@@ -46,8 +46,18 @@ status: implemented-static-review
 
 在本 fork 的 Actions 页面打开成功的 Android Build 运行，下载 `operit-android-运行编号` 产物，解压后使用 `app-debug.apk`。默认 debug 包名是 `com.ai.assistance.operit.debug`，显示名是 `Operit Debug`，可与官方正式版共存。它不会自动读取官方正式版的私有数据，也不要用上游 Releases 中的 APK 判断本次改动。
 
-该工作流目前保留产物 14 天。临时 debug 签名不保证不同构建之间可以覆盖更新；长期使用需另行配置持久签名，不要为解决签名冲突直接卸载含重要数据的应用。
+该工作流目前保留产物 14 天。本 fork 的 Debug 构建使用持久私密签名，配置步骤见下文。此前临时签名的 Debug APK 无法通过新签名直接覆盖；不要为解决签名冲突直接卸载含重要数据的应用。
 
-没有修改签名、包名、更新服务器或发布渠道；本次仅完成提示词改动与下载入口说明。
+## 持久 Debug 签名
+
+Android Build 从仓库 Actions Secret `OPERIT_DEBUG_KEYSTORE_BASE64` 恢复同一份 Debug keystore 到 Gradle 默认路径。缺少 Secret 或证书指纹不匹配时构建直接停止，避免生成不能覆盖更新的临时签名包。
+
+首次配置：在仓库 Settings → Secrets and variables → Actions → New repository secret 中创建上述 Secret，把私下交付的同名文本文件的全部内容作为值。配置后手动运行 Android Build，选择 `main` 和 `assembleDebug`。以后保留这份 Secret、包名和密钥，每次构建自动沿用。密钥不进入公开仓库、构建缓存或产物；交付文件同时是可恢复的密钥备份，不要公开。
+
+签名证书 SHA-256：`11aab8ecd6c292e507fe4d75c9f6ae7bb6da535262b91d8c9618af815c4992dc`。备份文本是 keystore 的完整 Base64；恢复时解码为 JKS，别名为 `androiddebugkey`，store/key password 均为 `android`。
+
+此处仅固定个人 Debug 版本的签名；Release/Nightly 的上游签名配置不改变。没有新增应用内自动更新；更新仍需下载新版 APK 并覆盖安装。若已经装了此前临时签名的 Debug 版，先完整备份数据，再单独处理第一次切换。官方正式版包名不同，继续并排保留。
+
+完成工作流静态审阅及交付 keystore 的解码和证书指纹核对，未运行 APK 构建；实际覆盖安装尚待配置 Secret 后验证。
 
 [DONE]
