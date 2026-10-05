@@ -96,6 +96,28 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
 
+      - name: Restore persistent personal Debug signing key
+        env:
+          OPERIT_DEBUG_KEYSTORE_BASE64: ${{ secrets.OPERIT_DEBUG_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$OPERIT_DEBUG_KEYSTORE_BASE64" ]; then
+            echo "::error::Add the OPERIT_DEBUG_KEYSTORE_BASE64 repository secret before building. A temporary signing key would prevent future in-place updates."
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$HOME/.android"
+          printf '%s' "$OPERIT_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          keytool -exportcert \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey \
+            -file "$RUNNER_TEMP/operit-debug-cert.der"
+          printf '%s  %s\n' \
+            '11aab8ecd6c292e507fe4d75c9f6ae7bb6da535262b91d8c9618af815c4992dc' \
+            "$RUNNER_TEMP/operit-debug-cert.der" | sha256sum --check
+          rm "$RUNNER_TEMP/operit-debug-cert.der"
+
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
