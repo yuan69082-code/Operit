@@ -48,8 +48,13 @@ object ConversationIdentityPrompts {
 
     fun prependTo(systemPrompt: String, useEnglish: Boolean): String {
         // Tool follow-ups may reuse an already composed SYSTEM turn. Add the shared layer once.
-        if (systemPrompt.contains(SECTION_MARKER)) return systemPrompt
         val identity = if (useEnglish) english else chinese
-        return identity + "\n\n" + systemPrompt
+        val withIdentity = if (systemPrompt.contains(SECTION_MARKER)) {
+            systemPrompt
+        } else {
+            identity + "\n\n" + systemPrompt
+        }
+        // Previously composed SYSTEM turns already have identity but may lack provenance rules.
+        return ConversationEvidencePrompts.prependTo(withIdentity, useEnglish)
     }
 }

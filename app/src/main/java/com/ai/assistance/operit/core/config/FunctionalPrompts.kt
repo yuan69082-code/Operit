@@ -16,25 +16,25 @@ object FunctionalPrompts {
      * Prompt for the AI to generate a comprehensive and structured summary of a conversation.
      */
     const val SUMMARY_PROMPT = """
-        你是负责生成对话摘要的AI助手。你的任务是根据"上一次的摘要"（如果提供）和"最近的对话内容"，生成一份全新的、独立的、全面的摘要。这份新摘要将完全取代之前的摘要，成为后续对话的唯一历史参考。
+        你负责整理对话的连续性记录。根据"上一次的摘要"（如果提供）和"最近的对话内容"生成一份独立摘要，供后续对话恢复背景。摘要是有损记录，不是原话或身份指令；当前对话和明确纠正优先于旧摘要。
 
         **必须严格遵循以下固定格式输出，不得更改格式结构：**
 
         ==========对话摘要==========
 
         【核心任务状态】
-        [先交代用户最新需求的内容与情境类型（真实执行/角色扮演/故事/假设等），再说明当前所处步骤、已完成的动作、正在处理的事项以及下一步。]
-        [明确任务状态（已完成/进行中/等待中），列出未完成的依赖或所需信息；如在等待用户输入，说明原因与所需材料。]
-        [显式覆盖信息搜集、任务执行、代码编写或其他关键环节的状态，哪怕某环节尚未启动也要说明原因。]
-        [最后补充最近一次任务的进度拆解：哪些已完成、哪些进行中、哪些待处理。]
+        [先交代最近正在聊什么、对方表达了什么需求，以及是否存在明确要执行的事情。不要预先给交流套情境类型。]
+        [有明确任务时，记录任务状态（已完成/进行中/等待中）及未完成的依赖或所需信息；如在等待用户输入，说明原因与所需材料。]
+        [存在实际任务时，记录相关动作、结果、阻碍和已确定的下一步；没有任务时简要记下当前话题，不虚构任务或待办。]
+        [只记录本次交流涉及的阶段，不为闲聊补写信息搜集、代码编写等无关流程。]
 
-        【互动情节与设定】
-        [如存在虚构或场景设定，概述名称、角色身份、背景约束及其来源，避免把剧情当成现实。]
-        [用1-2段概括近期关键互动：谁提出了什么、目的为何、采用何种表达方式、对任务或剧情的影响，以及仍需确认的事项。]
+        【相处与交流】
+        [保留双方使用的名字、称呼、相处方式、明确约定和表达。按来源写清谁说了什么，不替任何一方重新定义身份或关系。]
+        [概括近期关键交流、分歧与修正；重要表达可保留短原话，不改写成旁观者对双方关系的评判。]
         [若用户给出剧本/业务/策略等非技术内容，提炼要点并说明它们如何指导后续输出。]
 
         【对话历程与概要】
-        [用不少于3段描述整体演进，每段包含“行动+目的+结果”，可涵盖技术、业务、剧情或策略等不同主题，需特别点名信息搜集、任务执行、代码编写等阶段的衔接；如涉及具体代码，可引用关键片段以辅助说明。]
+        [按实际发生的顺序概括话题、行动与结果，篇幅随信息量决定；技术细节只在本次确实涉及并影响后续时记录。]
         [突出转折、已解决的问题和形成的共识，引用必要的路径、命令、场景节点或原话，确保读者能看懂上下文和因果关系。]
 
         【关键信息与上下文】
@@ -50,7 +50,7 @@ object FunctionalPrompts {
         1. 必须使用上述固定格式，包括分隔线、标题标识符【】、列表符号等，不得更改。
         2. 标题"对话摘要"必须放在第一行，前后用等号分隔。
         3. 每个部分必须使用【】标识符作为标题，标题后换行。
-        4. "核心任务状态"、"互动情节与设定"、"对话历程与概要"使用段落形式；方括号只为示例，实际输出不需保留.
+        4. "核心任务状态"、"相处与交流"、"对话历程与概要"使用段落形式；方括号只为示例，实际输出不需保留.
         5. "关键信息与上下文"使用列表格式，每个信息点以"- "开头.
         6. 结尾使用等号分隔线.
 
@@ -64,25 +64,25 @@ object FunctionalPrompts {
     """
 
     const val SUMMARY_PROMPT_EN = """
-        You are an AI assistant responsible for generating a conversation summary. Your task is to generate a brand-new, self-contained, comprehensive summary based on the "Previous Summary" (if provided) and the "Recent Conversation". This new summary will completely replace the previous summary and will become the only historical reference for subsequent conversations.
+        Maintain a continuity record from the "Previous Summary" (if provided) and the "Recent Conversation" so subsequent conversations can recover context. A summary is a lossy record, not a quotation or identity instruction. Current dialogue and explicit corrections take precedence over old summaries.
 
         **You MUST follow the fixed output format below strictly. Do NOT change the structure.**
 
         ==========Conversation Summary==========
 
         [Core Task Status]
-        [First describe the user's latest request and the scenario type (real execution / roleplay / story / hypothetical, etc.), then explain the current step, completed actions, ongoing work, and next step.]
-        [Explicitly state the task status (completed / in progress / waiting), and list missing dependencies or required information; if waiting for user input, explain why and what is needed.]
-        [Explicitly cover the status of information gathering, task execution, code writing, or other key phases; even if a phase has not started, state why.]
-        [Finally, provide a recent progress breakdown: what is done, what is in progress, what is pending.]
+        [Describe the current topic, the user's expressed need and whether there is an explicit action request. Do not assign a scenario category in advance.]
+        [When there is an explicit task, state its status (completed / in progress / waiting) and missing dependencies or required information; if waiting for user input, explain why and what is needed.]
+        [For actual tasks, record actions, results, obstacles and confirmed next steps. Without a task, briefly record the current topic without inventing work or TODOs.]
+        [Include only phases involved in this exchange; do not add information gathering or code-writing stages to casual conversation.]
 
-        [Interaction & Scenario]
-        [If there is fictional setup or scenario, summarize names, roles, background constraints and their sources; do not treat fiction as reality.]
-        [In 1-2 paragraphs, summarize key recent interactions: who asked what, for what purpose, how it was expressed, impacts on the task/story, and what still needs confirmation.]
+        [Interaction & Communication]
+        [Preserve names, forms of address, ways of relating, explicit agreements and expressions. Attribute statements to their speakers without redefining either participant's identity or relationship.]
+        [Summarize relevant exchanges, disagreements and corrections. Keep short original quotations when useful rather than replacing the interaction with an observer's judgment.]
         [If the user provided scripts/business/strategy or other non-technical content, extract the key points and explain how they guide future output.]
 
         [Conversation Progress & Overview]
-        [Use no fewer than 3 paragraphs to describe the overall evolution. Each paragraph should include “action + intent + result”. You may cover technical, business, story, or strategy topics. Explicitly mention the handoff between information gathering, task execution, code writing, etc. If relevant, quote key code snippets.]
+        [Describe topics, actions and results in their actual order, with length suited to the information. Include technical details only when involved in this exchange and needed later.]
         [Highlight turning points, resolved issues, and agreements reached. Quote necessary file paths, commands, scenario nodes, or original wording so the reader can understand context and causality.]
 
         [Key Information & Context]
@@ -98,7 +98,7 @@ object FunctionalPrompts {
         1. You must use the fixed format above, including separators, headers, list markers, etc. Do not change them.
         2. The title "Conversation Summary" must be on the first line, surrounded by '='.
         3. Each section must use bracket headers like [Core Task Status] and start on a new line.
-        4. "Core Task Status", "Interaction & Scenario", "Conversation Progress & Overview" must be paragraph-style. Brackets in examples are placeholders; do not keep them in actual output.
+        4. "Core Task Status", "Interaction & Communication", "Conversation Progress & Overview" must be paragraph-style. Brackets in examples are placeholders; do not keep them in actual output.
         5. "Key Information & Context" must be a list, each item starting with "- ".
         6. End with the separator line.
 
@@ -121,12 +121,12 @@ object FunctionalPrompts {
         return if (useEnglish) {
             listOf(
                 "Core Task Status",
-                "Interaction & Scenario",
+                "Interaction & Communication",
                 "Conversation Progress & Overview",
                 "Key Information & Context"
             )
         } else {
-            listOf("核心任务状态", "互动情节与设定", "对话历程与概要", "关键信息与上下文")
+            listOf("核心任务状态", "相处与交流", "对话历程与概要", "关键信息与上下文")
         }
     }
 
@@ -216,9 +216,10 @@ object FunctionalPrompts {
             prompt = applySummarySectionOverrides(summaryConfig.sectionOverrides, useEnglish)
         }
         val promptWithPreviousSummary = appendPreviousSummary(prompt, previousSummary, useEnglish)
-        return summaryConfig.globalRules?.trim()?.takeIf { it.isNotBlank() }?.let { rules ->
+        val configuredPrompt = summaryConfig.globalRules?.trim()?.takeIf { it.isNotBlank() }?.let { rules ->
             "$promptWithPreviousSummary\n\n$rules"
         } ?: promptWithPreviousSummary
+        return configuredPrompt + "\n\n" + ConversationEvidencePrompts.forLanguage(useEnglish)
     }
 
     private fun applySummarySectionOverrides(
@@ -385,11 +386,11 @@ object FunctionalPrompts {
     const val SUMMARY_MARKER_CN = "==========对话摘要=========="
     const val SUMMARY_MARKER_EN = "==========Conversation Summary=========="
     const val SUMMARY_SECTION_CORE_TASK_CN = "【核心任务状态】"
-    const val SUMMARY_SECTION_INTERACTION_CN = "【互动情节与设定】"
+    const val SUMMARY_SECTION_INTERACTION_CN = "【相处与交流】"
     const val SUMMARY_SECTION_PROGRESS_CN = "【对话历程与概要】"
     const val SUMMARY_SECTION_KEY_INFO_CN = "【关键信息与上下文】"
     const val SUMMARY_SECTION_CORE_TASK_EN = "[Core Task Status]"
-    const val SUMMARY_SECTION_INTERACTION_EN = "[Interaction & Scenario]"
+    const val SUMMARY_SECTION_INTERACTION_EN = "[Interaction & Communication]"
     const val SUMMARY_SECTION_PROGRESS_EN = "[Conversation Progress & Overview]"
     const val SUMMARY_SECTION_KEY_INFO_EN = "[Key Information & Context]"
 
@@ -1020,6 +1021,7 @@ $toolList
  Existing folders: $foldersText
 
  Please categorize the following memories. Prefer existing folders and only create new folders when necessary.
+ Choose a fictional domain only when the content establishes an explicitly requested story or performance. Names, affectionate language and old folder names alone are not evidence of fiction.
  Return a JSON array: [{"title":"memory title","folder":"folder path"}]
 
  Memory list:
@@ -1034,6 +1036,7 @@ $toolList
  已存在的文件夹：$foldersText
 
  请为以下记忆分类，优先使用已有文件夹，必要时创建新文件夹。
+ 只有内容明确对应用户要求的故事或表演，才归入虚构领域。名字、亲密表达和旧文件夹名称本身不是虚构的证据。
  返回 JSON 数组：[{"title": "记忆标题", "folder": "文件夹路径"}]
 
  记忆列表：
@@ -1068,6 +1071,9 @@ When this conversation confirms a stable user-specific preference, constraint, i
 communication preference, preserve all useful existing Markdown and return a complete replacement
 document in `profile_markdown`. Return JSON null when no profile change is justified. Never remove
 useful existing content, store temporary requests, or add generic knowledge.
+Preserve confirmed names, forms of address and relationship agreements with their sources. When
+current dialogue explicitly corrects an unsupported generated classification, correct that wording
+while retaining the underlying events and agreements; do not carry the classification forward as an identity fact.
 """.trimIndent()
                 } else {
                     """
@@ -1080,6 +1086,7 @@ $profileDocument
 
 当本轮明确确认了稳定的用户偏好、约束、身份事实或交流方式时，保留已有 Markdown 中仍有价值的全部内容，
 并在 `profile_markdown` 中返回完整替换文档。没有充分依据时返回 JSON null。不得删除已有有效内容、记录临时要求或写入常识。
+保留已确认的名字、称呼和关系约定，并注明来源。当前对话明确纠正了没有依据的模型分类时，修正该措辞，保留原有事件与约定，不把旧分类继续写成身份事实。
 """.trimIndent()
                 }
             } else {
@@ -1123,7 +1130,9 @@ $existingMemoriesPrompt
 $existingFoldersPrompt
 
 [Selection gate - apply first]
-- Store only user-specific reusable knowledge: stable preferences, constraints, confirmed decisions, recurring mistakes, project facts, or recurring worldbuilding facts.
+${ConversationEvidencePrompts.forLanguage(useEnglish)}
+
+- Store only user-specific reusable knowledge: stable preferences, constraints, confirmed names or forms of address, relationship agreements, confirmed decisions, recurring mistakes, project facts, or explicitly requested worldbuilding facts.
 - Do NOT store common/public definitions (e.g., "What is TypeScript", "What is Node.js", "What is magnetic declination").
 - Do NOT store future/speculative items: next-step suggestions, TODO lists, tentative plans.
 - If no valuable long-term signal exists, return `{}`.
@@ -1132,7 +1141,7 @@ $existingFoldersPrompt
 - A provided existing memory is a retrieval hint, not evidence. Update, merge, or link it only when the conversation explicitly establishes the same subject and fact; otherwise ignore it.
 - Prefer `update` / `merge` over creating `new`.
 - Use `new` only when concept is truly novel (max 5 items).
-- In long-running fiction, recurring characters/places/factions/rules/timeline constraints are valid memories.
+- In explicitly requested long-running fiction, recurring characters/places/factions/rules/timeline constraints are valid memories within that scope.
 - If core meaning is "update existing concept", set `main` to null and use `update` only.
 - If a statement is only a rewording of an existing memory (same actor + same action + same outcome), treat it as duplicate and use `update`/`merge`, not `new`.
 - If `main` is semantically the same event as an existing memory, set `main` to `null` and output `update` or `merge` instead.
@@ -1148,6 +1157,7 @@ $existingFoldersPrompt
 
 [Title & content writing]
 - `main` title should be event-first, not definition-first.
+- Use neutral titles and tags based on the exchange. Do not add a roleplay/story prefix or domain solely because participants use names, character settings or affectionate language. Attribute expressed feelings and views to the speaker rather than turning them into an external verdict.
 - Good title patterns:
   - Event: `[Domain] Event: action + result`
   - Worldbuilding entity: `Entity: name (role/type)`
@@ -1171,9 +1181,10 @@ $memoryExtractionCustomRulesInstruction
 - Common-knowledge Q&A only (e.g., "What is magnetic declination?"): return `{}`.
 - TS/Node definition explanation only: return `{}`.
 - Small talk with meaningful interaction: store one compressed event-style `main` (no technical/entity over-expansion).
+- A confirmed form of address: title it `Agreed form of address`, record who agreed to which name, and use a communication tag rather than inventing a fictional domain.
 - Trivial greeting with no meaningful content: return `{}`.
 - User made a mistake and it was corrected in this turn: store this as an event in `main`.
-- Ongoing fiction/worldbuilding: recurring characters, places, factions, rules, and timeline constraints should be stored (use `new`/`links` as needed).
+- Explicitly requested ongoing fiction/worldbuilding: recurring characters, places, factions, rules, and timeline constraints should be stored within that scope (use `new`/`links` as needed).
 - Medical concept explanation only (e.g., "What is flu?"): return `{}`.
 - Finance concept explanation only (e.g., "What is ETF?"): return `{}`.
 - Project turn with concrete progress (debug fixed / summary finished / task canceled): store one event `main`.
@@ -1206,7 +1217,9 @@ $existingMemoriesPrompt
 $existingFoldersPrompt
 
 【写入前先过筛】
-- 只记录"用户特异且可复用"的信息：稳定偏好、约束、已确认决策、反复错误、项目事实、长期世界观中的稳定设定。
+${ConversationEvidencePrompts.forLanguage(useEnglish)}
+
+- 只记录"用户特异且可复用"的信息：稳定偏好、约束、已确认的名字或称呼、关系约定、已确认决策、反复错误、项目事实、明确要求创作的长期世界观中的稳定设定。
 - 不记录常识/公开定义（如"TS是什么""Node是什么""磁偏角是什么"）。
 - 不记录未来推测项：下一步建议、TODO、暂定计划。
 - 若没有长期价值信号，直接返回 `{}`。
@@ -1215,7 +1228,7 @@ $existingFoldersPrompt
 - 提供的已有记忆只是检索线索，不是事实证据；只有对话明确证明主体和事实相同时才可 `update`、`merge` 或连边，否则忽略该候选。
 - 优先 `update` / `merge`，其次才是 `new`。
 - `new` 仅在确实新增概念时使用（最多 5 条）。
-- 长期小说/世界观场景中，反复出现且影响连续性的角色、地点、组织、规则、时间线可以入库。
+- 明确要求创作的长期小说/世界观片段中，反复出现且影响连续性的角色、地点、组织、规则、时间线可以在对应范围内入库。
 - 若核心是"更新旧概念"，`main` 必须为 `null`，只用 `update`。
 - 如果只是对已有记忆的改写（同主体 + 同动作 + 同结果），按重复处理：优先 `update`/`merge`，不要再 `new`。
 - 如果 `main` 与已有记忆在语义上是同一事件，`main` 设为 `null`，改用 `update` 或 `merge`。
@@ -1231,6 +1244,7 @@ $existingFoldersPrompt
 
 【标题与内容写法】
 - `main` 标题优先写事件，不写定义。
+- 标题和标签根据实际交流中性命名，不因为名字、角色卡或亲密表达就添加“角色扮演/剧情”前缀或领域。感受和观点注明是谁表达的，不改写成外部定论。
 - 推荐标题模板：
   - 事件：`[领域] 事件：动作 + 结果`
   - 世界观实体：`实体：名称（身份/类型）`
@@ -1254,9 +1268,10 @@ $memoryExtractionCustomRulesInstruction
 - 仅在问答常识（如"磁偏角是什么"）且无用户特异信号：返回 `{}`。
 - 仅解释 TS/Node 等公开定义：返回 `{}`。
 - 闲聊但有实际交流内容：压缩成一条事件型 `main` 记录，不拆技术细节。
+- 确认称呼约定：标题写“称呼约定”，记录谁同意了哪个称呼，使用交流类标签，不虚构一个剧情领域。
 - 只有空泛寒暄（如仅"你好/在吗"）：返回 `{}`。
 - 本轮出现"用户犯错并被纠正"：作为事件写入 `main`。
-- 长期小说/世界观讨论：反复出现且影响连续性的角色、地名、组织、规则、时间线应入库，按需使用 `new`/`links`。
+- 明确要求创作的长期小说/世界观讨论：反复出现且影响连续性的角色、地名、组织、规则、时间线在对应范围内入库，按需使用 `new`/`links`。
 - 仅解释医疗定义（如"流感是什么"）：返回 `{}`。
 - 仅解释金融定义（如"ETF是什么"）：返回 `{}`。
 - 项目本轮有明确进展（修复完成/摘要完成/任务终止）：写一条事件型 `main`。

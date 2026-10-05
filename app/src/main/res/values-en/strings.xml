@@ -6593,7 +6593,7 @@
     <string name="conversation_summary_preparing">Preparing summary...</string>
     <string name="conversation_summary_writing_title">Writing title...</string>
     <string name="conversation_summary_core_task">Core task status...</string>
-    <string name="conversation_summary_interaction">Interaction &amp; scenario...</string>
+    <string name="conversation_summary_interaction">Interaction &amp; communication...</string>
     <string name="conversation_summary_progress">Conversation progress...</string>
     <string name="conversation_summary_key_info">Key info &amp; context...</string>
     <string name="conversation_summary_finishing">Finishing...</string>

@@ -9,13 +9,17 @@ import org.junit.Test
 
 class FunctionalPromptsSummaryTest {
     @Test
-    fun buildSummarySystemPrompt_withoutOverridesKeepsLegacyPrompt() {
+    fun buildSummarySystemPrompt_withoutOverridesIncludesEvidenceRules() {
         val prompt = FunctionalPrompts.buildSummarySystemPrompt(
             previousSummary = null,
             useEnglish = false
         )
 
-        assertEquals(FunctionalPrompts.SUMMARY_PROMPT.trimIndent(), prompt)
+        assertEquals(
+            FunctionalPrompts.SUMMARY_PROMPT.trimIndent() + "\n\n" +
+                ConversationEvidencePrompts.forLanguage(false),
+            prompt
+        )
     }
 
     @Test
@@ -37,7 +41,8 @@ class FunctionalPromptsSummaryTest {
 
         assertTrue(prompt.contains("【工程状态】"))
         assertTrue(prompt.contains("仅记录已验证的工程变更。"))
-        assertFalse(prompt.contains("【互动情节与设定】"))
+        assertFalse(prompt.contains("【相处与交流】"))
+        assertTrue(prompt.contains(ConversationEvidencePrompts.forLanguage(false)))
         assertTrue(prompt.contains("【对话历程与概要】"))
         assertTrue(prompt.contains("【关键信息与上下文】"))
     }
@@ -52,7 +57,11 @@ class FunctionalPromptsSummaryTest {
             )
         )
 
-        assertEquals(FunctionalPrompts.SUMMARY_PROMPT_EN.trimIndent(), prompt)
+        assertEquals(
+            FunctionalPrompts.SUMMARY_PROMPT_EN.trimIndent() + "\n\n" +
+                ConversationEvidencePrompts.forLanguage(true),
+            prompt
+        )
     }
 
     @Test

@@ -7109,7 +7109,7 @@
     <string name="conversation_summary_preparing">正在生成总结...</string>
     <string name="conversation_summary_writing_title">正在生成标题...</string>
     <string name="conversation_summary_core_task">正在生成核心任务状态...</string>
-    <string name="conversation_summary_interaction">正在生成互动情节与设定...</string>
+    <string name="conversation_summary_interaction">正在整理相处与交流...</string>
     <string name="conversation_summary_progress">正在生成对话历程与概要...</string>
     <string name="conversation_summary_key_info">正在生成关键信息与上下文...</string>
     <string name="conversation_summary_finishing">正在收尾...</string>
