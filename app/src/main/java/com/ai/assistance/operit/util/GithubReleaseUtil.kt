@@ -175,13 +175,17 @@ class GithubReleaseUtil(private val context: Context) {
      * 获取最新的 Release 信息
      * 如果用户已登录，会自动带上认证头以提高 API 配额
      */
-    suspend fun fetchLatestReleaseInfo(repoOwner: String, repoName: String): ReleaseInfo? = withContext(Dispatchers.IO) {
+    suspend fun fetchLatestReleaseInfo(
+        repoOwner: String,
+        repoName: String,
+        requiredApkName: String? = null
+    ): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
             val result = githubApiService.getRepositoryReleases(
                 owner = repoOwner,
                 repo = repoName,
                 page = 1,
-                perPage = 1
+                perPage = if (requiredApkName != null) 20 else 1
             )
 
             result.fold(
@@ -191,13 +195,27 @@ class GithubReleaseUtil(private val context: Context) {
                         return@withContext null
                     }
 
-                    val latestRelease = releases.first()
+                    val latestRelease = if (requiredApkName != null) {
+                        releases.firstOrNull { release ->
+                            !release.draft && !release.prerelease &&
+                                release.assets.any { it.name == requiredApkName }
+                        } ?: return@withContext null
+                    } else {
+                        releases.first()
+                    }
                     val tagName = latestRelease.tag_name
                     val version = tagName.removePrefix("v")
 
                     // 查找 APK 资源
-                    val apkAsset = latestRelease.assets.find { it.name.endsWith(".apk") }
-                    val downloadUrl = apkAsset?.browser_download_url ?: latestRelease.html_url
+                    val apkAsset = latestRelease.assets.find {
+                        if (requiredApkName != null) it.name == requiredApkName
+                        else it.name.endsWith(".apk")
+                    }
+                    val downloadUrl = if (requiredApkName != null) {
+                        requireNotNull(apkAsset).browser_download_url
+                    } else {
+                        apkAsset?.browser_download_url ?: latestRelease.html_url
+                    }
 
                     ReleaseInfo(
                         version = version,
