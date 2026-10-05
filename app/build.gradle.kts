@@ -413,6 +413,15 @@ android {
         versionCode = 51
         versionName = "1.12.2"
 
+        // CI personal updates share the same package/key and need a strictly newer version.
+        val personalBuildNumber = providers.environmentVariable("OPERIT_PERSONAL_BUILD_NUMBER").orNull
+        if (personalBuildNumber != null) {
+            val buildNumber = personalBuildNumber.toInt()
+            require(buildNumber in 1..99999) { "Personal build number is outside the version range" }
+            versionCode = 51 * 100000 + buildNumber
+            versionName = "1.12.2+$buildNumber"
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
