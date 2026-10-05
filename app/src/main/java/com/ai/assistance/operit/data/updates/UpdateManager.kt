@@ -5,6 +5,7 @@ import com.ai.assistance.operit.util.AppLogger
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.ai.assistance.operit.R
+import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.data.api.GitHubApiService
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.util.GithubReleaseUtil
@@ -133,6 +134,25 @@ class UpdateManager private constructor(private val context: Context) {
     private suspend fun checkForUpdatesInternal(currentVersion: String): UpdateStatus {
         return withContext(Dispatchers.IO) {
             try {
+                // Personal Debug builds must never install upstream APKs or nightly patches.
+                if (BuildConfig.APPLICATION_ID == "com.ai.assistance.operit.debug") {
+                    val release = GithubReleaseUtil(context).fetchLatestReleaseInfo(
+                        "yuan69082-code", "Operit", requiredApkName = "app-debug.apk"
+                    ) ?: return@withContext UpdateStatus.Error(
+                        context.getString(R.string.update_cannot_fetch_info)
+                    )
+                    return@withContext if (compareVersions(release.version, currentVersion) > 0) {
+                        UpdateStatus.Available(
+                            newVersion = release.version,
+                            updateUrl = release.releasePageUrl,
+                            releaseNotes = release.releaseNotes,
+                            downloadUrl = release.downloadUrl
+                        )
+                    } else {
+                        UpdateStatus.UpToDate
+                    }
+                }
+
                 val betaEnabled = try {
                     UserPreferencesManager.getInstance(context).isBetaPlanEnabled()
                 } catch (_: Exception) {
