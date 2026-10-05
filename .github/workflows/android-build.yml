@@ -66,6 +66,8 @@ jobs:
     name: Build Android artifacts
     runs-on: ubuntu-24.04
     timeout-minutes: 240
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout source
@@ -235,6 +237,10 @@ jobs:
             workflow_dispatch) gradle_task="$DISPATCH_GRADLE_TASK" ;;
             *) echo "Unsupported workflow event: $EVENT_NAME" >&2; exit 2 ;;
           esac
+          if [ "$gradle_task" = assembleDebug ]; then
+            echo "OPERIT_PERSONAL_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+            export OPERIT_PERSONAL_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+          fi
           chmod +x ./gradlew
           ./gradlew "$gradle_task" --stacktrace --no-daemon
 
@@ -275,3 +281,24 @@ jobs:
             app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish personal in-app update
+        if: success() && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          version=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/debug/output-metadata.json"))["elements"][0]["versionName"])')
+          test "$version" = "1.12.2+$OPERIT_PERSONAL_BUILD_NUMBER"
+          tag="v$version"
+          notes="$RUNNER_TEMP/personal-update-notes.md"
+          printf '个人版更新 %s\n\n沿用固定个人签名，可覆盖第 12 版及后续个人版，保留应用数据。\n请下载 app-debug.apk，或在已接入个人更新源的应用内更新。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
+          gh release create "$tag" "$apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Operit 个人版 $version" \
+            --notes-file "$notes" \
+            --latest
