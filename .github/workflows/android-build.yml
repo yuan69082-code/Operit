@@ -117,6 +117,7 @@ jobs:
             '11aab8ecd6c292e507fe4d75c9f6ae7bb6da535262b91d8c9618af815c4992dc' \
             "$RUNNER_TEMP/operit-debug-cert.der" | sha256sum --check
           rm "$RUNNER_TEMP/operit-debug-cert.der"
+          echo "OPERIT_DEBUG_KEYSTORE_FILE=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
 
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -236,6 +237,22 @@ jobs:
           esac
           chmod +x ./gradlew
           ./gradlew "$gradle_task" --stacktrace --no-daemon
+
+      - name: Verify final Debug APK signing certificate
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          if [ -f "$apk" ]; then
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/operit-apk-signature.txt"
+            cat "$RUNNER_TEMP/operit-apk-signature.txt"
+            actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/operit-apk-signature.txt")
+            test "$actual" = '11aab8ecd6c292e507fe4d75c9f6ae7bb6da535262b91d8c9618af815c4992dc' || {
+              echo "::error::Final Debug APK does not use the persistent personal signing certificate."
+              exit 1
+            }
+          fi
 
       - name: Upload Android reports
         if: always()
