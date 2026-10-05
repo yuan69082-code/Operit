@@ -11,6 +11,7 @@ import com.ai.assistance.operit.core.chat.hooks.SummaryHookRegistry
 import com.ai.assistance.operit.core.chat.hooks.buildActivePromptHookMetadata
 import com.ai.assistance.operit.core.chat.hooks.toPromptTurns
 import com.ai.assistance.operit.core.config.SystemPromptConfig
+import com.ai.assistance.operit.core.config.ConversationIdentityPrompts
 import com.ai.assistance.operit.core.tools.climode.ToolExposureMode
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.core.tools.AIToolHandler
@@ -468,7 +469,8 @@ class ConversationService(
             memorySpaceIdOverride: String? = null,
             dispatchHistoryHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchPromptHistoryHooks,
             dispatchSystemPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchSystemPromptComposeHooks,
-            dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
+            dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks,
+            includeConversationIdentity: Boolean = true
     ): List<PromptTurn> {
         val activePromptMetadata = buildActivePromptHookMetadata(context, chatId, roleCardId)
         val beforeContext =
@@ -586,7 +588,8 @@ class ConversationService(
                     groupParticipantNamesText = groupParticipantNamesText.orEmpty(),
                     hookMetadata = activePromptMetadata,
                     dispatchSystemPromptComposeHooks = dispatchSystemPromptComposeHooks,
-                    dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
+                    dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks,
+                    includeConversationIdentity = includeConversationIdentity
                 )
 
                 // 构建waifu特殊规则
@@ -632,6 +635,8 @@ class ConversationService(
                 )
             }
 
+            // Multiple SYSTEM turns can contain separate context segments; anchor the request once.
+            val firstSystemTurnIndex = effectiveChatHistory.indexOfFirst { it.kind == PromptTurnKind.SYSTEM }
             // Process each message in chat history
             effectiveChatHistory.forEachIndexed { index, message ->
                 val kind = message.kind
@@ -649,6 +654,12 @@ class ConversationService(
                     }
                 } else if (kind == PromptTurnKind.TOOL_RESULT) {
                     preparedHistory.add(message.copy(content = normalizeToolResultMarkupForModel(content)))
+                } else if (includeConversationIdentity && kind == PromptTurnKind.SYSTEM && index == firstSystemTurnIndex) {
+                    // Existing SYSTEM turns skip composition, including tool follow-ups and imported history.
+                    preparedHistory.add(message.copy(content = ConversationIdentityPrompts.prependTo(
+                        content,
+                        !LocaleUtils.usesChineseContent(context)
+                    )))
                 } else {
                     // Add typed turns as is
                     preparedHistory.add(message)

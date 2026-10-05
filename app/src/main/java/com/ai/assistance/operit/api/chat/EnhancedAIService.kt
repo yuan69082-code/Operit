@@ -2718,7 +2718,9 @@ class EnhancedAIService private constructor(private val context: Context) {
                 memorySpaceIdOverride,
                 dispatchHistoryHooks,
                 dispatchSystemPromptComposeHooks,
-                dispatchToolPromptComposeHooks
+                dispatchToolPromptComposeHooks,
+                // Keep internal subtask and functional requests on their existing technical prompts.
+                includeConversationIdentity = !isSubTask && functionType == FunctionType.CHAT
         )
     }
 

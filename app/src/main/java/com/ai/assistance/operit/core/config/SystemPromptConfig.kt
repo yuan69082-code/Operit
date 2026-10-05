@@ -25,7 +25,7 @@ To use a tool, use this format in your response:
 
 When outputting XML (e.g., <tool>), insert a newline before it and ensure the opening tag starts at the beginning of a line.
 
-Based on user needs, proactively select the most appropriate tool or combination of tools. For complex tasks, you can break down the problem and use different tools step by step to solve it. After using each tool, clearly explain the execution results and suggest the next steps."""
+Use the most appropriate available tools for the user's action request. Break complex tasks into steps when useful. Report relevant results and obstacles naturally in the current character's voice; explain next steps when needed, rather than adding a report after every tool call."""
     private const val TOOL_USAGE_GUIDELINES_CN = """
 调用工具时，用户会看到你的响应，然后会自动将工具结果发送回给你。
 
@@ -37,7 +37,7 @@ Based on user needs, proactively select the most appropriate tool or combination
 
 输出XML（如 <tool>）时，必须在XML前换行，并确保起始标签位于行首。
 
-根据用户需求，主动选择最合适的工具或工具组合。对于复杂任务，你可以分解问题并使用不同的工具逐步解决。使用每个工具后，清楚地解释执行结果并建议下一步。"""
+根据用户的行动目标，选择合适的可用工具；复杂任务按需要分步推进。以当前角色的表达自然交代相关结果和阻碍，需要时说明下一步，不必每次调用工具后都追加报告。"""
 
     private const val PACKAGE_SYSTEM_GUIDELINES_EN = """
 PACKAGE SYSTEM
@@ -598,7 +598,8 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
           groupParticipantNamesText: String = "",
           hookMetadata: Map<String, Any?> = emptyMap(),
           dispatchSystemPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchSystemPromptComposeHooks,
-          dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks
+          dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks,
+          includeConversationIdentity: Boolean = true
   ): String {
     val beforeContext =
         dispatchSystemPromptComposeHooks(
@@ -660,7 +661,11 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
             dispatchToolPromptComposeHooks = dispatchToolPromptComposeHooks
         )
 
+    // Keep identity present even when a custom template or native/CLI tooling removes XML guidance.
     var composedPrompt = applyCustomPrompts(basePrompt, customIntroPrompt)
+    if (includeConversationIdentity) {
+      composedPrompt = ConversationIdentityPrompts.prependTo(composedPrompt, useEnglish)
+    }
     if (enableGroupOrchestrationHint) {
       val safeRoleName = groupOrchestrationRoleName.ifBlank { if (useEnglish) "assistant" else "助手" }
       composedPrompt += buildGroupOrchestrationHint(

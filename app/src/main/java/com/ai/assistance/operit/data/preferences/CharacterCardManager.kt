@@ -326,10 +326,16 @@ class CharacterCardManager private constructor(private val context: Context) {
             id = id,
             name = preferences[nameKey] ?: context.getString(R.string.default_character_card),
             description = preferences[descriptionKey] ?: "",
-            characterSetting = preferences[characterSettingKey] ?: "",
+            characterSetting = CharacterCardBilingualData.resolveCharacterSetting(
+                context, id, preferences[characterSettingKey] ?: ""
+            ),
             openingStatement = preferences[openingStatementKey] ?: "", // 新增
-            otherContentChat = preferences[otherContentChatKey] ?: "",
-            otherContentVoice = preferences[otherContentVoiceKey] ?: "",
+            otherContentChat = CharacterCardBilingualData.resolveOtherContentChat(
+                context, id, preferences[otherContentChatKey] ?: ""
+            ),
+            otherContentVoice = CharacterCardBilingualData.resolveOtherContentVoice(
+                context, id, preferences[otherContentVoiceKey] ?: ""
+            ),
             attachedTagIds = preferences[attachedTagIdsKey]?.toList() ?: emptyList(),
             advancedCustomPrompt = preferences[advancedCustomPromptKey] ?: "",
             marks = preferences[marksKey] ?: "",

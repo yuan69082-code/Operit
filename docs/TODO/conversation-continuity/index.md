@@ -1,0 +1,41 @@
+---
+fork: https://github.com/yuan69082-code/Operit
+status: implemented-static-review
+---
+
+# 对话身份与表达统一
+
+## 原状与目标
+
+上游 1.12.2 默认文字设定是通用助手，默认语音设定另行指定猫娘未来人，XML 工具说明要求每次调用后解释结果并建议下一步。目标是让聊天和执行任务由同一角色承接，语音只调整表达节奏。
+
+参考 Polaris 提供的身份、关系、动作分层思路，在 Operit 中重新撰写中英文规则。没有复制 Polaris 的源代码或人格提示词原文，也没有引入其专用工具、Pharos 身份或其关于意识的断言。
+
+## 作用域
+
+- `ConversationIdentityPrompts` 提供独立于工具协议的公共对话规则
+- `SystemPromptConfig` 在自定义模板、XML、原生工具调用、CLI 和禁用工具的主对话路径中加入公共规则，并简化 XML 工具说明的报告口吻
+- `ConversationService` 为复用的 SYSTEM 历史补入同一规则，已含规则的内容不会重复加入；保留原有提示词钩子
+- `EnhancedAIService` 仅为主聊天开启该规则，内部子任务和其他功能请求不加入公共身份层
+- `CharacterCardBilingualData` 更新默认身份、文字和语音表达
+- `CharacterCardManager` 读取内置默认卡时，仅将完整匹配上游工厂值的三个字段解析为新默认文案。语音通过完整文本的 SHA-256 匹配；自定义、空字段、其他角色卡不替换。此处不写入原偏好文件，也不升级偏好或数据库结构
+
+现有聊天、记忆提取与检索、Skill、MCP、权限、模型参数、工具参数与协议、头像标签及构建配置沿用原实现。没有新增常驻引擎、跨对话原话召回或应用感知能力。专用子任务身份、标题和摘要提示词没有加入这层角色规则。
+
+## 验证记录
+
+完成源码与差异审阅，核对新建与复用 SYSTEM 路径、各工具暴露模式和默认字段读取位置。旧语音指纹由上游固定提交 `dbf71916fae9750cfdc9f9a774f5a0fee56633fb` 的完整工厂文案计算。
+
+遵守仓库执行准则，没有执行编译、构建或测试命令。实际模型表现与 APK 可安装性尚未验证。
+
+## APK 下载入口
+
+仓库现有 `.github/workflows/android-build.yml` 支持 `main` 代码更新后自动构建，也支持手动 Run workflow。Fork 的 Actions 若尚未启用，需要仓库所有者先启用。
+
+在本 fork 的 Actions 页面打开成功的 Android Build 运行，下载 `operit-android-运行编号` 产物，解压后使用 `app-debug.apk`。默认 debug 包名是 `com.ai.assistance.operit.debug`，显示名是 `Operit Debug`，可与官方正式版共存。它不会自动读取官方正式版的私有数据，也不要用上游 Releases 中的 APK 判断本次改动。
+
+该工作流目前保留产物 14 天。临时 debug 签名不保证不同构建之间可以覆盖更新；长期使用需另行配置持久签名，不要为解决签名冲突直接卸载含重要数据的应用。
+
+没有修改签名、包名、更新服务器或发布渠道；本次仅完成提示词改动与下载入口说明。
+
+[DONE]
