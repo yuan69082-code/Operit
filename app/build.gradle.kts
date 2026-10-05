@@ -367,6 +367,19 @@ android {
     }
 
     signingConfigs {
+        val personalDebugKeystore = providers.environmentVariable("OPERIT_DEBUG_KEYSTORE_FILE").orNull
+        if (personalDebugKeystore != null) {
+            require(File(personalDebugKeystore).isFile) {
+                "OPERIT_DEBUG_KEYSTORE_FILE must point to the restored personal signing key"
+            }
+            getByName("debug") {
+                storeFile = File(personalDebugKeystore)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+
         val releaseKeystorePath = localProperties.getProperty("RELEASE_STORE_FILE")
         val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
         val releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")
