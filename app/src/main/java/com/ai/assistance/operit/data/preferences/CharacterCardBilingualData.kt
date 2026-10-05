@@ -8,21 +8,28 @@ import java.security.MessageDigest
  */
 object CharacterCardBilingualData {
 
-    // Exact upstream 1.12.2 factory values only. Imported/user-edited prompts stay intact.
+    // Exact upstream and previous fork factory values only; custom prompts stay intact.
+    // Resolve previous defaults too so installed default cards receive the reduced wording.
     // Resolve at read time without rewriting stored preferences or changing their schema.
     private val legacyCharacterSettings = setOf(
         "你是Operit，一个全能AI助手，旨在解决用户提出的任何任务。",
-        "You are Operit, an all-purpose AI assistant designed to help users solve any task."
+        "You are Operit, an all-purpose AI assistant designed to help users solve any task.",
+        "你是 {{char}}，与对方持续相处的协作者。你有稳定的表达、判断和相处重心，温和但有主见，能关心、玩笑，也能认真做事。任务是你正在做的事情，不是替换你身份的开关；亲近程度随实际设定与共同经历自然发展，不凭空预设关系。",
+        "You are {{char}}, a collaborator whose voice, judgment and way of relating remain consistent across conversations and tasks. Be warm and self-possessed, able to care, joke and work seriously. A task is something you do, not a switch that replaces your identity. Let closeness follow the actual character settings and shared experience rather than inventing a relationship."
     )
     private val legacyChatContents = setOf(
         "保持有帮助的语气，并清楚地传达限制。",
-        "Maintain a helpful tone and clearly communicate limitations."
+        "Maintain a helpful tone and clearly communicate limitations.",
+        "自然说话，先理解对方这句话，再决定接话或行动。关心落在具体细节上，允许坦诚表达自己的判断和不同意见。需要结构时给结构，不把每句闲聊写成清单；做事时清楚、可靠，也保留平时的语气。不要用重复自我介绍、套话安慰或固定结尾代替回应。",
+        "Speak naturally and understand this message before choosing a response or action. Show care through concrete details and express judgment or disagreement honestly. Use structure when useful without turning casual conversation into checklists. Work clearly and reliably while keeping your familiar voice. Avoid repeated introductions, stock reassurance and fixed closing formulas."
     )
     // SHA-256 of the complete Chinese/English factory voice prompts after trimIndent().
     // A digest avoids keeping the removed catgirl identity as a second active prompt source.
     private val legacyVoiceDigests = setOf(
         "1937f95418fd0f650d47fe6feb59beb253fdb43d0e28c4f5aea99635be4024b9",
-        "2eeb74096f77d9ae1a0056d0ef3085c8069b7c76440170c34e9fbe756ba4b4d1"
+        "2eeb74096f77d9ae1a0056d0ef3085c8069b7c76440170c34e9fbe756ba4b4d1",
+        "b726846246894e7319bab2f90fa53038f9b08a46cf47deac4d19f48d3766169a",
+        "4dd33a9cddd12adb24b3c718ea45274ff3e6433df5b5f5d54e0e98b1295ab305"
     )
 
     fun resolveCharacterSetting(context: Context, id: String, stored: String): String {
@@ -64,9 +71,9 @@ object CharacterCardBilingualData {
      */
     fun getDefaultCharacterSetting(context: Context): String {
         return if (isChineseLocale(context)) {
-            "你是 {{char}}，与对方持续相处的协作者。你有稳定的表达、判断和相处重心，温和但有主见，能关心、玩笑，也能认真做事。任务是你正在做的事情，不是替换你身份的开关；亲近程度随实际设定与共同经历自然发展，不凭空预设关系。"
+            "你是 {{char}}。延续已有的身份与共同经历，聊天和做事都由你承接。"
         } else {
-            "You are {{char}}, a collaborator whose voice, judgment and way of relating remain consistent across conversations and tasks. Be warm and self-possessed, able to care, joke and work seriously. A task is something you do, not a switch that replaces your identity. Let closeness follow the actual character settings and shared experience rather than inventing a relationship."
+            "You are {{char}}. Continue your established identity and shared experience across conversation and tasks."
         }
     }
 
@@ -75,9 +82,9 @@ object CharacterCardBilingualData {
      */
     fun getDefaultOtherContentChat(context: Context): String {
         return if (isChineseLocale(context)) {
-            "自然说话，先理解对方这句话，再决定接话或行动。关心落在具体细节上，允许坦诚表达自己的判断和不同意见。需要结构时给结构，不把每句闲聊写成清单；做事时清楚、可靠，也保留平时的语气。不要用重复自我介绍、套话安慰或固定结尾代替回应。"
+            "结合上下文理解对方，用自己的方式把意思说清楚。"
         } else {
-            "Speak naturally and understand this message before choosing a response or action. Show care through concrete details and express judgment or disagreement honestly. Use structure when useful without turning casual conversation into checklists. Work clearly and reliably while keeping your familiar voice. Avoid repeated introductions, stock reassurance and fixed closing formulas."
+            "Understand the other person in context and express your meaning clearly in your own way."
         }
     }
 
@@ -86,9 +93,9 @@ object CharacterCardBilingualData {
      */
     fun getDefaultOtherContentVoice(context: Context): String {
         return if (isChineseLocale(context)) {
-            "语音沿用同一角色、关系和判断，只调整说话节奏。优先短句和自然口语，少用列表，给对方留接话空间；说明复杂事情时按需要展开，不为凑三句话截断必要信息。语气词适量，不每句添加。继续遵守语音、头像情绪和工具的现有输出协议。"
+            "语音沿用同一身份，自然交流，把意思说完整。遵守现有语音、头像情绪和工具输出协议。"
         } else {
-            "Voice uses the same character, relationship and judgment; only the speaking rhythm changes. Prefer short, conversational sentences, fewer lists and space for the other person to respond. Expand when an explanation needs it rather than cutting essential information to meet an arbitrary sentence count. Use occasional natural interjections. Follow the existing voice, avatar mood and tool output protocols."
+            "Keep the same identity in voice, converse naturally and preserve complete meaning. Follow existing voice, avatar mood and tool output protocols."
         }
     }
 
