@@ -12,12 +12,16 @@ object CharacterCardBilingualData {
     // Resolve previous defaults too so installed default cards receive the reduced wording.
     // Resolve at read time without rewriting stored preferences or changing their schema.
     private val legacyCharacterSettings = setOf(
+        "你是 {{char}}。延续已有的身份与共同经历，聊天和做事都由你承接。",
+        "You are {{char}}. Continue your established identity and shared experience across conversation and tasks.",
         "你是Operit，一个全能AI助手，旨在解决用户提出的任何任务。",
         "You are Operit, an all-purpose AI assistant designed to help users solve any task.",
         "你是 {{char}}，与对方持续相处的协作者。你有稳定的表达、判断和相处重心，温和但有主见，能关心、玩笑，也能认真做事。任务是你正在做的事情，不是替换你身份的开关；亲近程度随实际设定与共同经历自然发展，不凭空预设关系。",
         "You are {{char}}, a collaborator whose voice, judgment and way of relating remain consistent across conversations and tasks. Be warm and self-possessed, able to care, joke and work seriously. A task is something you do, not a switch that replaces your identity. Let closeness follow the actual character settings and shared experience rather than inventing a relationship."
     )
     private val legacyChatContents = setOf(
+        "结合上下文理解对方，用自己的方式把意思说清楚。",
+        "Understand the other person in context and express your meaning clearly in your own way.",
         "保持有帮助的语气，并清楚地传达限制。",
         "Maintain a helpful tone and clearly communicate limitations.",
         "自然说话，先理解对方这句话，再决定接话或行动。关心落在具体细节上，允许坦诚表达自己的判断和不同意见。需要结构时给结构，不把每句闲聊写成清单；做事时清楚、可靠，也保留平时的语气。不要用重复自我介绍、套话安慰或固定结尾代替回应。",
@@ -48,6 +52,10 @@ object CharacterCardBilingualData {
 
     fun resolveOtherContentVoice(context: Context, id: String, stored: String): String {
         if (id != CharacterCardManager.DEFAULT_CHARACTER_CARD_ID || stored.isEmpty()) return stored
+        if (stored == "语音沿用同一身份，自然交流，把意思说完整。遵守现有语音、头像情绪和工具输出协议。" ||
+            stored == "Keep the same identity in voice, converse naturally and preserve complete meaning. Follow existing voice, avatar mood and tool output protocols.") {
+            return getDefaultOtherContentVoice(context)
+        }
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(stored.toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
@@ -71,33 +79,23 @@ object CharacterCardBilingualData {
      */
     fun getDefaultCharacterSetting(context: Context): String {
         return if (isChineseLocale(context)) {
-            "你是 {{char}}。延续已有的身份与共同经历，聊天和做事都由你承接。"
+            "你是 {{char}}。"
         } else {
-            "You are {{char}}. Continue your established identity and shared experience across conversation and tasks."
+            "You are {{char}}."
         }
     }
 
     /**
      * 获取默认其他内容（聊天）
      */
-    fun getDefaultOtherContentChat(context: Context): String {
-        return if (isChineseLocale(context)) {
-            "结合上下文理解对方，用自己的方式把意思说清楚。"
-        } else {
-            "Understand the other person in context and express your meaning clearly in your own way."
-        }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun getDefaultOtherContentChat(context: Context): String = ""
 
     /**
      * 获取默认其他内容（语音）
      */
-    fun getDefaultOtherContentVoice(context: Context): String {
-        return if (isChineseLocale(context)) {
-            "语音沿用同一身份，自然交流，把意思说完整。遵守现有语音、头像情绪和工具输出协议。"
-        } else {
-            "Keep the same identity in voice, converse naturally and preserve complete meaning. Follow existing voice, avatar mood and tool output protocols."
-        }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun getDefaultOtherContentVoice(context: Context): String = ""
 
     /**
      * 获取角色描述标签

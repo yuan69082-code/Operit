@@ -659,7 +659,7 @@ class ConversationService(
                     preparedHistory.add(message.copy(content = ConversationIdentityPrompts.prependTo(
                         content,
                         !LocaleUtils.usesChineseContent(context)
-                    )))
+                    ).replace("{user_name}", displayPreferencesManager.globalUserName.first() ?: "User")))
                 } else {
                     // Add typed turns as is
                     preparedHistory.add(message)
@@ -1077,6 +1077,7 @@ class ConversationService(
         
         // 替换占位符
         finalPrompt = finalPrompt.replace("{{user}}", globalUserName)
+        finalPrompt = finalPrompt.replace("{user_name}", globalUserName)
         finalPrompt = finalPrompt.replace("{{char}}", aiName)
         
         return finalPrompt
