@@ -29,6 +29,7 @@
     
     <!-- 麦克风前台服务权限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     
     <!-- 持续高性能模式 -->
     <uses-permission android:name="android.permission.SUSTAINED_PERFORMANCE_MODE" />
@@ -334,6 +335,11 @@
         </service>
 
         <!-- AI 前台服务 - 保持网络连接稳定 -->
+        <service
+            android:name=".ui.features.chat.voice.VoiceCallService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="microphone|mediaPlayback" />
         <service
             android:name=".api.chat.AIForegroundService"
             android:enabled="true"

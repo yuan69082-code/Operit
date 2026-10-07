@@ -779,6 +779,22 @@ class MessageProcessingDelegate(
             val buildUserMessageStartTime = messageTimingNow()
             val finalMessageContent = if (prebuiltMessageContent != null) {
                 prebuiltMessageContent
+            } else if (turnOptions.voiceCallAudioPath != null) {
+                // Preserve original audio in the media pool. Never substitute transcription for it.
+                try {
+                    check(enableDirectAudioProcessing) { context.getString(R.string.voice_call_audio_required) }
+                    val audioId = com.ai.assistance.operit.util.MediaPoolManager.addMedia(turnOptions.voiceCallAudioPath, "audio/wav")
+                    check(audioId != "error") { "Could not retain call audio" }
+                    messageText + "\n" + com.ai.assistance.operit.api.chat.llmprovider.MediaLinkBuilder.audio(context, audioId)
+                } catch (error: Exception) {
+                    AppLogger.e(TAG, "Could not prepare native call audio", error)
+                    val message = error.message.orEmpty()
+                    withContext(Dispatchers.Main) { showErrorMessage(message) }
+                    chatRuntime.isLoading.value = false
+                    updateGlobalLoadingState()
+                    setChatInputProcessingState(chatId, EnhancedInputProcessingState.Error(message))
+                    return@launch
+                }
             } else {
                 AIMessageManager.buildUserMessageContent(
                     context = context,
@@ -1083,7 +1099,10 @@ class MessageProcessingDelegate(
                     enhancedAiService = service,
                     chatId = activeChatId,
                     messageContent = if (turnOptions.voiceCall) {
-                        "[运行状态：正在与用户进行实时语音通话。下面是用户本轮语音转写；你的正文会被朗读。你收到的是文字转写，不能直接听到音色、语调或呼吸。通话与当前文字聊天共享身份、工具和记录。]\n$requestMessageContent"
+                        val inputDescription = if (turnOptions.voiceCallAudioPath != null)
+                            "本轮包含麦克风录制的原始音频片段，可能包含说话、语气和环境声。依据实际音频回应；不确定的声音来源不要猜成事实。"
+                        else "本轮输入为语音转写文字，不能直接听到音色、语调或呼吸。"
+                        "[运行状态：mode=voice_call，正在与用户进行实时语音通话。$inputDescription 你的正文会被朗读。通话与当前文字聊天共享身份、工具和记录。若你决定结束本次通话，在告别正文后单独输出 <voice_call_end/>，客户端会在朗读结束后挂断；这个控制标记不会被朗读。]\n$requestMessageContent"
                     } else requestMessageContent,
                     // 仅在群组编排中去掉当前用户消息，避免重复拼接。
                     // userMessageAdded 只覆盖本次发送自行落库的情况；编排路径的消息由

@@ -481,7 +481,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         )
         mainChatCore.setSpeakMessageHandler { text, interrupt ->
             // The call owns playback; auto-read must not speak the same reply a second time.
-            if (!isVoiceCallActive) speakMessage(text, interrupt)
+            if (!com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime.isActive) speakMessage(text, interrupt)
         }
         mainChatCore.setOnEnhancedAiServiceReady { service ->
             enhancedAiService = service
@@ -1487,11 +1487,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     }
 
     /** Uses the normal chat pipeline, including the current role, tools and persisted history. */
-    suspend fun sendVoiceCallTurn(text: String, chatId: String, onText: suspend (String) -> Unit): String =
+    suspend fun sendVoiceCallTurn(text: String, chatId: String, audioPath: String?, roleCardId: String?, onText: suspend (String) -> Unit): String =
         kotlinx.coroutines.coroutineScope {
-            check(currentChatId.value == chatId) { "Voice call conversation changed" }
             check(!activeStreamingChatIds.value.contains(chatId)) { "Conversation is busy" }
-            val lastTimestamp = chatHistory.value.maxOfOrNull { it.timestamp } ?: 0L
+            val lastTimestamp = chatHistoryDelegate.getChatHistory(chatId).maxOfOrNull { it.timestamp } ?: 0L
             clearError()
             // Subscribe before sending so even a very fast response cannot skip the busy event.
             val started = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -1502,11 +1501,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             }
             try {
                 messageCoordinationDelegate.sendUserMessage(
-                    preferActiveRoleCard = true,
+                    roleCardIdOverride = roleCardId,
                     chatIdOverride = chatId,
-                    messageTextOverride = "[语音通话转写]\n$text",
+                    messageTextOverride = if (audioPath != null) "[语音通话音频：本轮麦克风录音]" else "[语音通话转写]\n$text",
                     turnOptions = com.ai.assistance.operit.data.model.ChatTurnOptions(
                         voiceCall = true,
+                        voiceCallAudioPath = audioPath,
                         onVoiceCallText = onText,
                     ),
                 )
@@ -1514,7 +1514,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 kotlinx.coroutines.withTimeout(180_000) {
                     activeStreamingChatIds.first { !it.contains(chatId) }
                     errorMessage.value?.let { error(it) }
-                    val replies = chatHistory.value.filter {
+                    val replies = chatHistoryDelegate.getChatHistory(chatId).filter {
                         it.timestamp > lastTimestamp && it.sender == "ai" && it.content.isNotBlank()
                     }
                     check(replies.isNotEmpty()) { "No voice call reply returned" }

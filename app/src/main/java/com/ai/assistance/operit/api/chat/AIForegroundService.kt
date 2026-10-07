@@ -443,7 +443,8 @@ class AIForegroundService : Service() {
         }
 
         fun setWakeListeningSuspendedForVoiceCall(context: Context, active: Boolean) {
-            // The call requests microphone foreground first; send even before onCreate sets isRunning.
+            // VoiceCallService owns the microphone foreground lifetime now.
+            if (!isRunning.get()) return
             context.startService(Intent(context, AIForegroundService::class.java).apply {
                 action = ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_VOICE_CALL
                 putExtra(EXTRA_VOICE_CALL_ACTIVE, active)
@@ -939,6 +940,7 @@ class AIForegroundService : Service() {
         isRunning.set(true)
         (application as OperitApplication).initializeMainApplication()
         wakeListeningSuspendedForIme = lastRequestedImeVisible
+        wakeListeningSuspendedForVoiceCall = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime.isActive
         AppLogger.d(TAG, "AI 前台服务创建。")
         chatRuntimeHolder
         createNotificationChannel()

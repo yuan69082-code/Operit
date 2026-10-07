@@ -21,12 +21,14 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 
-/** Foreground, same-conversation call. Recording and playback never overlap. */
+/** Service-owned, same-conversation call. Recording and playback never overlap. */
 class VoiceCallController(
     private val context: Context,
     private val scope: CoroutineScope,
     private val viewModel: ChatViewModel,
-    private val chatId: String,
+    val chatId: String,
+    val nativeAudio: Boolean,
+    private val onStopped: () -> Unit,
 ) {
     enum class Phase { CONNECTING, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
 
@@ -46,6 +48,8 @@ class VoiceCallController(
     private var turnJob: Job? = null
     private var speech: SpeechService? = null
     private var voice: VoiceService? = null
+    val startedAt = android.os.SystemClock.elapsedRealtime()
+    private var roleCardId: String? = null
 
     fun start() {
         if (sessionJob?.isActive == true) return
@@ -55,15 +59,25 @@ class VoiceCallController(
         viewModel.setVoiceCallActive(true)
         sessionJob = scope.launch {
             try {
-                check(viewModel.currentChatId.value == chatId)
                 check(!viewModel.activeStreamingChatIds.value.contains(chatId)) {
                     context.getString(R.string.voice_call_busy)
                 }
-                AIForegroundService.ensureMicrophoneForeground(context, forceStart = true)
+                if (roleCardId == null) {
+                    roleCardId = (com.ai.assistance.operit.data.preferences.ActivePromptManager
+                        .getInstance(context).getActivePrompt() as? com.ai.assistance.operit.data.model.ActivePrompt.CharacterCard)?.id
+                }
+                if (nativeAudio) {
+                    check(viewModel.activeChatModelConfig.value?.enableDirectAudioProcessing == true) {
+                        context.getString(R.string.voice_call_audio_required)
+                    }
+                }
                 AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, true)
                 delay(180)
-                val recognizer = SpeechServiceFactory.createSpeechService(context).also { speech = it }
-                check(recognizer.initialize()) { context.getString(R.string.voice_call_stt_failed) }
+                val recognizer = if (nativeAudio) null else SpeechServiceFactory.createSpeechService(context).also {
+                    speech = it
+                    check(it.initialize()) { context.getString(R.string.voice_call_stt_failed) }
+                }
+                val recorder = VoiceCallAudioRecorder(context)
                 val speaker = VoiceServiceFactory.createVoiceService(context).also { voice = it }
                 check(speaker.initialize()) { context.getString(R.string.voice_call_tts_failed) }
                 val profiles = SpeechServiceProfilesPreferences(context)
@@ -75,9 +89,14 @@ class VoiceCallController(
                     }
                     coroutineScope {
                         turnJob = launch {
+                            var audioFile: java.io.File? = null
                             try {
                                 phase = Phase.LISTENING
-                                val text = recognizeTurn(recognizer)
+                                transcript = ""
+                                val text = if (nativeAudio) {
+                                    audioFile = recorder.recordTurn()
+                                    context.getString(R.string.voice_call_audio_sent)
+                                } else recognizeTurn(checkNotNull(recognizer))
                                 if (text.isBlank()) return@launch
                                 transcript = text
                                 reply = ""
@@ -86,7 +105,7 @@ class VoiceCallController(
                                     val sentences = Channel<Pair<String, Deferred<Boolean>?>>(2)
                                     val generation = async {
                                         try {
-                                            viewModel.sendVoiceCallTurn(text, chatId) { sentence ->
+                                            viewModel.sendVoiceCallTurn(text, chatId, audioFile?.absolutePath, roleCardId) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
@@ -120,7 +139,10 @@ class VoiceCallController(
                                         check(played) { context.getString(R.string.voice_call_tts_failed) }
                                         if (queued == null) speaker.speakingStateFlow.first { !it }
                                     }
-                                    generation.await()
+                                    val completed = ChatUtils.stripOpenAiResponsesProtocolMarkup(
+                                        ChatUtils.removeThinkingContent(generation.await())
+                                    ).trim()
+                                    if (completed.endsWith("<voice_call_end/>")) finish()
                                 }
                             } catch (e: CancellationException) {
                                 throw e
@@ -133,8 +155,9 @@ class VoiceCallController(
                                 // Cancellation may arrive during synthesis or an STT network request.
                                 // Join cleanup before allowing the next turn to acquire the microphone.
                                 withContext(NonCancellable) {
-                                    recognizer.cancelRecognition()
+                                    recognizer?.cancelRecognition()
                                     speaker.stop()
+                                    audioFile?.delete() // The chat media pool retained its own copy.
                                 }
                             }
                         }
@@ -162,6 +185,7 @@ class VoiceCallController(
                             AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, false)
                         } finally {
                             isRunning = false
+                            onStopped()
                         }
                     }
                 }

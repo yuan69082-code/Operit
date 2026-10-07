@@ -9,7 +9,15 @@
     <string name="voice_call_muted">麦克风已静音</string>
     <string name="voice_call_error">通话暂停</string>
     <string name="voice_call_ended">通话已结束</string>
-    <string name="voice_call_hint">说完后自动接话；想插话时点“打断并说话”。转写和回答保存在当前聊天。离开应用会结束通话。</string>
+    <string name="voice_call_hint">说完后自动接话；想插话时点“打断并说话”。可收起或切换软件，通知栏可返回和挂断。朗读时暂停收音。</string>
+    <string name="voice_call_minimize">收起通话</string>
+    <string name="voice_call_restore">返回通话</string>
+    <string name="voice_call_background">通话保持中 · 点击返回应用，或点挂断结束</string>
+    <string name="voice_call_choose_input">原生音频通话会把麦克风录到的说话和环境声直接发送给当前模型，需要模型与接口支持音频输入，并启用“直接音频处理”。转写通话只发送识别后的文字。</string>
+    <string name="voice_call_native_audio">原生音频通话</string>
+    <string name="voice_call_transcription">转写通话</string>
+    <string name="voice_call_audio_required">请在当前聊天模型配置中启用“直接音频处理”，并确认模型与接口支持音频输入；仅开启开关不会赋予模型音频能力。</string>
+    <string name="voice_call_audio_sent">已发送本轮音频，包含麦克风录到的环境声</string>
     <string name="voice_call_you">你说</string>
     <string name="voice_call_reply">回答</string>
     <string name="voice_call_retry">重新连接</string>

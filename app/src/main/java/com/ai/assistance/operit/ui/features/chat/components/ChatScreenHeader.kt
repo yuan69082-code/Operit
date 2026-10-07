@@ -36,6 +36,7 @@ import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
+import com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime
 import com.ai.assistance.operit.ui.floating.FloatingMode
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOf
@@ -80,14 +81,35 @@ fun ChatScreenHeader(
     }
 
     var voiceCallChatId by remember { mutableStateOf<String?>(null) }
+    var showVoiceCall by remember { mutableStateOf(false) }
+    val runningCall = VoiceCallRuntime.controller
     val callChatId by actualViewModel.currentChatId.collectAsState()
     val callBusy by actualViewModel.currentChatIsLoading.collectAsState()
     val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) voiceCallChatId = actualViewModel.currentChatId.value
         else actualViewModel.showToast(context.getString(R.string.microphone_permission_denied))
     }
+    if (showVoiceCall && runningCall != null) {
+        VoiceCallDialog(runningCall) { showVoiceCall = false }
+    }
     voiceCallChatId?.let { boundCallChatId ->
-        VoiceCallDialog(actualViewModel, boundCallChatId) { voiceCallChatId = null }
+        fun startCall(nativeAudio: Boolean) {
+            try {
+                VoiceCallRuntime.open(context, actualViewModel, boundCallChatId, nativeAudio)
+                showVoiceCall = true
+            } catch (error: Exception) {
+                com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Could not start call service", error)
+                actualViewModel.showToast(error.message.orEmpty())
+            }
+            voiceCallChatId = null
+        }
+        AlertDialog(
+            onDismissRequest = { voiceCallChatId = null },
+            title = { Text(stringResource(R.string.voice_call_title)) },
+            text = { Text(stringResource(R.string.voice_call_choose_input)) },
+            confirmButton = { TextButton(onClick = { startCall(true) }) { Text(stringResource(R.string.voice_call_native_audio)) } },
+            dismissButton = { TextButton(onClick = { startCall(false) }) { Text(stringResource(R.string.voice_call_transcription)) } },
+        )
     }
 
     val characterCardManager = remember { CharacterCardManager.getInstance(context) }
@@ -187,16 +209,18 @@ fun ChatScreenHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             IconButton(
-                enabled = callChatId != null && !callBusy && !isFloatingMode,
+                enabled = runningCall != null || (callChatId != null && !callBusy && !isFloatingMode),
                 onClick = {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    if (runningCall != null) {
+                        showVoiceCall = true
+                    } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                         voiceCallChatId = callChatId
                     } else {
                         callPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
             ) {
-                Icon(Icons.Default.Call, contentDescription = stringResource(R.string.voice_call_title))
+                Icon(Icons.Default.Call, contentDescription = stringResource(if (runningCall != null) R.string.voice_call_restore else R.string.voice_call_title), tint = if (runningCall != null) MaterialTheme.colorScheme.primary else LocalContentColor.current)
             }
             // 统计信息
             val maxWindowSize = (maxWindowSizeInK * 1024).toLong().coerceAtLeast(0L)

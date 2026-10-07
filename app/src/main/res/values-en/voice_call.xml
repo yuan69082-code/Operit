@@ -9,7 +9,7 @@
     <string name="voice_call_muted">Microphone muted</string>
     <string name="voice_call_error">Call paused</string>
     <string name="voice_call_ended">Call ended</string>
-    <string name="voice_call_hint">Replies start automatically after you finish. Tap Interrupt and speak to take a turn. Transcripts and replies stay in this chat. Leaving the app ends the call.</string>
+    <string name="voice_call_hint">Replies start automatically after you finish. Tap Interrupt and speak to take a turn. You can minimize or switch apps; use the notification to return or hang up. Recording pauses during playback.</string>
     <string name="voice_call_you">You said</string>
     <string name="voice_call_reply">Reply</string>
     <string name="voice_call_retry">Reconnect</string>
@@ -20,4 +20,12 @@
     <string name="voice_call_busy">Wait for the current reply to finish before calling</string>
     <string name="voice_call_stt_failed">Could not start recognition. Check speech service settings.</string>
     <string name="voice_call_tts_failed">Speech playback failed. Check speech service settings.</string>
+    <string name="voice_call_minimize">Minimize call</string>
+    <string name="voice_call_restore">Return to call</string>
+    <string name="voice_call_background">Call active · Tap to open the app, or hang up to end</string>
+    <string name="voice_call_choose_input">Native audio sends speech and nearby sounds directly to your current model. It requires an audio-capable model and endpoint with direct audio processing enabled. Transcription calls send recognized text only.</string>
+    <string name="voice_call_native_audio">Native audio call</string>
+    <string name="voice_call_transcription">Transcription call</string>
+    <string name="voice_call_audio_required">Enable direct audio processing for the current chat model and verify that its model and endpoint support audio input. The toggle alone does not add audio capabilities.</string>
+    <string name="voice_call_audio_sent">Audio sent, including nearby sounds recorded by the microphone</string>
 </resources>

@@ -12,46 +12,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.ai.assistance.operit.R
-import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import com.ai.assistance.operit.ui.features.chat.voice.VoiceCallController
+import com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime
 import kotlinx.coroutines.delay
 
 @Composable
-fun VoiceCallDialog(viewModel: ChatViewModel, chatId: String, onDismiss: () -> Unit) {
+fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val controller = remember(viewModel, chatId) {
-        VoiceCallController(context.applicationContext, scope, viewModel, chatId)
-    }
-    val currentChatId by viewModel.currentChatId.collectAsState()
     val muted by controller.isMuted.collectAsState()
-    val close by rememberUpdatedState(onDismiss)
-    val startedAt = remember { SystemClock.elapsedRealtime() }
     var elapsedSeconds by remember { mutableStateOf(0L) }
     LaunchedEffect(controller) {
-        controller.start()
         while (true) {
-            elapsedSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
+            elapsedSeconds = (SystemClock.elapsedRealtime() - controller.startedAt) / 1000
             delay(1000)
-        }
-    }
-    LaunchedEffect(currentChatId) {
-        if (currentChatId != chatId) close()
-    }
-    DisposableEffect(controller, lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            // This first version is a foreground call: leaving the app hangs up and releases audio.
-            if (event == Lifecycle.Event.ON_STOP) close()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            controller.finish()
         }
     }
     val status = when (controller.phase) {
@@ -71,6 +45,7 @@ fun VoiceCallDialog(viewModel: ChatViewModel, chatId: String, onDismiss: () -> U
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(stringResource(R.string.voice_call_title), style = MaterialTheme.typography.headlineSmall)
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.voice_call_minimize)) }
                 Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}")
                 Text(stringResource(status), style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(R.string.voice_call_hint), style = MaterialTheme.typography.bodySmall)
@@ -84,7 +59,7 @@ fun VoiceCallDialog(viewModel: ChatViewModel, chatId: String, onDismiss: () -> U
                 }
                 if (controller.phase == VoiceCallController.Phase.ERROR) {
                     Text(controller.errorMessage, color = MaterialTheme.colorScheme.error)
-                    Button(onClick = controller::start, enabled = !controller.isRunning) {
+                    Button(onClick = { VoiceCallRuntime.restart(context) }, enabled = !controller.isRunning) {
                         Text(stringResource(R.string.voice_call_retry))
                     }
                 } else {
@@ -97,7 +72,7 @@ fun VoiceCallDialog(viewModel: ChatViewModel, chatId: String, onDismiss: () -> U
                             controller.phase == VoiceCallController.Phase.SPEAKING,
                     ) { Text(stringResource(R.string.voice_call_interrupt)) }
                 }
-                Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                Button(onClick = { VoiceCallRuntime.hangUp(); onDismiss() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                     Text(stringResource(R.string.voice_call_hang_up))
                 }
             }
