@@ -28,6 +28,9 @@ class VoiceCallController(
     private val viewModel: ChatViewModel,
     val chatId: String,
     val nativeAudio: Boolean,
+    val audioAnalysis: Boolean = false,
+    private val callerRoleCardId: String? = null,
+    private val incoming: Boolean = false,
     private val onStopped: () -> Unit,
 ) {
     enum class Phase { CONNECTING, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
@@ -49,7 +52,7 @@ class VoiceCallController(
     private var speech: SpeechService? = null
     private var voice: VoiceService? = null
     val startedAt = android.os.SystemClock.elapsedRealtime()
-    private var roleCardId: String? = null
+    private var roleCardId: String? = callerRoleCardId
 
     fun start() {
         if (sessionJob?.isActive == true) return
@@ -66,14 +69,16 @@ class VoiceCallController(
                     roleCardId = (com.ai.assistance.operit.data.preferences.ActivePromptManager
                         .getInstance(context).getActivePrompt() as? com.ai.assistance.operit.data.model.ActivePrompt.CharacterCard)?.id
                 }
-                if (nativeAudio) {
+                val analyzer = VoiceCallAudioAnalysis(context)
+                if (audioAnalysis) analyzer.requireConfigured()
+                if (nativeAudio && !audioAnalysis) {
                     check(viewModel.activeChatModelConfig.value?.enableDirectAudioProcessing == true) {
                         context.getString(R.string.voice_call_audio_required)
                     }
                 }
                 AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, true)
                 delay(180)
-                val recognizer = if (nativeAudio) null else SpeechServiceFactory.createSpeechService(context).also {
+                val recognizer = if (nativeAudio || audioAnalysis) null else SpeechServiceFactory.createSpeechService(context).also {
                     speech = it
                     check(it.initialize()) { context.getString(R.string.voice_call_stt_failed) }
                 }
@@ -82,6 +87,7 @@ class VoiceCallController(
                 check(speaker.initialize()) { context.getString(R.string.voice_call_tts_failed) }
                 val profiles = SpeechServiceProfilesPreferences(context)
                 val cleanerRegexs = profiles.getCurrentTtsProfile().cleanerRegexs
+                var greetIncoming = incoming
                 while (isActive && phase != Phase.ERROR) {
                     if (muted.value) {
                         phase = Phase.MUTED
@@ -93,24 +99,46 @@ class VoiceCallController(
                             try {
                                 phase = Phase.LISTENING
                                 transcript = ""
-                                val text = if (nativeAudio) {
+                                val text = if (greetIncoming) {
+                                    greetIncoming = false
+                                    "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
+                                } else if (audioAnalysis) {
+                                    val savedAudio = recorder.recordTurn()
+                                    audioFile = savedAudio
+                                    phase = Phase.RECOGNIZING
+                                    try {
+                                        "[语音通话转写] " + analyzer.analyze(savedAudio) + "\n【语音文件】${savedAudio.absolutePath}"
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        currentCoroutineContext().ensureActive()
+                                        // User explicitly requested a path-only message on analysis failure.
+                                        AppLogger.w("VoiceCall", "Audio analysis failed: ${error.javaClass.simpleName}")
+                                        "[语音通话音频] 转写失败，音频已保存\n【语音文件】${savedAudio.absolutePath}"
+                                    }
+                                } else if (nativeAudio) {
                                     audioFile = recorder.recordTurn()
                                     context.getString(R.string.voice_call_audio_sent)
                                 } else recognizeTurn(checkNotNull(recognizer))
                                 if (text.isBlank()) return@launch
-                                transcript = text
+                                // Sound observations belong to chat context, not the spoken-word caption.
+                                transcript = if (text.startsWith("[通话事件]")) "" else if (audioAnalysis && text.contains("【原话】")) {
+                                    text.substringAfter("【原话】").substringBefore("【疑似听词】")
+                                        .substringBefore("【声音】").substringBefore("【语音文件】").trim()
+                                } else text
                                 reply = ""
                                 phase = Phase.THINKING
                                 coroutineScope {
                                     val sentences = Channel<Pair<String, Deferred<Boolean>?>>(2)
                                     val generation = async {
+                                        val publicText = VoiceCallPublicText.StreamCleaner()
                                         try {
-                                            viewModel.sendVoiceCallTurn(text, chatId, audioFile?.absolutePath, roleCardId) { sentence ->
+                                            viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
                                                     TtsCleaner.clean(
-                                                        ChatUtils.stripOpenAiResponsesProtocolMarkup(sentence),
+                                                        publicText.clean(ChatUtils.stripOpenAiResponsesProtocolMarkup(sentence)),
                                                         cleanerRegexs,
                                                     )
                                                 )
@@ -157,7 +185,8 @@ class VoiceCallController(
                                 withContext(NonCancellable) {
                                     recognizer?.cancelRecognition()
                                     speaker.stop()
-                                    audioFile?.delete() // The chat media pool retained its own copy.
+                                    // Keep analysis recordings: their paths are part of the persisted turn.
+                                    if (!audioAnalysis) audioFile?.delete()
                                 }
                             }
                         }

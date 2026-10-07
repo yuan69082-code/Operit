@@ -6,6 +6,8 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <exclude domain="sharedpref" path="voice_call_analysis.xml" />
+    <exclude domain="sharedpref" path="voice_call_incoming.xml" />
     <!-- EncryptedSharedPreferences depends on a device-local Android Keystore key. -->
     <exclude domain="sharedpref" path="codex_oauth_credentials.xml" />
 </full-backup-content>

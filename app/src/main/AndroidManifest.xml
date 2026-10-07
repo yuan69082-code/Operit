@@ -335,6 +335,7 @@
         </service>
 
         <!-- AI 前台服务 - 保持网络连接稳定 -->
+        <receiver android:name=".ui.features.chat.voice.VoiceCallIncomingReceiver" android:exported="false" />
         <service
             android:name=".ui.features.chat.voice.VoiceCallService"
             android:exported="false"

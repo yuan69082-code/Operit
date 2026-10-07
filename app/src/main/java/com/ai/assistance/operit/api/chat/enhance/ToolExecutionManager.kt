@@ -124,6 +124,16 @@ object ToolExecutionManager {
         callerCardId: String?
     ): ToolInvocation {
         val resolvedTargetTool = resolveToolTarget(invocation.tool).tool
+        if (resolvedTargetTool.name == "request_voice_call") {
+            // Bind the request to the executing conversation, never an AI-supplied chat ID.
+            val parameters = resolvedTargetTool.parameters.filterNot {
+                it.name in setOf(PACKAGE_CHAT_ID_PARAM, PACKAGE_CALLER_CARD_ID_PARAM, PACKAGE_CALLER_NAME_PARAM)
+            }.toMutableList()
+            addPackageContextParamIfMissing(parameters, PACKAGE_CHAT_ID_PARAM, callerChatId)
+            addPackageContextParamIfMissing(parameters, PACKAGE_CALLER_CARD_ID_PARAM, callerCardId)
+            addPackageContextParamIfMissing(parameters, PACKAGE_CALLER_NAME_PARAM, callerName)
+            return invocation.copy(tool = resolvedTargetTool.copy(parameters = parameters))
+        }
         if (!isJsPackageTool(resolvedTargetTool.name, jsPackageNames)) {
             return invocation
         }

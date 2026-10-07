@@ -5,10 +5,14 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="voice_call_analysis.xml" />
+        <exclude domain="sharedpref" path="voice_call_incoming.xml" />
         <!-- EncryptedSharedPreferences depends on a device-local Android Keystore key. -->
         <exclude domain="sharedpref" path="codex_oauth_credentials.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="sharedpref" path="voice_call_analysis.xml" />
+        <exclude domain="sharedpref" path="voice_call_incoming.xml" />
         <!-- EncryptedSharedPreferences depends on a device-local Android Keystore key. -->
         <exclude domain="sharedpref" path="codex_oauth_credentials.xml" />
     </device-transfer>

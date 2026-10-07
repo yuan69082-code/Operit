@@ -82,6 +82,51 @@ fun ChatScreenHeader(
 
     var voiceCallChatId by remember { mutableStateOf<String?>(null) }
     var showVoiceCall by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.restore(context.applicationContext) }
+    val incomingCall = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.pending
+    val streamingCallChats by actualViewModel.activeStreamingChatIds.collectAsState()
+    var answerAnalysis by remember { mutableStateOf(true) }
+    fun answerIncoming(analyze: Boolean) {
+        val request = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.pending ?: return
+        try {
+            check(request.expiresAt > System.currentTimeMillis()) { "来电已超时" }
+            check(!streamingCallChats.contains(request.chatId)) { "来电会话仍在处理，请稍后接听" }
+            if (analyze) com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(context).requireConfigured()
+            VoiceCallRuntime.open(context, actualViewModel, request.chatId, nativeAudio = false,
+                audioAnalysis = analyze, callerRoleCardId = request.roleCardId, incoming = true)
+            com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.clear(context)
+            showVoiceCall = true
+        } catch (error: Exception) {
+            com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Could not answer incoming call", error)
+            actualViewModel.showToast(error.message.orEmpty())
+        }
+    }
+    val incomingPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) answerIncoming(answerAnalysis)
+        else actualViewModel.showToast(context.getString(R.string.microphone_permission_denied))
+    }
+    if (incomingCall != null) {
+        fun acceptIncoming(analyze: Boolean) {
+            answerAnalysis = analyze
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                answerIncoming(analyze)
+            } else incomingPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
+        AlertDialog(
+            onDismissRequest = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.clear(context) },
+            title = { Text("${incomingCall.callerName} 来电") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(incomingCall.reason.ifBlank { "想和你说说话" })
+                    if (streamingCallChats.contains(incomingCall.chatId)) Text("正在结束当前回复，稍后可以接听。")
+                    com.ai.assistance.operit.ui.features.settings.screens.VoiceCallAnalysisSettingsButton()
+                    TextButton(onClick = { acceptIncoming(false) }, enabled = !streamingCallChats.contains(incomingCall.chatId)) { Text("使用普通转写接听") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { acceptIncoming(true) }, enabled = !streamingCallChats.contains(incomingCall.chatId)) { Text("接听（音频分析）") } },
+            dismissButton = { TextButton(onClick = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.clear(context) }) { Text("拒接") } },
+        )
+    }
     val runningCall = VoiceCallRuntime.controller
     val callChatId by actualViewModel.currentChatId.collectAsState()
     val callBusy by actualViewModel.currentChatIsLoading.collectAsState()
@@ -93,9 +138,10 @@ fun ChatScreenHeader(
         VoiceCallDialog(runningCall) { showVoiceCall = false }
     }
     voiceCallChatId?.let { boundCallChatId ->
-        fun startCall(nativeAudio: Boolean) {
+        fun startCall(nativeAudio: Boolean, audioAnalysis: Boolean = false) {
             try {
-                VoiceCallRuntime.open(context, actualViewModel, boundCallChatId, nativeAudio)
+                if (audioAnalysis) com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(context).requireConfigured()
+                VoiceCallRuntime.open(context, actualViewModel, boundCallChatId, nativeAudio, audioAnalysis)
                 showVoiceCall = true
             } catch (error: Exception) {
                 com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Could not start call service", error)
@@ -106,8 +152,14 @@ fun ChatScreenHeader(
         AlertDialog(
             onDismissRequest = { voiceCallChatId = null },
             title = { Text(stringResource(R.string.voice_call_title)) },
-            text = { Text(stringResource(R.string.voice_call_choose_input)) },
-            confirmButton = { TextButton(onClick = { startCall(true) }) { Text(stringResource(R.string.voice_call_native_audio)) } },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("音频分析通话会先转写说话、语气和环境声，再发给当前聊天模型；Claude 等文字模型也能使用。首次使用请填写分析接口的 API Key。")
+                    com.ai.assistance.operit.ui.features.settings.screens.VoiceCallAnalysisSettingsButton()
+                    TextButton(onClick = { startCall(true) }) { Text(stringResource(R.string.voice_call_native_audio)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { startCall(false, true) }) { Text("音频分析通话") } },
             dismissButton = { TextButton(onClick = { startCall(false) }) { Text(stringResource(R.string.voice_call_transcription)) } },
         )
     }

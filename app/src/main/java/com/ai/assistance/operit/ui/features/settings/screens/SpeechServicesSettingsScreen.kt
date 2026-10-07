@@ -400,6 +400,7 @@ fun SpeechServicesSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                item(key = "voice-call-analysis") { VoiceCallAnalysisSettingsButton() }
                 item {
                     SpeechServicesModeTabs(
                         selectedTabIndex = selectedTabIndex,

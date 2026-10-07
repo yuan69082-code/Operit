@@ -1487,7 +1487,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     }
 
     /** Uses the normal chat pipeline, including the current role, tools and persisted history. */
-    suspend fun sendVoiceCallTurn(text: String, chatId: String, audioPath: String?, roleCardId: String?, onText: suspend (String) -> Unit): String =
+    suspend fun sendVoiceCallTurn(text: String, chatId: String, audioPath: String?, roleCardId: String?, audioAnalyzed: Boolean = false, onText: suspend (String) -> Unit): String =
         kotlinx.coroutines.coroutineScope {
             check(!activeStreamingChatIds.value.contains(chatId)) { "Conversation is busy" }
             val response = kotlinx.coroutines.CompletableDeferred<String>()
@@ -1503,10 +1503,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 messageCoordinationDelegate.sendUserMessage(
                     roleCardIdOverride = roleCardId,
                     chatIdOverride = chatId,
-                    messageTextOverride = if (audioPath != null) "[语音通话音频：本轮麦克风录音]" else "[语音通话转写]\n$text",
+                    messageTextOverride = if (audioAnalyzed || text.startsWith("[通话事件]")) text else if (audioPath != null) "[语音通话音频：本轮麦克风录音]" else "[语音通话转写]\n$text",
                     turnOptions = com.ai.assistance.operit.data.model.ChatTurnOptions(
                         voiceCall = true,
                         voiceCallAudioPath = audioPath,
+                        voiceCallAudioAnalyzed = audioAnalyzed,
+                        voiceCallEvent = text.startsWith("[通话事件]"),
                         onVoiceCallText = onText,
                         onVoiceCallComplete = { response.complete(it) },
                     ),

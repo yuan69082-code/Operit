@@ -18,10 +18,10 @@ object VoiceCallRuntime {
         private set
     val isActive: Boolean get() = controller?.isRunning == true
 
-    fun open(context: Context, viewModel: ChatViewModel, chatId: String, nativeAudio: Boolean) {
-        if (controller != null) return
+    fun open(context: Context, viewModel: ChatViewModel, chatId: String, nativeAudio: Boolean, audioAnalysis: Boolean = false, callerRoleCardId: String? = null, incoming: Boolean = false) {
+        check(controller == null) { "已有通话，请先挂断" }
         val appContext = context.applicationContext
-        controller = VoiceCallController(appContext, scope, viewModel, chatId, nativeAudio) {
+        controller = VoiceCallController(appContext, scope, viewModel, chatId, nativeAudio, audioAnalysis, callerRoleCardId, incoming) {
             appContext.stopService(Intent(appContext, VoiceCallService::class.java))
             if (controller?.phase == VoiceCallController.Phase.ENDED) controller = null
         }

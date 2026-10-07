@@ -267,6 +267,29 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
 
     // 不在提示词加入的工具
     handler.registerTool(
+        name = "request_voice_call",
+        descriptionGenerator = { "向用户发起语音来电" },
+        executor = { tool ->
+            try {
+                val chatId = checkNotNull(tool.parameters.find { it.name == "__operit_package_chat_id" }?.value) {
+                    "来电工具必须在聊天会话内调用"
+                }
+                val roleId = tool.parameters.find { it.name == "__operit_package_caller_card_id" }?.value
+                val reason = tool.parameters.find { it.name == "reason" }?.value.orEmpty()
+                val callerName = tool.parameters.find { it.name == "__operit_package_caller_name" }?.value.orEmpty()
+                val message = runBlocking(Dispatchers.Main.immediate) {
+                    com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.request(context, chatId, roleId, reason, callerName)
+                }
+                ToolResult(toolName = tool.name, success = true, result = StringResultData(message))
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Could not request incoming call", error)
+                buildToolErrorResult(tool, error.message.orEmpty())
+            }
+        },
+    )
+    handler.registerTool(
             name = "execute_shell",
             descriptionGenerator = { tool ->
                 val command = tool.parameters.find { it.name == "command" }?.value ?: ""

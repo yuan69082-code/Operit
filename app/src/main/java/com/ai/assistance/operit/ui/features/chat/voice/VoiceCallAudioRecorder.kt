@@ -64,7 +64,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 .put("RIFF".toByteArray()).putInt(data.size + 36).put("WAVEfmt ".toByteArray())
                 .putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2)
                 .putShort(2).putShort(16).put("data".toByteArray()).putInt(data.size).array()
-            val directory = File(context.cacheDir, "voice_call_audio").apply { mkdirs() }
+            val directory = File(checkNotNull(context.getExternalFilesDir(null)), "voice_recordings").apply { mkdirs() }
             File.createTempFile("call-", ".wav", directory).also { file ->
                 file.outputStream().use { it.write(header); it.write(data) }
             }
