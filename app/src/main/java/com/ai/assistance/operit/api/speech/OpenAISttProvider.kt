@@ -134,6 +134,7 @@ class OpenAISttProvider(
         continuousMode: Boolean,
         partialResults: Boolean,
         audioSource: Int,
+        silenceDurationMs: Int,
     ): Boolean {
         if (!isInitialized.value) {
             val ok = initialize()
@@ -195,6 +196,7 @@ class OpenAISttProvider(
                             val vadInstance = try {
                                 (vad ?: OnnxSileroVad(context = context, speechDurationMs = 0)).also { created ->
                                     vad = created
+                                    created.setSilenceDurationMs(silenceDurationMs)
                                     created.reset()
                                 }
                             } catch (e: Exception) {

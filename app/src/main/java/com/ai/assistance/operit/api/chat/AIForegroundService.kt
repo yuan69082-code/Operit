@@ -125,6 +125,9 @@ class AIForegroundService : Service() {
         private const val ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_FLOATING_FULLSCREEN =
             "com.ai.assistance.operit.action.SET_WAKE_LISTENING_SUSPENDED_FOR_FLOATING_FULLSCREEN"
         private const val EXTRA_FLOATING_FULLSCREEN_ACTIVE = "extra_floating_fullscreen_active"
+        private const val ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_VOICE_CALL =
+            "com.ai.assistance.operit.action.SET_WAKE_LISTENING_SUSPENDED_FOR_VOICE_CALL"
+        private const val EXTRA_VOICE_CALL_ACTIVE = "extra_voice_call_active"
 
         const val ACTION_PREPARE_WAKE_HANDOFF =
             "com.ai.assistance.operit.action.PREPARE_WAKE_HANDOFF"
@@ -439,6 +442,14 @@ class AIForegroundService : Service() {
             }
         }
 
+        fun setWakeListeningSuspendedForVoiceCall(context: Context, active: Boolean) {
+            // The call requests microphone foreground first; send even before onCreate sets isRunning.
+            context.startService(Intent(context, AIForegroundService::class.java).apply {
+                action = ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_VOICE_CALL
+                putExtra(EXTRA_VOICE_CALL_ACTIVE, active)
+            })
+        }
+
         fun ensureRunningForExternalHttp(context: Context) {
             startServiceForAction(context, ACTION_START_OR_REFRESH_EXTERNAL_HTTP)
         }
@@ -553,12 +564,13 @@ class AIForegroundService : Service() {
             wakeListeningEnabled &&
                 !wakeListeningSuspendedForIme &&
                 !wakeListeningSuspendedForExternalRecording &&
-                !wakeListeningSuspendedForFloatingFullscreen
+                !wakeListeningSuspendedForFloatingFullscreen &&
+                !wakeListeningSuspendedForVoiceCall
 
         if (shouldListen) {
             startWakeListeningLocked()
         } else {
-            val shouldRelease = !wakeListeningEnabled || wakeListeningSuspendedForFloatingFullscreen
+            val shouldRelease = !wakeListeningEnabled || wakeListeningSuspendedForFloatingFullscreen || wakeListeningSuspendedForVoiceCall
             stopWakeListeningLocked(releaseProvider = shouldRelease)
         }
 
@@ -768,6 +780,7 @@ class AIForegroundService : Service() {
 
     @Volatile
     private var wakeListeningSuspendedForFloatingFullscreen: Boolean = false
+    private var wakeListeningSuspendedForVoiceCall: Boolean = false
 
     private var audioManager: AudioManager? = null
     private var audioRecordingCallback: AudioManager.AudioRecordingCallback? = null
@@ -1193,6 +1206,12 @@ class AIForegroundService : Service() {
         if (intent?.action == ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_FLOATING_FULLSCREEN) {
             val active = intent.getBooleanExtra(EXTRA_FLOATING_FULLSCREEN_ACTIVE, false)
             updateWakeListeningSuspendedForFloatingFullscreen(active)
+            return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_VOICE_CALL) {
+            wakeListeningSuspendedForVoiceCall = intent.getBooleanExtra(EXTRA_VOICE_CALL_ACTIVE, false)
+            applyWakeListeningState()
             return START_NOT_STICKY
         }
 
@@ -1858,7 +1877,7 @@ class AIForegroundService : Service() {
         // 为了简单起见，使用一个安卓内置图标。
         // 在实际项目中，应替换为应用的自定义图标。
         val wakeListeningEnabledSnapshot = wakeListeningEnabled
-        val wakeListeningSuspendedSnapshot = wakeListeningSuspendedForIme || wakeListeningSuspendedForExternalRecording || wakeListeningSuspendedForFloatingFullscreen
+        val wakeListeningSuspendedSnapshot = wakeListeningSuspendedForIme || wakeListeningSuspendedForExternalRecording || wakeListeningSuspendedForFloatingFullscreen || wakeListeningSuspendedForVoiceCall
         val externalHttpSnapshot = externalHttpStateFlow.value
         val title =
             if (isAiBusy) {

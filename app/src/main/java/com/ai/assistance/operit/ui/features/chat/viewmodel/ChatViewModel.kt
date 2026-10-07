@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import com.ai.assistance.operit.ui.floating.ui.pet.AvatarEmotionManager
 import com.ai.assistance.operit.api.voice.VoiceService
@@ -478,7 +479,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     override fun getReplyToMessage(): ChatMessage? = replyToMessage.value
                 }
         )
-        mainChatCore.setSpeakMessageHandler(::speakMessage)
+        mainChatCore.setSpeakMessageHandler { text, interrupt ->
+            // The call owns playback; auto-read must not speak the same reply a second time.
+            if (!isVoiceCallActive) speakMessage(text, interrupt)
+        }
         mainChatCore.setOnEnhancedAiServiceReady { service ->
             enhancedAiService = service
             setupInputProcessingStateListener(service)
@@ -1473,6 +1477,49 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             messageTextOverride = text
         )
     }
+
+    var isVoiceCallActive: Boolean = false
+        private set
+
+    fun setVoiceCallActive(active: Boolean) {
+        isVoiceCallActive = active
+        if (active) stopSpeaking()
+    }
+
+    /** Uses the normal chat pipeline, including the current role, tools and persisted history. */
+    suspend fun sendVoiceCallTurn(text: String, chatId: String): String =
+        kotlinx.coroutines.coroutineScope {
+            check(currentChatId.value == chatId) { "Voice call conversation changed" }
+            check(!activeStreamingChatIds.value.contains(chatId)) { "Conversation is busy" }
+            val lastTimestamp = chatHistory.value.maxOfOrNull { it.timestamp } ?: 0L
+            clearError()
+            // Subscribe before sending so even a very fast response cannot skip the busy event.
+            val started = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                combine(activeStreamingChatIds, errorMessage) { ids, errorText ->
+                    errorText?.let { error(it) }
+                    ids.contains(chatId)
+                }.first { it }
+            }
+            try {
+                messageCoordinationDelegate.sendUserMessage(
+                    preferActiveRoleCard = true,
+                    chatIdOverride = chatId,
+                    messageTextOverride = text,
+                )
+                kotlinx.coroutines.withTimeout(30_000) { started.await() }
+                kotlinx.coroutines.withTimeout(180_000) {
+                    activeStreamingChatIds.first { !it.contains(chatId) }
+                    errorMessage.value?.let { error(it) }
+                    val replies = chatHistory.value.filter {
+                        it.timestamp > lastTimestamp && it.sender == "ai" && it.content.isNotBlank()
+                    }
+                    check(replies.isNotEmpty()) { "No voice call reply returned" }
+                    replies.joinToString("\n") { it.content }
+                }
+            } finally {
+                started.cancel()
+            }
+        }
 
     fun sendTextMessage(
         text: String,

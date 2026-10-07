@@ -284,6 +284,7 @@ class SherpaMnnSpeechProvider(private val context: Context) : SpeechService {
             continuousMode: Boolean,
             partialResults: Boolean,
             audioSource: Int,
+            silenceDurationMs: Int,
     ): Boolean {
         if (!isInitialized.value) {
             if (!initialize()) return false
@@ -295,6 +296,7 @@ class SherpaMnnSpeechProvider(private val context: Context) : SpeechService {
         
         // 重置 VAD 和创建新的 stream
         vad?.reset()
+        sileroVad?.setSilenceDurationMs(silenceDurationMs)
         sileroVad?.reset()
         // 安全释放旧的 stream
         try {
@@ -660,4 +662,3 @@ class SherpaMnnSpeechProvider(private val context: Context) : SpeechService {
         }
     }
 }
-

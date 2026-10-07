@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voice_call_title">语音通话</string>
+    <string name="voice_call_connecting">正在连接语音服务…</string>
+    <string name="voice_call_listening">正在听你说</string>
+    <string name="voice_call_recognizing">正在识别…</string>
+    <string name="voice_call_thinking">正在回应…</string>
+    <string name="voice_call_speaking">正在说话</string>
+    <string name="voice_call_muted">麦克风已静音</string>
+    <string name="voice_call_error">通话暂停</string>
+    <string name="voice_call_ended">通话已结束</string>
+    <string name="voice_call_hint">说完后自动接话；想插话时点“打断并说话”。转写和回答保存在当前聊天。离开应用会结束通话。</string>
+    <string name="voice_call_you">你说</string>
+    <string name="voice_call_reply">回答</string>
+    <string name="voice_call_retry">重新连接</string>
+    <string name="voice_call_mute">静音</string>
+    <string name="voice_call_unmute">开麦</string>
+    <string name="voice_call_interrupt">打断并说话</string>
+    <string name="voice_call_hang_up">挂断</string>
+    <string name="voice_call_busy">请等待当前回答结束后再通话</string>
+    <string name="voice_call_stt_failed">语音识别未能启动，请检查语音服务设置</string>
+    <string name="voice_call_tts_failed">语音播放失败，请检查语音服务设置</string>
+</resources>

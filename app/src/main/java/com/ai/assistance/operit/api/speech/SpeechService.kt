@@ -72,6 +72,7 @@ interface SpeechService {
      * @param continuousMode 是否持续识别模式，true表示不会自动停止，直到调用stop()
      * @param partialResults 是否返回部分结果，若为false则只返回最终结果
      * @param audioSource 录音源，默认使用 VOICE_COMMUNICATION
+     * @param silenceDurationMs 一句结束前的静默时长；通话可单独延长，不改变普通输入默认值
      * @return 开始识别是否成功
      */
     suspend fun startRecognition(
@@ -79,6 +80,7 @@ interface SpeechService {
             continuousMode: Boolean = false,
             partialResults: Boolean = true,
             audioSource: Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            silenceDurationMs: Int = 300,
     ): Boolean
 
     /**

@@ -14,6 +14,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +77,17 @@ fun ChatScreenHeader(
         actualViewModel.moveTaskToBackEvents.collect {
             (context as? android.app.Activity)?.moveTaskToBack(true)
         }
+    }
+
+    var voiceCallChatId by remember { mutableStateOf<String?>(null) }
+    val callChatId by actualViewModel.currentChatId.collectAsState()
+    val callBusy by actualViewModel.currentChatIsLoading.collectAsState()
+    val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) voiceCallChatId = actualViewModel.currentChatId.value
+        else actualViewModel.showToast(context.getString(R.string.microphone_permission_denied))
+    }
+    voiceCallChatId?.let { boundCallChatId ->
+        VoiceCallDialog(actualViewModel, boundCallChatId) { voiceCallChatId = null }
     }
 
     val characterCardManager = remember { CharacterCardManager.getInstance(context) }
@@ -169,6 +186,18 @@ fun ChatScreenHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            IconButton(
+                enabled = callChatId != null && !callBusy && !isFloatingMode,
+                onClick = {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        voiceCallChatId = callChatId
+                    } else {
+                        callPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+            ) {
+                Icon(Icons.Default.Call, contentDescription = stringResource(R.string.voice_call_title))
+            }
             // 统计信息
             val maxWindowSize = (maxWindowSizeInK * 1024).toLong().coerceAtLeast(0L)
             val totalTokenCount = inputTokenCount + outputTokenCount

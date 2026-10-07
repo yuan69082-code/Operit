@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voice_call_title">Voice call</string>
+    <string name="voice_call_connecting">Connecting voice services…</string>
+    <string name="voice_call_listening">Listening to you</string>
+    <string name="voice_call_recognizing">Transcribing…</string>
+    <string name="voice_call_thinking">Preparing a reply…</string>
+    <string name="voice_call_speaking">Speaking</string>
+    <string name="voice_call_muted">Microphone muted</string>
+    <string name="voice_call_error">Call paused</string>
+    <string name="voice_call_ended">Call ended</string>
+    <string name="voice_call_hint">Replies start automatically after you finish. Tap Interrupt and speak to take a turn. Transcripts and replies stay in this chat. Leaving the app ends the call.</string>
+    <string name="voice_call_you">You said</string>
+    <string name="voice_call_reply">Reply</string>
+    <string name="voice_call_retry">Reconnect</string>
+    <string name="voice_call_mute">Mute</string>
+    <string name="voice_call_unmute">Unmute</string>
+    <string name="voice_call_interrupt">Interrupt and speak</string>
+    <string name="voice_call_hang_up">Hang up</string>
+    <string name="voice_call_busy">Wait for the current reply to finish before calling</string>
+    <string name="voice_call_stt_failed">Could not start recognition. Check speech service settings.</string>
+    <string name="voice_call_tts_failed">Speech playback failed. Check speech service settings.</string>
+</resources>

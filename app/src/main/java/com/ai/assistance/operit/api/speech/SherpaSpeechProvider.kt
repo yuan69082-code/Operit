@@ -227,6 +227,7 @@ class SherpaSpeechProvider(private val context: Context) : SpeechService {
             continuousMode: Boolean,
             partialResults: Boolean,
             audioSource: Int,
+            silenceDurationMs: Int,
     ): Boolean {
         return recognitionMutex.withLock {
             if (!isInitialized.value) {
@@ -318,6 +319,7 @@ class SherpaSpeechProvider(private val context: Context) : SpeechService {
                         val vadInstance = try {
                             (vad ?: OnnxSileroVad(context = context, speechDurationMs = 0)).also { created ->
                                 vad = created
+                                created.setSilenceDurationMs(silenceDurationMs)
                                 created.reset()
                             }
                         } catch (e: Exception) {
