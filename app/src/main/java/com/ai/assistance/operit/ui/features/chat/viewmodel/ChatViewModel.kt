@@ -1490,12 +1490,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     suspend fun sendVoiceCallTurn(text: String, chatId: String, audioPath: String?, roleCardId: String?, onText: suspend (String) -> Unit): String =
         kotlinx.coroutines.coroutineScope {
             check(!activeStreamingChatIds.value.contains(chatId)) { "Conversation is busy" }
-            val lastTimestamp = chatHistoryDelegate.getChatHistory(chatId).maxOfOrNull { it.timestamp } ?: 0L
-            clearError()
+            val response = kotlinx.coroutines.CompletableDeferred<String>()
+            messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Idle)
             // Subscribe before sending so even a very fast response cannot skip the busy event.
             val started = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-                combine(activeStreamingChatIds, errorMessage) { ids, errorText ->
-                    errorText?.let { error(it) }
+                combine(activeStreamingChatIds, messageProcessingDelegate.inputProcessingStateByChatId) { ids, states ->
+                    (states[chatId] as? InputProcessingState.Error)?.let { error(it.message) }
                     ids.contains(chatId)
                 }.first { it }
             }
@@ -1508,17 +1508,15 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                         voiceCall = true,
                         voiceCallAudioPath = audioPath,
                         onVoiceCallText = onText,
+                        onVoiceCallComplete = { response.complete(it) },
                     ),
                 )
                 kotlinx.coroutines.withTimeout(30_000) { started.await() }
                 kotlinx.coroutines.withTimeout(180_000) {
                     activeStreamingChatIds.first { !it.contains(chatId) }
-                    errorMessage.value?.let { error(it) }
-                    val replies = chatHistoryDelegate.getChatHistory(chatId).filter {
-                        it.timestamp > lastTimestamp && it.sender == "ai" && it.content.isNotBlank()
-                    }
-                    check(replies.isNotEmpty()) { "No voice call reply returned" }
-                    replies.joinToString("\n") { it.content }
+                    (messageProcessingDelegate.inputProcessingStateByChatId.value[chatId] as? InputProcessingState.Error)?.let { error(it.message) }
+                    // The raw completion also retains call-control tags in segmented display mode.
+                    response.await()
                 }
             } finally {
                 started.cancel()

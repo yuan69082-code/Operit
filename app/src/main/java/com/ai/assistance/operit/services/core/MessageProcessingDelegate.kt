@@ -1431,6 +1431,7 @@ class MessageProcessingDelegate(
 
                             autoReadJob?.join()
                             callReadJob?.join()
+                            turnOptions.onVoiceCallComplete?.invoke(aiMessage.content)
                             waifuSegmentsJob?.join()
 
                             if (getIsAutoReadEnabled() && !isWaifuModeEnabled) {
