@@ -1,6 +1,12 @@
 package com.ai.assistance.operit.api.voice
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Deferred
+
+/** Engines with an ordered synthesis/playback queue can prepare the next sentence while speaking. */
+interface QueuedVoiceService : VoiceService {
+    suspend fun enqueueSpeech(text: String, onPlaybackStart: suspend () -> Unit): Deferred<Boolean>
+}
 
 /** 语音服务接口，定义与不同语音引擎进行交互的标准方法 */
 interface VoiceService {

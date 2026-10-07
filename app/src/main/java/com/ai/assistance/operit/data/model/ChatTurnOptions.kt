@@ -4,5 +4,8 @@ data class ChatTurnOptions(
     val persistTurn: Boolean = true,
     val notifyReply: Boolean? = null,
     val hideUserMessage: Boolean = false,
-    val disableWarning: Boolean = false
+    val disableWarning: Boolean = false,
+    val voiceCall: Boolean = false,
+    // Transient delivery callback; never persisted as conversation data.
+    val onVoiceCallText: (suspend (String) -> Unit)? = null
 )

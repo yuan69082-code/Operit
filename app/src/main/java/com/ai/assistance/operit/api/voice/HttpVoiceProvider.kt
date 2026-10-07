@@ -45,7 +45,7 @@ import okhttp3.Response
  */
 open class HttpVoiceProvider(
     private val context: Context
-) : VoiceService {
+) : QueuedVoiceService {
 
     private var httpConfig: SpeechServicesPreferences.TtsHttpConfig = SpeechServicesPreferences.DEFAULT_HTTP_TTS_PRESET
 
@@ -204,6 +204,12 @@ open class HttpVoiceProvider(
             extraParams = extraParams
         )
     }
+
+    override suspend fun enqueueSpeech(text: String, onPlaybackStart: suspend () -> Unit): kotlinx.coroutines.Deferred<Boolean> =
+        playbackQueue.enqueue(text, onPlaybackStart = onPlaybackStart)
+
+    suspend fun enqueueConfiguredSpeech(text: String, extraParams: Map<String, String>, onPlaybackStart: suspend () -> Unit): kotlinx.coroutines.Deferred<Boolean> =
+        playbackQueue.enqueue(text, extraParams = extraParams, onPlaybackStart = onPlaybackStart)
 
     private suspend fun fetchAudioFile(request: QueuedTtsPlayback.Request): File? {
         // 检查初始化状态

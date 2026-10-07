@@ -9,14 +9,16 @@ import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.api.speech.SpeechService
 import com.ai.assistance.operit.api.speech.SpeechServiceFactory
 import com.ai.assistance.operit.api.voice.VoiceService
+import com.ai.assistance.operit.api.voice.QueuedVoiceService
 import com.ai.assistance.operit.api.voice.VoiceServiceFactory
 import com.ai.assistance.operit.data.preferences.SpeechServiceProfilesPreferences
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.TtsCleaner
-import com.ai.assistance.operit.util.TtsSegmenter
+import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.WaifuMessageProcessor
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 
 /** Foreground, same-conversation call. Recording and playback never overlap. */
@@ -78,25 +80,53 @@ class VoiceCallController(
                                 val text = recognizeTurn(recognizer)
                                 if (text.isBlank()) return@launch
                                 transcript = text
+                                reply = ""
                                 phase = Phase.THINKING
-                                reply = viewModel.sendVoiceCallTurn(text, chatId)
-                                phase = Phase.SPEAKING
-                                val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
-                                    TtsCleaner.clean(reply, cleanerRegexs)
-                                )
-                                for (segment in TtsSegmenter.split(cleaned)) {
-                                    check(speaker.speak(segment, interrupt = false)) {
-                                        context.getString(R.string.voice_call_tts_failed)
+                                coroutineScope {
+                                    val sentences = Channel<Pair<String, Deferred<Boolean>?>>(2)
+                                    val generation = async {
+                                        try {
+                                            viewModel.sendVoiceCallTurn(text, chatId) { sentence ->
+                                                // Display and speech share the same public text; protocol
+                                                // metadata and thinking never enter the call captions.
+                                                val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
+                                                    TtsCleaner.clean(
+                                                        ChatUtils.stripOpenAiResponsesProtocolMarkup(sentence),
+                                                        cleanerRegexs,
+                                                    )
+                                                )
+                                                if (cleaned.isNotBlank()) {
+                                                    val queued = (speaker as? QueuedVoiceService)?.enqueueSpeech(cleaned) {
+                                                        withContext(Dispatchers.Main) {
+                                                            if (phase != Phase.ENDED && phase != Phase.ERROR) {
+                                                                phase = Phase.SPEAKING
+                                                                reply = cleaned
+                                                            }
+                                                        }
+                                                    }
+                                                    sentences.send(cleaned to queued)
+                                                }
+                                            }
+                                        } finally {
+                                            sentences.close()
+                                        }
                                     }
-                                    // System TTS returns after queueing, whereas HTTP TTS awaits playback.
-                                    // In either case, do not reopen the microphone until playback is idle.
-                                    speaker.speakingStateFlow.first { !it }
+                                    for ((sentence, queued) in sentences) {
+                                        val played = if (queued != null) queued.await() else {
+                                            phase = Phase.SPEAKING
+                                            reply = sentence
+                                            speaker.speak(sentence, interrupt = false)
+                                        }
+                                        check(played) { context.getString(R.string.voice_call_tts_failed) }
+                                        if (queued == null) speaker.speakingStateFlow.first { !it }
+                                    }
+                                    generation.await()
                                 }
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
                                 AppLogger.e("VoiceCall", "Call turn failed", e)
-                                if (phase == Phase.THINKING) viewModel.cancelMessage(chatId)
+                                viewModel.cancelMessage(chatId)
                                 errorMessage = e.message.orEmpty()
                                 phase = Phase.ERROR
                             } finally {
@@ -163,7 +193,7 @@ class VoiceCallController(
             check(recognizer.startRecognition(
                 continuousMode = false,
                 partialResults = true,
-                silenceDurationMs = 3000,
+                silenceDurationMs = 1200,
             )) { context.getString(R.string.voice_call_stt_failed) }
             result.await()
         } finally {
@@ -188,7 +218,7 @@ class VoiceCallController(
     }
 
     fun finish() {
-        if (phase == Phase.THINKING) viewModel.cancelMessage(chatId)
+        if (viewModel.activeStreamingChatIds.value.contains(chatId)) viewModel.cancelMessage(chatId)
         phase = Phase.ENDED
         sessionJob?.cancel()
     }

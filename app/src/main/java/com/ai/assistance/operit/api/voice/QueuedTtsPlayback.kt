@@ -8,6 +8,7 @@ import java.io.FileInputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +32,7 @@ internal class QueuedTtsPlayback(
         val extraParams: Map<String, String>,
         val generation: Long,
         val completion: CompletableDeferred<Boolean>,
+        val onPlaybackStart: (suspend () -> Unit)?,
     )
 
     private data class PreparedRequest(
@@ -89,6 +91,16 @@ internal class QueuedTtsPlayback(
             clearForInterrupt()
         }
 
+        enqueue(text, rate, pitch, extraParams).await()
+    }
+
+    suspend fun enqueue(
+        text: String,
+        rate: Float? = null,
+        pitch: Float? = null,
+        extraParams: Map<String, String> = emptyMap(),
+        onPlaybackStart: (suspend () -> Unit)? = null,
+    ): Deferred<Boolean> {
         val completion = CompletableDeferred<Boolean>()
         val request = Request(
             text = text,
@@ -97,9 +109,10 @@ internal class QueuedTtsPlayback(
             extraParams = extraParams,
             generation = stopGeneration.get(),
             completion = completion,
+            onPlaybackStart = onPlaybackStart,
         )
         speakQueue.send(request)
-        completion.await()
+        return completion
     }
 
     suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
@@ -208,11 +221,11 @@ internal class QueuedTtsPlayback(
         if (!isCurrent(prepared.request)) {
             return false
         }
-        playAudioFile(prepared.audioFile)
+        playAudioFile(prepared.audioFile, prepared.request.onPlaybackStart)
         return true
     }
 
-    private suspend fun playAudioFile(audioFile: File) {
+    private suspend fun playAudioFile(audioFile: File, onPlaybackStart: (suspend () -> Unit)?) {
         if (!audioFile.exists() || audioFile.length() == 0L) {
             AppLogger.e(tag, "Audio file is invalid: ${audioFile.absolutePath}")
             return
@@ -240,6 +253,7 @@ internal class QueuedTtsPlayback(
                 }
             }
 
+            onPlaybackStart?.invoke()
             mediaPlayer?.let {
                 while (it.isPlaying || isPaused.get()) {
                     delay(100)

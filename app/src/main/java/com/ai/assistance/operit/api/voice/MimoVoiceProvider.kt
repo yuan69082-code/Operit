@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.Flow
 class MimoVoiceProvider(
     private val context: Context,
     private val config: SpeechServicesPreferences.TtsHttpConfig
-) : VoiceService {
+) : QueuedVoiceService {
 
     companion object {
         const val DEFAULT_ENDPOINT_URL = "https://api.xiaomimimo.com/v1/chat/completions"
@@ -95,6 +95,16 @@ class MimoVoiceProvider(
                         "model" to resolvedModelName,
                         "voice_id" to resolvedVoiceId
                     )
+        )
+    }
+
+    override suspend fun enqueueSpeech(text: String, onPlaybackStart: suspend () -> Unit): kotlinx.coroutines.Deferred<Boolean> {
+        check(isInitialized)
+        delegate.setConfiguration(buildHttpConfig())
+        return delegate.enqueueConfiguredSpeech(
+            text,
+            mapOf("model" to config.modelName.ifBlank { DEFAULT_MODEL_NAME }, "voice_id" to selectedVoiceId),
+            onPlaybackStart,
         )
     }
 

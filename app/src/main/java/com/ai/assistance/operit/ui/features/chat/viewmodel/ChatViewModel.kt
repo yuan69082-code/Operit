@@ -1487,7 +1487,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     }
 
     /** Uses the normal chat pipeline, including the current role, tools and persisted history. */
-    suspend fun sendVoiceCallTurn(text: String, chatId: String): String =
+    suspend fun sendVoiceCallTurn(text: String, chatId: String, onText: suspend (String) -> Unit): String =
         kotlinx.coroutines.coroutineScope {
             check(currentChatId.value == chatId) { "Voice call conversation changed" }
             check(!activeStreamingChatIds.value.contains(chatId)) { "Conversation is busy" }
@@ -1504,7 +1504,11 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 messageCoordinationDelegate.sendUserMessage(
                     preferActiveRoleCard = true,
                     chatIdOverride = chatId,
-                    messageTextOverride = text,
+                    messageTextOverride = "[语音通话转写]\n$text",
+                    turnOptions = com.ai.assistance.operit.data.model.ChatTurnOptions(
+                        voiceCall = true,
+                        onVoiceCallText = onText,
+                    ),
                 )
                 kotlinx.coroutines.withTimeout(30_000) { started.await() }
                 kotlinx.coroutines.withTimeout(180_000) {

@@ -1082,7 +1082,9 @@ class MessageProcessingDelegate(
                 val responseStream = AIMessageManager.sendMessage(
                     enhancedAiService = service,
                     chatId = activeChatId,
-                    messageContent = requestMessageContent,
+                    messageContent = if (turnOptions.voiceCall) {
+                        "[运行状态：正在与用户进行实时语音通话。下面是用户本轮语音转写；你的正文会被朗读。你收到的是文字转写，不能直接听到音色、语调或呼吸。通话与当前文字聊天共享身份、工具和记录。]\n$requestMessageContent"
+                    } else requestMessageContent,
                     // 仅在群组编排中去掉当前用户消息，避免重复拼接。
                     // userMessageAdded 只覆盖本次发送自行落库的情况；编排路径的消息由
                     // orchestrateGroupConversation 预先落库（suppressUserMessageInHistory=true，
@@ -1301,6 +1303,24 @@ class MessageProcessingDelegate(
                                         }
                                     }
                                 }
+                            // Subscribe to the replayable response directly: call speech must not
+                            // wait for the entire reply or the visual typing animation to finish.
+                            val callReadJob = turnOptions.onVoiceCallText?.let { deliver ->
+                                launch {
+                                    val buffer = StringBuilder()
+                                    WaifuMessageProcessor.streamTtsText(sharedCharStream).collect { char ->
+                                        buffer.append(char)
+                                        if (char in "。！？!?\n" ||
+                                            (buffer.length >= 160 && char in "，,；; ")) {
+                                            val sentence = buffer.toString().trim()
+                                            buffer.clear()
+                                            if (sentence.isNotEmpty()) deliver(sentence)
+                                        }
+                                    }
+                                    val tail = buffer.toString().trim()
+                                    if (tail.isNotEmpty()) deliver(tail)
+                                }
+                            }
                             val waifuSegmentsJob =
                                 if (isWaifuModeEnabled) {
                                     launch {
@@ -1391,6 +1411,7 @@ class MessageProcessingDelegate(
                             }
 
                             autoReadJob?.join()
+                            callReadJob?.join()
                             waifuSegmentsJob?.join()
 
                             if (getIsAutoReadEnabled() && !isWaifuModeEnabled) {
