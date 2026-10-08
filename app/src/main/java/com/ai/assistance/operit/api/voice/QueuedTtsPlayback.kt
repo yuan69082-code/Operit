@@ -239,7 +239,8 @@ internal class QueuedTtsPlayback(
                         setAudioAttributes(
                             AudioAttributes.Builder()
                                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setUsage(if (com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime.controller?.let { it.audioAnalysis && it.isConnected && it.isRunning } == true)
+                                    AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
                                 .build()
                         )
                         setDataSource(fis.fd)

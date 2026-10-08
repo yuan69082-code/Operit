@@ -5,6 +5,8 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.AudioManager
+import android.media.audiofx.AcousticEchoCanceler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -110,6 +112,141 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
             } finally {
                 recorder.release()
+            }
+        }
+    }
+
+    data class Clip(
+        val file: File,
+        val quietIntervals: List<Pair<Long, Long>>,
+        val beginMillis: Long,
+        val endMillis: Long,
+        val windowEnded: Boolean,
+        val playbackText: String,
+        val inputEpoch: Int,
+    )
+
+    /** One AudioRecord session stays alive while remote speech plays and analysis runs. */
+    @SuppressLint("MissingPermission")
+    suspend fun captureContinuous(
+        isMuted: () -> Boolean,
+        inputEpoch: () -> Int,
+        playbackText: () -> String,
+        shouldSubmit: () -> Boolean,
+        onEcho: suspend (Boolean) -> Unit,
+        onProgress: suspend (Float, Long, Boolean) -> Unit,
+        onClip: suspend (Clip) -> Unit,
+    ): Unit = withContext(Dispatchers.IO) {
+        val rate = 16000
+        val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        check(minBuffer > 0) { "Microphone does not support 16 kHz PCM" }
+        val manager = context.getSystemService(AudioManager::class.java)
+        val previousMode = manager.mode
+        val recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate,
+            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate * 2))
+        var echo: AcousticEchoCanceler? = null
+        try {
+            check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
+            manager.mode = AudioManager.MODE_IN_COMMUNICATION
+            if (AcousticEchoCanceler.isAvailable()) {
+                echo = AcousticEchoCanceler.create(recorder.audioSessionId)
+                echo?.setEnabled(true)
+            }
+            onEcho(echo?.enabled == true)
+            val frame = ShortArray(320)
+            val pcm = ByteArrayOutputStream()
+            val preRoll = ArrayDeque<ByteArray>()
+            val quietIntervals = mutableListOf<Pair<Long, Long>>()
+            var quietStart: Long? = null
+            var quietSamples = 0L
+            var totalSamples = 0L
+            var clipStartSamples = 0L
+            var framesRead = 0
+            var remoteText = ""
+            var epoch = inputEpoch()
+            recorder.startRecording()
+            check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val count = recorder.read(frame, 0, frame.size)
+                check(count > 0) { "Microphone read failed: $count" }
+                totalSamples += count
+                framesRead++
+                val bytes = ByteBuffer.allocate(count * 2).order(ByteOrder.LITTLE_ENDIAN)
+                var energy = 0.0
+                for (i in 0 until count) {
+                    bytes.putShort(frame[i])
+                    val sample = frame[i] / 32768.0
+                    energy += sample * sample
+                }
+                val currentEpoch = inputEpoch()
+                val changedEpoch = currentEpoch != epoch
+                epoch = currentEpoch
+                val muted = isMuted()
+                val rms = if (muted) 0f else sqrt(energy / count).toFloat()
+                // A sound gate, not a speech gate: non-word sounds can open a window too.
+                val hasSound = rms >= .004f
+                if (framesRead % 5 == 0) onProgress(rms, totalSamples * 1000 / rate, hasSound)
+                if (muted || changedEpoch) {
+                    pcm.reset()
+                    preRoll.clear()
+                    quietIntervals.clear()
+                    quietStart = null
+                    quietSamples = 0L
+                    remoteText = ""
+                    continue
+                }
+                val manualSubmit = shouldSubmit()
+                if (pcm.size() == 0) {
+                    preRoll.addLast(bytes.array())
+                    if (preRoll.size > 15) preRoll.removeFirst()
+                    if (!hasSound && !manualSubmit) continue
+                    clipStartSamples = totalSamples - preRoll.sumOf { it.size / 2 }
+                    preRoll.forEach { pcm.write(it) }
+                    preRoll.clear()
+                } else pcm.write(bytes.array())
+                val playing = playbackText()
+                if (playing.isNotBlank()) remoteText = playing
+                val elapsed = pcm.size().toLong() * 1000 / (rate * 2)
+                if (!hasSound && quietStart == null) quietStart = elapsed - count * 1000 / rate
+                if (hasSound && quietStart != null) {
+                    val start = checkNotNull(quietStart)
+                    if (elapsed - start >= 120) quietIntervals.add(start to elapsed)
+                    quietStart = null
+                }
+                quietSamples = if (hasSound) 0L else quietSamples + count
+                val windowEnded = pcm.size() >= rate * 2 * 3
+                if (windowEnded || quietSamples >= rate * 6 / 10 || manualSubmit) {
+                    quietStart?.let { if (elapsed - it >= 120) quietIntervals.add(it to elapsed) }
+                    val data = pcm.toByteArray()
+                    val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+                        .put("RIFF".toByteArray()).putInt(data.size + 36).put("WAVEfmt ".toByteArray())
+                        .putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2)
+                        .putShort(2).putShort(16).put("data".toByteArray()).putInt(data.size).array()
+                    val dir = File(checkNotNull(context.getExternalFilesDir(null)), "voice_recordings").apply { mkdirs() }
+                    val file = File.createTempFile("live-call-", ".wav", dir)
+                    try {
+                        file.outputStream().use { it.write(header); it.write(data) }
+                        onClip(Clip(file, quietIntervals.toList(), clipStartSamples * 1000 / rate,
+                            totalSamples * 1000 / rate, windowEnded, remoteText, epoch))
+                    } catch (error: Throwable) {
+                        file.delete()
+                        throw error
+                    }
+                    pcm.reset()
+                    quietIntervals.clear()
+                    quietStart = null
+                    quietSamples = 0L
+                    remoteText = ""
+                }
+            }
+        } finally {
+            try {
+                if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
+            } finally {
+                try { echo?.release() } finally {
+                    try { recorder.release() } finally { manager.mode = previousMode }
+                }
             }
         }
     }

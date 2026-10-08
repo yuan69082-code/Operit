@@ -22,7 +22,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.flow.*
 
-/** Service-owned, same-conversation call. Recording and playback never overlap. */
+/** Service-owned call. Audio analysis has independent continuous capture and playback. */
 class VoiceCallController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -58,11 +58,11 @@ class VoiceCallController(
     var soundDetected by mutableStateOf(false)
         private set
     private val submitRecording = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val microphoneEpoch = java.util.concurrent.atomic.AtomicInteger()
     val isConfirmingVoice: Boolean get() = audioAnalysis && voiceReference == null
     var recordingNotice by mutableStateOf("")
         private set
     private var voiceReference by mutableStateOf<java.io.File?>(null)
-    private var recentBackgroundContext = ""
     var cameraEnabled by mutableStateOf(false)
         private set
     var cameraWarning by mutableStateOf("")
@@ -120,6 +120,13 @@ class VoiceCallController(
         private set
     private val muted = MutableStateFlow(false)
     val isMuted: StateFlow<Boolean> = muted.asStateFlow()
+    var continuousWarning by mutableStateOf("")
+        private set
+    val continuousListening: Boolean get() = audioAnalysis && isConnected && isRunning && !muted.value &&
+        phase != Phase.ERROR && phase != Phase.ENDED
+    private var continuousJob: Job? = null
+    private val heardReady = Channel<Unit>(Channel.CONFLATED)
+    private val pendingHeard = ArrayDeque<CallInput>()
     private var sessionJob: Job? = null
     private var turnJob: Job? = null
     private var speech: SpeechService? = null
@@ -215,6 +222,77 @@ class VoiceCallController(
                 check(speaker.initialize()) { context.getString(R.string.voice_call_tts_failed) }
                 val profiles = SpeechServiceProfilesPreferences(context)
                 val cleanerRegexs = profiles.getCurrentTtsProfile().cleanerRegexs
+                if (audioAnalysis) {
+                    continuousJob = launch {
+                        try {
+                        VoiceCallContinuousAudio(
+                            context, analyzer,
+                            isMuted = { muted.value },
+                            inputEpoch = { microphoneEpoch.get() },
+                            playbackText = { if (speaker.isSpeaking) reply else "" },
+                            referenceSnapshot = {
+                                // Snapshot on the owner thread so a voice reset cannot delete it mid-copy.
+                                withContext(Dispatchers.Main) {
+                                    voiceReference?.let { source ->
+                                        java.io.File.createTempFile("live-reference-", ".wav", context.cacheDir)
+                                            .also { source.copyTo(it, overwrite = true) }
+                                    }
+                                }
+                            },
+                            shouldSubmit = { submitRecording.getAndSet(false) },
+                            onEcho = { enabled -> withContext(Dispatchers.Main) {
+                                continuousWarning = if (enabled) "" else "设备未提供可控回声消除，扬声器声音可能被再次录入；建议使用耳机。"
+                            } },
+                            onProgress = { rms, elapsed, sound -> withContext(Dispatchers.Main) {
+                                microphoneLevel = (rms * 30f).coerceIn(0f, 1f)
+                                recordingMillis = elapsed
+                                soundDetected = sound
+                            } },
+                            onSkipped = { count -> withContext(Dispatchers.Main) {
+                                continuousWarning = "音频分析跟不上，已跳过 $count 个较旧片段，继续处理最近声音。"
+                            } },
+                            onAnalysis = { analysis, clip -> withContext(Dispatchers.Main) {
+                                if (analysis.userText.isNotBlank() || analysis.soundActivity) {
+                                    if (voiceReference == null && analysis.userText.isNotBlank() &&
+                                        analysis.speakerMatch == "matched" && analysis.utterances.all { it.speaker == "caller" } &&
+                                        clip.playbackText.isBlank()) saveVoiceReference(clip.file)
+                                    val path = if (analysis.userText.isBlank()) "" else withContext(Dispatchers.IO) {
+                                        java.io.File.createTempFile("retained-live-", ".wav", clip.file.parentFile)
+                                            .also { clip.file.copyTo(it, overwrite = true) }.absolutePath
+                                    }
+                                    if (muted.value || phase == Phase.ENDED || clip.inputEpoch != microphoneEpoch.get()) {
+                                        if (path.isNotBlank()) java.io.File(path).delete()
+                                        return@withContext
+                                    }
+                                    val observed = analysis.toContext() +
+                                        "\n【采集片段】通话第 ${clip.beginMillis} 至 ${clip.endMillis} 毫秒；" +
+                                        (if (clip.windowEnded) "窗口到时截止，声源可能仍在继续。" else "低音量分段或手动提交，不证明用户已经说完。")
+                                    if (pendingHeard.size >= 8) {
+                                        pendingHeard.removeFirst().recordings.forEach { it.delete() }
+                                        continuousWarning = "回复处理跟不上，已略过较旧的声音观察，保留最近片段。"
+                                    }
+                                    pendingHeard.addLast(CallInput(
+                                        text = observed + (if (path.isBlank()) "" else "\n【语音文件】$path"),
+                                        heard = true, observation = analysis.userText.isBlank(), caption = analysis.userText,
+                                        recordings = if (path.isBlank()) emptyList() else listOf(java.io.File(path)),
+                                    ))
+                                    heardReady.trySend(Unit)
+                                }
+                            } },
+                        ).run()
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            AppLogger.e("VoiceCall", "Continuous capture or analysis failed", error)
+                            errorMessage = "持续收音或音频分析失败：" + error.message.orEmpty()
+                            phase = Phase.ERROR
+                            viewModel.cancelMessage(chatId)
+                            turnJob?.cancel()
+                            // Wake a session waiting on mute/input so its finally releases the microphone.
+                            sessionJob?.cancel()
+                        }
+                    }
+                }
                 var greetIncoming = !openingDelivered
                 while (isActive && phase != Phase.ERROR) {
                     if (muted.value && pendingTyped.isEmpty()) {
@@ -242,7 +320,7 @@ class VoiceCallController(
                                 soundDetected = false
                                 submitRecording.set(false)
                                 val input = if (greetIncoming) null else {
-                                    takeTypedInput() ?: if (muted.value) CallInput(visualOnly = true) else awaitCallInput(recorder, recognizer)
+                                    takeTypedInput() ?: takeHeardInput() ?: if (muted.value) CallInput(visualOnly = true) else awaitCallInput(recorder, recognizer)
                                 }
                                 visualOnly = input?.visualOnly == true
                                 val text = if (greetIncoming) {
@@ -254,41 +332,8 @@ class VoiceCallController(
                                 } else if (input?.typed == true) {
                                     // Typed words have no audio observations and never establish a voice reference.
                                     "[语音通话打字]\n${input.text}"
-                                } else if (audioAnalysis) {
-                                    val savedAudio = checkNotNull(input?.audio)
-                                    audioFile = savedAudio
-                                    phase = Phase.RECOGNIZING
-                                    analysisWarning = ""
-                                    try {
-                                        val analysis = analyzer.analyze(savedAudio, voiceReference, recorder.lastQuietIntervals)
-                                        if (analysis.userText.isBlank()) {
-                                            recordingNotice = if (analysis.speakerMatch == "uncertain" && voiceReference == null)
-                                                "这段声音来源不确定，等你下一句话再建立参考。"
-                                            else if (analysis.speakerMatch == "uncertain")
-                                                "无法确定是谁说的，没有记成你的发言。你可以重新确认声音。"
-                                            else "这段没有检测到你的发言，其他声音作为背景保留。"
-                                            recentBackgroundContext = "\n【上一片段背景观察】\n${analysis.toContext()}\n这些声音来自用户端麦克风的旁人或不确定声源，不是通话另一端的AI，也不能按男性声音推断为你。"
-                                            return@launch
-                                        }
-                                        // The first usable phrase is both conversation content and a
-                                        // provisional reference, never a separate discarded recording.
-                                        if (voiceReference == null && analysis.utterances.all { it.speaker == "caller" }) {
-                                            saveVoiceReference(savedAudio)
-                                        }
-                                        recordingNotice = ""
-                                        val contextText = analysis.toContext() + recentBackgroundContext
-                                        recentBackgroundContext = ""
-                                        contextText + "\n【语音文件】${savedAudio.absolutePath}"
-                                    } catch (error: CancellationException) {
-                                        throw error
-                                    } catch (error: Exception) {
-                                        currentCoroutineContext().ensureActive()
-                                        // User explicitly requested a path-only message on analysis failure.
-                                        AppLogger.w("VoiceCall", "Audio analysis failed: ${error.javaClass.simpleName}")
-                                        analysisWarning = if (error is VoiceCallAudioAnalysis.AnalysisFailure) error.message.orEmpty()
-                                            else "音频分析未完成，录音已保存。请检查分析配置；当前模型没有收到转写内容。"
-                                        "[语音通话音频] 转写失败，音频已保存\n【语音文件】${savedAudio.absolutePath}"
-                                    }
+                                } else if (input?.heard == true) {
+                                    input.text
                                 } else if (nativeAudio) {
                                     audioFile = checkNotNull(input?.audio)
                                     context.getString(R.string.voice_call_audio_sent)
@@ -300,7 +345,7 @@ class VoiceCallController(
                                 activeVisual = visual
                                 if (visual != null) cameraDelivery = "正在向模型发送画面"
                                 // Sound observations belong to chat context, not the spoken-word caption.
-                                transcript = if (visualOnly || text.startsWith("[通话事件]")) "" else
+                                transcript = if (input?.heard == true) input.caption else if (visualOnly || text.startsWith("[通话事件]")) "" else
                                     com.ai.assistance.operit.util.VoiceCallMessageText.forDisplay(text).removePrefix("[语音通话]").trim()
                                 reply = ""
                                 phase = Phase.THINKING
@@ -310,7 +355,8 @@ class VoiceCallController(
                                         val publicText = VoiceCallPublicText.StreamCleaner()
                                         try {
                                             viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis && input?.typed != true,
-                                                visual?.file?.absolutePath, visual?.video == true, visualOnly, typed = input?.typed == true) { sentence ->
+                                                visual?.file?.absolutePath, visual?.video == true, visualOnly, typed = input?.typed == true,
+                                                continuous = audioAnalysis, observation = input?.observation == true) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
@@ -349,6 +395,10 @@ class VoiceCallController(
                                     ).trim()
                                     if (visual != null) cameraDelivery = "模型请求已完成（${if (visual?.video == true) "视频" else "图片"}）"
                                     openingDelivered = true
+                                    if (input?.observation == true) {
+                                        val spoken = VoiceCallPublicText.clean(WaifuMessageProcessor.cleanContentForWaifu(completed))
+                                        if (spoken.isNotBlank()) VoiceCallEvents.record(context, chatId, "ai", participantName, spoken).join()
+                                    }
                                     if (completed.endsWith("<voice_call_end/>")) finish(EndBy.AI)
                                 }
                             } catch (e: CancellationException) {
@@ -387,6 +437,11 @@ class VoiceCallController(
                         speech?.cancelRecognition()
                         voice?.stop()
                     } finally {
+                        continuousJob?.cancelAndJoin()
+                        continuousJob = null
+                        pendingHeard.forEach { it.recordings.forEach { file -> file.delete() } }
+                        pendingHeard.clear()
+                        while (heardReady.tryReceive().isSuccess) { }
                         speech?.shutdown()
                         voice?.shutdown()
                         speech = null
@@ -426,11 +481,32 @@ class VoiceCallController(
         }
     }
 
-    private data class CallInput(val audio: java.io.File? = null, val text: String = "", val visualOnly: Boolean = false, val typed: Boolean = false)
+    private data class CallInput(val audio: java.io.File? = null, val text: String = "", val visualOnly: Boolean = false,
+        val typed: Boolean = false, val heard: Boolean = false, val observation: Boolean = false, val caption: String = "",
+        val recordings: List<java.io.File> = emptyList())
+
+    private fun takeHeardInput(): CallInput? {
+        if (pendingHeard.isEmpty() || muted.value) return null
+        val clips = pendingHeard.toList()
+        pendingHeard.clear()
+        heardReady.tryReceive()
+        val original = clips.map { it.caption }.filter { it.isNotBlank() }.joinToString(" ")
+        val header = if (original.isBlank()) "[通话声音观察]" else "[语音通话转写] 【原话】$original"
+        return CallInput(text = header + "\n【声音】连续片段，按采集时间排序；不要补齐被截断的词句。\n" +
+            clips.joinToString("\n") { it.text }, heard = true, observation = original.isBlank(), caption = original,
+            recordings = clips.flatMap { it.recordings })
+    }
 
     private suspend fun awaitCallInput(recorder: VoiceCallAudioRecorder, recognizer: SpeechService?): CallInput = coroutineScope {
+        if (audioAnalysis) {
+            return@coroutineScope select {
+                heardReady.onReceive { checkNotNull(takeHeardInput()) }
+                typedReady.onReceive { checkNotNull(takeTypedInput()) }
+                visualReady.onReceive { CallInput(visualOnly = true) }
+            }
+        }
         val recorded = async {
-            if (audioAnalysis || nativeAudio) CallInput(audio = recordAudioTurn(recorder))
+            if (nativeAudio) CallInput(audio = recordAudioTurn(recorder))
             else CallInput(text = recognizeTurn(checkNotNull(recognizer)))
         }
         select {
@@ -499,7 +575,6 @@ class VoiceCallController(
         turnJob?.cancel()
         voiceReference?.delete()
         voiceReference = null
-        recentBackgroundContext = ""
         recordingNotice = ""
     }
 
@@ -522,7 +597,7 @@ class VoiceCallController(
     }
 
     fun sendRecordingNow() {
-        if ((nativeAudio || audioAnalysis) && phase == Phase.LISTENING) submitRecording.set(true)
+        if (continuousListening || (nativeAudio && phase == Phase.LISTENING)) submitRecording.set(true)
     }
 
     private suspend fun recognizeTurn(recognizer: SpeechService): String = coroutineScope {
@@ -571,7 +646,13 @@ class VoiceCallController(
 
     fun toggleMute() {
         if (!isConnected) return
+        microphoneEpoch.incrementAndGet()
         muted.value = !muted.value
+        if (muted.value) {
+            pendingHeard.forEach { it.recordings.forEach { file -> file.delete() } }
+            pendingHeard.clear()
+            while (heardReady.tryReceive().isSuccess) { }
+        }
         if (muted.value && (phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {
             turnJob?.cancel()
         }

@@ -105,10 +105,12 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                     } else Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
                                         CallPortrait(call.participantAvatarUri, call.participantName, call.phase == VoiceCallController.Phase.SPEAKING, small = true)
                                     }
-                                    CallMicrophoneWave(if (call.phase == VoiceCallController.Phase.LISTENING) call.microphoneLevel else 0f)
+                                    CallMicrophoneWave(if (call.continuousListening || call.phase == VoiceCallController.Phase.LISTENING) call.microphoneLevel else 0f)
+                                    if (call.continuousListening) Text("持续收音", style = MaterialTheme.typography.labelSmall)
+                                    if (call.continuousWarning.isNotBlank()) Text(call.continuousWarning, style = MaterialTheme.typography.bodySmall)
                                     if (call.reply.isNotBlank()) Text(call.reply, maxLines = 3)
                                     else if (call.transcript.isNotBlank()) Text(call.transcript, maxLines = 3)
-                                    if ((call.audioAnalysis || call.nativeAudio) && call.phase == VoiceCallController.Phase.LISTENING) {
+                                    if (call.continuousListening || (call.nativeAudio && call.phase == VoiceCallController.Phase.LISTENING)) {
                                         TextButton(onClick = call::sendRecordingNow) { Text("发送录音") }
                                     }
                                     VoiceCallCameraControls(call, showPreview = false)

@@ -317,6 +317,12 @@ class SimpleVoiceProvider(
             return@withContext suspendCancellableCoroutine { continuation ->
                 tts?.let { textToSpeech ->
                     ensureVoiceAndLocaleReady(textToSpeech)
+                    val continuousCall = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime.controller
+                        ?.let { it.audioAnalysis && it.isConnected && it.isRunning } == true
+                    textToSpeech.setAudioAttributes(android.media.AudioAttributes.Builder()
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(if (continuousCall) android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION
+                            else android.media.AudioAttributes.USAGE_MEDIA).build())
 
                     if (currentRate != effectiveRate) {
                         textToSpeech.setSpeechRate(effectiveRate)

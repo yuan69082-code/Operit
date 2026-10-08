@@ -71,7 +71,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     }
     val phase = controller.phase
     val speaking = phase == VoiceCallController.Phase.SPEAKING
-    val listening = phase == VoiceCallController.Phase.LISTENING && !muted
+    val listening = (controller.continuousListening || phase == VoiceCallController.Phase.LISTENING) && !muted
     val status = when (phase) {
         VoiceCallController.Phase.CONNECTING -> R.string.voice_call_connecting
         VoiceCallController.Phase.RINGING -> R.string.voice_call_ringing
@@ -127,6 +127,8 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                         Text(stringResource(status), color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         if (controller.isConnected) Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.titleMedium)
                         CallMicrophoneWave(if (listening) controller.microphoneLevel else 0f)
+                        if (controller.continuousListening) Text("持续收音 · 对方说话时也能听见", style = MaterialTheme.typography.labelSmall)
+                        if (controller.continuousWarning.isNotBlank()) Text(controller.continuousWarning, style = MaterialTheme.typography.bodySmall, color = colors.error)
                         VoiceCallCameraControls(controller, showPreview = false) { video, interval ->
                             requestedVideo = video
                             requestedInterval = interval
