@@ -83,6 +83,9 @@ class VoiceCallController(
     private var cameraGeneration = 0
     private data class Visual(val file: java.io.File, val video: Boolean)
     private var pendingVisual: Visual? = null
+    // Standalone camera turns are transient; subsequent speech still needs the latest frame.
+    private var latestVisual: Visual? = null
+    private var activeVisual: Visual? = null
     private val visualReady = Channel<Unit>(Channel.CONFLATED)
     var isRunning by mutableStateOf(false)
         private set
@@ -203,9 +206,10 @@ class VoiceCallController(
                                     context.getString(R.string.voice_call_audio_sent)
                                 } else input?.text.orEmpty()
                                 if (text.isBlank()) return@launch
-                                visual = pendingVisual
+                                visual = pendingVisual ?: if (!visualOnly) latestVisual else null
                                 pendingVisual = null
                                 if (visualOnly && visual == null) return@launch
+                                activeVisual = visual
                                 if (visual != null) cameraDelivery = "正在向模型发送画面"
                                 // Sound observations belong to chat context, not the spoken-word caption.
                                 transcript = if (visualOnly || text.startsWith("[通话事件]")) "" else
@@ -274,7 +278,8 @@ class VoiceCallController(
                                     speaker.stop()
                                     // Keep analysis recordings: their paths are part of the persisted turn.
                                     if (!audioAnalysis) audioFile?.delete()
-                                    visual?.file?.delete()
+                                    if (visual !== latestVisual) visual?.file?.delete()
+                                    activeVisual = null
                                 }
                             }
                         }
@@ -363,8 +368,10 @@ class VoiceCallController(
         val capture = VoiceCallCamera(context, scope, video, intervalSeconds,
             onMedia = { file, isVideo ->
                 if (!cameraEnabled || generation != cameraGeneration) file.delete() else {
-                    pendingVisual?.file?.delete()
-                    pendingVisual = Visual(file, isVideo)
+                    if (latestVisual !== activeVisual) latestVisual?.file?.delete()
+                    val captured = Visual(file, isVideo)
+                    latestVisual = captured
+                    pendingVisual = captured
                     cameraDelivery = "新画面已采集，等待发送"
                     // Do not queue an immediate visual reply behind TTS: leave time to speak.
                     if ((phase == Phase.LISTENING && !isConfirmingVoice) || phase == Phase.MUTED) visualReady.trySend(Unit)
@@ -381,7 +388,8 @@ class VoiceCallController(
         cameraDelivery = ""
         camera?.stop()
         camera = null
-        pendingVisual?.file?.delete()
+        if (latestVisual !== activeVisual) latestVisual?.file?.delete()
+        latestVisual = null
         pendingVisual = null
         while (visualReady.tryReceive().isSuccess) { /* Drop old camera wake-ups. */ }
     }
