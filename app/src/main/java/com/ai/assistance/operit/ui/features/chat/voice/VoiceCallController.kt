@@ -231,7 +231,7 @@ class VoiceCallController(
                                             else if (analysis.speakerMatch == "uncertain")
                                                 "无法确定是谁说的，没有记成你的发言。你可以重新确认声音。"
                                             else "这段没有检测到你的发言，其他声音作为背景保留。"
-                                            recentBackgroundContext = "\n【上一片段背景观察】声源判断：${analysis.speakerMatch}；${analysis.environment}。不属于已确认的用户发言。"
+                                            recentBackgroundContext = "\n【上一片段背景观察】\n${analysis.toContext()}\n这些声音来自用户端麦克风的旁人或不确定声源，不是通话另一端的AI，也不能按男性声音推断为你。"
                                             return@launch
                                         }
                                         // The first usable phrase is both conversation content and a
@@ -512,7 +512,7 @@ class VoiceCallController(
             check(recognizer.startRecognition(
                 continuousMode = false,
                 partialResults = true,
-                silenceDurationMs = 1200,
+                silenceDurationMs = 700,
             )) { context.getString(R.string.voice_call_stt_failed) }
             result.await()
         } finally {
@@ -558,6 +558,11 @@ class VoiceCallController(
         val name = if (by == EndBy.AI) participantName else context.getString(R.string.message_role_user)
         val event = if (by == EndBy.SYSTEM) "通话因服务停止而结束"
             else if (isConnected) "通话结束" else "已取消拨号，未接通"
+        if (by == EndBy.USER && isConnected) {
+            // Send once through the conversation pipeline; a history-only entry never wakes AI.
+            viewModel.sendVoiceCallEnded(chatId, roleCardId)
+            return null
+        }
         return VoiceCallEvents.record(context, chatId, sender, name, event)
     }
 }

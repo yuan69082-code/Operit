@@ -6,6 +6,7 @@ data class ChatTurnOptions(
     val hideUserMessage: Boolean = false,
     val disableWarning: Boolean = false,
     val voiceCall: Boolean = false,
+    val voiceCallEnded: Boolean = false,
     val voiceCallAudioPath: String? = null,
     val voiceCallVisualPath: String? = null,
     val voiceCallVisualIsVideo: Boolean = false,

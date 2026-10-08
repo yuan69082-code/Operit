@@ -36,6 +36,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
     private var owner: ServiceLifecycleOwner? = null
     private var view: ComposeView? = null
     private var compact by mutableStateOf(false)
+    private var fullscreen by mutableStateOf(false)
     private val density = context.resources.displayMetrics.density
     private var expandedWidth = 280 * density
     private var expandedHeight by mutableStateOf(520 * density)
@@ -78,7 +79,15 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                 }
                             }, verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (compact) "通话" else call.participantName, modifier = Modifier.weight(1f), maxLines = 1)
-                                IconButton(onClick = { compact = !compact; resize() }, modifier = Modifier.size(40.dp)) {
+                                IconButton(onClick = {
+                                    compact = false
+                                    fullscreen = !fullscreen
+                                    resize()
+                                }, modifier = Modifier.size(40.dp)) {
+                                    Icon(if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = if (fullscreen) "恢复小窗" else "恢复完整通话画面")
+                                }
+                                IconButton(onClick = { fullscreen = false; compact = !compact; resize() }, modifier = Modifier.size(40.dp)) {
                                     Icon(if (compact) Icons.Default.OpenInFull else Icons.Default.FullscreenExit, contentDescription = if (compact) "展开通话" else "收起通话")
                                 }
                                 IconButton(onClick = ::hide, modifier = Modifier.size(40.dp)) {
@@ -90,7 +99,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                     if (call.phase == VoiceCallController.Phase.RINGING) Text("等待对方接听…")
                                     if (call.cameraEnabled) {
                                         call.camera?.let {
-                                            VoiceCallCameraPreview(it, Modifier.fillMaxWidth().height((expandedHeight / density * 0.5f).coerceAtLeast(140f).dp))
+                                            VoiceCallCameraPreview(it, Modifier.fillMaxWidth().height(((if (fullscreen) params.height.toFloat() else expandedHeight) / density * 0.5f).coerceAtLeast(140f).dp))
                                         }
                                     } else Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
                                         CallPortrait(call.participantAvatarUri, call.participantName, call.phase == VoiceCallController.Phase.SPEAKING, small = true)
@@ -115,6 +124,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                     Icon(Icons.Default.OpenInFull, contentDescription = "拖动调整通话窗口大小", modifier = Modifier.size(28.dp).pointerInput(Unit) {
                                         detectDragGestures { change, drag ->
                                             change.consume()
+                                            fullscreen = false
                                             expandedWidth += drag.x
                                             expandedHeight += drag.y
                                             resize()
@@ -141,6 +151,15 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
         val metrics = context.resources.displayMetrics
         expandedWidth = expandedWidth.coerceIn((240 * density).coerceAtMost(metrics.widthPixels.toFloat()), metrics.widthPixels.toFloat())
         expandedHeight = expandedHeight.coerceIn((320 * density).coerceAtMost(metrics.heightPixels.toFloat()), metrics.heightPixels.toFloat())
+        if (fullscreen) {
+            // Restore the complete call size without opening the underlying Operit Activity.
+            params.width = metrics.widthPixels
+            params.height = metrics.heightPixels
+            params.x = 0
+            params.y = 0
+            updateWindow()
+            return
+        }
         params.width = (if (compact) (160 * density).coerceAtMost(metrics.widthPixels.toFloat()) else expandedWidth).roundToInt()
         params.height = (if (compact) 52 * density else expandedHeight).roundToInt()
         updateWindow()

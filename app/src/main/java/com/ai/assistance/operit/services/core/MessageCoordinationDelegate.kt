@@ -544,7 +544,7 @@ class MessageCoordinationDelegate(
         val isBackgroundSend =
             !chatIdOverride.isNullOrBlank() && chatIdOverride != chatHistoryDelegate.currentChatId.value
         // 自动续聊由总结消息中的续接指令驱动，不能消费用户尚未提交的编辑器状态。
-        val shouldReadComposerState = !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall
+        val shouldReadComposerState = !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded
         val effectiveMessageTextOverride = if (isAutoContinuation) "" else messageTextOverride
         // 获取当前聊天ID和工作区路径
         val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value

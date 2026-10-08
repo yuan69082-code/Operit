@@ -87,7 +87,8 @@ class VoiceCallAudioRecorder(private val context: Context) {
                         quietStartMillis = null
                     }
                     quietFrames = if (hasSound) 0 else quietFrames + 1
-                    if (quietFrames >= 60 || pcm.size() >= rate * 2 * 12) break
+                    // 700 ms end-of-phrase silence; avoid an extra 1.2 s before analysis.
+                    if (quietFrames >= 35 || pcm.size() >= rate * 2 * 12) break
                 }
             }
             val data = pcm.toByteArray()
