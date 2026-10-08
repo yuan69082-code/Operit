@@ -87,9 +87,11 @@ fun ChatScreenHeader(
     val incomingCall = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.pending
     val streamingCallChats by actualViewModel.activeStreamingChatIds.collectAsState()
     var answerAnalysis by remember { mutableStateOf(true) }
+    var answerRequestId by remember { mutableStateOf<String?>(null) }
     fun answerIncoming(analyze: Boolean) {
         val request = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.pending ?: return
         try {
+            check(request.id == answerRequestId) { "刚才的来电已结束，请重新选择接听" }
             check(request.expiresAt > System.currentTimeMillis()) { "来电已超时" }
             check(!streamingCallChats.contains(request.chatId)) { "来电会话仍在处理，请稍后接听" }
             if (analyze) com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(context).requireConfigured()
@@ -109,23 +111,26 @@ fun ChatScreenHeader(
     if (incomingCall != null) {
         fun acceptIncoming(analyze: Boolean) {
             answerAnalysis = analyze
+            answerRequestId = incomingCall.id
             if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 answerIncoming(analyze)
             } else incomingPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
         AlertDialog(
-            onDismissRequest = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.clear(context) },
+            onDismissRequest = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.reject(context) },
             title = { Text("${incomingCall.callerName} 来电") },
             text = {
                 androidx.compose.foundation.layout.Column {
                     Text(incomingCall.reason.ifBlank { "想和你说说话" })
+                    val ringtoneError = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.ringtoneError
+                    if (ringtoneError.isNotBlank()) Text(ringtoneError, color = MaterialTheme.colorScheme.error)
                     if (streamingCallChats.contains(incomingCall.chatId)) Text("正在结束当前回复，稍后可以接听。")
                     com.ai.assistance.operit.ui.features.settings.screens.VoiceCallAnalysisSettingsButton()
                     TextButton(onClick = { acceptIncoming(false) }, enabled = !streamingCallChats.contains(incomingCall.chatId)) { Text("使用普通转写接听") }
                 }
             },
             confirmButton = { TextButton(onClick = { acceptIncoming(true) }, enabled = !streamingCallChats.contains(incomingCall.chatId)) { Text("接听（音频分析）") } },
-            dismissButton = { TextButton(onClick = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.clear(context) }) { Text("拒接") } },
+            dismissButton = { TextButton(onClick = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.reject(context) }) { Text("拒接") } },
         )
     }
     val runningCall = VoiceCallRuntime.controller
@@ -161,6 +166,7 @@ fun ChatScreenHeader(
                 androidx.compose.foundation.layout.Column {
                     Text("音频分析通话会先转写说话、语气和环境声，再发给当前聊天模型；Claude 等文字模型也能使用。首次使用请填写分析接口的 API Key。")
                     com.ai.assistance.operit.ui.features.settings.screens.VoiceCallAnalysisSettingsButton()
+                    com.ai.assistance.operit.ui.features.settings.screens.VoiceCallRingtoneSettingsButton()
                     TextButton(onClick = { startCall(true) }) { Text(stringResource(R.string.voice_call_native_audio)) }
                     Text("原生音频仅用于支持音频输入的当前聊天模型；录音期间不显示转写文字。")
                     if (voiceCallStartError.isNotBlank()) Text(voiceCallStartError, color = MaterialTheme.colorScheme.error)

@@ -2,6 +2,16 @@
 <resources>
     <string name="voice_call_title">Voice call</string>
     <string name="voice_call_connecting">Connecting voice services…</string>
+    <string name="voice_call_ringing">Calling, waiting for an answer…</string>
+    <string name="voice_call_ringtone_settings">Incoming call ringtone</string>
+    <string name="voice_call_ringtone_custom">Custom audio</string>
+    <string name="voice_call_ringtone_system">System default ringtone</string>
+    <string name="voice_call_ringtone_hint">Loops while an incoming call rings and stops when answered, declined or ended. Respects silent mode.</string>
+    <string name="voice_call_ringtone_choose">Choose audio from phone</string>
+    <string name="voice_call_ringtone_use_system">Use system ringtone</string>
+    <string name="voice_call_ringtone_done">Done</string>
+    <string name="voice_call_ringtone_select_error">Cannot read the selected audio. Please choose again.</string>
+    <string name="voice_call_ringtone_play_error">Could not play the ringtone. Please select audio again in ringtone settings.</string>
     <string name="voice_call_listening">Listening to you</string>
     <string name="voice_call_recognizing">Transcribing…</string>
     <string name="voice_call_thinking">Preparing a reply…</string>

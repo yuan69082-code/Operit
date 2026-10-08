@@ -80,7 +80,7 @@ class VoiceCallService : Service() {
     override fun onDestroy() {
         overlay?.destroy()
         overlay = null
-        if (VoiceCallRuntime.controller === ownedCall && VoiceCallRuntime.isActive) VoiceCallRuntime.hangUp()
+        if (VoiceCallRuntime.controller === ownedCall && VoiceCallRuntime.isActive) VoiceCallRuntime.serviceStopped()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         super.onDestroy()

@@ -34,7 +34,8 @@ class VoiceCallController(
     private val incoming: Boolean = false,
     private val onStopped: () -> Unit,
 ) {
-    enum class Phase { CONNECTING, SPEAKER_SETUP, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
+    enum class Phase { CONNECTING, RINGING, SPEAKER_SETUP, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
+    enum class EndBy { USER, AI, SYSTEM }
 
     var phase by mutableStateOf(Phase.CONNECTING)
         private set
@@ -95,10 +96,19 @@ class VoiceCallController(
     private var turnJob: Job? = null
     private var speech: SpeechService? = null
     private var voice: VoiceService? = null
-    val startedAt = android.os.SystemClock.elapsedRealtime()
+    var startedAt by mutableStateOf(0L)
+        private set
+    var isConnected by mutableStateOf(false)
+        private set
+    private var accepted = incoming
+    private var dialRecorded = false
+    private var endRecorded = false
+    private var endedBy: EndBy? = null
+    private var openingDelivered = false
     private var roleCardId: String? = callerRoleCardId
 
     fun start() {
+        if (phase == Phase.ENDED) return
         if (sessionJob?.isActive == true) return
         errorMessage = ""
         analysisWarning = ""
@@ -130,6 +140,43 @@ class VoiceCallController(
                     }
                 }
                 AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, true)
+                if (!accepted) {
+                    if (!dialRecorded) {
+                        dialRecorded = true
+                        VoiceCallEvents.record(context, chatId, "user", context.getString(R.string.message_role_user), "拨打电话，等待接听").join()
+                    }
+                    val callerName = com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
+                        .getInstance(context).globalUserName.first().orEmpty().ifBlank { context.getString(R.string.message_role_user) }
+                    while (!accepted) {
+                        phase = Phase.RINGING
+                        val raw = viewModel.sendVoiceCallTurn(
+                            "$callerName 给你打电话了，是否选择接听？电话仍在等待，用户可以取消。",
+                            chatId, null, roleCardId, decision = true,
+                        ) { /* Do not speak or display model control data before acceptance. */ }
+                        currentCoroutineContext().ensureActive()
+                        val decision = VoiceCallDecision.parse(raw)
+                        when (decision.action) {
+                            VoiceCallDecision.Action.ACCEPT -> {
+                                accepted = true
+                                VoiceCallEvents.record(context, chatId, "ai", participantName, "已接听").join()
+                            }
+                            VoiceCallDecision.Action.REJECT -> {
+                                VoiceCallEvents.record(context, chatId, "ai", participantName,
+                                    "拒接" + if (decision.reason.isBlank()) "" else "\n${decision.reason}").join()
+                                reply = decision.reason
+                                viewModel.showToast("对方已拒接")
+                                phase = Phase.ENDED
+                                return@launch
+                            }
+                            VoiceCallDecision.Action.WAIT -> delay(decision.waitMillis)
+                        }
+                    }
+                }
+                if (!isConnected) {
+                    isConnected = true
+                    startedAt = android.os.SystemClock.elapsedRealtime()
+                }
+                phase = Phase.CONNECTING
                 delay(180)
                 val recognizer = if (nativeAudio || audioAnalysis) null else SpeechServiceFactory.createSpeechService(context).also {
                     speech = it
@@ -140,7 +187,7 @@ class VoiceCallController(
                 check(speaker.initialize()) { context.getString(R.string.voice_call_tts_failed) }
                 val profiles = SpeechServiceProfilesPreferences(context)
                 val cleanerRegexs = profiles.getCurrentTtsProfile().cleanerRegexs
-                var greetIncoming = incoming
+                var greetIncoming = !openingDelivered
                 while (isActive && phase != Phase.ERROR) {
                     if (muted.value) {
                         phase = Phase.MUTED
@@ -159,7 +206,8 @@ class VoiceCallController(
                             var visual: Visual? = null
                             var visualOnly = false
                             try {
-                                if (audioAnalysis && voiceReference == null && !muted.value) confirmVoiceReference(recorder)
+                                // The AI opens the connected call before any voice-reference setup.
+                                if (!greetIncoming && audioAnalysis && voiceReference == null && !muted.value) confirmVoiceReference(recorder)
                                 phase = if (muted.value) Phase.MUTED else Phase.LISTENING
                                 transcript = ""
                                 microphoneLevel = 0f
@@ -170,7 +218,8 @@ class VoiceCallController(
                                 visualOnly = input?.visualOnly == true
                                 val text = if (greetIncoming) {
                                     greetIncoming = false
-                                    "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
+                                    if (incoming) "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
+                                    else "[通话事件] 你已选择接听用户打来的电话，现在已经接通。请先对用户开口，不必等用户说第一句话，不复述事件说明。"
                                 } else if (visualOnly) {
                                     "[通话画面更新] 摄像头提供了新的画面；用户并没有开口。"
                                 } else if (audioAnalysis) {
@@ -260,7 +309,8 @@ class VoiceCallController(
                                         ChatUtils.removeThinkingContent(generation.await())
                                     ).trim()
                                     if (visual != null) cameraDelivery = "模型请求已完成（${if (visual?.video == true) "视频" else "图片"}）"
-                                    if (completed.endsWith("<voice_call_end/>")) finish()
+                                    openingDelivered = true
+                                    if (completed.endsWith("<voice_call_end/>")) finish(EndBy.AI)
                                 }
                             } catch (e: CancellationException) {
                                 throw e
@@ -310,6 +360,7 @@ class VoiceCallController(
                             AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, false)
                         } finally {
                             isRunning = false
+                            recordEndEvent()?.join()
                             onStopped()
                         }
                     }
@@ -356,6 +407,7 @@ class VoiceCallController(
 
     fun enableCamera(video: Boolean, intervalSeconds: Int) {
         if (!isRunning) return
+        check(isConnected) { "请先等待对方接听" }
         check(if (video) supportsCameraVideo else supportsCameraImages) { "当前聊天模型没有启用对应的视觉能力" }
         check(intervalSeconds == 10 || intervalSeconds == 30) { "请选择10秒或30秒" }
         disableCamera()
@@ -476,6 +528,7 @@ class VoiceCallController(
     }
 
     fun toggleMute() {
+        if (!isConnected) return
         muted.value = !muted.value
         if (muted.value && (phase == Phase.SPEAKER_SETUP || phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {
             turnJob?.cancel()
@@ -489,9 +542,24 @@ class VoiceCallController(
         turnJob?.cancel()
     }
 
-    fun finish() {
+    fun finish(by: EndBy = EndBy.USER) {
+        if (phase == Phase.ENDED) return
+        endedBy = by
         if (viewModel.activeStreamingChatIds.value.contains(chatId)) viewModel.cancelMessage(chatId)
         phase = Phase.ENDED
         sessionJob?.cancel()
+        // A paused call has already left the session's finally block.
+        if (!isRunning) recordEndEvent()
+    }
+
+    private fun recordEndEvent(): Job? {
+        val by = endedBy ?: return null
+        if (endRecorded) return null
+        endRecorded = true
+        val sender = if (by == EndBy.AI) "ai" else "user"
+        val name = if (by == EndBy.AI) participantName else context.getString(R.string.message_role_user)
+        val event = if (by == EndBy.SYSTEM) "通话因服务停止而结束"
+            else if (isConnected) "通话结束" else "已取消拨号，未接通"
+        return VoiceCallEvents.record(context, chatId, sender, name, event)
     }
 }

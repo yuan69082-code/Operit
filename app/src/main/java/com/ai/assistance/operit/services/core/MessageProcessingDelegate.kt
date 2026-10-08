@@ -1118,7 +1118,9 @@ class MessageProcessingDelegate(
                 val responseStream = AIMessageManager.sendMessage(
                     enhancedAiService = service,
                     chatId = activeChatId,
-                    messageContent = if (turnOptions.voiceCall) {
+                    messageContent = if (turnOptions.voiceCallDecision) {
+                        "[运行状态：mode=voice_call，用户正在给你打电话，尚未接通，尚未收音或采集摄像头。是否接听、何时接听由你决定，不要求你接听。回复末尾输出恰好一个控制标记：接听 <voice_call_accept/>；拒接 <voice_call_reject/>；暂时等待 <voice_call_wait seconds=\"正整数秒数\"/>。拒接时可以在标记前简短说明原因，也可以只输出标记；等待后客户端会再次通知你决定，用户也可以取消。不要把等待或拒接当成已接通。确认接听后另一个接通事件会触发你说第一句话。这些控制标记仅供客户端处理，不复述给用户。]\n$requestMessageContent"
+                    } else if (turnOptions.voiceCall) {
                         val inputDescription = if (turnOptions.voiceCallEvent || turnOptions.voiceCallVisualOnly) "本轮是客户端通话事件，不是用户说的话。"
                         else if (turnOptions.voiceCallAudioPath != null)
                             "本轮包含麦克风录制的原始音频片段，可能包含说话、语气和环境声。依据实际音频回应；不确定的声音来源不要猜成事实。"
@@ -1128,7 +1130,7 @@ class MessageProcessingDelegate(
                             if (turnOptions.voiceCallVisualIsVideo) "本轮附带前置摄像头刚录制的短视频，不是无间断实时视频流。" else "本轮附带前置摄像头的单帧画面，只代表拍摄时刻，不能推断两帧之间发生的动作。"
                         } else "本轮没有新摄像头画面，不能假装仍能看见用户。"
                         val visualOnlyDescription = if (turnOptions.voiceCallVisualOnly) "本轮是摄像头更新，不是用户开口。只在有值得回应的内容时开口，否则只输出 <voice_call_quiet/>。" else ""
-                        "[运行状态：mode=voice_call，正在与用户进行语音通话。此状态仅供内部使用，禁止复述、解释或输出状态标记和文件路径。$inputDescription $visualDescription $visualOnlyDescription 直接说对用户说的话，正文会被朗读。通话与当前文字聊天共享身份、工具和记录。若你决定结束本次通话，在告别正文后单独输出 <voice_call_end/>，客户端会在朗读结束后挂断；这个控制标记不会被朗读。]\n$requestMessageContent"
+                        "[运行状态：mode=voice_call，正在与用户进行语音通话。此状态仅供内部使用，禁止复述、解释或输出状态标记和文件路径。$inputDescription $visualDescription $visualOnlyDescription 直接说对用户说的话，正文会被朗读。通话与当前文字聊天共享身份、工具和记录。若你决定结束本次通话，可先说明原因，也可以不说话；在回复末尾单独输出 <voice_call_end/>，客户端在正文朗读结束后挂断，并以你的身份记录通话结束；这个控制标记不会被朗读。]\n$requestMessageContent"
                     } else requestMessageContent,
                     // 仅在群组编排中去掉当前用户消息，避免重复拼接。
                     // userMessageAdded 只覆盖本次发送自行落库的情况；编排路径的消息由

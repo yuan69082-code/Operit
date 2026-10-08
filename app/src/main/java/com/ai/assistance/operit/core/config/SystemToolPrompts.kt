@@ -48,6 +48,11 @@ object SystemToolPrompts {
                 parametersStructured = listOf(ToolParameterSchema(name = "reason", type = "string", description = "Optional short call reason", required = false))
             ),
             ToolPrompt(
+                name = "cancel_voice_call",
+                description = "Withdraw your own pending call in this conversation before the user answers. The reason is optional. A connected call can instead end with <voice_call_end/>, with or without spoken words.",
+                parametersStructured = listOf(ToolParameterSchema(name = "reason", type = "string", description = "Optional cancellation reason", required = false))
+            ),
+            ToolPrompt(
                 name = "sleep",
                 description = "Demonstration tool that pauses briefly.",
                 parametersStructured = listOf(
@@ -76,6 +81,11 @@ object SystemToolPrompts {
                 name = "request_voice_call",
                 description = "向本会话用户打电话。你想主动打来或用户让你打来时，直接调用 request_voice_call，无需寻找包或应用，也不能只说‘给你打电话’。工具显示来电和通知，成功只表示等待接听，不能假装已接通。接听后客户端会通知你，再开始通话。拒接或超时后不要重复拨打。定时或事件触发的对话运行时也可调用；这个工具不会自行唤醒模型。",
                 parametersStructured = listOf(ToolParameterSchema(name = "reason", type = "string", description = "可选，简短来电原因", required = false))
+            ),
+            ToolPrompt(
+                name = "cancel_voice_call",
+                description = "撤回你在本会话发起、仍等待用户接听的来电，原因可省略。已经接通的电话可在回复末尾输出 <voice_call_end/> 挂断，可先说明原因或不说话。",
+                parametersStructured = listOf(ToolParameterSchema(name = "reason", type = "string", description = "可选，取消呼叫的原因", required = false))
             ),
             ToolPrompt(
                 name = "sleep",

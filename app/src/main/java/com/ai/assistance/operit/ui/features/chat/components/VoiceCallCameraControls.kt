@@ -36,7 +36,7 @@ fun VoiceCallCameraControls(call: VoiceCallController, showPreview: Boolean = tr
                     FilterChip(selected = interval == 10, onClick = { interval = 10 }, label = { Text("10秒") })
                     FilterChip(selected = interval == 30, onClick = { interval = 30 }, label = { Text("30秒") })
                 }
-                TextButton(enabled = call.isRunning && call.phase != VoiceCallController.Phase.ERROR && call.phase != VoiceCallController.Phase.ENDED, onClick = {
+                TextButton(enabled = call.isConnected && call.isRunning && call.phase != VoiceCallController.Phase.ERROR && call.phase != VoiceCallController.Phase.ENDED, onClick = {
                     if (requestCamera != null) requestCamera(video, interval)
                     else try { VoiceCallRuntime.enableCamera(context, video, interval) }
                     catch (error: Exception) { call.reportCameraError(error.message.orEmpty()) }

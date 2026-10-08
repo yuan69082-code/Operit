@@ -401,6 +401,7 @@ fun SpeechServicesSettingsScreen(
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
                 item(key = "voice-call-analysis") { VoiceCallAnalysisSettingsButton() }
+                item(key = "voice-call-ringtone") { VoiceCallRingtoneSettingsButton() }
                 item {
                     SpeechServicesModeTabs(
                         selectedTabIndex = selectedTabIndex,

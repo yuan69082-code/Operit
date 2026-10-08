@@ -72,6 +72,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                 }
                             }
                             if (!compact) {
+                                if (call.phase == VoiceCallController.Phase.RINGING) Text("等待对方接听…")
                                 if (call.cameraEnabled) {
                                     call.camera?.let { VoiceCallCameraPreview(it, Modifier.fillMaxWidth().height(260.dp)) }
                                 } else Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
@@ -89,7 +90,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                 VoiceCallCameraControls(call, showPreview = false)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     val muted by call.isMuted.collectAsState()
-                                    IconButton(onClick = call::toggleMute) { Icon(if (muted) Icons.Default.MicOff else Icons.Default.Mic, "静音") }
+                                    IconButton(onClick = call::toggleMute, enabled = call.isConnected) { Icon(if (muted) Icons.Default.MicOff else Icons.Default.Mic, "静音") }
                                     FilledIconButton(onClick = VoiceCallRuntime::hangUp, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error)) { Icon(Icons.Default.CallEnd, "挂断") }
                                     IconButton(onClick = call::interrupt, enabled = call.phase == VoiceCallController.Phase.SPEAKING || call.phase == VoiceCallController.Phase.THINKING) { Icon(Icons.Default.RecordVoiceOver, "打断说话") }
                                 }

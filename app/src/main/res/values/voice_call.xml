@@ -2,6 +2,16 @@
 <resources>
     <string name="voice_call_title">语音通话</string>
     <string name="voice_call_connecting">正在连接语音服务…</string>
+    <string name="voice_call_ringing">正在呼叫，等待对方接听…</string>
+    <string name="voice_call_ringtone_settings">来电铃声设置</string>
+    <string name="voice_call_ringtone_custom">自定义音频</string>
+    <string name="voice_call_ringtone_system">系统默认铃声</string>
+    <string name="voice_call_ringtone_hint">对方来电时循环播放，接听、拒接或呼叫结束后停止；遵循手机静音模式。</string>
+    <string name="voice_call_ringtone_choose">从手机选择音频</string>
+    <string name="voice_call_ringtone_use_system">使用系统铃声</string>
+    <string name="voice_call_ringtone_done">完成</string>
+    <string name="voice_call_ringtone_select_error">无法读取所选音频，请重新选择。</string>
+    <string name="voice_call_ringtone_play_error">来电铃声播放失败，请在铃声设置中重新选择音频。</string>
     <string name="voice_call_listening">正在听你说</string>
     <string name="voice_call_recognizing">正在识别…</string>
     <string name="voice_call_thinking">正在回应…</string>

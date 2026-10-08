@@ -20,6 +20,10 @@ object VoiceCallRuntime {
 
     fun open(context: Context, viewModel: ChatViewModel, chatId: String, nativeAudio: Boolean, audioAnalysis: Boolean = false, callerRoleCardId: String? = null, incoming: Boolean = false) {
         check(controller == null) { "已有通话，请先挂断" }
+        if (!incoming) {
+            VoiceCallIncoming.restore(context.applicationContext)
+            check(VoiceCallIncoming.pending == null) { "请先接听或拒接当前来电" }
+        }
         val appContext = context.applicationContext
         controller = VoiceCallController(appContext, scope, viewModel, chatId, nativeAudio, audioAnalysis, callerRoleCardId, incoming) {
             appContext.stopService(Intent(appContext, VoiceCallService::class.java))
@@ -43,7 +47,7 @@ object VoiceCallRuntime {
     }
 
     fun enableCamera(context: Context, video: Boolean, interval: Int) {
-        check(controller?.isRunning == true) { "请先接通语音电话" }
+        check(controller?.isConnected == true && controller?.isRunning == true) { "请先接通语音电话" }
         check(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) { "请先在 Operit 通话界面授予摄像头权限" }
         context.startService(Intent(context, VoiceCallService::class.java).setAction(VoiceCallService.ACTION_CAMERA_ON)
             .putExtra("video", video).putExtra("interval", interval))
@@ -53,5 +57,9 @@ object VoiceCallRuntime {
         val call = controller ?: return
         call.finish()
         if (!call.isRunning) controller = null
+    }
+
+    fun serviceStopped() {
+        controller?.finish(VoiceCallController.EndBy.SYSTEM)
     }
 }

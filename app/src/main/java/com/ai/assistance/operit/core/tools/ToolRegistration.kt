@@ -289,6 +289,28 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             }
         },
     )
+    handler.registerTool(
+        name = "cancel_voice_call",
+        descriptionGenerator = { "撤回本角色正在等待接听的来电" },
+        executor = { tool ->
+            try {
+                val chatId = checkNotNull(tool.parameters.find { it.name == "__operit_package_chat_id" }?.value) {
+                    "撤回来电工具必须在聊天会话内调用"
+                }
+                val roleId = tool.parameters.find { it.name == "__operit_package_caller_card_id" }?.value
+                val reason = tool.parameters.find { it.name == "reason" }?.value.orEmpty()
+                val message = runBlocking(Dispatchers.Main.immediate) {
+                    com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.cancel(context, chatId, roleId, reason)
+                }
+                ToolResult(toolName = tool.name, success = true, result = StringResultData(message))
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Could not cancel incoming call", error)
+                buildToolErrorResult(tool, error.message.orEmpty())
+            }
+        },
+    )
     // 不在提示词加入的工具
     handler.registerTool(
             name = "execute_shell",

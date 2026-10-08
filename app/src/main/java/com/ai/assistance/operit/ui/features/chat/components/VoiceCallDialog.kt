@@ -65,7 +65,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     var elapsedSeconds by remember(controller) { mutableStateOf(0L) }
     LaunchedEffect(controller) {
         while (true) {
-            elapsedSeconds = (SystemClock.elapsedRealtime() - controller.startedAt) / 1000
+            elapsedSeconds = if (controller.isConnected) (SystemClock.elapsedRealtime() - controller.startedAt) / 1000 else 0
             delay(1000)
         }
     }
@@ -74,6 +74,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     val listening = phase == VoiceCallController.Phase.LISTENING && !muted
     val status = when (phase) {
         VoiceCallController.Phase.CONNECTING -> R.string.voice_call_connecting
+        VoiceCallController.Phase.RINGING -> R.string.voice_call_ringing
         VoiceCallController.Phase.SPEAKER_SETUP -> R.string.voice_call_connecting
         VoiceCallController.Phase.LISTENING -> R.string.voice_call_listening
         VoiceCallController.Phase.RECOGNIZING -> R.string.voice_call_recognizing
@@ -125,7 +126,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                             Text(controller.participantName, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
                         }
                         Text(stringResource(status), color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                        Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.titleMedium)
+                        if (controller.isConnected) Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.titleMedium)
                         CallMicrophoneWave(if (listening) controller.microphoneLevel else 0f)
                         VoiceCallCameraControls(controller, showPreview = false) { video, interval ->
                             requestedVideo = video
@@ -190,7 +191,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                     CallControl(
                         if (muted) Icons.Default.MicOff else Icons.Default.Mic,
                         stringResource(if (muted) R.string.voice_call_unmute else R.string.voice_call_mute),
-                        enabled = phase != VoiceCallController.Phase.CONNECTING && phase != VoiceCallController.Phase.ERROR && phase != VoiceCallController.Phase.ENDED,
+                        enabled = controller.isConnected && phase != VoiceCallController.Phase.CONNECTING && phase != VoiceCallController.Phase.ERROR && phase != VoiceCallController.Phase.ENDED,
                         selected = muted, onClick = controller::toggleMute,
                     )
                     CallControl(Icons.Default.CallEnd, stringResource(R.string.voice_call_hang_up), hangUp = true,
