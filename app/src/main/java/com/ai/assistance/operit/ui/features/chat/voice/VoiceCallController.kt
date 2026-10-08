@@ -41,6 +41,10 @@ class VoiceCallController(
         private set
     var reply by mutableStateOf("")
         private set
+    var participantName by mutableStateOf("Operit")
+        private set
+    var participantAvatarUri by mutableStateOf<String?>(null)
+        private set
     var errorMessage by mutableStateOf("")
         private set
     var analysisWarning by mutableStateOf("")
@@ -85,6 +89,12 @@ class VoiceCallController(
                 if (roleCardId == null) {
                     roleCardId = (com.ai.assistance.operit.data.preferences.ActivePromptManager
                         .getInstance(context).getActivePrompt() as? com.ai.assistance.operit.data.model.ActivePrompt.CharacterCard)?.id
+                }
+                roleCardId?.let { id ->
+                    participantName = com.ai.assistance.operit.data.preferences.CharacterCardManager
+                        .getInstance(context).getCharacterCard(id).name
+                    participantAvatarUri = com.ai.assistance.operit.data.preferences.UserPreferencesManager
+                        .getInstance(context).getAiAvatarForCharacterCardFlow(id).first()
                 }
                 val analyzer = VoiceCallAudioAnalysis(context)
                 if (audioAnalysis) analyzer.requireConfigured()
@@ -311,6 +321,10 @@ class VoiceCallController(
 
     private suspend fun recognizeTurn(recognizer: SpeechService): String = coroutineScope {
         val result = CompletableDeferred<String>()
+        // Reuse the STT microphone meter; no second recorder is needed for animation.
+        val levels = launch {
+            recognizer.volumeLevelFlow.collect { microphoneLevel = it.coerceIn(0f, 1f) }
+        }
         // Ignore the replayed result from the previous turn; subscribe before starting recording.
         val results = launch(start = CoroutineStart.UNDISPATCHED) {
             recognizer.recognitionResultFlow.drop(1).collect {
@@ -337,6 +351,8 @@ class VoiceCallController(
             )) { context.getString(R.string.voice_call_stt_failed) }
             result.await()
         } finally {
+            levels.cancel()
+            microphoneLevel = 0f
             results.cancel()
             errors.cancel()
             states.cancel()
