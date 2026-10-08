@@ -18,7 +18,10 @@ import kotlin.math.sqrt
 /** Records the waveform, including non-speech sounds. No STT or noise filtering is applied here. */
 class VoiceCallAudioRecorder(private val context: Context) {
     @SuppressLint("MissingPermission") // The call can only be started after the microphone grant.
-    suspend fun recordTurn(): File = withContext(Dispatchers.IO) {
+    suspend fun recordTurn(
+        onProgress: suspend (rms: Float, elapsedMillis: Long, soundDetected: Boolean) -> Unit = { _, _, _ -> },
+        shouldSubmit: () -> Boolean = { false },
+    ): File = withContext(Dispatchers.IO) {
         val rate = 16000
         val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minBuffer > 0) { "Microphone does not support 16 kHz PCM" }
@@ -28,9 +31,14 @@ class VoiceCallAudioRecorder(private val context: Context) {
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
             val frame = ShortArray(320) // 20 ms frames; cancellation never waits for a long recording.
             val preRoll = ArrayDeque<ByteArray>()
+            // Keep a bounded manual buffer so a quiet sentence can be submitted explicitly,
+            // even when it never crosses the automatic sound threshold.
+            val manualFrames = ArrayDeque<ByteArray>()
             val pcm = ByteArrayOutputStream()
             var recordingSound = false
             var quietFrames = 0
+            var sampleCount = 0L
+            var framesRead = 0
             recorder.startRecording()
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
             while (true) {
@@ -44,7 +52,18 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     val normalized = frame[i] / 32768.0
                     energy += normalized * normalized
                 }
-                val hasSound = sqrt(energy / count) >= 0.012
+                val rms = sqrt(energy / count).toFloat()
+                val hasSound = rms >= 0.012f
+                sampleCount += count
+                framesRead++
+                manualFrames.addLast(bytes.array())
+                if (manualFrames.size > 600) manualFrames.removeFirst()
+                if (framesRead % 5 == 0) onProgress(rms, sampleCount * 1000 / rate, recordingSound || hasSound)
+                if (shouldSubmit()) {
+                    if (recordingSound) pcm.write(bytes.array())
+                    else manualFrames.forEach { pcm.write(it) }
+                    break
+                }
                 if (!recordingSound) {
                     preRoll.addLast(bytes.array())
                     if (preRoll.size > 40) preRoll.removeFirst() // Keep 800 ms before the sound.

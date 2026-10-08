@@ -43,6 +43,15 @@ class VoiceCallController(
         private set
     var errorMessage by mutableStateOf("")
         private set
+    var analysisWarning by mutableStateOf("")
+        private set
+    var microphoneLevel by mutableStateOf(0f)
+        private set
+    var recordingMillis by mutableStateOf(0L)
+        private set
+    var soundDetected by mutableStateOf(false)
+        private set
+    private val submitRecording = java.util.concurrent.atomic.AtomicBoolean(false)
     var isRunning by mutableStateOf(false)
         private set
     private val muted = MutableStateFlow(false)
@@ -57,6 +66,7 @@ class VoiceCallController(
     fun start() {
         if (sessionJob?.isActive == true) return
         errorMessage = ""
+        analysisWarning = ""
         phase = Phase.CONNECTING
         isRunning = true
         viewModel.setVoiceCallActive(true)
@@ -99,13 +109,18 @@ class VoiceCallController(
                             try {
                                 phase = Phase.LISTENING
                                 transcript = ""
+                                microphoneLevel = 0f
+                                recordingMillis = 0
+                                soundDetected = false
+                                submitRecording.set(false)
                                 val text = if (greetIncoming) {
                                     greetIncoming = false
                                     "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
                                 } else if (audioAnalysis) {
-                                    val savedAudio = recorder.recordTurn()
+                                    val savedAudio = recordAudioTurn(recorder)
                                     audioFile = savedAudio
                                     phase = Phase.RECOGNIZING
+                                    analysisWarning = ""
                                     try {
                                         "[语音通话转写] " + analyzer.analyze(savedAudio) + "\n【语音文件】${savedAudio.absolutePath}"
                                     } catch (error: CancellationException) {
@@ -114,10 +129,12 @@ class VoiceCallController(
                                         currentCoroutineContext().ensureActive()
                                         // User explicitly requested a path-only message on analysis failure.
                                         AppLogger.w("VoiceCall", "Audio analysis failed: ${error.javaClass.simpleName}")
+                                        analysisWarning = if (error is VoiceCallAudioAnalysis.AnalysisFailure) error.message.orEmpty()
+                                            else "音频分析未完成，录音已保存。请检查分析配置；当前模型没有收到转写内容。"
                                         "[语音通话音频] 转写失败，音频已保存\n【语音文件】${savedAudio.absolutePath}"
                                     }
                                 } else if (nativeAudio) {
-                                    audioFile = recorder.recordTurn()
+                                    audioFile = recordAudioTurn(recorder)
                                     context.getString(R.string.voice_call_audio_sent)
                                 } else recognizeTurn(checkNotNull(recognizer))
                                 if (text.isBlank()) return@launch
@@ -220,6 +237,22 @@ class VoiceCallController(
                 }
             }
         }
+    }
+
+    private suspend fun recordAudioTurn(recorder: VoiceCallAudioRecorder): java.io.File = recorder.recordTurn(
+        onProgress = { rms, elapsedMillis, detected ->
+            withContext(Dispatchers.Main) {
+                // A waveform meter distinguishes capture from recognition, which starts later.
+                microphoneLevel = (rms * 20f).coerceIn(0f, 1f)
+                recordingMillis = elapsedMillis
+                soundDetected = detected
+            }
+        },
+        shouldSubmit = { submitRecording.get() },
+    )
+
+    fun sendRecordingNow() {
+        if ((nativeAudio || audioAnalysis) && phase == Phase.LISTENING) submitRecording.set(true)
     }
 
     private suspend fun recognizeTurn(recognizer: SpeechService): String = coroutineScope {

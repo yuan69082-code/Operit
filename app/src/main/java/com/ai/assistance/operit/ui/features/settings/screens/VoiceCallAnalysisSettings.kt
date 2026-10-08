@@ -22,7 +22,7 @@ fun VoiceCallAnalysisSettingsButton() {
 fun VoiceCallAnalysisSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { VoiceCallAnalysisPreferences(context) }
-    var endpoint by remember { mutableStateOf(prefs.endpoint) }
+    var endpoint by remember { mutableStateOf(prefs.savedEndpoint) }
     var model by remember { mutableStateOf(prefs.model) }
     var key by remember { mutableStateOf(prefs.apiKey) }
     var prompt by remember { mutableStateOf(prefs.extraPrompt) }
@@ -33,9 +33,10 @@ fun VoiceCallAnalysisSettingsDialog(onDismiss: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("录音由独立音频模型转写并描述声音，当前聊天模型收到文字。设置在本机保存。")
-                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("完整 HTTPS 接口地址") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(model, { model = it }, label = { Text("音频模型") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(key, { key = it }, label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS 接口地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("可填以 /v1 结尾的基础地址，保存时会补齐 /chat/completions。域名和 Key 必须对应你的服务商与地域。")
+                OutlinedTextField(model, { model = it }, label = { Text("音频模型") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(key, { key = it }, label = { Text("API Key") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(prompt, { prompt = it }, label = { Text("补充背景（可选）") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                 Text("可补充称呼或背景；听不清的候选词仍会保留。不会固定说话者身份，也不会强行纠正同音字。")
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)

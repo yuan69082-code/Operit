@@ -19,15 +19,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 /** One audio request per turn, never changes the conversational model or persona. */
 class VoiceCallAudioAnalysis(context: Context) {
+    class AnalysisFailure(message: String) : IllegalStateException(message)
     private val prefs = VoiceCallAnalysisPreferences(context)
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS).callTimeout(60, TimeUnit.SECONDS).build()
 
     fun requireConfigured() {
         check(prefs.apiKey.isNotBlank()) { "请先在语音服务设置中填写通话音频分析的 API Key" }
+        check(prefs.endpoint.isNotBlank()) { "请填写音频接口地址" }
     }
 
     suspend fun analyze(file: File): String = withContext(Dispatchers.IO) {
@@ -41,6 +47,10 @@ class VoiceCallAudioAnalysis(context: Context) {
         val payload = JSONObject().put("model", prefs.model).put("stream", true)
             .put("modalities", JSONArray().put("text"))
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        if (prefs.model.startsWith("qwen3.8-omni-flash")) {
+            // This model defaults to extended reasoning; transcription needs direct observations.
+            payload.put("reasoning_effort", "none")
+        }
         val call = client.newCall(Request.Builder().url(prefs.endpoint)
             .header("Authorization", "Bearer ${prefs.apiKey}")
             .post(payload.toString().toRequestBody("application/json".toMediaType())).build())
@@ -50,7 +60,16 @@ class VoiceCallAudioAnalysis(context: Context) {
         }
         try {
             call.execute().use { response ->
-                check(response.isSuccessful) { "音频分析接口返回 HTTP ${response.code}" }
+                if (!response.isSuccessful) {
+                    val hint = when (response.code) {
+                        401, 403 -> "请检查 API Key、接口域名、地域及模型权限"
+                        404 -> "请检查接口地址和模型名称"
+                        400, 422 -> "接口不接受当前音频请求，请检查模型是否支持 Omni 音频输入"
+                        429 -> "请求限流或额度不足"
+                        else -> "音频服务未能完成请求"
+                    }
+                    throw AnalysisFailure("音频分析失败：HTTP ${response.code}，$hint。录音已保存。")
+                }
                 val source = checkNotNull(response.body).source()
                 val text = StringBuilder()
                 var complete = false
@@ -76,6 +95,15 @@ class VoiceCallAudioAnalysis(context: Context) {
                 check(complete && text.isNotBlank()) { "音频分析结果为空或连接提前结束" }
                 text.toString().trim()
             }
+        } catch (error: SocketTimeoutException) {
+            throw AnalysisFailure("音频分析请求超时，录音已保存。")
+        } catch (error: UnknownHostException) {
+            throw AnalysisFailure("无法解析音频接口域名，请检查地址和网络。录音已保存。")
+        } catch (error: SSLException) {
+            throw AnalysisFailure("音频接口的安全连接失败，请检查接口域名和证书。录音已保存。")
+        } catch (error: IOException) {
+            coroutine.ensureActive()
+            throw AnalysisFailure("音频分析网络连接失败，录音已保存。")
         } finally {
             cancellation.cancel()
             call.cancel()

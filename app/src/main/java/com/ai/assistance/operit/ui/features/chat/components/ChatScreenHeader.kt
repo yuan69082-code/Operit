@@ -81,6 +81,7 @@ fun ChatScreenHeader(
     }
 
     var voiceCallChatId by remember { mutableStateOf<String?>(null) }
+    var voiceCallStartError by remember { mutableStateOf("") }
     var showVoiceCall by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.restore(context.applicationContext) }
     val incomingCall = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.pending
@@ -141,22 +142,28 @@ fun ChatScreenHeader(
         fun startCall(nativeAudio: Boolean, audioAnalysis: Boolean = false) {
             try {
                 if (audioAnalysis) com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(context).requireConfigured()
+                if (nativeAudio) check(actualViewModel.activeChatModelConfig.value?.enableDirectAudioProcessing == true) {
+                    "原生音频通话需要当前聊天模型支持音频并启用直接音频处理。Claude 等文字模型请选择音频分析通话。"
+                }
                 VoiceCallRuntime.open(context, actualViewModel, boundCallChatId, nativeAudio, audioAnalysis)
                 showVoiceCall = true
+                voiceCallChatId = null
+                voiceCallStartError = ""
             } catch (error: Exception) {
                 com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Could not start call service", error)
-                actualViewModel.showToast(error.message.orEmpty())
+                voiceCallStartError = error.message.orEmpty()
             }
-            voiceCallChatId = null
         }
         AlertDialog(
-            onDismissRequest = { voiceCallChatId = null },
+            onDismissRequest = { voiceCallChatId = null; voiceCallStartError = "" },
             title = { Text(stringResource(R.string.voice_call_title)) },
             text = {
                 androidx.compose.foundation.layout.Column {
                     Text("音频分析通话会先转写说话、语气和环境声，再发给当前聊天模型；Claude 等文字模型也能使用。首次使用请填写分析接口的 API Key。")
                     com.ai.assistance.operit.ui.features.settings.screens.VoiceCallAnalysisSettingsButton()
                     TextButton(onClick = { startCall(true) }) { Text(stringResource(R.string.voice_call_native_audio)) }
+                    Text("原生音频仅用于支持音频输入的当前聊天模型；录音期间不显示转写文字。")
+                    if (voiceCallStartError.isNotBlank()) Text(voiceCallStartError, color = MaterialTheme.colorScheme.error)
                 }
             },
             confirmButton = { TextButton(onClick = { startCall(false, true) }) { Text("音频分析通话") } },

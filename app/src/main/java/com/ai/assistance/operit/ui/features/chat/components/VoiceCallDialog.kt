@@ -48,6 +48,18 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.voice_call_minimize)) }
                 Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}")
                 Text(stringResource(status), style = MaterialTheme.typography.titleMedium)
+                if ((controller.nativeAudio || controller.audioAnalysis) && controller.phase == VoiceCallController.Phase.LISTENING) {
+                    Text("正在录音 · ${controller.recordingMillis / 1000} 秒；停顿后开始转写，录音时不会逐字显示。")
+                    LinearProgressIndicator(progress = { controller.microphoneLevel }, modifier = Modifier.fillMaxWidth())
+                    Text(if (controller.soundDetected) "已检测到声音" else "等待声音，也可以手动发送最近最多12秒录音")
+                    OutlinedButton(onClick = controller::sendRecordingNow, enabled = controller.recordingMillis > 0) {
+                        Text("发送这段录音")
+                    }
+                }
+                if (controller.analysisWarning.isNotBlank()) {
+                    Text(controller.analysisWarning, color = MaterialTheme.colorScheme.error)
+                    com.ai.assistance.operit.ui.features.settings.screens.VoiceCallAnalysisSettingsButton()
+                }
                 Text(stringResource(R.string.voice_call_hint), style = MaterialTheme.typography.bodySmall)
                 if (controller.transcript.isNotBlank()) {
                     Text(stringResource(R.string.voice_call_you), style = MaterialTheme.typography.labelLarge)
