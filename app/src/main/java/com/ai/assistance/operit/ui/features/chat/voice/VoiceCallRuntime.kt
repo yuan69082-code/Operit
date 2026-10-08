@@ -37,6 +37,18 @@ object VoiceCallRuntime {
         ContextCompat.startForegroundService(context, Intent(context, VoiceCallService::class.java))
     }
 
+    fun showWindow(context: Context) {
+        check(android.provider.Settings.canDrawOverlays(context)) { "请先开启显示在其他应用上层权限" }
+        context.startService(Intent(context, VoiceCallService::class.java).setAction(VoiceCallService.ACTION_SHOW_WINDOW))
+    }
+
+    fun enableCamera(context: Context, video: Boolean, interval: Int) {
+        check(controller?.isRunning == true) { "请先接通语音电话" }
+        check(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) { "请先在 Operit 通话界面授予摄像头权限" }
+        context.startService(Intent(context, VoiceCallService::class.java).setAction(VoiceCallService.ACTION_CAMERA_ON)
+            .putExtra("video", video).putExtra("interval", interval))
+    }
+
     fun hangUp() {
         val call = controller ?: return
         call.finish()

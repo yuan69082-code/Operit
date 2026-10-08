@@ -1,6 +1,14 @@
 package com.ai.assistance.operit.ui.features.chat.components
 
 import android.os.SystemClock
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -43,6 +51,15 @@ import kotlinx.coroutines.delay
 @Composable
 fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    var requestedVideo by remember { mutableStateOf(false) }
+    var requestedInterval by remember { mutableStateOf(10) }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) VoiceCallRuntime.enableCamera(context, requestedVideo, requestedInterval)
+        else controller.reportCameraError("摄像头权限未开启，语音通话继续。")
+    }
+    val overlayPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (Settings.canDrawOverlays(context)) { VoiceCallRuntime.showWindow(context); onDismiss() }
+    }
     val muted by controller.isMuted.collectAsState()
     var elapsedSeconds by remember(controller) { mutableStateOf(0L) }
     LaunchedEffect(controller) {
@@ -79,7 +96,10 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
             ) {
                 Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.voice_call_title), color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = {
+                        if (Settings.canDrawOverlays(context)) { VoiceCallRuntime.showWindow(context); onDismiss() }
+                        else overlayPermission.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+                    }) {
                         Icon(Icons.Default.FullscreenExit, contentDescription = stringResource(R.string.voice_call_minimize))
                     }
                 }
@@ -95,6 +115,13 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                         Text(stringResource(status), color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.titleMedium)
                         CallMicrophoneWave(if (listening) controller.microphoneLevel else 0f)
+                        VoiceCallCameraControls(controller) { video, interval ->
+                            requestedVideo = video
+                            requestedInterval = interval
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                VoiceCallRuntime.enableCamera(context, video, interval)
+                            } else cameraPermission.launch(Manifest.permission.CAMERA)
+                        }
                         if (phase == VoiceCallController.Phase.SPEAKER_SETUP) {
                             Text("先独自说一句，确认本次通话的声音。", textAlign = TextAlign.Center)
                             Button(onClick = controller::recordMyVoice) { Text("开始确认我的声音") }
@@ -165,7 +192,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun CallPortrait(avatarUri: String?, name: String, speaking: Boolean) {
+internal fun CallPortrait(avatarUri: String?, name: String, speaking: Boolean, small: Boolean = false) {
     // Waiting for the model is not speech: animate only during voice playback.
     val scale = if (speaking) {
         val transition = rememberInfiniteTransition(label = "call speaking")
@@ -174,10 +201,12 @@ private fun CallPortrait(avatarUri: String?, name: String, speaking: Boolean) {
         value
     } else 1f
     val color = MaterialTheme.colorScheme.primary
-    Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(if (small) 110.dp else 220.dp), contentAlignment = Alignment.Center) {
+        if (!small) {
         Box(Modifier.size(210.dp).scale(scale).border(1.dp, color.copy(alpha = .12f), CircleShape))
         Box(Modifier.size(190.dp).scale(scale).background(color.copy(alpha = .08f), CircleShape))
-        Surface(modifier = Modifier.size(164.dp).scale(scale), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 8.dp) {
+        }
+        Surface(modifier = Modifier.size(if (small) 88.dp else 164.dp).scale(scale), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 8.dp) {
             if (!avatarUri.isNullOrBlank()) {
                 AsyncImage(model = avatarUri, contentDescription = name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape))
             } else {
@@ -190,7 +219,7 @@ private fun CallPortrait(avatarUri: String?, name: String, speaking: Boolean) {
 }
 
 @Composable
-private fun CallMicrophoneWave(level: Float) {
+internal fun CallMicrophoneWave(level: Float) {
     val amplitude by animateFloatAsState(level.coerceIn(0f, 1f), tween(100), label = "microphone amplitude")
     val ripple = if (level > .04f) {
         val transition = rememberInfiniteTransition(label = "microphone ripple")

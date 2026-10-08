@@ -7,6 +7,10 @@ data class ChatTurnOptions(
     val disableWarning: Boolean = false,
     val voiceCall: Boolean = false,
     val voiceCallAudioPath: String? = null,
+    val voiceCallVisualPath: String? = null,
+    val voiceCallVisualIsVideo: Boolean = false,
+    val voiceCallVisualOnly: Boolean = false,
+    val onVoiceCallVisualStored: ((String) -> Unit)? = null,
     val voiceCallAudioAnalyzed: Boolean = false,
     val voiceCallEvent: Boolean = false,
     // Transient delivery callback; never persisted as conversation data.

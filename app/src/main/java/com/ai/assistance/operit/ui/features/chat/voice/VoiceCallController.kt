@@ -19,6 +19,7 @@ import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.WaifuMessageProcessor
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.flow.*
 
 /** Service-owned, same-conversation call. Recording and playback never overlap. */
@@ -63,6 +64,25 @@ class VoiceCallController(
     private var voiceReference: java.io.File? = null
     private var referenceRequested: CompletableDeferred<Unit>? = null
     private var recentBackgroundContext = ""
+    var cameraEnabled by mutableStateOf(false)
+        private set
+    var cameraPreview by mutableStateOf<ByteArray?>(null)
+        private set
+    var cameraWarning by mutableStateOf("")
+        private set
+    var supportsCameraImages by mutableStateOf(false)
+        private set
+    var supportsCameraVideo by mutableStateOf(false)
+        private set
+    var cameraIntervalSeconds by mutableStateOf(10)
+        private set
+    var cameraVideoMode by mutableStateOf(false)
+        private set
+    private var camera: VoiceCallCamera? = null
+    private var cameraGeneration = 0
+    private data class Visual(val file: java.io.File, val video: Boolean)
+    private var pendingVisual: Visual? = null
+    private val visualReady = Channel<Unit>(Channel.CONFLATED)
     var isRunning by mutableStateOf(false)
         private set
     private val muted = MutableStateFlow(false)
@@ -97,6 +117,8 @@ class VoiceCallController(
                         .getInstance(context).getAiAvatarForCharacterCardFlow(id).first()
                 }
                 val analyzer = VoiceCallAudioAnalysis(context)
+                supportsCameraImages = viewModel.activeChatModelConfig.value?.enableDirectImageProcessing == true
+                supportsCameraVideo = viewModel.activeChatModelConfig.value?.enableDirectVideoProcessing == true
                 if (audioAnalysis) analyzer.requireConfigured()
                 if (nativeAudio && !audioAnalysis) {
                     check(viewModel.activeChatModelConfig.value?.enableDirectAudioProcessing == true) {
@@ -118,24 +140,37 @@ class VoiceCallController(
                 while (isActive && phase != Phase.ERROR) {
                     if (muted.value) {
                         phase = Phase.MUTED
-                        muted.first { !it }
+                        coroutineScope {
+                            val unmuted = async { muted.first { !it } }
+                            try { select<Unit> {
+                                unmuted.onAwait { }
+                                visualReady.onReceive { }
+                            } } finally { unmuted.cancel() }
+                        }
+                        if (muted.value && pendingVisual == null) continue
                     }
                     coroutineScope {
                         turnJob = launch {
                             var audioFile: java.io.File? = null
+                            var visual: Visual? = null
+                            var visualOnly = false
                             try {
-                                if (audioAnalysis && voiceReference == null) confirmVoiceReference(recorder)
-                                phase = Phase.LISTENING
+                                if (audioAnalysis && voiceReference == null && !muted.value) confirmVoiceReference(recorder)
+                                phase = if (muted.value) Phase.MUTED else Phase.LISTENING
                                 transcript = ""
                                 microphoneLevel = 0f
                                 recordingMillis = 0
                                 soundDetected = false
                                 submitRecording.set(false)
+                                val input = if (greetIncoming) null else if (muted.value) CallInput(visualOnly = true) else awaitCallInput(recorder, recognizer)
+                                visualOnly = input?.visualOnly == true
                                 val text = if (greetIncoming) {
                                     greetIncoming = false
                                     "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
+                                } else if (visualOnly) {
+                                    "[通话画面更新] 摄像头提供了新的画面；用户并没有开口。"
                                 } else if (audioAnalysis) {
-                                    val savedAudio = recordAudioTurn(recorder)
+                                    val savedAudio = checkNotNull(input?.audio)
                                     audioFile = savedAudio
                                     phase = Phase.RECOGNIZING
                                     analysisWarning = ""
@@ -163,12 +198,15 @@ class VoiceCallController(
                                         "[语音通话音频] 转写失败，音频已保存\n【语音文件】${savedAudio.absolutePath}"
                                     }
                                 } else if (nativeAudio) {
-                                    audioFile = recordAudioTurn(recorder)
+                                    audioFile = checkNotNull(input?.audio)
                                     context.getString(R.string.voice_call_audio_sent)
-                                } else recognizeTurn(checkNotNull(recognizer))
+                                } else input?.text.orEmpty()
                                 if (text.isBlank()) return@launch
+                                visual = pendingVisual
+                                pendingVisual = null
+                                if (visualOnly && visual == null) return@launch
                                 // Sound observations belong to chat context, not the spoken-word caption.
-                                transcript = if (text.startsWith("[通话事件]")) "" else
+                                transcript = if (visualOnly || text.startsWith("[通话事件]")) "" else
                                     com.ai.assistance.operit.util.VoiceCallMessageText.forDisplay(text).removePrefix("[语音通话]").trim()
                                 reply = ""
                                 phase = Phase.THINKING
@@ -177,7 +215,8 @@ class VoiceCallController(
                                     val generation = async {
                                         val publicText = VoiceCallPublicText.StreamCleaner()
                                         try {
-                                            viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis) { sentence ->
+                                            viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis,
+                                                visual?.file?.absolutePath, visual?.video == true, visualOnly) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
@@ -231,6 +270,7 @@ class VoiceCallController(
                                     speaker.stop()
                                     // Keep analysis recordings: their paths are part of the persisted turn.
                                     if (!audioAnalysis) audioFile?.delete()
+                                    visual?.file?.delete()
                                 }
                             }
                         }
@@ -253,6 +293,7 @@ class VoiceCallController(
                         voice?.shutdown()
                         speech = null
                         voice = null
+                        disableCamera()
                         voiceReference?.delete()
                         voiceReference = null
                         viewModel.setVoiceCallActive(false)
@@ -283,6 +324,64 @@ class VoiceCallController(
             isConfirmingVoice = false
         }
     }
+
+    private data class CallInput(val audio: java.io.File? = null, val text: String = "", val visualOnly: Boolean = false)
+
+    private suspend fun awaitCallInput(recorder: VoiceCallAudioRecorder, recognizer: SpeechService?): CallInput = coroutineScope {
+        val recorded = async {
+            if (audioAnalysis || nativeAudio) CallInput(audio = recordAudioTurn(recorder))
+            else CallInput(text = recognizeTurn(checkNotNull(recognizer)))
+        }
+        select {
+            recorded.onAwait { it }
+            visualReady.onReceive {
+                // Never discard a phrase already being spoken just to send a scheduled frame.
+                if (soundDetected || pendingVisual == null || !cameraEnabled) recorded.await()
+                else {
+                    recorded.cancelAndJoin()
+                    CallInput(visualOnly = true)
+                }
+            }
+        }
+    }
+
+    fun enableCamera(video: Boolean, intervalSeconds: Int) {
+        if (!isRunning) return
+        check(if (video) supportsCameraVideo else supportsCameraImages) { "当前聊天模型没有启用对应的视觉能力" }
+        check(intervalSeconds == 10 || intervalSeconds == 30) { "请选择10秒或30秒" }
+        disableCamera()
+        cameraEnabled = true
+        cameraWarning = ""
+        cameraVideoMode = video
+        cameraIntervalSeconds = intervalSeconds
+        val generation = cameraGeneration
+        val capture = VoiceCallCamera(context, scope, video, intervalSeconds,
+            onPreview = { if (cameraEnabled && generation == cameraGeneration) cameraPreview = it },
+            onMedia = { file, isVideo ->
+                if (!cameraEnabled || generation != cameraGeneration) file.delete() else {
+                    pendingVisual?.file?.delete()
+                    pendingVisual = Visual(file, isVideo)
+                    // Do not queue an immediate visual reply behind TTS: leave time to speak.
+                    if ((phase == Phase.LISTENING && !isConfirmingVoice) || phase == Phase.MUTED) visualReady.trySend(Unit)
+                }
+            },
+            onError = { if (generation == cameraGeneration) { cameraWarning = it; disableCamera() } })
+        camera = capture
+        capture.start()
+    }
+
+    fun disableCamera() {
+        cameraGeneration++
+        cameraEnabled = false
+        camera?.stop()
+        camera = null
+        cameraPreview = null
+        pendingVisual?.file?.delete()
+        pendingVisual = null
+        while (visualReady.tryReceive().isSuccess) { /* Drop old camera wake-ups. */ }
+    }
+
+    fun reportCameraError(message: String) { cameraWarning = message; disableCamera() }
 
     fun recordMyVoice() {
         if (phase == Phase.SPEAKER_SETUP) referenceRequested?.complete(Unit)
@@ -323,7 +422,10 @@ class VoiceCallController(
         val result = CompletableDeferred<String>()
         // Reuse the STT microphone meter; no second recorder is needed for animation.
         val levels = launch {
-            recognizer.volumeLevelFlow.collect { microphoneLevel = it.coerceIn(0f, 1f) }
+            recognizer.volumeLevelFlow.collect {
+                microphoneLevel = it.coerceIn(0f, 1f)
+                if (it > .12f) soundDetected = true
+            }
         }
         // Ignore the replayed result from the previous turn; subscribe before starting recording.
         val results = launch(start = CoroutineStart.UNDISPATCHED) {
@@ -351,6 +453,7 @@ class VoiceCallController(
             )) { context.getString(R.string.voice_call_stt_failed) }
             result.await()
         } finally {
+            withContext(NonCancellable) { recognizer.cancelRecognition() }
             levels.cancel()
             microphoneLevel = 0f
             results.cancel()

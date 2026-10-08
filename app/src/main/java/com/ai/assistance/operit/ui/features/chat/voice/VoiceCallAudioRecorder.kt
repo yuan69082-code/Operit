@@ -63,7 +63,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 framesRead++
                 manualFrames.addLast(bytes.array())
                 if (manualFrames.size > 600) manualFrames.removeFirst()
-                if (framesRead % 5 == 0) onProgress(rms, sampleCount * 1000 / rate, recordingSound || hasSound)
+                if (framesRead % 5 == 0 || (hasSound && !recordingSound)) onProgress(rms, sampleCount * 1000 / rate, recordingSound || hasSound)
                 if (shouldSubmit()) {
                     if (recordingSound) pcm.write(bytes.array())
                     else manualFrames.forEach { pcm.write(it) }

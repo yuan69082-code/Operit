@@ -4,7 +4,7 @@ package com.ai.assistance.operit.ui.features.chat.voice
 object VoiceCallPublicText {
     private val runtimeBlock = Regex("""\[运行状态[：:][\s\S]*?\]""")
     private val mode = Regex("""[`"']?mode\s*[:=]\s*["']?voice_call["'`]?""", RegexOption.IGNORE_CASE)
-    private val control = Regex("""<voice_call_end\s*/>""")
+    private val control = Regex("""<voice_call_(?:end|quiet)\s*/>""")
     fun clean(text: String): String = text.replace(runtimeBlock, "").replace(mode, "")
         .replace(control, "").trim()
 
