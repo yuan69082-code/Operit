@@ -37,6 +37,7 @@ import com.ai.assistance.operit.ui.features.chat.components.rememberRevisableTex
 import com.ai.assistance.operit.ui.features.chat.components.part.CustomXmlRenderer
 import com.ai.assistance.operit.ui.features.chat.components.part.ThinkToolsXmlNodeGrouper
 import com.ai.assistance.operit.ui.features.chat.components.LinkPreviewDialog
+import com.ai.assistance.operit.util.SpeechCueText
 import com.ai.assistance.operit.util.markdown.toCharStream
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -372,7 +373,7 @@ fun BubbleAiMessageComposable(
                         key(message.timestamp) {
                             val stream = rememberRevisableTextStream(message.contentStream)
                             if (stream != null) {
-                                val charStream = remember(stream) { stream.toCharStream() }
+                                val charStream = remember(stream) { SpeechCueText.cleanStream(stream).toCharStream() }
                                 StreamMarkdownRenderer(
                                     markdownStream = charStream,
                                     textColor = textColor,
@@ -393,7 +394,7 @@ fun BubbleAiMessageComposable(
                                 )
                             } else {
                                 StreamMarkdownRenderer(
-                                    content = message.content,
+                                    content = SpeechCueText.clean(message.content),
                                     textColor = textColor,
                                     backgroundColor = backgroundColor,
                                     onLinkClick = rememberedOnLinkClick,
@@ -579,7 +580,7 @@ fun BubbleAiMessageComposable(
                         key(message.timestamp) {
                             val stream = rememberRevisableTextStream(message.contentStream)
                             if (stream != null) {
-                                val charStream = remember(stream) { stream.toCharStream() }
+                                val charStream = remember(stream) { SpeechCueText.cleanStream(stream).toCharStream() }
                                 StreamMarkdownRenderer(
                                     markdownStream = charStream,
                                     textColor = textColor,
@@ -602,7 +603,7 @@ fun BubbleAiMessageComposable(
                                 // 对于已完成的静态消息，使用 content 参数的渲染器以支持Markdown
                                 // 共享相同的state，避免重新计算nodes等状态
                                 StreamMarkdownRenderer(
-                                    content = message.content,
+                                    content = SpeechCueText.clean(message.content),
                                     textColor = textColor,
                                     backgroundColor = backgroundColor,
                                     onLinkClick = rememberedOnLinkClick,

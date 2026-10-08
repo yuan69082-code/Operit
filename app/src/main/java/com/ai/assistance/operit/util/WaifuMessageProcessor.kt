@@ -113,7 +113,7 @@ object WaifuMessageProcessor {
             session.collectStableSegments(renderableBuffer.toString()).forEach { emit(it) }
         }
 
-        sourceStream.nativeMarkdownSplitByBlock().collect { blockGroup ->
+        SpeechCueText.cleanStream(sourceStream).nativeMarkdownSplitByBlock().collect { blockGroup ->
             val blockType = blockGroup.tag ?: MarkdownProcessorType.PLAIN_TEXT
             when (blockType) {
                 MarkdownProcessorType.XML_BLOCK -> {
@@ -259,7 +259,7 @@ object WaifuMessageProcessor {
             }
         }
 
-        sourceStream.nativeMarkdownSplitByBlock().collect { blockGroup ->
+        SpeechCueText.cleanStream(sourceStream).nativeMarkdownSplitByBlock().collect { blockGroup ->
             val blockType = blockGroup.tag ?: MarkdownProcessorType.PLAIN_TEXT
             when (blockType) {
                 MarkdownProcessorType.XML_BLOCK,
@@ -741,9 +741,10 @@ object WaifuMessageProcessor {
             return ""
         }
 
-        val blocks = StructuredAssistantContentParser.parse(content)
+        val cueFreeContent = SpeechCueText.clean(content)
+        val blocks = StructuredAssistantContentParser.parse(cueFreeContent)
         if (blocks.isEmpty()) {
-            return content
+            return cueFreeContent
         }
 
         val builder = StringBuilder()

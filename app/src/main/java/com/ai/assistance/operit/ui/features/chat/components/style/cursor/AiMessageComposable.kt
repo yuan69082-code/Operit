@@ -23,6 +23,7 @@ import com.ai.assistance.operit.ui.features.chat.components.rememberRevisableTex
 import com.ai.assistance.operit.ui.features.chat.components.part.CustomXmlRenderer
 import com.ai.assistance.operit.ui.features.chat.components.part.ThinkToolsXmlNodeGrouper
 import com.ai.assistance.operit.ui.features.chat.components.LinkPreviewDialog
+import com.ai.assistance.operit.util.SpeechCueText
 import com.ai.assistance.operit.util.markdown.toCharStream
 import com.ai.assistance.operit.util.stream.Stream
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -180,7 +181,7 @@ fun AiMessageComposable(
             if (streamToRender != null) {
                 // 对于正在流式传输的消息，使用流式渲染器
                 // 将contentStream保存到本地变量以避免智能转换问题
-                val charStream = remember(streamToRender) { streamToRender.toCharStream() }
+                val charStream = remember(streamToRender) { SpeechCueText.cleanStream(streamToRender).toCharStream() }
 
                 StreamMarkdownRenderer(
                     markdownStream = charStream,
@@ -197,7 +198,7 @@ fun AiMessageComposable(
                 // 对于已完成的静态消息，使用新的字符串渲染器以提高性能
                 // 共享相同的state，避免重新计算nodes等状态
                 StreamMarkdownRenderer(
-                    content = message.content,
+                    content = SpeechCueText.clean(message.content),
                     textColor = textColor,
                     backgroundColor = backgroundColor,
                     onLinkClick = rememberedOnLinkClick,
