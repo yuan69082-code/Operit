@@ -30,6 +30,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     }
     val status = when (controller.phase) {
         VoiceCallController.Phase.CONNECTING -> R.string.voice_call_connecting
+        VoiceCallController.Phase.SPEAKER_SETUP -> R.string.voice_call_connecting
         VoiceCallController.Phase.LISTENING -> R.string.voice_call_listening
         VoiceCallController.Phase.RECOGNIZING -> R.string.voice_call_recognizing
         VoiceCallController.Phase.THINKING -> R.string.voice_call_thinking
@@ -48,6 +49,20 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.voice_call_minimize)) }
                 Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}")
                 Text(stringResource(status), style = MaterialTheme.typography.titleMedium)
+                if (controller.phase == VoiceCallController.Phase.SPEAKER_SETUP) {
+                    Text("先记录本次通话的声音参考，用来区分你和旁人。请在安静时独自说一句话；声音相似或重叠时仍可能无法判断。")
+                    Button(onClick = controller::recordMyVoice) { Text("开始确认我的声音") }
+                }
+                if (controller.isConfirmingVoice && controller.phase == VoiceCallController.Phase.LISTENING) {
+                    Text("正在记录声音参考，请独自说一句话，停顿后完成。")
+                }
+                if (controller.recordingNotice.isNotBlank()) {
+                    Text(controller.recordingNotice, style = MaterialTheme.typography.bodySmall)
+                }
+                if (controller.audioAnalysis && !controller.isConfirmingVoice &&
+                    (controller.phase == VoiceCallController.Phase.LISTENING || controller.phase == VoiceCallController.Phase.MUTED)) {
+                    TextButton(onClick = controller::reconfirmVoice) { Text("重新确认我的声音") }
+                }
                 if ((controller.nativeAudio || controller.audioAnalysis) && controller.phase == VoiceCallController.Phase.LISTENING) {
                     Text("正在录音 · ${controller.recordingMillis / 1000} 秒；停顿后开始转写，录音时不会逐字显示。")
                     LinearProgressIndicator(progress = { controller.microphoneLevel }, modifier = Modifier.fillMaxWidth())

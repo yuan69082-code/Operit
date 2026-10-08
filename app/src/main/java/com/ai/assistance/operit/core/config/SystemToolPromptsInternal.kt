@@ -13,11 +13,6 @@ object SystemToolPromptsInternal {
                 tools =
                     listOf(
                         ToolPrompt(
-                            name = "request_voice_call",
-                            description = "Initiate an incoming voice call to the user in this conversation. Use when you want to call or the user asks you to call. This shows an incoming call and notification; merely saying you will call does not. Success means ringing, not connected. Do not repeatedly dial after rejection or timeout. Microphone access begins only after acceptance. Background scheduled conversations can invoke this tool when they run; the model cannot wake itself without a trigger.",
-                            parametersStructured = listOf(ToolParameterSchema(name = "reason", type = "string", description = "Short optional call reason", required = false))
-                        ),
-                        ToolPrompt(
                             name = "execute_shell",
                             description = "Execute a device shell command.",
                             parametersStructured =
@@ -3009,11 +3004,6 @@ object SystemToolPromptsInternal {
                 categoryName = "内部工具",
                 tools =
                     listOf(
-                        ToolPrompt(
-                            name = "request_voice_call",
-                            description = "向本会话用户主动发起语音来电。你想打电话或用户让你打来时，必须调用此工具，只说‘给你打电话’不会拨号。成功表示已响铃等待接听，不代表已接通；接听后才开启麦克风。拒接或超时后不要重复拨打。后台定时或事件触发的对话运行时也可以调用；没有触发器时模型不能自行唤醒。",
-                            parametersStructured = listOf(ToolParameterSchema(name = "reason", type = "string", description = "可选，简短的来电原因", required = false))
-                        ),
                         ToolPrompt(
                             name = "execute_shell",
                             description = "执行设备 Shell 命令。",

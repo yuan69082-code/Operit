@@ -124,7 +124,7 @@ fun BubbleUserMessageComposable(
             if (isHiddenPlaceholder) {
                 MessageParseResult(processedText = "", trailingAttachments = emptyList())
             } else {
-                parseMessageContent(context, message.content)
+                parseMessageContent(context, com.ai.assistance.operit.util.VoiceCallMessageText.forDisplay(message.content))
             }
         }
     val textContent = parseResult.processedText

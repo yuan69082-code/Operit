@@ -33,7 +33,7 @@ class VoiceCallController(
     private val incoming: Boolean = false,
     private val onStopped: () -> Unit,
 ) {
-    enum class Phase { CONNECTING, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
+    enum class Phase { CONNECTING, SPEAKER_SETUP, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
 
     var phase by mutableStateOf(Phase.CONNECTING)
         private set
@@ -52,6 +52,13 @@ class VoiceCallController(
     var soundDetected by mutableStateOf(false)
         private set
     private val submitRecording = java.util.concurrent.atomic.AtomicBoolean(false)
+    var isConfirmingVoice by mutableStateOf(false)
+        private set
+    var recordingNotice by mutableStateOf("")
+        private set
+    private var voiceReference: java.io.File? = null
+    private var referenceRequested: CompletableDeferred<Unit>? = null
+    private var recentBackgroundContext = ""
     var isRunning by mutableStateOf(false)
         private set
     private val muted = MutableStateFlow(false)
@@ -107,6 +114,7 @@ class VoiceCallController(
                         turnJob = launch {
                             var audioFile: java.io.File? = null
                             try {
+                                if (audioAnalysis && voiceReference == null) confirmVoiceReference(recorder)
                                 phase = Phase.LISTENING
                                 transcript = ""
                                 microphoneLevel = 0f
@@ -122,7 +130,18 @@ class VoiceCallController(
                                     phase = Phase.RECOGNIZING
                                     analysisWarning = ""
                                     try {
-                                        "[语音通话转写] " + analyzer.analyze(savedAudio) + "\n【语音文件】${savedAudio.absolutePath}"
+                                        val analysis = analyzer.analyze(savedAudio, checkNotNull(voiceReference), recorder.lastQuietIntervals)
+                                        if (analysis.userText.isBlank()) {
+                                            recordingNotice = if (analysis.speakerMatch == "uncertain")
+                                                "无法确定是谁说的，没有记成你的发言。你可以重新确认声音。"
+                                            else "这段没有检测到你的发言，其他声音作为背景保留。"
+                                            recentBackgroundContext = "\n【上一片段背景观察】声源判断：${analysis.speakerMatch}；${analysis.environment}。不属于已确认的用户发言。"
+                                            return@launch
+                                        }
+                                        recordingNotice = ""
+                                        val contextText = analysis.toContext() + recentBackgroundContext
+                                        recentBackgroundContext = ""
+                                        contextText + "\n【语音文件】${savedAudio.absolutePath}"
                                     } catch (error: CancellationException) {
                                         throw error
                                     } catch (error: Exception) {
@@ -139,10 +158,8 @@ class VoiceCallController(
                                 } else recognizeTurn(checkNotNull(recognizer))
                                 if (text.isBlank()) return@launch
                                 // Sound observations belong to chat context, not the spoken-word caption.
-                                transcript = if (text.startsWith("[通话事件]")) "" else if (audioAnalysis && text.contains("【原话】")) {
-                                    text.substringAfter("【原话】").substringBefore("【疑似听词】")
-                                        .substringBefore("【声音】").substringBefore("【语音文件】").trim()
-                                } else text
+                                transcript = if (text.startsWith("[通话事件]")) "" else
+                                    com.ai.assistance.operit.util.VoiceCallMessageText.forDisplay(text).removePrefix("[语音通话]").trim()
                                 reply = ""
                                 phase = Phase.THINKING
                                 coroutineScope {
@@ -226,6 +243,8 @@ class VoiceCallController(
                         voice?.shutdown()
                         speech = null
                         voice = null
+                        voiceReference?.delete()
+                        voiceReference = null
                         viewModel.setVoiceCallActive(false)
                         try {
                             AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, false)
@@ -239,7 +258,41 @@ class VoiceCallController(
         }
     }
 
-    private suspend fun recordAudioTurn(recorder: VoiceCallAudioRecorder): java.io.File = recorder.recordTurn(
+    private suspend fun confirmVoiceReference(recorder: VoiceCallAudioRecorder) {
+        isConfirmingVoice = true
+        val requested = CompletableDeferred<Unit>()
+        referenceRequested = requested
+        phase = Phase.SPEAKER_SETUP
+        try {
+            requested.await()
+            phase = Phase.LISTENING
+            voiceReference = recordAudioTurn(recorder)
+            recordingNotice = "声音参考已记录；不确定的说话者不会记成你的发言。"
+        } finally {
+            referenceRequested = null
+            isConfirmingVoice = false
+        }
+    }
+
+    fun recordMyVoice() {
+        if (phase == Phase.SPEAKER_SETUP) referenceRequested?.complete(Unit)
+    }
+
+    fun reconfirmVoice() {
+        if (!audioAnalysis || isConfirmingVoice || (phase != Phase.LISTENING && phase != Phase.MUTED)) return
+        turnJob?.cancel()
+        voiceReference?.delete()
+        voiceReference = null
+        recentBackgroundContext = ""
+        recordingNotice = ""
+    }
+
+    private suspend fun recordAudioTurn(recorder: VoiceCallAudioRecorder): java.io.File {
+        microphoneLevel = 0f
+        recordingMillis = 0L
+        soundDetected = false
+        submitRecording.set(false)
+        return recorder.recordTurn(
         onProgress = { rms, elapsedMillis, detected ->
             withContext(Dispatchers.Main) {
                 // A waveform meter distinguishes capture from recognition, which starts later.
@@ -249,7 +302,8 @@ class VoiceCallController(
             }
         },
         shouldSubmit = { submitRecording.get() },
-    )
+        )
+    }
 
     fun sendRecordingNow() {
         if ((nativeAudio || audioAnalysis) && phase == Phase.LISTENING) submitRecording.set(true)
@@ -291,7 +345,7 @@ class VoiceCallController(
 
     fun toggleMute() {
         muted.value = !muted.value
-        if (muted.value && (phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {
+        if (muted.value && (phase == Phase.SPEAKER_SETUP || phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {
             turnJob?.cancel()
         }
     }

@@ -265,7 +265,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
         )
     }
 
-    // 不在提示词加入的工具
+    // Exposed in the basic tool prompt so the model can actually request an incoming call.
     handler.registerTool(
         name = "request_voice_call",
         descriptionGenerator = { "向用户发起语音来电" },
@@ -289,6 +289,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             }
         },
     )
+    // 不在提示词加入的工具
     handler.registerTool(
             name = "execute_shell",
             descriptionGenerator = { tool ->

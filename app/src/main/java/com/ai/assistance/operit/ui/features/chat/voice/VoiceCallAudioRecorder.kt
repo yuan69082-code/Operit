@@ -17,11 +17,14 @@ import kotlin.math.sqrt
 
 /** Records the waveform, including non-speech sounds. No STT or noise filtering is applied here. */
 class VoiceCallAudioRecorder(private val context: Context) {
+    var lastQuietIntervals: List<Pair<Long, Long>> = emptyList()
+        private set
     @SuppressLint("MissingPermission") // The call can only be started after the microphone grant.
     suspend fun recordTurn(
         onProgress: suspend (rms: Float, elapsedMillis: Long, soundDetected: Boolean) -> Unit = { _, _, _ -> },
         shouldSubmit: () -> Boolean = { false },
     ): File = withContext(Dispatchers.IO) {
+        lastQuietIntervals = emptyList()
         val rate = 16000
         val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minBuffer > 0) { "Microphone does not support 16 kHz PCM" }
@@ -39,6 +42,8 @@ class VoiceCallAudioRecorder(private val context: Context) {
             var quietFrames = 0
             var sampleCount = 0L
             var framesRead = 0
+            val quietIntervals = mutableListOf<Pair<Long, Long>>()
+            var quietStartMillis: Long? = null
             recorder.startRecording()
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
             while (true) {
@@ -74,11 +79,23 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     }
                 } else {
                     pcm.write(bytes.array())
+                    val elapsedPcmMillis = pcm.size().toLong() * 1000 / (rate * 2)
+                    if (!hasSound && quietStartMillis == null) quietStartMillis = elapsedPcmMillis - count * 1000 / rate
+                    if (hasSound && quietStartMillis != null) {
+                        val start = checkNotNull(quietStartMillis)
+                        if (elapsedPcmMillis - start >= 120) quietIntervals.add(start to elapsedPcmMillis)
+                        quietStartMillis = null
+                    }
                     quietFrames = if (hasSound) 0 else quietFrames + 1
                     if (quietFrames >= 60 || pcm.size() >= rate * 2 * 12) break
                 }
             }
             val data = pcm.toByteArray()
+            quietStartMillis?.let { start ->
+                val end = data.size.toLong() * 1000 / (rate * 2)
+                if (end - start >= 120) quietIntervals.add(start to end)
+            }
+            lastQuietIntervals = quietIntervals.toList()
             val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
                 .put("RIFF".toByteArray()).putInt(data.size + 36).put("WAVEfmt ".toByteArray())
                 .putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2)
