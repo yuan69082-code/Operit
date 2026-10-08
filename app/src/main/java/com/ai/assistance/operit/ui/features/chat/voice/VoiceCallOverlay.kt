@@ -28,68 +28,98 @@ import com.ai.assistance.operit.ui.features.chat.components.CallMicrophoneWave
 import com.ai.assistance.operit.ui.features.chat.components.VoiceCallCameraControls
 import com.ai.assistance.operit.ui.features.chat.components.VoiceCallCameraPreview
 import com.ai.assistance.operit.ui.floating.FloatingWindowTheme
+import kotlin.math.roundToInt
 
-/** Only this window receives touches; the rest of the screen stays usable. */
+/** Only this window receives touches; hiding it does not stop the service or call. */
 class VoiceCallOverlay(private val context: Context, private val call: VoiceCallController) {
     private val manager = context.getSystemService(WindowManager::class.java)
-    private val owner = ServiceLifecycleOwner()
+    private var owner: ServiceLifecycleOwner? = null
     private var view: ComposeView? = null
     private var compact by mutableStateOf(false)
     private val density = context.resources.displayMetrics.density
+    private var expandedWidth = 280 * density
+    private var expandedHeight by mutableStateOf(520 * density)
     private val params = WindowManager.LayoutParams(
-        (280 * density).toInt().coerceAtMost(context.resources.displayMetrics.widthPixels),
-        WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        expandedWidth.roundToInt(), expandedHeight.roundToInt(),
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
         PixelFormat.TRANSLUCENT,
-    ).apply { gravity = Gravity.TOP or Gravity.END; x = (12 * density).toInt(); y = (80 * density).toInt() }
+    ).apply {
+        gravity = Gravity.TOP or Gravity.LEFT
+        x = (context.resources.displayMetrics.widthPixels - expandedWidth - 12 * density).roundToInt().coerceAtLeast(0)
+        y = (80 * density).roundToInt()
+    }
 
     fun show() {
         compact = false
-        if (view != null) { resize(); return }
-        owner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        owner.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        owner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        resize()
+        if (view != null) return
+        // A destroyed lifecycle cannot be resumed when reopening the hidden window.
+        val windowOwner = ServiceLifecycleOwner()
+        owner = windowOwner
+        windowOwner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        windowOwner.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        windowOwner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         val content = ComposeView(context).apply {
-            setViewTreeLifecycleOwner(owner)
-            setViewTreeViewModelStoreOwner(owner)
-            setViewTreeSavedStateRegistryOwner(owner)
+            setViewTreeLifecycleOwner(windowOwner)
+            setViewTreeViewModelStoreOwner(windowOwner)
+            setViewTreeSavedStateRegistryOwner(windowOwner)
             setContent {
                 FloatingWindowTheme {
                     Surface(shape = RoundedCornerShape(24.dp), shadowElevation = 8.dp) {
-                        Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(Modifier.fillMaxWidth().pointerInput(Unit) {
                                 detectDragGestures { change, drag ->
                                     change.consume()
-                                    params.x = (params.x - drag.x.toInt()).coerceIn(0, (context.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
-                                    params.y = (params.y + drag.y.toInt()).coerceIn(0, (context.resources.displayMetrics.heightPixels - (view?.height ?: 0)).coerceAtLeast(0))
-                                    view?.let { manager.updateViewLayout(it, params) }
+                                    params.x += drag.x.roundToInt()
+                                    params.y += drag.y.roundToInt()
+                                    updateWindow()
                                 }
                             }, verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (compact) "通话" else call.participantName, modifier = Modifier.weight(1f), maxLines = 1)
                                 IconButton(onClick = { compact = !compact; resize() }, modifier = Modifier.size(40.dp)) {
                                     Icon(if (compact) Icons.Default.OpenInFull else Icons.Default.FullscreenExit, contentDescription = if (compact) "展开通话" else "收起通话")
                                 }
+                                IconButton(onClick = ::hide, modifier = Modifier.size(40.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "临时隐藏，通话继续")
+                                }
                             }
                             if (!compact) {
-                                if (call.phase == VoiceCallController.Phase.RINGING) Text("等待对方接听…")
-                                if (call.cameraEnabled) {
-                                    call.camera?.let { VoiceCallCameraPreview(it, Modifier.fillMaxWidth().height(260.dp)) }
-                                } else Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
-                                    CallPortrait(call.participantAvatarUri, call.participantName, call.phase == VoiceCallController.Phase.SPEAKING, small = true)
+                                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    if (call.phase == VoiceCallController.Phase.RINGING) Text("等待对方接听…")
+                                    if (call.cameraEnabled) {
+                                        call.camera?.let {
+                                            VoiceCallCameraPreview(it, Modifier.fillMaxWidth().height((expandedHeight / density * 0.5f).coerceAtLeast(140f).dp))
+                                        }
+                                    } else Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
+                                        CallPortrait(call.participantAvatarUri, call.participantName, call.phase == VoiceCallController.Phase.SPEAKING, small = true)
+                                    }
+                                    CallMicrophoneWave(if (call.phase == VoiceCallController.Phase.LISTENING) call.microphoneLevel else 0f)
+                                    if (call.reply.isNotBlank()) Text(call.reply, maxLines = 3)
+                                    else if (call.transcript.isNotBlank()) Text(call.transcript, maxLines = 3)
+                                    if ((call.audioAnalysis || call.nativeAudio) && call.phase == VoiceCallController.Phase.LISTENING) {
+                                        TextButton(onClick = call::sendRecordingNow) { Text("发送录音") }
+                                    }
+                                    VoiceCallCameraControls(call, showPreview = false)
                                 }
-                                CallMicrophoneWave(if (call.phase == VoiceCallController.Phase.LISTENING) call.microphoneLevel else 0f)
-                                if (call.reply.isNotBlank()) Text(call.reply, maxLines = 3)
-                                else if (call.transcript.isNotBlank()) Text(call.transcript, maxLines = 3)
-                                if ((call.audioAnalysis || call.nativeAudio) && call.phase == VoiceCallController.Phase.LISTENING) {
-                                    TextButton(onClick = call::sendRecordingNow) { Text("发送录音") }
-                                }
-                                VoiceCallCameraControls(call, showPreview = false)
+                                // Keep call controls reachable even when the preview or subtitles scroll.
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     val muted by call.isMuted.collectAsState()
                                     IconButton(onClick = call::toggleMute, enabled = call.isConnected) { Icon(if (muted) Icons.Default.MicOff else Icons.Default.Mic, "静音") }
                                     FilledIconButton(onClick = VoiceCallRuntime::hangUp, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error)) { Icon(Icons.Default.CallEnd, "挂断") }
                                     IconButton(onClick = call::interrupt, enabled = call.phase == VoiceCallController.Phase.SPEAKING || call.phase == VoiceCallController.Phase.THINKING) { Icon(Icons.Default.RecordVoiceOver, "打断说话") }
+                                }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("拖动右下角调整大小", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                                    Icon(Icons.Default.OpenInFull, contentDescription = "拖动调整通话窗口大小", modifier = Modifier.size(28.dp).pointerInput(Unit) {
+                                        detectDragGestures { change, drag ->
+                                            change.consume()
+                                            expandedWidth += drag.x
+                                            expandedHeight += drag.y
+                                            resize()
+                                        }
+                                    })
                                 }
                             }
                         }
@@ -100,21 +130,43 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
         view = content
         try { manager.addView(content, params) }
         catch (error: Exception) {
-            view = null
             content.disposeComposition()
+            view = null
+            releaseOwner()
             com.ai.assistance.operit.util.AppLogger.e("VoiceCallOverlay", "Could not display overlay", error)
         }
     }
 
     private fun resize() {
-        params.width = ((if (compact) 120 else 280) * density).toInt().coerceAtMost(context.resources.displayMetrics.widthPixels)
+        val metrics = context.resources.displayMetrics
+        expandedWidth = expandedWidth.coerceIn((240 * density).coerceAtMost(metrics.widthPixels.toFloat()), metrics.widthPixels.toFloat())
+        expandedHeight = expandedHeight.coerceIn((320 * density).coerceAtMost(metrics.heightPixels.toFloat()), metrics.heightPixels.toFloat())
+        params.width = (if (compact) (160 * density).coerceAtMost(metrics.widthPixels.toFloat()) else expandedWidth).roundToInt()
+        params.height = (if (compact) 52 * density else expandedHeight).roundToInt()
+        updateWindow()
+    }
+
+    private fun updateWindow() {
+        val metrics = context.resources.displayMetrics
+        params.x = params.x.coerceIn(0, (metrics.widthPixels - params.width).coerceAtLeast(0))
+        params.y = params.y.coerceIn(0, (metrics.heightPixels - params.height).coerceAtLeast(0))
         view?.let { manager.updateViewLayout(it, params) }
     }
 
-    fun destroy() {
+    fun hide() {
+        // Dispose only the UI; camera sampling, microphone and the notification remain owned by the call.
         view?.let { manager.removeView(it); it.disposeComposition() }
         view = null
-        owner.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-        owner.viewModelStore.clear()
+        releaseOwner()
     }
+
+    private fun releaseOwner() {
+        owner?.let {
+            it.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+            it.viewModelStore.clear()
+        }
+        owner = null
+    }
+
+    fun destroy() = hide()
 }

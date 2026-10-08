@@ -330,6 +330,13 @@ class AIForegroundService : Service() {
                     )
 
                 val cleanedReplyContent = WaifuMessageProcessor.cleanContentForWaifu(rawReplyContent)
+                // Call replies open the independent overlay just like the ongoing call notification.
+                val activeCall = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime.controller
+                val replyOpenIntent = if (activeCall != null && activeCall.isRunning && activeCall.chatId == chatId) {
+                    com.ai.assistance.operit.ui.features.chat.voice.VoiceCallService.windowPendingIntent(appContext, activeCall.chatId)
+                } else {
+                    createMainActivityPendingIntent(appContext)
+                }
                 var notificationDefaults = NotificationCompat.DEFAULT_LIGHTS
                 if (enableReplyNotificationSound) {
                     notificationDefaults = notificationDefaults or NotificationCompat.DEFAULT_SOUND
@@ -354,7 +361,7 @@ class AIForegroundService : Service() {
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setDefaults(notificationDefaults)
                         .setCategory(NotificationCompat.CATEGORY_STATUS)
-                        .setContentIntent(createMainActivityPendingIntent(appContext))
+                        .setContentIntent(replyOpenIntent)
                         .setAutoCancel(true)
 
                 if (cleanedReplyContent.isNotEmpty()) {

@@ -3,6 +3,9 @@ package com.ai.assistance.operit.ui.features.chat.components
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
+import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import android.view.TextureView
 import androidx.compose.runtime.Composable
@@ -33,8 +36,26 @@ private class CallCameraTexture(context: Context, private val camera: VoiceCallC
     private var bufferWidth = 640
     private var bufferHeight = 480
     private var sensorRotation = 0
+    private val displayManager = context.getSystemService(DisplayManager::class.java)
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            if (display?.displayId == displayId) transformPreview()
+        }
+    }
 
     init { surfaceTextureListener = this }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        displayManager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+    }
+
+    override fun onDetachedFromWindow() {
+        displayManager.unregisterDisplayListener(displayListener)
+        super.onDetachedFromWindow()
+    }
 
     fun updateGeometry(width: Int, height: Int, rotation: Int) {
         bufferWidth = width
@@ -74,17 +95,18 @@ private class CallCameraTexture(context: Context, private val camera: VoiceCallC
             Surface.ROTATION_270 -> 270
             else -> 0
         }
-        val rotation = (sensorRotation + displayDegrees) % 360
-        val sideways = rotation == 90 || rotation == 270
-        val rotatedWidth = if (sideways) bufferHeight else bufferWidth
-        val rotatedHeight = if (sideways) bufferWidth else bufferHeight
+        // TextureView already applies sensor orientation and front-camera mirroring.
+        // Undo its nonuniform stretch, then compensate only for display rotation.
+        val sensorSideways = sensorRotation % 180 != 0
+        val naturalWidth = if (sensorSideways) bufferHeight else bufferWidth
+        val naturalHeight = if (sensorSideways) bufferWidth else bufferHeight
+        val displaySideways = displayDegrees % 180 != 0
+        val rotatedWidth = if (displaySideways) naturalHeight else naturalWidth
+        val rotatedHeight = if (displaySideways) naturalWidth else naturalHeight
         val scale = max(width.toFloat() / rotatedWidth, height.toFloat() / rotatedHeight)
         setTransform(Matrix().apply {
-            setScale(bufferWidth.toFloat() / width, bufferHeight.toFloat() / height)
-            postTranslate(-bufferWidth / 2f, -bufferHeight / 2f)
-            postRotate(rotation.toFloat())
-            postScale(-scale, scale) // Mirror only the local selfie preview.
-            postTranslate(width / 2f, height / 2f)
+            setScale(scale * naturalWidth / width, scale * naturalHeight / height, width / 2f, height / 2f)
+            postRotate(-displayDegrees.toFloat(), width / 2f, height / 2f)
         })
     }
 }

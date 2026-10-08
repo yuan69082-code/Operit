@@ -4,7 +4,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -32,6 +34,9 @@ class VoiceCallService : Service() {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_SHOW_WINDOW) {
+            // An old reply notification must not reopen a different chat's call.
+            val targetChat = intent.getStringExtra(EXTRA_CALL_CHAT)
+            if (targetChat != null && targetChat != controller.chatId) return START_NOT_STICKY
             if (android.provider.Settings.canDrawOverlays(this)) {
                 if (overlay == null) overlay = VoiceCallOverlay(this, controller)
                 overlay?.show()
@@ -41,7 +46,7 @@ class VoiceCallService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         ownedCall = controller
         manager.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.voice_call_title), NotificationManager.IMPORTANCE_LOW))
-        val open = PendingIntent.getService(this, 301, Intent(this, VoiceCallService::class.java).setAction(ACTION_SHOW_WINDOW), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = windowPendingIntent(this, controller.chatId)
         val hangUp = PendingIntent.getService(this, 302, Intent(this, VoiceCallService::class.java).setAction(ACTION_HANG_UP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
@@ -91,5 +96,14 @@ class VoiceCallService : Service() {
         private const val ACTION_HANG_UP = "com.ai.assistance.operit.voice.HANG_UP"
         const val ACTION_SHOW_WINDOW = "com.ai.assistance.operit.voice.SHOW_WINDOW"
         const val ACTION_CAMERA_ON = "com.ai.assistance.operit.voice.CAMERA_ON"
+        private const val EXTRA_CALL_CHAT = "call_chat_id"
+
+        fun windowPendingIntent(context: Context, chatId: String): PendingIntent =
+            PendingIntent.getService(context, 301,
+                Intent(context, VoiceCallService::class.java)
+                    .setAction(ACTION_SHOW_WINDOW)
+                    .setData(Uri.Builder().scheme("operit").authority("voice-call").appendPath(chatId).build())
+                    .putExtra(EXTRA_CALL_CHAT, chatId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 }
