@@ -100,7 +100,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
             Column(
                 Modifier.fillMaxSize()
                     .then(if (video) Modifier else Modifier.background(Brush.verticalGradient(listOf(colors.primary.copy(alpha = .10f), colors.surface, colors.tertiary.copy(alpha = .08f)))))
-                    .windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 24.dp),
+                    .windowInsetsPadding(WindowInsets.safeDrawing).imePadding().padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -175,6 +175,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                         }
                     }
                 }
+                VoiceCallTextInput(controller)
                 Row(
                     Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 24.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,

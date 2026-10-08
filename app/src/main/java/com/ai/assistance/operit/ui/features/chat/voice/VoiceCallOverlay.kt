@@ -23,6 +23,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.ai.assistance.operit.services.ServiceLifecycleOwner
+import com.ai.assistance.operit.ui.features.chat.components.VoiceCallTextInput
 import com.ai.assistance.operit.ui.features.chat.components.CallPortrait
 import com.ai.assistance.operit.ui.features.chat.components.CallMicrophoneWave
 import com.ai.assistance.operit.ui.features.chat.components.VoiceCallCameraControls
@@ -112,6 +113,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                     }
                                     VoiceCallCameraControls(call, showPreview = false)
                                 }
+                                VoiceCallTextInput(call, onEditingChanged = ::setEditing)
                                 // Keep call controls reachable even when the preview or subtitles scroll.
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     val muted by call.isMuted.collectAsState()
@@ -172,10 +174,21 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
         view?.let { manager.updateViewLayout(it, params) }
     }
 
+    private fun setEditing(editing: Boolean) {
+        // Non-focusable overlays cannot receive an IME. Only acquire focus while typing.
+        params.flags = if (editing) params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            else params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        if (editing) params.y = 0
+        updateWindow()
+    }
+
     fun hide() {
-        // Dispose only the UI; camera sampling, microphone and the notification remain owned by the call.
-        view?.let { manager.removeView(it); it.disposeComposition() }
+        // Clear the view reference before disposal, whose composer releases IME focus.
+        val hidden = view
         view = null
+        hidden?.let { manager.removeView(it); it.disposeComposition() }
+        setEditing(false)
         releaseOwner()
     }
 

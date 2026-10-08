@@ -7,6 +7,10 @@ object VoiceCallMessageText {
 
     fun forDisplay(content: String): String {
         val text = content.trimStart()
+        if (text.startsWith("[语音通话打字]")) {
+            val body = text.removePrefix("[语音通话打字]").replace(media, "").trim()
+            return "[语音通话 · 打字]\n$body"
+        }
         if (text.startsWith("[语音通话转写]")) {
             val body = text.removePrefix("[语音通话转写]").trim()
             val original = if (body.startsWith("【原话】")) body.removePrefix("【原话】").trim() else body

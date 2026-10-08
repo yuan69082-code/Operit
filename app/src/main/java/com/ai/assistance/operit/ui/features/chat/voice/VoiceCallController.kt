@@ -86,6 +86,36 @@ class VoiceCallController(
     private var latestVisual: Visual? = null
     private var activeVisual: Visual? = null
     private val visualReady = Channel<Unit>(Channel.CONFLATED)
+    private val typedReady = Channel<Unit>(Channel.CONFLATED)
+    private val pendingTyped = ArrayDeque<String>()
+    var typedDraft by mutableStateOf("")
+        private set
+    var pendingTypedCount by mutableStateOf(0)
+        private set
+
+    fun updateTypedDraft(text: String) { typedDraft = text }
+
+    fun sendTypedDraft(): Boolean {
+        val text = typedDraft.trim()
+        if (!isConnected || !isRunning || phase == Phase.ERROR || phase == Phase.ENDED || text.isEmpty()) return false
+        if (pendingTyped.size >= 16) {
+            viewModel.showToast("待发送文字较多，请等当前回复结束")
+            return false
+        }
+        pendingTyped.addLast(text)
+        pendingTypedCount = pendingTyped.size
+        typedDraft = ""
+        typedReady.trySend(Unit)
+        return true
+    }
+
+    private fun takeTypedInput(): CallInput? {
+        if (pendingTyped.isEmpty()) return null
+        val text = pendingTyped.removeFirst()
+        pendingTypedCount = pendingTyped.size
+        if (pendingTyped.isEmpty()) typedReady.tryReceive()
+        return CallInput(text = text, typed = true)
+    }
     var isRunning by mutableStateOf(false)
         private set
     private val muted = MutableStateFlow(false)
@@ -187,16 +217,17 @@ class VoiceCallController(
                 val cleanerRegexs = profiles.getCurrentTtsProfile().cleanerRegexs
                 var greetIncoming = !openingDelivered
                 while (isActive && phase != Phase.ERROR) {
-                    if (muted.value) {
+                    if (muted.value && pendingTyped.isEmpty()) {
                         phase = Phase.MUTED
                         coroutineScope {
                             val unmuted = async { muted.first { !it } }
                             try { select<Unit> {
                                 unmuted.onAwait { }
                                 visualReady.onReceive { }
+                                typedReady.onReceive { }
                             } } finally { unmuted.cancel() }
                         }
-                        if (muted.value && pendingVisual == null) continue
+                        if (muted.value && pendingVisual == null && pendingTyped.isEmpty()) continue
                     }
                     coroutineScope {
                         turnJob = launch {
@@ -210,7 +241,9 @@ class VoiceCallController(
                                 recordingMillis = 0
                                 soundDetected = false
                                 submitRecording.set(false)
-                                val input = if (greetIncoming) null else if (muted.value) CallInput(visualOnly = true) else awaitCallInput(recorder, recognizer)
+                                val input = if (greetIncoming) null else {
+                                    takeTypedInput() ?: if (muted.value) CallInput(visualOnly = true) else awaitCallInput(recorder, recognizer)
+                                }
                                 visualOnly = input?.visualOnly == true
                                 val text = if (greetIncoming) {
                                     greetIncoming = false
@@ -218,6 +251,9 @@ class VoiceCallController(
                                     else "[通话事件] 你已选择接听用户打来的电话，现在已经接通。请先对用户开口，不必等用户说第一句话，不复述事件说明。"
                                 } else if (visualOnly) {
                                     "[通话画面更新] 摄像头提供了新的画面；用户并没有开口。"
+                                } else if (input?.typed == true) {
+                                    // Typed words have no audio observations and never establish a voice reference.
+                                    "[语音通话打字]\n${input.text}"
                                 } else if (audioAnalysis) {
                                     val savedAudio = checkNotNull(input?.audio)
                                     audioFile = savedAudio
@@ -273,8 +309,8 @@ class VoiceCallController(
                                     val generation = async {
                                         val publicText = VoiceCallPublicText.StreamCleaner()
                                         try {
-                                            viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis,
-                                                visual?.file?.absolutePath, visual?.video == true, visualOnly) { sentence ->
+                                            viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis && input?.typed != true,
+                                                visual?.file?.absolutePath, visual?.video == true, visualOnly, typed = input?.typed == true) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
@@ -358,6 +394,9 @@ class VoiceCallController(
                         disableCamera()
                         voiceReference?.delete()
                         voiceReference = null
+                        pendingTyped.clear()
+                        pendingTypedCount = 0
+                        while (typedReady.tryReceive().isSuccess) { /* No text survives a finished call. */ }
                         viewModel.setVoiceCallActive(false)
                         try {
                             AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, false)
@@ -387,7 +426,7 @@ class VoiceCallController(
         }
     }
 
-    private data class CallInput(val audio: java.io.File? = null, val text: String = "", val visualOnly: Boolean = false)
+    private data class CallInput(val audio: java.io.File? = null, val text: String = "", val visualOnly: Boolean = false, val typed: Boolean = false)
 
     private suspend fun awaitCallInput(recorder: VoiceCallAudioRecorder, recognizer: SpeechService?): CallInput = coroutineScope {
         val recorded = async {
@@ -396,6 +435,11 @@ class VoiceCallController(
         }
         select {
             recorded.onAwait { it }
+            typedReady.onReceive {
+                // Sending text stops this listening attempt, never the call or an AI reply.
+                recorded.cancelAndJoin()
+                checkNotNull(takeTypedInput())
+            }
             visualReady.onReceive {
                 // Never discard a phrase already being spoken just to send a scheduled frame.
                 if (soundDetected || pendingVisual == null || !cameraEnabled) recorded.await()
