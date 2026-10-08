@@ -79,9 +79,6 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                     CallPortrait(call.participantAvatarUri, call.participantName, call.phase == VoiceCallController.Phase.SPEAKING, small = true)
                                 }
                                 CallMicrophoneWave(if (call.phase == VoiceCallController.Phase.LISTENING) call.microphoneLevel else 0f)
-                                if (call.phase == VoiceCallController.Phase.SPEAKER_SETUP) {
-                                    TextButton(onClick = call::recordMyVoice) { Text("确认我的声音") }
-                                }
                                 if (call.reply.isNotBlank()) Text(call.reply, maxLines = 3)
                                 else if (call.transcript.isNotBlank()) Text(call.transcript, maxLines = 3)
                                 if ((call.audioAnalysis || call.nativeAudio) && call.phase == VoiceCallController.Phase.LISTENING) {

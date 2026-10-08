@@ -34,7 +34,7 @@ class VoiceCallController(
     private val incoming: Boolean = false,
     private val onStopped: () -> Unit,
 ) {
-    enum class Phase { CONNECTING, RINGING, SPEAKER_SETUP, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
+    enum class Phase { CONNECTING, RINGING, LISTENING, RECOGNIZING, THINKING, SPEAKING, MUTED, ERROR, ENDED }
     enum class EndBy { USER, AI, SYSTEM }
 
     var phase by mutableStateOf(Phase.CONNECTING)
@@ -58,12 +58,10 @@ class VoiceCallController(
     var soundDetected by mutableStateOf(false)
         private set
     private val submitRecording = java.util.concurrent.atomic.AtomicBoolean(false)
-    var isConfirmingVoice by mutableStateOf(false)
-        private set
+    val isConfirmingVoice: Boolean get() = audioAnalysis && voiceReference == null
     var recordingNotice by mutableStateOf("")
         private set
-    private var voiceReference: java.io.File? = null
-    private var referenceRequested: CompletableDeferred<Unit>? = null
+    private var voiceReference by mutableStateOf<java.io.File?>(null)
     private var recentBackgroundContext = ""
     var cameraEnabled by mutableStateOf(false)
         private set
@@ -206,8 +204,6 @@ class VoiceCallController(
                             var visual: Visual? = null
                             var visualOnly = false
                             try {
-                                // The AI opens the connected call before any voice-reference setup.
-                                if (!greetIncoming && audioAnalysis && voiceReference == null && !muted.value) confirmVoiceReference(recorder)
                                 phase = if (muted.value) Phase.MUTED else Phase.LISTENING
                                 transcript = ""
                                 microphoneLevel = 0f
@@ -228,13 +224,20 @@ class VoiceCallController(
                                     phase = Phase.RECOGNIZING
                                     analysisWarning = ""
                                     try {
-                                        val analysis = analyzer.analyze(savedAudio, checkNotNull(voiceReference), recorder.lastQuietIntervals)
+                                        val analysis = analyzer.analyze(savedAudio, voiceReference, recorder.lastQuietIntervals)
                                         if (analysis.userText.isBlank()) {
-                                            recordingNotice = if (analysis.speakerMatch == "uncertain")
+                                            recordingNotice = if (analysis.speakerMatch == "uncertain" && voiceReference == null)
+                                                "这段声音来源不确定，等你下一句话再建立参考。"
+                                            else if (analysis.speakerMatch == "uncertain")
                                                 "无法确定是谁说的，没有记成你的发言。你可以重新确认声音。"
                                             else "这段没有检测到你的发言，其他声音作为背景保留。"
                                             recentBackgroundContext = "\n【上一片段背景观察】声源判断：${analysis.speakerMatch}；${analysis.environment}。不属于已确认的用户发言。"
                                             return@launch
+                                        }
+                                        // The first usable phrase is both conversation content and a
+                                        // provisional reference, never a separate discarded recording.
+                                        if (voiceReference == null && analysis.utterances.all { it.speaker == "caller" }) {
+                                            saveVoiceReference(savedAudio)
                                         }
                                         recordingNotice = ""
                                         val contextText = analysis.toContext() + recentBackgroundContext
@@ -369,19 +372,18 @@ class VoiceCallController(
         }
     }
 
-    private suspend fun confirmVoiceReference(recorder: VoiceCallAudioRecorder) {
-        isConfirmingVoice = true
-        val requested = CompletableDeferred<Unit>()
-        referenceRequested = requested
-        phase = Phase.SPEAKER_SETUP
+    private suspend fun saveVoiceReference(recording: java.io.File) {
+        var copy: java.io.File? = null
         try {
-            requested.await()
-            phase = Phase.LISTENING
-            voiceReference = recordAudioTurn(recorder)
-            recordingNotice = "声音参考已记录；不确定的说话者不会记成你的发言。"
+            withContext(Dispatchers.IO) {
+                val file = java.io.File.createTempFile("call-voice-reference-", ".wav", context.cacheDir)
+                copy = file
+                recording.copyTo(file, overwrite = true)
+            }
+            currentCoroutineContext().ensureActive()
+            voiceReference = checkNotNull(copy)
         } finally {
-            referenceRequested = null
-            isConfirmingVoice = false
+            if (copy !== voiceReference) copy?.delete()
         }
     }
 
@@ -426,7 +428,7 @@ class VoiceCallController(
                     pendingVisual = captured
                     cameraDelivery = "新画面已采集，等待发送"
                     // Do not queue an immediate visual reply behind TTS: leave time to speak.
-                    if ((phase == Phase.LISTENING && !isConfirmingVoice) || phase == Phase.MUTED) visualReady.trySend(Unit)
+                    if (phase == Phase.LISTENING || phase == Phase.MUTED) visualReady.trySend(Unit)
                 }
             },
             onError = { if (generation == cameraGeneration) { cameraWarning = it; disableCamera() } })
@@ -447,10 +449,6 @@ class VoiceCallController(
     }
 
     fun reportCameraError(message: String) { cameraWarning = message; disableCamera() }
-
-    fun recordMyVoice() {
-        if (phase == Phase.SPEAKER_SETUP) referenceRequested?.complete(Unit)
-    }
 
     fun reconfirmVoice() {
         if (!audioAnalysis || isConfirmingVoice || (phase != Phase.LISTENING && phase != Phase.MUTED)) return
@@ -530,7 +528,7 @@ class VoiceCallController(
     fun toggleMute() {
         if (!isConnected) return
         muted.value = !muted.value
-        if (muted.value && (phase == Phase.SPEAKER_SETUP || phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {
+        if (muted.value && (phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {
             turnJob?.cancel()
         }
     }

@@ -75,7 +75,6 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
     val status = when (phase) {
         VoiceCallController.Phase.CONNECTING -> R.string.voice_call_connecting
         VoiceCallController.Phase.RINGING -> R.string.voice_call_ringing
-        VoiceCallController.Phase.SPEAKER_SETUP -> R.string.voice_call_connecting
         VoiceCallController.Phase.LISTENING -> R.string.voice_call_listening
         VoiceCallController.Phase.RECOGNIZING -> R.string.voice_call_recognizing
         VoiceCallController.Phase.THINKING -> R.string.voice_call_thinking
@@ -134,13 +133,6 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                             if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                                 VoiceCallRuntime.enableCamera(context, video, interval)
                             } else cameraPermission.launch(Manifest.permission.CAMERA)
-                        }
-                        if (phase == VoiceCallController.Phase.SPEAKER_SETUP) {
-                            Text("先独自说一句，确认本次通话的声音。", textAlign = TextAlign.Center)
-                            Button(onClick = controller::recordMyVoice) { Text("开始确认我的声音") }
-                        }
-                        if (controller.isConfirmingVoice && listening) {
-                            Text("请独自说一句，停顿后完成。", color = colors.onSurfaceVariant)
                         }
                         if (controller.transcript.isNotBlank() || controller.reply.isNotBlank()) {
                             Surface(color = colors.surface.copy(alpha = .75f), shape = RoundedCornerShape(24.dp)) {

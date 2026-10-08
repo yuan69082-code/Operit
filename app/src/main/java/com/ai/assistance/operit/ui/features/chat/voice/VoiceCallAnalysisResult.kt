@@ -27,7 +27,7 @@ data class VoiceCallAnalysisResult(
 
     fun toContext(): String = buildString {
         append("[语音通话转写] 【原话】").append(userText)
-        append("\n【声源判断】与本次用户确认的声音参考进行比较，结果：").append(speakerMatch)
+        append("\n【声源判断】本次通话以首句可分离的声音作为暂定参考，结果：").append(speakerMatch)
         append("；依据：").append(speakerEvidence).append("。这不是声纹鉴权，判断仍可能出错。")
         append("\n【疑似听词】").append(uncertainWords)
         append("\n【声音】")
