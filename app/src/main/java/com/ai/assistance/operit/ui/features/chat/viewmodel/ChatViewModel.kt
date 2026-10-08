@@ -1531,7 +1531,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 started.cancel()
                 transientVisualId.get()?.let { id ->
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.IO) {
-                        com.ai.assistance.operit.util.MediaPoolManager.removeMedia(id)
+                        if (visualIsVideo) com.ai.assistance.operit.util.MediaPoolManager.removeMedia(id)
+                        else com.ai.assistance.operit.util.ImagePoolManager.removeImage(id)
                     }
                 }
             }

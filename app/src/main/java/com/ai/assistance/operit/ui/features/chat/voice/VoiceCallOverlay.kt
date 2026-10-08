@@ -26,6 +26,7 @@ import com.ai.assistance.operit.services.ServiceLifecycleOwner
 import com.ai.assistance.operit.ui.features.chat.components.CallPortrait
 import com.ai.assistance.operit.ui.features.chat.components.CallMicrophoneWave
 import com.ai.assistance.operit.ui.features.chat.components.VoiceCallCameraControls
+import com.ai.assistance.operit.ui.features.chat.components.VoiceCallCameraPreview
 import com.ai.assistance.operit.ui.floating.FloatingWindowTheme
 
 /** Only this window receives touches; the rest of the screen stays usable. */
@@ -38,7 +39,8 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
     private val params = WindowManager.LayoutParams(
         (280 * density).toInt().coerceAtMost(context.resources.displayMetrics.widthPixels),
         WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
         PixelFormat.TRANSLUCENT,
     ).apply { gravity = Gravity.TOP or Gravity.END; x = (12 * density).toInt(); y = (80 * density).toInt() }
 
@@ -70,7 +72,9 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                 }
                             }
                             if (!compact) {
-                                Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
+                                if (call.cameraEnabled) {
+                                    call.camera?.let { VoiceCallCameraPreview(it, Modifier.fillMaxWidth().height(260.dp)) }
+                                } else Box(Modifier.height(110.dp), contentAlignment = Alignment.Center) {
                                     CallPortrait(call.participantAvatarUri, call.participantName, call.phase == VoiceCallController.Phase.SPEAKING, small = true)
                                 }
                                 CallMicrophoneWave(if (call.phase == VoiceCallController.Phase.LISTENING) call.microphoneLevel else 0f)
@@ -82,7 +86,7 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                 if ((call.audioAnalysis || call.nativeAudio) && call.phase == VoiceCallController.Phase.LISTENING) {
                                     TextButton(onClick = call::sendRecordingNow) { Text("发送录音") }
                                 }
-                                VoiceCallCameraControls(call)
+                                VoiceCallCameraControls(call, showPreview = false)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     val muted by call.isMuted.collectAsState()
                                     IconButton(onClick = call::toggleMute) { Icon(if (muted) Icons.Default.MicOff else Icons.Default.Mic, "静音") }

@@ -66,8 +66,6 @@ class VoiceCallController(
     private var recentBackgroundContext = ""
     var cameraEnabled by mutableStateOf(false)
         private set
-    var cameraPreview by mutableStateOf<ByteArray?>(null)
-        private set
     var cameraWarning by mutableStateOf("")
         private set
     var supportsCameraImages by mutableStateOf(false)
@@ -78,7 +76,10 @@ class VoiceCallController(
         private set
     var cameraVideoMode by mutableStateOf(false)
         private set
-    private var camera: VoiceCallCamera? = null
+    var camera by mutableStateOf<VoiceCallCamera?>(null)
+        private set
+    var cameraDelivery by mutableStateOf("")
+        private set
     private var cameraGeneration = 0
     private data class Visual(val file: java.io.File, val video: Boolean)
     private var pendingVisual: Visual? = null
@@ -205,6 +206,7 @@ class VoiceCallController(
                                 visual = pendingVisual
                                 pendingVisual = null
                                 if (visualOnly && visual == null) return@launch
+                                if (visual != null) cameraDelivery = "正在向模型发送画面"
                                 // Sound observations belong to chat context, not the spoken-word caption.
                                 transcript = if (visualOnly || text.startsWith("[通话事件]")) "" else
                                     com.ai.assistance.operit.util.VoiceCallMessageText.forDisplay(text).removePrefix("[语音通话]").trim()
@@ -253,6 +255,7 @@ class VoiceCallController(
                                     val completed = ChatUtils.stripOpenAiResponsesProtocolMarkup(
                                         ChatUtils.removeThinkingContent(generation.await())
                                     ).trim()
+                                    if (visual != null) cameraDelivery = "模型请求已完成（${if (visual?.video == true) "视频" else "图片"}）"
                                     if (completed.endsWith("<voice_call_end/>")) finish()
                                 }
                             } catch (e: CancellationException) {
@@ -261,6 +264,7 @@ class VoiceCallController(
                                 AppLogger.e("VoiceCall", "Call turn failed", e)
                                 viewModel.cancelMessage(chatId)
                                 errorMessage = e.message.orEmpty()
+                                if (visual != null) cameraDelivery = "画面请求失败：${e.message.orEmpty()}"
                                 phase = Phase.ERROR
                             } finally {
                                 // Cancellation may arrive during synthesis or an STT network request.
@@ -351,16 +355,17 @@ class VoiceCallController(
         check(intervalSeconds == 10 || intervalSeconds == 30) { "请选择10秒或30秒" }
         disableCamera()
         cameraEnabled = true
+        cameraDelivery = "正在采集第一帧"
         cameraWarning = ""
         cameraVideoMode = video
         cameraIntervalSeconds = intervalSeconds
         val generation = cameraGeneration
         val capture = VoiceCallCamera(context, scope, video, intervalSeconds,
-            onPreview = { if (cameraEnabled && generation == cameraGeneration) cameraPreview = it },
             onMedia = { file, isVideo ->
                 if (!cameraEnabled || generation != cameraGeneration) file.delete() else {
                     pendingVisual?.file?.delete()
                     pendingVisual = Visual(file, isVideo)
+                    cameraDelivery = "新画面已采集，等待发送"
                     // Do not queue an immediate visual reply behind TTS: leave time to speak.
                     if ((phase == Phase.LISTENING && !isConfirmingVoice) || phase == Phase.MUTED) visualReady.trySend(Unit)
                 }
@@ -373,9 +378,9 @@ class VoiceCallController(
     fun disableCamera() {
         cameraGeneration++
         cameraEnabled = false
+        cameraDelivery = ""
         camera?.stop()
         camera = null
-        cameraPreview = null
         pendingVisual?.file?.delete()
         pendingVisual = null
         while (visualReady.tryReceive().isSuccess) { /* Drop old camera wake-ups. */ }

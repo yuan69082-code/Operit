@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -82,15 +83,23 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
         VoiceCallController.Phase.ERROR -> R.string.voice_call_error
         VoiceCallController.Phase.ENDED -> R.string.voice_call_ended
     }
-    val colors = MaterialTheme.colorScheme
+    val video = controller.cameraEnabled
+    val colors = if (video) darkColorScheme() else MaterialTheme.colorScheme
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        MaterialTheme(colorScheme = colors) {
         Surface(modifier = Modifier.fillMaxSize(), color = colors.surface) {
+            Box(Modifier.fillMaxSize()) {
+                if (video) {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
+                    controller.camera?.let { VoiceCallCameraPreview(it, Modifier.fillMaxSize()) }
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .45f), Color.Transparent, Color.Black.copy(alpha = .8f)))))
+                }
             Column(
                 Modifier.fillMaxSize()
-                    .background(Brush.verticalGradient(listOf(colors.primary.copy(alpha = .10f), colors.surface, colors.tertiary.copy(alpha = .08f))))
+                    .then(if (video) Modifier else Modifier.background(Brush.verticalGradient(listOf(colors.primary.copy(alpha = .10f), colors.surface, colors.tertiary.copy(alpha = .08f)))))
                     .windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -104,18 +113,21 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                     }
                 }
                 // Keep controls anchored even with long captions or a small display.
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = if (video) Alignment.BottomCenter else Alignment.Center) {
                     Column(
-                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 16.dp),
+                        Modifier.fillMaxWidth().then(if (video) Modifier.heightIn(max = 260.dp) else Modifier)
+                            .verticalScroll(rememberScrollState()).padding(vertical = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        CallPortrait(controller.participantAvatarUri, controller.participantName, speaking)
-                        Text(controller.participantName, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+                        if (!video) {
+                            CallPortrait(controller.participantAvatarUri, controller.participantName, speaking)
+                            Text(controller.participantName, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+                        }
                         Text(stringResource(status), color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.titleMedium)
                         CallMicrophoneWave(if (listening) controller.microphoneLevel else 0f)
-                        VoiceCallCameraControls(controller) { video, interval ->
+                        VoiceCallCameraControls(controller, showPreview = false) { video, interval ->
                             requestedVideo = video
                             requestedInterval = interval
                             if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -187,6 +199,8 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                         onClick = controller::interrupt)
                 }
             }
+            }
+        }
         }
     }
 }

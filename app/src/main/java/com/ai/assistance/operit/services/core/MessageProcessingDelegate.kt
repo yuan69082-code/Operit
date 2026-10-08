@@ -793,15 +793,21 @@ class MessageProcessingDelegate(
                         turnOptions.voiceCallVisualPath?.let { path ->
                             val video = turnOptions.voiceCallVisualIsVideo
                             check(if (video) enableDirectVideoProcessing else enableDirectImageProcessing) { "当前模型未启用对应的视觉输入能力" }
-                            val id = com.ai.assistance.operit.util.MediaPoolManager.addMedia(path, if (video) "video/mp4" else "image/jpeg")
+                            // Image links resolve through ImagePoolManager, not the audio/video pool.
+                            val id = if (video) com.ai.assistance.operit.util.MediaPoolManager.addMedia(path, "video/mp4")
+                                else com.ai.assistance.operit.util.ImagePoolManager.addImage(path)
                             check(id != "error") { "Could not retain call camera media" }
                             turnOptions.onVoiceCallVisualStored?.invoke(id)
+                            check(if (video) com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser.extractMediaLinks(
+                                com.ai.assistance.operit.api.chat.llmprovider.MediaLinkBuilder.video(context, id)).isNotEmpty()
+                            else com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser.extractImageLinks(
+                                com.ai.assistance.operit.api.chat.llmprovider.MediaLinkBuilder.image(context, id)).isNotEmpty()) { "无法读取待发送的通话画面" }
                             append("\n").append(if (video) com.ai.assistance.operit.api.chat.llmprovider.MediaLinkBuilder.video(context, id)
                                 else com.ai.assistance.operit.api.chat.llmprovider.MediaLinkBuilder.image(context, id))
                         }
                     }
                 } catch (error: Exception) {
-                    AppLogger.e(TAG, "Could not prepare native call audio", error)
+                    AppLogger.e(TAG, "Could not prepare call media", error)
                     val message = error.message.orEmpty()
                     withContext(Dispatchers.Main) { showErrorMessage(message) }
                     chatRuntime.isLoading.value = false

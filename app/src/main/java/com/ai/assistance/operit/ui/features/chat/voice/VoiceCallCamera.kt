@@ -11,19 +11,26 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Size
+import android.view.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.selects.onTimeout
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** A bounded camera feed: preview at most once per second, one pending media item per call. */
+/** Camera surfaces render continuously; JPEG/MP4 delivery has a separate sampling interval. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class VoiceCallCamera(
     private val context: Context,
     private val scope: CoroutineScope,
     private val video: Boolean,
     private val intervalSeconds: Int,
-    private val onPreview: (ByteArray) -> Unit,
     private val onMedia: (File, Boolean) -> Unit,
     private val onError: (String) -> Unit,
 ) {
@@ -36,7 +43,14 @@ class VoiceCallCamera(
     private var job: Job? = null
     @Volatile private var latestJpeg: ByteArray? = null
     @Volatile private var closed = false
-    private var rotation = 0
+    var rotation by mutableStateOf(0)
+        private set
+    var previewSize by mutableStateOf(Size(640, 480))
+        private set
+    private var previewSurface: Surface? = null
+    private val previewChanged = Channel<Unit>(Channel.CONFLATED)
+    private val retiredPreviews = mutableListOf<Pair<Surface, SurfaceTexture>>()
+    private val firstFrame = CompletableDeferred<ByteArray>()
     private var clip: File? = null
 
     @SuppressLint("MissingPermission") // Camera permission is checked before promoting the service.
@@ -53,6 +67,7 @@ class VoiceCallCamera(
                     .getOutputSizes(ImageFormat.YUV_420_888)
                 val size = sizes.filter { it.width <= 640 && it.height <= 480 }.maxByOrNull { it.width * it.height }
                     ?: sizes.minBy { it.width * it.height }
+                previewSize = size
                 val imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 2)
                 reader = imageReader
                 var lastPreview = 0L
@@ -68,7 +83,7 @@ class VoiceCallCamera(
                             lastPreview = now
                             val bytes = jpeg(image)
                             latestJpeg = bytes
-                            scope.launch { onPreview(bytes) }
+                            firstFrame.complete(bytes)
                         }
                     } catch (error: Exception) {
                         com.ai.assistance.operit.util.AppLogger.e("VoiceCallCamera", "Could not prepare camera frame", error)
@@ -99,16 +114,12 @@ class VoiceCallCamera(
                     while (isActive) recordClip(size, imageReader)
                 } else {
                     configure(listOf(imageReader.surface), CameraDevice.TEMPLATE_PREVIEW)
+                    sendFrame(firstFrame.await())
                     while (isActive) {
-                        delay(intervalSeconds * 1000L)
-                        val bytes = latestJpeg ?: continue
-                        val file = newFile(".jpg")
-                        var delivered = false
-                        try {
-                            withContext(Dispatchers.IO) { file.writeBytes(bytes) }
-                            onMedia(file, false)
-                            delivered = true
-                        } finally { if (!delivered) file.delete() }
+                        select<Unit> {
+                            previewChanged.onReceive { configure(listOf(imageReader.surface), CameraDevice.TEMPLATE_PREVIEW) }
+                            onTimeout(intervalSeconds * 1000L) { latestJpeg?.let { sendFrame(it) } }
+                        }
                     }
                 }
             } catch (error: CancellationException) {
@@ -122,8 +133,11 @@ class VoiceCallCamera(
 
     private suspend fun configure(surfaces: List<android.view.Surface>, template: Int) {
         val camera = checkNotNull(device)
+        val outputs = surfaces + listOfNotNull(previewSurface)
+        session?.close()
+        session = null
         val configured = suspendCancellableCoroutine<CameraCaptureSession> { continuation ->
-            camera.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
+            camera.createCaptureSession(outputs, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(value: CameraCaptureSession) {
                     if (continuation.isActive) {
                         continuation.invokeOnCancellation { value.close() }
@@ -137,7 +151,11 @@ class VoiceCallCamera(
             }, handler)
         }
         session = configured
-        val request = camera.createCaptureRequest(template).apply { surfaces.forEach { addTarget(it) } }
+        // Old view textures are retained until the camera no longer targets them.
+        val retired = retiredPreviews.filter { it.first !in outputs }
+        retired.forEach { (surface, texture) -> surface.release(); texture.release() }
+        retiredPreviews.removeAll(retired.toSet())
+        val request = camera.createCaptureRequest(template).apply { outputs.forEach { addTarget(it) } }
         configured.setRepeatingRequest(request.build(), null, handler)
     }
 
@@ -150,14 +168,17 @@ class VoiceCallCamera(
         mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
         mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
         mediaRecorder.setVideoSize(size.width, size.height)
-        mediaRecorder.setVideoFrameRate(15)
-        mediaRecorder.setVideoEncodingBitRate(600_000)
+        mediaRecorder.setVideoFrameRate(30)
+        mediaRecorder.setVideoEncodingBitRate(1_200_000)
         mediaRecorder.setOrientationHint(rotation)
         mediaRecorder.setOutputFile(file.absolutePath)
         mediaRecorder.prepare()
         configure(listOf(imageReader.surface, mediaRecorder.surface), CameraDevice.TEMPLATE_RECORD)
         mediaRecorder.start()
-        delay(intervalSeconds * 1000L)
+        select<Unit> {
+            onTimeout(intervalSeconds * 1000L) { }
+            previewChanged.onReceive { delay(1000) }
+        }
         session?.stopRepeating()
         session?.abortCaptures()
         session?.close()
@@ -172,6 +193,29 @@ class VoiceCallCamera(
     private fun newFile(extension: String): File {
         val directory = File(context.cacheDir, "call_camera").apply { mkdirs() }
         return File.createTempFile("camera-", extension, directory)
+    }
+
+    private suspend fun sendFrame(bytes: ByteArray) {
+        val file = newFile(".jpg")
+        var delivered = false
+        try {
+            withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+            onMedia(file, false)
+            delivered = true
+        } finally { if (!delivered) file.delete() }
+    }
+
+    fun attachPreview(surface: Surface) {
+        if (closed) { surface.release(); return }
+        previewSurface = surface
+        previewChanged.trySend(Unit)
+    }
+
+    fun detachPreview(surface: Surface, texture: SurfaceTexture) {
+        if (closed) { surface.release(); texture.release(); return }
+        if (previewSurface === surface) previewSurface = null
+        retiredPreviews.add(surface to texture)
+        previewChanged.trySend(Unit)
     }
 
     private fun jpeg(image: Image): ByteArray {
@@ -205,6 +249,9 @@ class VoiceCallCamera(
         closed = true
         session?.close(); session = null
         device?.close(); device = null
+        previewSurface?.release(); previewSurface = null
+        retiredPreviews.forEach { (surface, texture) -> surface.release(); texture.release() }
+        retiredPreviews.clear()
         recorder?.reset(); recorder?.release(); recorder = null
         reader?.close(); reader = null
         clip?.delete(); clip = null
