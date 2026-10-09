@@ -163,7 +163,7 @@ object CompanionRuntime {
             .put("memory", store.memoryContext(chatId))
         if (store.capabilitiesEnabled) request.put("capabilities", CompanionContext.permissions(context))
         val system = persona + """
-            
+
             你正在决定是否主动联系用户，这不是用户发言。根据历史和真实事件决定是否有值得主动说的话；没有则安静。
             这里提供最近聊天的文字节选，truncated 表示文本已截短。没有新的音频、画面或传感器数据，不要声称正在看或听用户。
             不要把无消息解释为危险，不要编造心率或身体数据，不因情绪词强迫用户回应。用户拒接后不要重复打。

@@ -5,7 +5,6 @@ import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,7 +43,8 @@ class StructuredToolCallBridgeHistoryTest {
             ),
             placeholder
         )
-        assertFalse(placeholder.contains("用户取消"))
+        // Missing tool output must explicitly distinguish itself from user cancellation.
+        assertTrue(placeholder.contains("这不是用户取消"))
         assertEquals("The second read was skipped.", messages.at(4).getString("content"))
         assertToolResultsFollowTheirCalls(messages)
     }
