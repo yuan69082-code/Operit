@@ -855,15 +855,20 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         performInsertSummary(message)
     }
 
+    private var insertSummaryJob: Job? = null
+    private var insertSummaryChatId: String? = null
+
     private fun performInsertSummary(message: ChatMessage) {
-        viewModelScope.launch {
+        if (insertSummaryJob?.isActive == true) return
+        val currentChatId = chatHistoryDelegate.currentChatId.value
+        if (currentChatId == null) {
+            uiStateDelegate.showToast(context.getString(R.string.chat_no_active_conversation))
+            return
+        }
+        insertSummaryChatId = currentChatId
+        insertSummaryJob = viewModelScope.launch {
             try {
-                // 获取当前会话ID并绑定
-                val currentChatId = chatHistoryDelegate.currentChatId.value
-                if (currentChatId == null) {
-                    uiStateDelegate.showToast(context.getString(R.string.chat_no_active_conversation))
-                    return@launch
-                }
+                val reviewRoleCardId = activePromptManager.resolveActiveCardIdForSend()
                 if (message.sender != "user" && message.sender != "ai") {
                     uiStateDelegate.showToast(context.getString(R.string.chat_no_messages_to_summarize))
                     return@launch
@@ -883,7 +888,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                             chatId = currentChatId,
                             beforeTimestampExclusive = afterTimestamp,
                             upToTimestampInclusive = beforeTimestamp,
-                        ).filter { it.sender == "user" || it.sender == "ai" }
+                        ).filter { it.sender == "user" || it.sender == "ai" }.map { it.copy() }
 
                 if (messagesToSummarize.isEmpty()) {
                     uiStateDelegate.showToast(context.getString(R.string.chat_no_messages_to_summarize))
@@ -912,7 +917,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     autoContinue = false,
                     isGroupChat = isGroupChat,
                     summaryConfig = summaryConfig,
-                    chatId = currentChatId
+                    chatId = currentChatId,
+                    roleCardId = reviewRoleCardId
                 )
 
                 if (summaryMessage != null) {
@@ -921,6 +927,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                         summaryMessage = summaryMessage,
                         beforeTimestamp = beforeTimestamp,
                         afterTimestamp = afterTimestamp,
+                        chatIdOverride = currentChatId,
+                        expectedSource = messagesToSummarize,
                     )
 
                     messageCoordinationDelegate.refreshStableContextWindow(chatId = currentChatId)
@@ -934,21 +942,16 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 messageProcessingDelegate.setInputProcessingStateForChat(currentChatId, InputProcessingState.Idle)
             } catch (e: CancellationException) {
                 AppLogger.d(TAG, "插入总结已取消")
-                val currentChatId = chatHistoryDelegate.currentChatId.value
-                if (currentChatId != null) {
-                    messageProcessingDelegate.setInputProcessingStateForChat(
-                        currentChatId,
-                        InputProcessingState.Idle
-                    )
-                }
+                throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "插入总结时发生错误", e)
                 uiStateDelegate.showToast(context.getString(R.string.chat_insert_summary_failed, e.message ?: ""))
-                // 发生错误时也需要清除状态
-                val currentChatId = chatHistoryDelegate.currentChatId.value
-                if (currentChatId != null) {
+            } finally {
+                if (messageProcessingDelegate.inputProcessingStateByChatId.value[currentChatId] is InputProcessingState.Summarizing) {
                     messageProcessingDelegate.setInputProcessingStateForChat(currentChatId, InputProcessingState.Idle)
                 }
+                insertSummaryChatId = null
+                insertSummaryJob = null
             }
         }
     }
@@ -1770,6 +1773,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     }
 
     fun cancelMessage(chatId: String) {
+        if (insertSummaryChatId == chatId) insertSummaryJob?.cancel()
         if (::messageCoordinationDelegate.isInitialized) {
             messageCoordinationDelegate.cancelSummaryForChat(chatId)
         }

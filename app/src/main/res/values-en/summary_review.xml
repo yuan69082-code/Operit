@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conversation_summary_draft_ready">Draft ready, awaiting AI review</string>
+    <string name="conversation_summary_reviewing">AI is checking the source and revising the summary…</string>
+    <string name="conversation_summary_reviewed">AI approved the summary. Saving…</string>
+    <string name="conversation_summary_source_changed">The source changed during review. Nothing was compressed; please try again.</string>
+</resources>

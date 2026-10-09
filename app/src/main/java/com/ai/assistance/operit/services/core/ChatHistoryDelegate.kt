@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1582,9 +1583,19 @@ class ChatHistoryDelegate(
         beforeTimestamp: Long?,
         afterTimestamp: Long?,
         chatIdOverride: String? = null,
+        expectedSource: List<ChatMessage>? = null,
     ) {
         historyUpdateMutex.withLock {
             val chatId = chatIdOverride ?: _currentChatId.value ?: return@withLock
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (expectedSource != null) {
+                val lastTimestamp = expectedSource.maxOfOrNull { it.timestamp }
+                    ?: error(context.getString(R.string.conversation_summary_source_changed))
+                val currentSource = chatHistoryManager.loadRuntimeChatMessagesUpTo(chatId, lastTimestamp)
+                check(com.ai.assistance.operit.core.chat.SummaryReview.sourceUnchanged(expectedSource, currentSource)) {
+                    context.getString(R.string.conversation_summary_source_changed)
+                }
+            }
             val isCurrentChat = chatId == _currentChatId.value
             val currentDisplayStartTimestamp = currentChatWindow.currentDisplayStartTimestamp()
             val currentDisplayEndTimestamp = currentChatWindow.currentDisplayEndTimestamp()

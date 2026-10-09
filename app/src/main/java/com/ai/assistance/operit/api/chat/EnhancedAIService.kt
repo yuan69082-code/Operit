@@ -2589,12 +2589,14 @@ class EnhancedAIService private constructor(private val context: Context) {
             previousSummary: String?,
             summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
             recordTokenUsage: Boolean = true,
+            awaitingReview: Boolean = false,
     ): String {
         return generateSummaryFromPromptTurns(
             messages.toPromptTurns(),
             previousSummary,
             summaryConfig,
             recordTokenUsage,
+            awaitingReview,
         )
     }
 
@@ -2603,6 +2605,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             previousSummary: String?,
             summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
             recordTokenUsage: Boolean = true,
+            awaitingReview: Boolean = false,
     ): String {
         // 调用ConversationService中的方法
         return conversationService.generateSummaryFromPromptTurns(
@@ -2611,6 +2614,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             multiServiceManager,
             summaryConfig,
             recordTokenUsage,
+            awaitingReview,
         )
     }
 

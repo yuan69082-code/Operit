@@ -1765,6 +1765,7 @@ class MessageCoordinationDelegate(
         if (snapshotMessages.isEmpty() || originalChatId == null) {
             return
         }
+        val reviewedSource = snapshotMessages.map { it.copy() }
 
         // 标记：有一次发送触发的异步总结正在进行
         _isSendTriggeredSummarizing.value = true
@@ -1788,11 +1789,14 @@ class MessageCoordinationDelegate(
                 val summaryConfig = readSummaryConfig()
                 val summaryMessage = AIMessageManager.summarizeMemory(
                     enhancedAiService = service,
-                    messages = snapshotMessages,
+                    messages = reviewedSource,
                     autoContinue = false,
                     isGroupChat = isGroupChat,
                     summaryConfig = summaryConfig,
-                    chatId = originalChatId
+                    chatId = originalChatId,
+                    roleCardId = roleCardId,
+                    chatModelConfigIdOverride = chatModelConfigIdOverride,
+                    chatModelIndexOverride = chatModelIndexOverride
                 ) ?: return@launch
 
                 val currentChatId = chatHistoryDelegate.currentChatId.value
@@ -1809,6 +1813,7 @@ class MessageCoordinationDelegate(
                     beforeTimestamp = beforeTimestamp,
                     afterTimestamp = afterTimestamp,
                     chatIdOverride = originalChatId,
+                    expectedSource = reviewedSource,
                 )
 
                 refreshStableContextWindow(
@@ -1822,6 +1827,7 @@ class MessageCoordinationDelegate(
                 throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Async summary during send failed: ${e.message}", e)
+                uiStateDelegate.showErrorMessage(context.getString(R.string.chat_summarize_generation_failed, e.message.orEmpty()))
             } finally {
                 _isSendTriggeredSummarizing.value = false
 
@@ -1899,7 +1905,7 @@ class MessageCoordinationDelegate(
             }
 
             val currentMessages =
-                currentChatId?.let { chatHistoryDelegate.getRuntimeChatHistory(it) }.orEmpty()
+                currentChatId?.let { chatHistoryDelegate.getRuntimeChatHistory(it) }.orEmpty().map { it.copy() }
             if (currentMessages.isEmpty()) {
                 AppLogger.d(TAG, "历史记录为空，无需总结")
                 return false
@@ -1920,7 +1926,10 @@ class MessageCoordinationDelegate(
                     autoContinue,
                     effectiveIsGroupChat,
                     summaryConfig,
-                    chatId = currentChatId
+                    chatId = currentChatId,
+                    roleCardId = resolveRoleCardId(currentChatId, roleCardIdOverride),
+                    chatModelConfigIdOverride = effectiveChatModelConfigIdOverride,
+                    chatModelIndexOverride = effectiveChatModelIndexOverride
                 )
 
             if (summaryMessage != null) {
@@ -1929,6 +1938,7 @@ class MessageCoordinationDelegate(
                     beforeTimestamp = beforeTimestamp,
                     afterTimestamp = afterTimestamp,
                     chatIdOverride = currentChatId,
+                    expectedSource = currentMessages,
                 )
 
                 refreshStableContextWindow(

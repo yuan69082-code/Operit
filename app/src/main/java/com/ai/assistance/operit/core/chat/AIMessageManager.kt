@@ -687,7 +687,10 @@ object AIMessageManager {
         autoContinue: Boolean = false,
         isGroupChat: Boolean = false,
         summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
-        chatId: String? = null
+        chatId: String? = null,
+        roleCardId: String? = null,
+        chatModelConfigIdOverride: String? = null,
+        chatModelIndexOverride: Int? = null
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null
@@ -1043,23 +1046,25 @@ object AIMessageManager {
 
         return try {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
-            val summary =
+            val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride)
+            val protectedMemory = chatId?.let {
+                com.ai.assistance.operit.core.companion.CompanionStore(context).memoryContext(it)
+            }.orEmpty()
+            val draft =
                 enhancedAiService.generateSummary(
-                    conversationToSummarize + listOfNotNull(chatId?.let {
-                        com.ai.assistance.operit.core.companion.CompanionStore(context).memoryContext(it)
-                            .takeIf { text -> text.isNotBlank() }?.let { text -> "user" to text }
-                    }),
+                    conversationToSummarize + listOfNotNull(protectedMemory.takeIf { it.isNotBlank() }?.let { "user" to it }),
                     previousSummary,
-                    summaryConfig
+                    summaryConfig,
+                    awaitingReview = true
                 )
-            AppLogger.d(TAG, "AI生成总结完成: ${summary.take(50)}...")
+            AppLogger.d(TAG, "AI生成压缩草稿完成，等待审阅")
 
-            if (summary.isBlank()) {
+            if (draft.isBlank()) {
                 AppLogger.e(TAG, "AI生成的总结内容为空，放弃本次总结")
                 null
             } else {
                 // 如果是自动续写，在总结消息尾部添加续写提示
-                val trimmedSummary = summary.trim()
+                val trimmedSummary = draft.trim()
                 val useEnglish = !LocaleUtils.usesChineseContent(context)
                 val packageWarmupBlock = buildPackageWarmupBlock(messagesToSummarize, useEnglish)
                 val summaryWithQuotes = buildString {
@@ -1085,10 +1090,22 @@ object AIMessageManager {
                     }
                 }.trimEnd()
 
+                com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                    com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
+                    0.85f,
+                    context.getString(R.string.conversation_summary_reviewing)
+                )
+                // Review the actual complete draft, including generated dialogue excerpts.
+                val reviewedSummary = reviewer.review(summaryWithQuotes, conversationToSummarize, previousSummary, protectedMemory)
+                com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                    com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
+                    0.98f,
+                    context.getString(R.string.conversation_summary_reviewed)
+                )
                 val finalSummary = if (autoContinue) {
-                    context.getString(R.string.ai_message_continue_task_if_complete, summaryWithQuotes)
+                    context.getString(R.string.ai_message_continue_task_if_complete, reviewedSummary)
                 } else {
-                    summaryWithQuotes
+                    reviewedSummary
                 }
                 
                 ChatMessage(

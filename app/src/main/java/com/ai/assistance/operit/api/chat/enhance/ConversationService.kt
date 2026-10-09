@@ -118,6 +118,7 @@ class ConversationService(
             multiServiceManager: MultiServiceManager,
             summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
             recordTokenUsage: Boolean = true,
+            awaitingReview: Boolean = false,
     ): String {
         try {
             val useEnglish = !LocaleUtils.usesChineseContent(context)
@@ -262,7 +263,7 @@ class ConversationService(
                     lastStageIndex += 1
                     ToolProgressBus.update(
                         ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
-                        next.progress,
+                        next.progress * if (awaitingReview) 0.8f else 1f,
                         next.message
                     )
                 }
@@ -285,8 +286,8 @@ class ConversationService(
 
             ToolProgressBus.update(
                 ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
-                1f,
-                context.getString(R.string.conversation_summary_completed)
+                if (awaitingReview) 0.8f else 1f,
+                context.getString(if (awaitingReview) R.string.conversation_summary_draft_ready else R.string.conversation_summary_completed)
             )
 
             // 获取完整的总结内容
@@ -320,9 +321,9 @@ class ConversationService(
                 )
             summaryContent = afterGenerateContext.summaryResult ?: summaryContent
 
-            // 如果内容为空，返回默认消息
+            // A placeholder must never be mistaken for a usable draft and replace real history.
             if (summaryContent.isBlank()) {
-                return "Conversation Summary: Unable to generate valid summary."
+                error(context.getString(R.string.chat_summarize_failed_no_valid_summary))
             }
 
             AppLogger.d(TAG, "总结生成使用了输入token: $inputTokens, 缓存token: $cachedInputTokens, 输出token: $outputTokens")

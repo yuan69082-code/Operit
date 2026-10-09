@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conversation_summary_draft_ready">压缩草稿已生成，等待 AI 审阅</string>
+    <string name="conversation_summary_reviewing">AI 正在对照原文审阅并修订摘要…</string>
+    <string name="conversation_summary_reviewed">AI 已确认摘要，正在保存</string>
+    <string name="conversation_summary_source_changed">审阅期间原对话有变动，本次未压缩，请重新尝试。</string>
+</resources>
