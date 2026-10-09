@@ -1,6 +1,12 @@
 name: Android Build
 
 on:
+  workflow_call:
+    inputs:
+      gradle_task:
+        required: false
+        default: assembleDebug
+        type: string
   workflow_dispatch:
     inputs:
       gradle_task:
@@ -46,7 +52,7 @@ on:
       - web-chat/**
 
 concurrency:
-  group: android-build-${{ github.event_name }}-${{ github.ref }}
+  group: android-build-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -64,6 +70,8 @@ env:
 jobs:
   build:
     name: Build Android artifacts
+    # Shared releases own push builds after the desktop rollout; manual builds remain available.
+    if: github.event_name != 'push' || github.workflow != 'Android Build'
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
@@ -234,7 +242,7 @@ jobs:
           set -euo pipefail
           case "$EVENT_NAME" in
             push) gradle_task=assembleDebug ;;
-            workflow_dispatch) gradle_task="$DISPATCH_GRADLE_TASK" ;;
+            workflow_dispatch|workflow_call) gradle_task="$DISPATCH_GRADLE_TASK" ;;
             *) echo "Unsupported workflow event: $EVENT_NAME" >&2; exit 2 ;;
           esac
           if [ "$gradle_task" = assembleDebug ]; then
@@ -260,6 +268,21 @@ jobs:
             }
           fi
 
+      - name: Verify shared release version
+        if: success() && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
+        shell: bash
+        run: |
+          if [ -f desktop/release.json ]; then
+            python3 - <<'PY'
+          import json, os
+          release = json.load(open("desktop/release.json"))
+          metadata = json.load(open("app/build/outputs/apk/debug/output-metadata.json"))
+          number = int(os.environ["GITHUB_RUN_NUMBER"])
+          assert metadata["elements"][0]["versionName"] == release["version"] + "+" + str(number)
+          assert metadata["elements"][0]["versionCode"] == release["android_version_base"] * 100000 + number
+          PY
+          fi
+
       - name: Upload Android reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -283,7 +306,7 @@ jobs:
           retention-days: 14
 
       - name: Publish personal in-app update
-        if: success() && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
+        if: success() && github.ref == 'refs/heads/main' && env.OPERIT_PERSONAL_BUILD_NUMBER != '' && hashFiles('desktop/release.json') == ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -302,3 +325,4 @@ jobs:
             --title "Operit 个人版 $version" \
             --notes-file "$notes" \
             --latest
+

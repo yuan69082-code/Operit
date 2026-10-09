@@ -410,16 +410,21 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 51
-        versionName = "1.12.2"
+        val sharedReleaseFile = rootProject.file("desktop/release.json")
+        val sharedRelease = if (sharedReleaseFile.isFile)
+            groovy.json.JsonSlurper().parse(sharedReleaseFile) as Map<*, *> else null
+        val releaseBase = if (sharedRelease != null) sharedRelease["version"] as String else "1.12.2"
+        val codeBase = if (sharedRelease != null) (sharedRelease["android_version_base"] as Number).toInt() else 51
+        versionCode = codeBase
+        versionName = releaseBase
 
         // CI personal updates share the same package/key and need a strictly newer version.
         val personalBuildNumber = providers.environmentVariable("OPERIT_PERSONAL_BUILD_NUMBER").orNull
         if (personalBuildNumber != null) {
             val buildNumber = personalBuildNumber.toInt()
             require(buildNumber in 1..99999) { "Personal build number is outside the version range" }
-            versionCode = 51 * 100000 + buildNumber
-            versionName = "1.12.2+$buildNumber"
+            versionCode = codeBase * 100000 + buildNumber
+            versionName = "$releaseBase+$buildNumber"
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -865,3 +870,4 @@ dependencies {
     implementation(libs.glance.appwidget)
     implementation(libs.glance.material3)
 }
+
