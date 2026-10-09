@@ -127,6 +127,8 @@ class VoiceCallController(
     private var continuousJob: Job? = null
     private val heardReady = Channel<Unit>(Channel.CONFLATED)
     private val pendingHeard = ArrayDeque<CallInput>()
+    private var heardTurnReady = false
+    private val speechTurnActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private var sessionJob: Job? = null
     private var turnJob: Job? = null
     private var speech: SpeechService? = null
@@ -251,6 +253,11 @@ class VoiceCallController(
                             onSkipped = { count -> withContext(Dispatchers.Main) {
                                 continuousWarning = "音频分析跟不上，已跳过 $count 个较旧片段，继续处理最近声音。"
                             } },
+                            onSpeechState = { active ->
+                                speechTurnActive.set(active)
+                                // A queued observation must wait while a new sentence is being spoken.
+                                if (!active) heardReady.trySend(Unit)
+                            },
                             onAnalysis = { analysis, clip -> withContext(Dispatchers.Main) {
                                 if (analysis.userText.isNotBlank() || analysis.soundActivity) {
                                     if (voiceReference == null && analysis.userText.isNotBlank() &&
@@ -266,7 +273,7 @@ class VoiceCallController(
                                     }
                                     val observed = analysis.toContext() +
                                         "\n【采集片段】通话第 ${clip.beginMillis} 至 ${clip.endMillis} 毫秒；" +
-                                        (if (clip.windowEnded) "窗口到时截止，声源可能仍在继续。" else "低音量分段或手动提交，不证明用户已经说完。")
+                                        (if (clip.windowEnded) "长发言的中间片段，尚未轮到回复。" else "检测到约2秒无语音，或仅声音观察到期、用户手动提交；这是候选轮次边界，不保证语义说完。")
                                     if (pendingHeard.size >= 8) {
                                         pendingHeard.removeFirst().recordings.forEach { it.delete() }
                                         continuousWarning = "回复处理跟不上，已略过较旧的声音观察，保留最近片段。"
@@ -276,6 +283,12 @@ class VoiceCallController(
                                         heard = true, observation = analysis.userText.isBlank(), caption = analysis.userText,
                                         recordings = if (path.isBlank()) emptyList() else listOf(java.io.File(path)),
                                     ))
+                                    // Intermediate long-speech chunks accumulate without waking the main model.
+                                    heardTurnReady = !clip.windowEnded
+                                }
+                                // The closing window can be all silence; it still releases earlier speech.
+                                if (!clip.windowEnded && pendingHeard.isNotEmpty()) {
+                                    heardTurnReady = true
                                     heardReady.trySend(Unit)
                                 }
                             } },
@@ -441,6 +454,8 @@ class VoiceCallController(
                         continuousJob = null
                         pendingHeard.forEach { it.recordings.forEach { file -> file.delete() } }
                         pendingHeard.clear()
+                        heardTurnReady = false
+                        speechTurnActive.set(false)
                         while (heardReady.tryReceive().isSuccess) { }
                         speech?.shutdown()
                         voice?.shutdown()
@@ -486,9 +501,10 @@ class VoiceCallController(
         val recordings: List<java.io.File> = emptyList())
 
     private fun takeHeardInput(): CallInput? {
-        if (pendingHeard.isEmpty() || muted.value) return null
+        if (pendingHeard.isEmpty() || muted.value || !heardTurnReady || speechTurnActive.get()) return null
         val clips = pendingHeard.toList()
         pendingHeard.clear()
+        heardTurnReady = false
         heardReady.tryReceive()
         val original = clips.map { it.caption }.filter { it.isNotBlank() }.joinToString(" ")
         val header = if (original.isBlank()) "[通话声音观察]" else "[语音通话转写] 【原话】$original"
@@ -499,10 +515,14 @@ class VoiceCallController(
 
     private suspend fun awaitCallInput(recorder: VoiceCallAudioRecorder, recognizer: SpeechService?): CallInput = coroutineScope {
         if (audioAnalysis) {
-            return@coroutineScope select {
-                heardReady.onReceive { checkNotNull(takeHeardInput()) }
-                typedReady.onReceive { checkNotNull(takeTypedInput()) }
-                visualReady.onReceive { CallInput(visualOnly = true) }
+            while (true) {
+                val input = select<CallInput?> {
+                    heardReady.onReceive { takeHeardInput() }
+                    typedReady.onReceive { takeTypedInput() }
+                    visualReady.onReceive { CallInput(visualOnly = true) }
+                }
+                if (input != null) return@coroutineScope input
+                // Null means the speaker is still talking or a stale wake-up was consumed.
             }
         }
         val recorded = async {
@@ -631,7 +651,7 @@ class VoiceCallController(
             check(recognizer.startRecognition(
                 continuousMode = false,
                 partialResults = true,
-                silenceDurationMs = 700,
+                silenceDurationMs = 2000,
             )) { context.getString(R.string.voice_call_stt_failed) }
             result.await()
         } finally {
@@ -651,6 +671,7 @@ class VoiceCallController(
         if (muted.value) {
             pendingHeard.forEach { it.recordings.forEach { file -> file.delete() } }
             pendingHeard.clear()
+            heardTurnReady = false
             while (heardReady.tryReceive().isSuccess) { }
         }
         if (muted.value && (phase == Phase.LISTENING || phase == Phase.RECOGNIZING)) {

@@ -7,6 +7,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.AudioManager
 import android.media.audiofx.AcousticEchoCanceler
+import com.ai.assistance.operit.api.speech.OnnxSileroVad
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -89,8 +90,8 @@ class VoiceCallAudioRecorder(private val context: Context) {
                         quietStartMillis = null
                     }
                     quietFrames = if (hasSound) 0 else quietFrames + 1
-                    // 700 ms end-of-phrase silence; avoid an extra 1.2 s before analysis.
-                    if (quietFrames >= 35 || pcm.size() >= rate * 2 * 12) break
+                    // A natural thinking pause must not terminate the user's sentence.
+                    if (quietFrames >= 100 || pcm.size() >= rate * 2 * 60) break
                 }
             }
             val data = pcm.toByteArray()
@@ -124,6 +125,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
         val windowEnded: Boolean,
         val playbackText: String,
         val inputEpoch: Int,
+        val speechTurn: Boolean,
     )
 
     /** One AudioRecord session stays alive while remote speech plays and analysis runs. */
@@ -135,6 +137,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
         shouldSubmit: () -> Boolean,
         onEcho: suspend (Boolean) -> Unit,
         onProgress: suspend (Float, Long, Boolean) -> Unit,
+        onSpeechState: suspend (Boolean) -> Unit,
         onClip: suspend (Clip) -> Unit,
     ): Unit = withContext(Dispatchers.IO) {
         val rate = 16000
@@ -145,6 +148,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
         val recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate,
             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate * 2))
         var echo: AcousticEchoCanceler? = null
+        var vad: OnnxSileroVad? = null
         try {
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -153,12 +157,18 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 echo?.setEnabled(true)
             }
             onEcho(echo?.enabled == true)
-            val frame = ShortArray(320)
+            val speechDetector = OnnxSileroVad(context, speechDurationMs = 64, silenceDurationMs = 0)
+            vad = speechDetector
+            val frame = ShortArray(512) // Silero requires 512 samples at 16 kHz.
+            val vadFrame = ShortArray(512)
+            var vadSamples = 0
+            var speechFrame = false
+            var speechTurnOpen = false
+            var nonSpeechSamples = 0L
             val pcm = ByteArrayOutputStream()
             val preRoll = ArrayDeque<ByteArray>()
             val quietIntervals = mutableListOf<Pair<Long, Long>>()
             var quietStart: Long? = null
-            var quietSamples = 0L
             var totalSamples = 0L
             var clipStartSamples = 0L
             var framesRead = 0
@@ -192,15 +202,33 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     preRoll.clear()
                     quietIntervals.clear()
                     quietStart = null
-                    quietSamples = 0L
                     remoteText = ""
+                    speechDetector.reset()
+                    vadSamples = 0
+                    speechFrame = false
+                    nonSpeechSamples = 0L
+                    if (speechTurnOpen) onSpeechState(false)
+                    speechTurnOpen = false
                     continue
                 }
+                // Accumulate exact VAD windows even if AudioRecord returns a short read.
+                for (i in 0 until count) {
+                    vadFrame[vadSamples++] = frame[i]
+                    if (vadSamples == vadFrame.size) {
+                        speechFrame = speechDetector.isSpeech(vadFrame)
+                        vadSamples = 0
+                    }
+                }
+                if (speechFrame) {
+                    if (!speechTurnOpen) onSpeechState(true)
+                    speechTurnOpen = true
+                    nonSpeechSamples = 0L
+                } else if (speechTurnOpen) nonSpeechSamples += count
                 val manualSubmit = shouldSubmit()
                 if (pcm.size() == 0) {
                     preRoll.addLast(bytes.array())
-                    if (preRoll.size > 15) preRoll.removeFirst()
-                    if (!hasSound && !manualSubmit) continue
+                    if (preRoll.size > 10) preRoll.removeFirst()
+                    if (!hasSound && !speechTurnOpen && !manualSubmit) continue
                     clipStartSamples = totalSamples - preRoll.sumOf { it.size / 2 }
                     preRoll.forEach { pcm.write(it) }
                     preRoll.clear()
@@ -214,9 +242,14 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     if (elapsed - start >= 120) quietIntervals.add(start to elapsed)
                     quietStart = null
                 }
-                quietSamples = if (hasSound) 0L else quietSamples + count
-                val windowEnded = pcm.size() >= rate * 2 * 3
-                if (windowEnded || quietSamples >= rate * 6 / 10 || manualSubmit) {
+                // Speech and non-word sounds have separate clocks. Breathing cannot reset
+                // the speech-pause timer, and a 3 s sound window cannot cut a sentence.
+                val speechFinished = speechTurnOpen && nonSpeechSamples >= rate * 2L
+                val soundWindowFinished = !speechTurnOpen && pcm.size() >= rate * 2 * 3
+                // Bound memory on exceptionally long speech; this chunk is not an end-of-turn.
+                val windowEnded = speechTurnOpen && pcm.size() >= rate * 2 * 30 &&
+                    !speechFinished && !manualSubmit
+                if (windowEnded || speechFinished || soundWindowFinished || manualSubmit) {
                     quietStart?.let { if (elapsed - it >= 120) quietIntervals.add(it to elapsed) }
                     val data = pcm.toByteArray()
                     val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
@@ -228,7 +261,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     try {
                         file.outputStream().use { it.write(header); it.write(data) }
                         onClip(Clip(file, quietIntervals.toList(), clipStartSamples * 1000 / rate,
-                            totalSamples * 1000 / rate, windowEnded, remoteText, epoch))
+                            totalSamples * 1000 / rate, windowEnded, remoteText, epoch, speechTurnOpen))
                     } catch (error: Throwable) {
                         file.delete()
                         throw error
@@ -236,16 +269,28 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     pcm.reset()
                     quietIntervals.clear()
                     quietStart = null
-                    quietSamples = 0L
                     remoteText = ""
+                    if (!windowEnded) {
+                        speechTurnOpen = false
+                        nonSpeechSamples = 0L
+                        speechFrame = false
+                        vadSamples = 0
+                        speechDetector.reset()
+                        onSpeechState(false)
+                    }
                 }
             }
         } finally {
             try {
                 if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
             } finally {
-                try { echo?.release() } finally {
-                    try { recorder.release() } finally { manager.mode = previousMode }
+                try { vad?.close() } finally {
+                    try { echo?.release() } finally {
+                        try { recorder.release() } finally {
+                            manager.mode = previousMode
+                            onSpeechState(false)
+                        }
+                    }
                 }
             }
         }
