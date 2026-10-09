@@ -6,6 +6,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -61,6 +62,15 @@ class SummaryReviewTest {
             SummaryReview.finalize("draft") { throw java.io.IOException("offline") }
             fail("Failure must be propagated")
         } catch (e: java.io.IOException) { assertEquals("offline", e.message) }
+    }
+
+    @Test fun stalledReviewerTimesOutWithoutReturningTheDraft() = runTest {
+        val result = async { runCatching { SummaryReview.finalize("draft") { awaitCancellation() } } }
+        runCurrent()
+        advanceTimeBy(120_001)
+        runCurrent()
+        assertTrue(result.await().isFailure)
+        assertTrue(result.await().exceptionOrNull()?.message.orEmpty().contains("审阅超时"))
     }
 
     @Test fun sourceCheckAllowsNewTurnsButRejectsChangesInsideReviewedHistory() {

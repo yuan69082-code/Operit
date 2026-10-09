@@ -3,13 +3,15 @@ package com.ai.assistance.operit.core.chat
 import com.ai.assistance.operit.data.model.ChatMessage
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /** No summary may leave this gate until the reviewer explicitly accepts a final text. */
 internal object SummaryReview {
     suspend fun finalize(draft: String, review: suspend (String) -> String): String {
         require(draft.isNotBlank()) { "压缩草稿为空，原上下文已保留。" }
-        val response = review(draft)
+        val response = withTimeoutOrNull(120_000) { review(draft) }
+            ?: error("AI 审阅超时，本次未压缩，原上下文已保留。")
         currentCoroutineContext().ensureActive()
         val result = JSONObject(response)
         return when (result.get("decision")) {

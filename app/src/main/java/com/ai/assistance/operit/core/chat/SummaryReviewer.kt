@@ -11,7 +11,6 @@ import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.util.ChatUtils
-import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -51,8 +50,7 @@ internal class SummaryReviewer private constructor(
                 无法可靠确认时返回 {"decision":"reject"}，软件会保留原上下文。
                 只返回一个 JSON 对象，不加代码围栏，不调用工具，不输出内部思考。
             """.trimIndent()
-            val output = withTimeout(120_000) {
-                service.callFunctionModel(
+            val output = service.callFunctionModel(
                     FunctionType.CHAT,
                     listOf(
                         PromptTurn(kind = PromptTurnKind.SYSTEM, content = persona + "\n\n" + instructions),
@@ -61,7 +59,6 @@ internal class SummaryReviewer private constructor(
                     chatModelConfigIdOverride = modelConfigId,
                     chatModelIndexOverride = modelIndex
                 )
-            }
             ChatUtils.removeThinkingContent(output).trim()
         } finally {
             EnhancedAIService.releaseChatInstance(serviceKey)
