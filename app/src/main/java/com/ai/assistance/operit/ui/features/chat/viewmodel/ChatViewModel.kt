@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.withContext
 import com.ai.assistance.operit.ui.floating.ui.pet.AvatarEmotionManager
 import com.ai.assistance.operit.api.voice.VoiceService
@@ -1494,6 +1495,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 activeStreamingChatIds.first { !it.contains(chatId) }
             }
             val response = kotlinx.coroutines.CompletableDeferred<String>()
+            // Stream callbacks run in the message service, whose lifetime exceeds a call turn.
+            // Own every text delivery here and join cancellation before the caller closes its queue.
+            val callTextJob = kotlinx.coroutines.Job(kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job])
+            val callTextScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.currentCoroutineContext() + callTextJob)
             val transientVisualId = java.util.concurrent.atomic.AtomicReference<String?>(null)
             messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Idle)
             // Subscribe before sending so even a very fast response cannot skip the busy event.
@@ -1523,7 +1528,18 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                         voiceCallContinuous = continuous,
                         voiceCallObservation = observation,
                         voiceCallEvent = text.startsWith("[通话事件]"),
-                        onVoiceCallText = onText,
+                        onVoiceCallText = { sentence ->
+                            if (callTextJob.isActive) {
+                                val delivery = callTextScope.async { onText(sentence) }
+                                try {
+                                    delivery.await()
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    // Ending this turn intentionally detaches its service callback.
+                                    // Cancellation originating in the still-live service must propagate.
+                                    if (callTextJob.isActive) throw cancelled
+                                }
+                            }
+                        },
                         onVoiceCallComplete = { response.complete(it) },
                     ),
                 )
@@ -1544,6 +1560,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     } finally { failure.cancel() }
                 }
             } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    callTextJob.cancelAndJoin()
+                }
                 started.cancel()
                 transientVisualId.get()?.let { id ->
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.IO) {
