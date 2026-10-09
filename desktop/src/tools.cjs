@@ -36,7 +36,7 @@ function createTools(root, logger = console) {
       if (name === 'pc_command') return powershell(args.command);
       if (name === 'pc_read_file') return files.readTextFile(args.path, 'utf8');
       if (name === 'pc_write_file') return files.writeTextFile(args.path, args.content, 'utf8');
-      if (name === 'pc_list_files') return files.listDirectory(args.path, { depth: 1 });
+      if (name === 'pc_list_files') return files.listDirectory(args.path, 1);
       if (name === 'pc_screen') {
         const result = await powershell("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[Windows.Forms.SystemInformation]::VirtualScreen; $i=New-Object Drawing.Bitmap $b.Width,$b.Height; $g=[Drawing.Graphics]::FromImage($i); try {$g.CopyFromScreen($b.X,$b.Y,0,0,$i.Size); $m=New-Object IO.MemoryStream; try {$i.Save($m,[Drawing.Imaging.ImageFormat]::Png); @{image=[Convert]::ToBase64String($m.ToArray()); origin_x=$b.X; origin_y=$b.Y; width=$b.Width; height=$b.Height} | ConvertTo-Json -Compress} finally {$m.Dispose()}} finally {$g.Dispose(); $i.Dispose()}");
         const capture = JSON.parse(result.stdout.trim());

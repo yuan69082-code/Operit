@@ -6,6 +6,7 @@ const path = require('node:path');
 const { Store } = require('../src/store.cjs');
 const { createSharedServer } = require('../src/server.cjs');
 const { generate } = require('../src/model.cjs');
+const { createTools } = require('../src/tools.cjs');
 
 function temporary(t) { const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'operit-shared-')); t.after(() => fs.rmSync(directory, { recursive: true, force: true })); return directory; }
 async function start(t, options = {}) {
@@ -76,6 +77,15 @@ test('provider error is visible and preserves the user turn without a fake AI an
 });
 
 function streamed(chunks) { return new Response(chunks.map(chunk => 'data: ' + JSON.stringify(chunk) + '\n\n').join('') + 'data: [DONE]\n\n'); }
+test('Windows file tools use the existing service argument contract', { skip: process.platform !== 'win32' }, async t => {
+  const directory = temporary(t), tools = createTools(directory);
+  await tools.execute('pc_write_file', { path: 'sample.txt', content: '真实文件内容' });
+  const read = await tools.execute('pc_read_file', { path: 'sample.txt' });
+  assert.equal(read.content, '真实文件内容');
+  const listing = await tools.execute('pc_list_files', { path: directory });
+  assert.equal(listing.depth, 1);
+  assert.equal(listing.items.some(item => item.name === 'sample.txt'), true);
+});
 test('model keeps persona and routes a real tool result into the following request', async () => {
   const requests = []; const calls = [];
   const responses = [
