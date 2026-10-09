@@ -61,6 +61,9 @@ jobs:
       gradle_task: assembleDebug
   publish:
     name: Publish both clients after checks
+    # GitHub's built-in token cannot publish targets with workflow changes relative to main.
+    # Development branches produce paired artifacts; main publishes the paired update.
+    if: github.ref == 'refs/heads/main'
     needs: [windows, android]
     runs-on: ubuntu-24.04
     steps:
