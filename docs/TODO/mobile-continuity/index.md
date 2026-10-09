@@ -1,7 +1,7 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
 branch: feat/mobile-continuity-release
-status: validating-android-release
+status: released-mobile-43-device-validation-pending
 ---
 
 # 手机端状态延续与主动交互
