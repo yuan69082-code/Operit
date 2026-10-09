@@ -70,6 +70,8 @@ env:
 jobs:
   build:
     name: Build Android artifacts
+    # Shared releases own push builds after the desktop rollout; manual builds remain available.
+    if: github.event_name != 'push' || github.workflow != 'Android Build'
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
@@ -267,7 +269,7 @@ jobs:
           fi
 
       - name: Verify shared release version
-        if: success()
+        if: success() && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
         shell: bash
         run: |
           if [ -f desktop/release.json ]; then

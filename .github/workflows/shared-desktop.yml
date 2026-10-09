@@ -3,7 +3,7 @@ name: Shared desktop preview
 on:
   workflow_dispatch:
   push:
-    branches: [feat/desktop-shared-chat]
+    branches: [main, feat/desktop-shared-chat]
     paths: [desktop/**, web-chat/**, app/**, .github/workflows/shared-desktop.yml, .github/workflows/android-build.yml]
 
 permissions:
