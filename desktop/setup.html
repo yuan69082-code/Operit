@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Operit · 共享服务</title>
+<style>body{font:16px/1.7 system-ui;background:#faf8f5;color:#302b2d;margin:0}main{max-width:720px;margin:40px auto;padding:24px}label{display:block;margin:16px 0}input,textarea{display:block;width:100%;box-sizing:border-box;padding:12px;border:1px solid #d8cbd1;border-radius:10px;background:#fffdf9;font:inherit}textarea{min-height:180px}button,a{font:inherit;color:#825268}button{padding:10px 20px;border:0;border-radius:10px;background:#f4dbe5;cursor:pointer}fieldset{border:1px solid #d8cbd1;border-radius:16px;margin:24px 0;padding:20px}input[type=checkbox]{display:inline;width:auto}#status{white-space:pre-wrap}code{overflow-wrap:anywhere}small{color:#756c70}</style>
+<main><h1>共享聊天服务</h1><p>手机与电脑连接这里，使用同一套会话。服务运行在这台电脑，电脑需要保持开机。</p>
+<label>连接 Token<input id="token" type="password" autocomplete="off"></label><button id="connect">读取配置</button>
+<fieldset><legend>模型和角色</legend>
+<label>完整模型接口地址<input id="endpoint" placeholder="https://你的接口/v1/chat/completions"></label>
+<label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="已有配置时，留空表示保持原Key"></label>
+<label>模型名称<input id="model"></label><label>角色名称<input id="name"></label>
+<label>原有系统提示词<textarea id="prompt" placeholder="将手机版正在使用的系统提示词迁移到这里"></textarea></label>
+<label><input id="tools" type="checkbox"> 允许模型使用这台电脑的屏幕、鼠标键盘、命令和文件工具</label>
+<button id="save">保存配置</button> <a href="/?shared=1">进入聊天</a></fieldset>
+<fieldset><legend>手机连接</legend><p id="addresses"></p><p>手机版设置 → 数据和权限 → 外部 HTTP 调用 → 共享聊天，填入上面的电脑地址。连接时使用同一个 Token。</p></fieldset>
+<fieldset><legend>迁移已有文字记录</legend><p>先在手机启用外部 HTTP 服务。这里显式导入文字记录，手机原记录保留；旧图片、附件和角色配置不包含在此次导入中。</p>
+<label>手机服务地址<input id="phoneUrl" placeholder="http://手机局域网IP:8094/"></label><label>手机服务 Token<input id="phoneToken" type="password"></label><button id="import">导入文字记录</button></fieldset>
+<fieldset><legend>双端更新</legend><p>共享版本发布后，这里提供同一批安卓包与 Windows 包。更新电脑程序时，会话数据保留在用户目录。</p><button id="updates">检查更新</button><div id="releases"></div></fieldset>
+<p id="status" role="status"></p></main>
+<script>
+const byId=id=>document.getElementById(id);
+const hash=new URLSearchParams(location.hash.slice(1));
+if(hash.has('token')){localStorage.setItem('operit-web-chat-token',hash.get('token'));history.replaceState(null,'',location.pathname);}
+byId('token').value=localStorage.getItem('operit-web-chat-token')||'';
+async function request(route,input){const response=await fetch(route,{method:input===undefined?'GET':'POST',headers:{Authorization:'Bearer '+byId('token').value,'Content-Type':'application/json'},body:input===undefined?undefined:JSON.stringify(input)});const data=await response.json();if(!response.ok)throw new Error(data.error);return data;}
+function show(error){byId('status').textContent=error instanceof Error?error.message:String(error);}
+async function load(){const data=await request('/api/shared/config');for(const key of ['endpoint','model','name','prompt'])byId(key).value=data[key];byId('tools').checked=data.tools;byId('addresses').textContent=data.connectionUrls.join('\n');localStorage.setItem('operit-web-chat-token',byId('token').value);show('已连接 · '+data.version);}
+byId('connect').onclick=()=>load().catch(show);
+byId('save').onclick=async()=>{try{const input={};for(const key of ['endpoint','apiKey','model','name','prompt'])input[key]=byId(key).value;input.tools=byId('tools').checked;await request('/api/shared/config',input);byId('apiKey').value='';show('已保存');}catch(error){show(error);}};
+byId('import').onclick=async()=>{byId('import').disabled=true;try{const data=await request('/api/shared/import-phone',{url:byId('phoneUrl').value,token:byId('phoneToken').value});show('已导入 '+data.imported+' 个文字会话');}catch(error){show(error);}finally{byId('import').disabled=false;}};
+byId('updates').onclick=async()=>{try{const data=await request('/api/shared/updates');const container=byId('releases');container.replaceChildren();if(!data.release){show('当前 '+data.current+'，尚无共享版本发布');return;}const p=document.createElement('p');p.textContent='当前 '+data.current+' · 可下载 '+data.release.version;container.append(p);for(const [name,url] of [['Windows包',data.release.windows],['安卓包',data.release.android]]){const a=document.createElement('a');a.textContent=name+' ';a.href=url;a.target='_blank';a.rel='noopener';container.append(a);}}catch(error){show(error);}};
+if(byId('token').value)load().catch(show);
+</script></html>

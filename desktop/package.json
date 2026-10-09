@@ -1,0 +1,1 @@
+{"name":"operit-shared-service","private":true,"version":"1.12.2-pc.1","scripts":{"start":"node src/launcher.cjs","test":"node --test test/*.test.cjs"},"engines":{"node":">=22"}}

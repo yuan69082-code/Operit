@@ -1,0 +1,9 @@
+<resources>
+    <string name="shared_chat_title">共享聊天</string>
+    <string name="shared_chat_description">连接电脑上的共享服务，手机与电脑使用同一套会话。原本的手机本地聊天保留。</string>
+    <string name="shared_chat_address">电脑服务地址，如 http://192.168.1.2:8095/</string>
+    <string name="shared_chat_open">打开共享聊天</string>
+    <string name="shared_chat_close">返回手机版</string>
+    <string name="shared_chat_invalid_address">请填写完整的 HTTP 或 HTTPS 地址</string>
+    <string name="shared_chat_connection_failed">无法连接共享服务，请确认电脑服务运行且网络可达</string>
+</resources>

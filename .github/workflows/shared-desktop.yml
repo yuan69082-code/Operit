@@ -1,0 +1,88 @@
+name: Shared desktop preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/desktop-shared-chat]
+    paths: [desktop/**, web-chat/**, app/**, .github/workflows/shared-desktop.yml, .github/workflows/android-build.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shared-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows shared chat and checks
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22'
+      - name: Check shared service
+        run: node --test desktop/test/shared.test.cjs
+      - name: Prepare WebChat
+        run: npm --prefix web-chat ci --no-audit --no-fund
+      - name: Check WebChat types
+        run: npm --prefix web-chat run typecheck
+      - name: Build WebChat
+        run: npm --prefix web-chat run build
+      - name: Package portable Windows client
+        shell: pwsh
+        run: |
+          $release = Get-Content desktop/release.json -Raw | ConvertFrom-Json
+          $version = "$($release.version)+$env:GITHUB_RUN_NUMBER"
+          New-Item -ItemType Directory -Force package/desktop, package/web-chat, package/runtime, package/examples/windows_control/resources/pc_agent/operit-pc-agent/src/services | Out-Null
+          Copy-Item desktop/* package/desktop -Recurse
+          Copy-Item web-chat/dist package/web-chat -Recurse
+          Copy-Item examples/windows_control/resources/pc_agent/operit-pc-agent/src/services/process-service.js package/examples/windows_control/resources/pc_agent/operit-pc-agent/src/services
+          Copy-Item examples/windows_control/resources/pc_agent/operit-pc-agent/src/services/file-service.js package/examples/windows_control/resources/pc_agent/operit-pc-agent/src/services
+          Copy-Item (Get-Command node).Source package/runtime/node.exe
+          Copy-Item LICENSE package/LICENSE
+          @{version=$version; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content package/desktop/build-version.json -Encoding utf8NoBOM
+          Compress-Archive -Path package/* -DestinationPath operit-windows.zip
+          $tag = "shared-v$version"
+          $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
+          @{version=$version; version_code=($release.android_version_base*100000+[int]$env:GITHUB_RUN_NUMBER); protocol=$release.protocol; channel=$release.channel; commit=$env:GITHUB_SHA; windows="$base/operit-windows.zip"; android="$base/app-debug.apk"} | ConvertTo-Json | Set-Content shared-release.json -Encoding utf8NoBOM
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: operit-windows-${{ github.run_number }}
+          path: |
+            operit-windows.zip
+            shared-release.json
+          if-no-files-found: error
+  android:
+    name: Same-commit Android client
+    uses: ./.github/workflows/android-build.yml
+    secrets: inherit
+    with:
+      gradle_task: assembleDebug
+  publish:
+    name: Publish both clients after checks
+    needs: [windows, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: operit-windows-${{ github.run_number }}
+          path: artifacts/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: operit-android-${{ github.run_number }}
+          path: artifacts/android
+      - name: Publish shared preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=$(find artifacts/android -name app-debug.apk -type f)
+          test -n "$apk"
+          cp "$apk" artifacts/windows/app-debug.apk
+          version=$(python3 -c 'import json;print(json.load(open("artifacts/windows/shared-release.json"))["version"])')
+          tag="shared-v$version"
+          notes="$RUNNER_TEMP/shared-preview.md"
+          printf 'Windows共享聊天预览 %s\n\n同一提交构建的Windows便携包和安卓客户端。解压Windows包后运行desktop/Start-Operit.cmd。配置模型后在手机版外部HTTP设置中打开共享聊天。\n\n原生手机本地会话保持独立；旧文字记录需显式导入。本预览尚未包含跨端通话、完整历史附件迁移或原生桌面安装器。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
+          gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Operit 双端预览 $version" --notes-file "$notes" --prerelease --latest=false
