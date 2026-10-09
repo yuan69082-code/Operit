@@ -14,7 +14,7 @@ on:
           - ':app:assembleClone'
           - ':app:bundleRelease'
   push:
-    branches: [main]
+    branches: [main, feat/mobile-continuity-release]
     paths:
       - .github/workflows/android-build.yml
       - .gitmodules
@@ -242,7 +242,7 @@ jobs:
             export OPERIT_PERSONAL_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
           fi
           chmod +x ./gradlew
-          ./gradlew "$gradle_task" --stacktrace --no-daemon
+          ./gradlew :app:testDebugUnitTest "$gradle_task" --stacktrace --no-daemon
 
       - name: Verify final Debug APK signing certificate
         if: success()
@@ -283,7 +283,7 @@ jobs:
           retention-days: 14
 
       - name: Publish personal in-app update
-        if: success() && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
+        if: success() && github.ref == 'refs/heads/main' && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

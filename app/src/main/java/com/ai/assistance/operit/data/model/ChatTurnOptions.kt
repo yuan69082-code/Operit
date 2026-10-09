@@ -16,6 +16,7 @@ data class ChatTurnOptions(
     val voiceCallTyped: Boolean = false,
     val voiceCallContinuous: Boolean = false,
     val voiceCallObservation: Boolean = false,
+    val voiceCallSilence: Boolean = false,
     val voiceCallEvent: Boolean = false,
     val voiceCallDecision: Boolean = false,
     // Transient delivery callback; never persisted as conversation data.

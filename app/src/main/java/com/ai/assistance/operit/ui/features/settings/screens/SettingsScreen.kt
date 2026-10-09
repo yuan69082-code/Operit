@@ -131,6 +131,7 @@ fun SettingsScreen(
                 }
 
                 // ======= 个性化配置 =======
+                CompanionSettingsButton()
                 SettingsSection(
                         title = stringResource(id = R.string.settings_section_personalization),
                         icon = Icons.Default.Person,

@@ -1123,7 +1123,9 @@ class MessageProcessingDelegate(
                     } else if (turnOptions.voiceCallDecision) {
                         "[运行状态：mode=voice_call，用户正在给你打电话，尚未接通，尚未收音或采集摄像头。是否接听、何时接听由你决定，不要求你接听。回复末尾输出恰好一个控制标记：接听 <voice_call_accept/>；拒接 <voice_call_reject/>；暂时等待 <voice_call_wait seconds=\"正整数秒数\"/>。拒接时可以在标记前简短说明原因，也可以只输出标记；等待后客户端会再次通知你决定，用户也可以取消。不要把等待或拒接当成已接通。确认接听后另一个接通事件会触发你说第一句话。这些控制标记仅供客户端处理，不复述给用户。]\n$requestMessageContent"
                     } else if (turnOptions.voiceCall) {
-                        val inputDescription = if (turnOptions.voiceCallObservation)
+                        val inputDescription = if (turnOptions.voiceCallSilence)
+                            "本轮是客户端静默检测回调，没有用户新发言或声音分析。你可主动接话或只输出 <voice_call_quiet/> 保持安静；不要朗读回调内容，不根据沉默猜测活动或健康。"
+                        else if (turnOptions.voiceCallObservation)
                             "本轮是麦克风持续采集的声音观察，没有可确认的用户原话，不是用户的文字消息。可以根据实际声音变化决定现在开口或继续听；若继续听，仅输出 <voice_call_quiet/>。不要凭声音补出没说过的话或猜具体活动。"
                         else if (turnOptions.voiceCallTyped)
                             "本轮输入来自用户在通话界面打字发送，输入来源为文字；这条消息不是用户开口说话，也不是语音转写，不能据此推断听到用户的声音、语气、音色或停顿。通话仍然保持，你继续用语音回答。用户打字不表示整段通话都没有声音，也不代表已挂断。"

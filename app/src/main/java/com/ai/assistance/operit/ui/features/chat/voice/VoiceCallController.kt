@@ -87,6 +87,11 @@ class VoiceCallController(
     private var activeVisual: Visual? = null
     private val visualReady = Channel<Unit>(Channel.CONFLATED)
     private val typedReady = Channel<Unit>(Channel.CONFLATED)
+    private val silenceReady = Channel<Unit>(Channel.CONFLATED)
+    private val companionOptions = com.ai.assistance.operit.core.companion.CompanionStore(context)
+    private var lastSoundAt = android.os.SystemClock.elapsedRealtime()
+    private var silenceJob: Job? = null
+    private var silenceTurnActive = false
     private val pendingTyped = ArrayDeque<String>()
     var typedDraft by mutableStateOf("")
         private set
@@ -224,6 +229,19 @@ class VoiceCallController(
                 check(speaker.initialize()) { context.getString(R.string.voice_call_tts_failed) }
                 val profiles = SpeechServiceProfilesPreferences(context)
                 val cleanerRegexs = profiles.getCurrentTtsProfile().cleanerRegexs
+                silenceJob = launch {
+                    while (isActive) {
+                        delay(1000)
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (!companionOptions.silenceEnabled || muted.value || phase != Phase.LISTENING ||
+                            speechTurnActive.get() || pendingHeard.isNotEmpty() || pendingTyped.isNotEmpty()) {
+                            lastSoundAt = now
+                            silenceReady.tryReceive()
+                        } else if (now - lastSoundAt >= companionOptions.silenceSeconds * 1000L) {
+                            silenceReady.trySend(Unit)
+                        }
+                    }
+                }
                 if (audioAnalysis) {
                     continuousJob = launch {
                         try {
@@ -246,6 +264,7 @@ class VoiceCallController(
                                 continuousWarning = if (enabled) "" else "设备未提供可控回声消除，扬声器声音可能被再次录入；建议使用耳机。"
                             } },
                             onProgress = { rms, elapsed, sound -> withContext(Dispatchers.Main) {
+                                if (rms >= .004f) lastSoundAt = android.os.SystemClock.elapsedRealtime()
                                 microphoneLevel = (rms * 30f).coerceIn(0f, 1f)
                                 recordingMillis = elapsed
                                 soundDetected = sound
@@ -256,11 +275,16 @@ class VoiceCallController(
                             onInvalidAnalysis = { withContext(Dispatchers.Main) {
                                 continuousWarning = "有一段声音分析结果不完整，未发送给AI；通话继续收音。"
                             } },
-                            onSpeechState = { active ->
+                            onSpeechState = { active -> withContext(Dispatchers.Main) {
                                 speechTurnActive.set(active)
+                                // A real utterance supersedes an in-flight silence response.
+                                if (active && silenceTurnActive && phase == Phase.THINKING) {
+                                    viewModel.cancelMessage(chatId)
+                                    turnJob?.cancel()
+                                }
                                 // A queued observation must wait while a new sentence is being spoken.
                                 if (!active) heardReady.trySend(Unit)
-                            },
+                            } },
                             onAnalysis = { analysis, clip -> withContext(Dispatchers.Main) {
                                 if (analysis.userText.isNotBlank() || analysis.soundActivity) {
                                     if (voiceReference == null && analysis.userText.isNotBlank() &&
@@ -328,6 +352,7 @@ class VoiceCallController(
                             var audioFile: java.io.File? = null
                             var visual: Visual? = null
                             var visualOnly = false
+                            var sentTurn = false
                             try {
                                 phase = if (muted.value) Phase.MUTED else Phase.LISTENING
                                 transcript = ""
@@ -339,6 +364,7 @@ class VoiceCallController(
                                     takeTypedInput() ?: takeHeardInput() ?: if (muted.value) CallInput(visualOnly = true) else awaitCallInput(recorder, recognizer)
                                 }
                                 visualOnly = input?.visualOnly == true
+                                silenceTurnActive = input?.silence == true
                                 val text = if (greetIncoming) {
                                     greetIncoming = false
                                     if (incoming) "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
@@ -348,6 +374,8 @@ class VoiceCallController(
                                 } else if (input?.typed == true) {
                                     // Typed words have no audio observations and never establish a voice reference.
                                     "[语音通话打字]\n${input.text}"
+                                } else if (input?.silence == true) {
+                                    input.text
                                 } else if (input?.heard == true) {
                                     input.text
                                 } else if (nativeAudio) {
@@ -355,13 +383,14 @@ class VoiceCallController(
                                     context.getString(R.string.voice_call_audio_sent)
                                 } else input?.text.orEmpty()
                                 if (text.isBlank()) return@launch
+                                sentTurn = true
                                 visual = pendingVisual ?: if (!visualOnly) latestVisual else null
                                 pendingVisual = null
                                 if (visualOnly && visual == null) return@launch
                                 activeVisual = visual
                                 if (visual != null) cameraDelivery = "正在向模型发送画面"
                                 // Sound observations belong to chat context, not the spoken-word caption.
-                                transcript = if (input?.heard == true) input.caption else if (visualOnly || text.startsWith("[通话事件]")) "" else
+                                transcript = if (input?.heard == true) input.caption else if (input?.silence == true || visualOnly || text.startsWith("[通话事件]")) "" else
                                     com.ai.assistance.operit.util.VoiceCallMessageText.forDisplay(text).removePrefix("[语音通话]").trim()
                                 reply = ""
                                 phase = Phase.THINKING
@@ -372,7 +401,7 @@ class VoiceCallController(
                                         try {
                                             viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis && input?.typed != true,
                                                 visual?.file?.absolutePath, visual?.video == true, visualOnly, typed = input?.typed == true,
-                                                continuous = audioAnalysis, observation = input?.observation == true) { sentence ->
+                                                continuous = audioAnalysis, observation = input?.observation == true, silence = input?.silence == true) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
@@ -435,6 +464,9 @@ class VoiceCallController(
                                     if (!audioAnalysis) audioFile?.delete()
                                     if (visual !== latestVisual) visual?.file?.delete()
                                     activeVisual = null
+                                    silenceTurnActive = false
+                                    // Blank STT results must not restart the silence timer forever.
+                                    if (sentTurn) lastSoundAt = android.os.SystemClock.elapsedRealtime()
                                 }
                             }
                         }
@@ -454,6 +486,9 @@ class VoiceCallController(
                         voice?.stop()
                     } finally {
                         continuousJob?.cancelAndJoin()
+                        silenceJob?.cancelAndJoin()
+                        silenceJob = null
+                        while (silenceReady.tryReceive().isSuccess) { }
                         continuousJob = null
                         pendingHeard.forEach { it.recordings.forEach { file -> file.delete() } }
                         pendingHeard.clear()
@@ -500,8 +535,18 @@ class VoiceCallController(
     }
 
     private data class CallInput(val audio: java.io.File? = null, val text: String = "", val visualOnly: Boolean = false,
-        val typed: Boolean = false, val heard: Boolean = false, val observation: Boolean = false, val caption: String = "",
+        val typed: Boolean = false, val heard: Boolean = false, val observation: Boolean = false, val caption: String = "", val silence: Boolean = false,
         val recordings: List<java.io.File> = emptyList())
+
+    private fun takeSilenceInput(): CallInput? {
+        val elapsed = android.os.SystemClock.elapsedRealtime() - lastSoundAt
+        if (!companionOptions.silenceEnabled || muted.value || !isConnected || phase != Phase.LISTENING ||
+            speechTurnActive.get() || pendingHeard.isNotEmpty() || pendingTyped.isNotEmpty() ||
+            elapsed < companionOptions.silenceSeconds * 1000L) return null
+        lastSoundAt = android.os.SystemClock.elapsedRealtime()
+        return CallInput(text = "[通话静默] 约 ${elapsed / 1000} 秒未检测到新的说话活动；用户并未发送消息。你可以自然接话，或仅输出 <voice_call_quiet/> 继续陪伴。不要推断沉默的原因。",
+            silence = true, observation = true)
+    }
 
     private fun takeHeardInput(): CallInput? {
         if (pendingHeard.isEmpty() || muted.value || !heardTurnReady || speechTurnActive.get()) return null
@@ -522,6 +567,7 @@ class VoiceCallController(
                 val input = select<CallInput?> {
                     heardReady.onReceive { takeHeardInput() }
                     typedReady.onReceive { takeTypedInput() }
+                    silenceReady.onReceive { takeSilenceInput() }
                     visualReady.onReceive { CallInput(visualOnly = true) }
                 }
                 if (input != null) return@coroutineScope input
@@ -532,22 +578,31 @@ class VoiceCallController(
             if (nativeAudio) CallInput(audio = recordAudioTurn(recorder))
             else CallInput(text = recognizeTurn(checkNotNull(recognizer)))
         }
-        select {
-            recorded.onAwait { it }
-            typedReady.onReceive {
-                // Sending text stops this listening attempt, never the call or an AI reply.
-                recorded.cancelAndJoin()
-                checkNotNull(takeTypedInput())
-            }
-            visualReady.onReceive {
-                // Never discard a phrase already being spoken just to send a scheduled frame.
-                if (soundDetected || pendingVisual == null || !cameraEnabled) recorded.await()
-                else {
+        var input: CallInput? = null
+        while (input == null) {
+            input = select<CallInput?> {
+                recorded.onAwait { it }
+                silenceReady.onReceive {
+                    val silent = takeSilenceInput()
+                    if (silent != null) recorded.cancelAndJoin()
+                    silent
+                }
+                typedReady.onReceive {
+                    // Sending text stops this listening attempt, never the call or an AI reply.
                     recorded.cancelAndJoin()
-                    CallInput(visualOnly = true)
+                    checkNotNull(takeTypedInput())
+                }
+                visualReady.onReceive {
+                    // Never discard a phrase already being spoken just to send a scheduled frame.
+                    if (soundDetected || pendingVisual == null || !cameraEnabled) recorded.await()
+                    else {
+                        recorded.cancelAndJoin()
+                        CallInput(visualOnly = true)
+                    }
                 }
             }
         }
+        input
     }
 
     fun enableCamera(video: Boolean, intervalSeconds: Int) {
@@ -613,6 +668,7 @@ class VoiceCallController(
                 microphoneLevel = (rms * 20f).coerceIn(0f, 1f)
                 recordingMillis = elapsedMillis
                 soundDetected = detected
+                if (rms >= .012f) lastSoundAt = android.os.SystemClock.elapsedRealtime()
             }
         },
         shouldSubmit = { submitRecording.get() },
@@ -630,6 +686,7 @@ class VoiceCallController(
             recognizer.volumeLevelFlow.collect {
                 microphoneLevel = it.coerceIn(0f, 1f)
                 if (it > .12f) soundDetected = true
+                if (it > .12f) lastSoundAt = android.os.SystemClock.elapsedRealtime()
             }
         }
         // Ignore the replayed result from the previous turn; subscribe before starting recording.

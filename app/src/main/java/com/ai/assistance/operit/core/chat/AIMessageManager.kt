@@ -686,7 +686,8 @@ object AIMessageManager {
         messages: List<ChatMessage>,
         autoContinue: Boolean = false,
         isGroupChat: Boolean = false,
-        summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig()
+        summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
+        chatId: String? = null
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null
@@ -1044,7 +1045,10 @@ object AIMessageManager {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
             val summary =
                 enhancedAiService.generateSummary(
-                    conversationToSummarize,
+                    conversationToSummarize + listOfNotNull(chatId?.let {
+                        com.ai.assistance.operit.core.companion.CompanionStore(context).memoryContext(it)
+                            .takeIf { text -> text.isNotBlank() }?.let { text -> "user" to text }
+                    }),
                     previousSummary,
                     summaryConfig
                 )

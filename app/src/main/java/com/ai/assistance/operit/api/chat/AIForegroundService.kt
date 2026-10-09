@@ -469,7 +469,7 @@ class AIForegroundService : Service() {
                     DisplayPreferencesManager.getInstance(appContext).enableBackgroundKeepAlive.first()
                 }
             }.getOrDefault(false)
-            if (!keepAliveEnabled && !isRunning.get()) {
+            if (!keepAliveEnabled && !com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled && !isRunning.get()) {
                 return
             }
             val intent = Intent(appContext, AIForegroundService::class.java).apply {
@@ -532,7 +532,8 @@ class AIForegroundService : Service() {
                     config.enabled && ExternalHttpApiPreferences.isValidPort(config.port)
                 }
             }.getOrDefault(false)
-            return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled
+            return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
+                com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled
         }
     }
 
@@ -924,7 +925,8 @@ class AIForegroundService : Service() {
     private fun stopSelfIfIdle(ignoreAppForeground: Boolean = false) {
         val alwaysListeningEnabled = wakeListeningEnabled || isAlwaysListeningEnabledNow()
         val externalHttpEnabled = externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
-        if (isAiBusy || alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled) {
+        if (isAiBusy || alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
+            com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled) {
             return
         }
         if (!ignoreAppForeground && ActivityLifecycleManager.getCurrentActivity() != null) {
@@ -964,6 +966,9 @@ class AIForegroundService : Service() {
         observeRuntimeTaskViewPreference()
         observeBackgroundKeepAlivePreference()
         observeChatRuntimeStats()
+        serviceScope.launch {
+            com.ai.assistance.operit.core.companion.CompanionRuntime.run(applicationContext)
+        }
         startWakeMonitoring()
         startExternalHttpMonitoring()
         AppLogger.d(TAG, "AI 前台服务已启动。")
@@ -1285,7 +1290,8 @@ class AIForegroundService : Service() {
                 if (!isAiBusy &&
                     !alwaysListeningEnabled &&
                     !backgroundKeepAliveEnabled &&
-                    !externalHttpEnabled
+                    !externalHttpEnabled &&
+                    !com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled
                 ) {
                     AppLogger.d(TAG, "服务进入空闲且无持久后台职责，停止前台服务并移除通知")
                     stopSelfIfIdle(ignoreAppForeground = true)

@@ -668,11 +668,13 @@ class EnhancedAIService private constructor(private val context: Context) {
         functionType: FunctionType,
         turns: List<PromptTurn>,
         enableThinking: Boolean = false,
-        recordTokenUsage: Boolean = true
+        recordTokenUsage: Boolean = true,
+        chatModelConfigIdOverride: String? = null,
+        chatModelIndexOverride: Int? = null
     ): String {
         ensureInitialized()
-        val serviceForFunction = getAIServiceForFunction(functionType)
-        val modelParameters = getModelParametersForFunction(functionType)
+        val serviceForFunction = getAIServiceForFunction(functionType, chatModelConfigIdOverride, chatModelIndexOverride)
+        val modelParameters = getModelParametersForFunction(functionType, chatModelConfigIdOverride, chatModelIndexOverride)
         val output = StringBuilder()
 
         serviceForFunction
@@ -1012,7 +1014,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                                     isSubTask,
                                     functionType,
                                     modelSnapshot.config,
-                                    memorySpaceIdOverride
+                                    memorySpaceIdOverride,
+                                    recordCompanionSnapshot = true
                             )
                     val tAfterPrepareHistory = messageTimingNow()
                     AppLogger.d(TAG, "sendMessage本地耗时: prepareConversationHistory=${tAfterPrepareHistory - startTime}ms")
@@ -2678,7 +2681,8 @@ class EnhancedAIService private constructor(private val context: Context) {
             dispatchSystemPromptComposeHooks: (PromptHookContext) -> PromptHookContext =
                 PromptHookRegistry::dispatchSystemPromptComposeHooks,
             dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext =
-                PromptHookRegistry::dispatchToolPromptComposeHooks
+                PromptHookRegistry::dispatchToolPromptComposeHooks,
+            recordCompanionSnapshot: Boolean = false
     ): List<PromptTurn> {
         // Check if backend image recognition service is configured (for intent-based vision)
         // For subtasks, always disable backend image recognition (only support OCR)
@@ -2720,7 +2724,9 @@ class EnhancedAIService private constructor(private val context: Context) {
                 dispatchSystemPromptComposeHooks,
                 dispatchToolPromptComposeHooks,
                 // Keep internal subtask and functional requests on their existing technical prompts.
-                includeConversationIdentity = !isSubTask && functionType == FunctionType.CHAT
+                includeConversationIdentity = !isSubTask && functionType == FunctionType.CHAT,
+                recordCompanionSnapshot = recordCompanionSnapshot,
+                companionModelLabel = "${config.apiProviderType}: ${config.modelName}"
         )
     }
 

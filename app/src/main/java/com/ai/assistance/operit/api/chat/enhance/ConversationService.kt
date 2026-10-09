@@ -470,7 +470,9 @@ class ConversationService(
             dispatchHistoryHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchPromptHistoryHooks,
             dispatchSystemPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchSystemPromptComposeHooks,
             dispatchToolPromptComposeHooks: (PromptHookContext) -> PromptHookContext = PromptHookRegistry::dispatchToolPromptComposeHooks,
-            includeConversationIdentity: Boolean = true
+            includeConversationIdentity: Boolean = true,
+            recordCompanionSnapshot: Boolean = false,
+            companionModelLabel: String = ""
     ): List<PromptTurn> {
         val activePromptMetadata = buildActivePromptHookMetadata(context, chatId, roleCardId)
         val beforeContext =
@@ -607,6 +609,24 @@ class ConversationService(
                 val finalSystemPrompt = buildString {
                     append(avatarMoodRulesText)
                     append(systemPrompt)
+                    if (includeConversationIdentity && chatId != null) {
+                        append(com.ai.assistance.operit.core.companion.CompanionContext.compose(
+                            context, chatId, effectiveRoleCardId,
+                            org.json.JSONObject().put("tools_enabled", enableTools)
+                                .put("model", companionModelLabel)
+                                .put("direct_audio", chatModelHasDirectAudio)
+                                .put("direct_image", chatModelHasDirectImage)
+                                .put("direct_video", chatModelHasDirectVideo)
+                                .put("audio_recognition", hasAudioRecognition)
+                                .put("image_recognition", hasImageRecognition)
+                                .put("video_recognition", hasVideoRecognition)
+                                .put("tool_visibility", org.json.JSONObject(roleCardToolAccess.effectiveBuiltinToolVisibility))
+                                .put("allowed_packages", org.json.JSONArray(roleCardToolAccess.allowedPackageNames.sorted()))
+                                .put("allowed_skills", org.json.JSONArray(roleCardToolAccess.allowedSkillNames.sorted()))
+                                .put("allowed_mcp_servers", org.json.JSONArray(roleCardToolAccess.allowedMcpServerNames.sorted())),
+                            recordSnapshot = recordCompanionSnapshot
+                        ))
+                    }
                     if (proxyRolePrompt.isNotEmpty()) {
                         append("\n\n<assistant_role source=\"proxy_character_card\">\n")
                         append(proxyRolePrompt)

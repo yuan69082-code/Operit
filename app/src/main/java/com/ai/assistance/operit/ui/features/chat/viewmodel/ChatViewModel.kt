@@ -911,7 +911,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     messagesToSummarize,
                     autoContinue = false,
                     isGroupChat = isGroupChat,
-                    summaryConfig = summaryConfig
+                    summaryConfig = summaryConfig,
+                    chatId = currentChatId
                 )
 
                 if (summaryMessage != null) {
@@ -1488,7 +1489,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     }
 
     /** Uses the normal chat pipeline, including the current role, tools and persisted history. */
-    suspend fun sendVoiceCallTurn(text: String, chatId: String, audioPath: String?, roleCardId: String?, audioAnalyzed: Boolean = false, visualPath: String? = null, visualIsVideo: Boolean = false, visualOnly: Boolean = false, decision: Boolean = false, typed: Boolean = false, continuous: Boolean = false, observation: Boolean = false, onText: suspend (String) -> Unit): String =
+    suspend fun sendVoiceCallTurn(text: String, chatId: String, audioPath: String?, roleCardId: String?, audioAnalyzed: Boolean = false, visualPath: String? = null, visualIsVideo: Boolean = false, visualOnly: Boolean = false, decision: Boolean = false, typed: Boolean = false, continuous: Boolean = false, observation: Boolean = false, silence: Boolean = false, onText: suspend (String) -> Unit): String =
         kotlinx.coroutines.coroutineScope {
             // Finish UI persistence before sending again, while the call may already capture speech.
             kotlinx.coroutines.withTimeout(180_000) {
@@ -1527,6 +1528,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                         voiceCallTyped = typed,
                         voiceCallContinuous = continuous,
                         voiceCallObservation = observation,
+                        voiceCallSilence = silence,
                         voiceCallEvent = text.startsWith("[通话事件]"),
                         onVoiceCallText = { sentence ->
                             if (callTextJob.isActive) {

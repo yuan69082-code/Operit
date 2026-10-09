@@ -34,6 +34,7 @@ import org.json.JSONObject
  * @param context Application context for tools that need it
  */
 fun registerAllTools(handler: AIToolHandler, context: Context) {
+    com.ai.assistance.operit.core.companion.CompanionTools.register(handler, context)
 
     // Helper function to wrap UI tool execution with visibility changes
     suspend fun executeUiToolWithVisibility(

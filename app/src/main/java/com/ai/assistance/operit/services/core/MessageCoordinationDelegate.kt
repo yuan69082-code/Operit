@@ -336,6 +336,7 @@ class MessageCoordinationDelegate(
         preferActiveRoleCard: Boolean = false,
     ) {
         // 仅在没有指定 chatId 的情况下，才需要确保有当前对话
+        com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()
         if (chatIdOverride.isNullOrBlank() && chatHistoryDelegate.currentChatId.value == null) {
             AppLogger.d(TAG, "当前没有活跃对话，自动创建新对话")
 
@@ -1790,7 +1791,8 @@ class MessageCoordinationDelegate(
                     messages = snapshotMessages,
                     autoContinue = false,
                     isGroupChat = isGroupChat,
-                    summaryConfig = summaryConfig
+                    summaryConfig = summaryConfig,
+                    chatId = originalChatId
                 ) ?: return@launch
 
                 val currentChatId = chatHistoryDelegate.currentChatId.value
@@ -1917,7 +1919,8 @@ class MessageCoordinationDelegate(
                     currentMessages,
                     autoContinue,
                     effectiveIsGroupChat,
-                    summaryConfig
+                    summaryConfig,
+                    chatId = currentChatId
                 )
 
             if (summaryMessage != null) {
