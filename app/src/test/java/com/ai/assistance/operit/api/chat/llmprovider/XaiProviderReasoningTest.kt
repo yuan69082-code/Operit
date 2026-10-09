@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class XaiProviderReasoningTest {
+    @get:org.junit.Rule val appLog = com.ai.assistance.operit.util.JvmAppLogRule()
     private fun mapping(model: String) = ThinkingQualityMappingRegistry.resolve(
         ApiProviderType.XAI.name, model, ModelThinkingConfigDefaults.forProvider(ApiProviderType.XAI.name)
     )

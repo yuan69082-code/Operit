@@ -102,9 +102,13 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
             val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
             chatId = core.currentChatId.value
             val current = chatId ?: return@LaunchedEffect
-            val known = withContext(Dispatchers.IO) { store.read("conversation:$current") }
-            roleId = if (known.has("role_id")) known.optString("role_id").takeIf { it.isNotBlank() }
-                else (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id
+            // The visible selector is authoritative even before this role's first message.
+            // Using the previous turn's receipt here could bind XC to the wrong role after a switch.
+            roleId = (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id
+            if (roleId == null) {
+                error = "请先选择单个角色，再管理对应的 XC 和资料库。"
+                return@LaunchedEffect
+            }
             identity = store.scope(current, roleId)
             roleLabel = roleId?.let { com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context).getCharacterCard(it)?.name }
                 ?: "当前会话（未绑定角色卡）"

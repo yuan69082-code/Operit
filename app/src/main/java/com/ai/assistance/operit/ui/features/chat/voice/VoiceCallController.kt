@@ -233,12 +233,16 @@ class VoiceCallController(
                     while (isActive) {
                         delay(1000)
                         val now = android.os.SystemClock.elapsedRealtime()
-                        if (!companionOptions.silenceEnabled || muted.value || phase != Phase.LISTENING ||
-                            speechTurnActive.get() || pendingHeard.isNotEmpty() || pendingTyped.isNotEmpty()) {
+                        if (VoiceCallSilencePolicy.resetsClock(phase, companionOptions.silenceEnabled, muted.value,
+                            speechTurnActive.get() || pendingHeard.any { !it.observation } || pendingTyped.isNotEmpty())) {
                             lastSoundAt = now
                             silenceReady.tryReceive()
-                        } else if (now - lastSoundAt >= companionOptions.silenceSeconds * 1000L) {
+                        } else if (phase == Phase.LISTENING && now - lastSoundAt >= companionOptions.silenceSeconds * 1000L) {
                             silenceReady.trySend(Unit)
+                        } else {
+                            // Empty STT requests may enter RECOGNIZING repeatedly without any speech.
+                            // Waiting for that HTTP result must not erase time already spent in silence.
+                            silenceReady.tryReceive()
                         }
                     }
                 }
@@ -264,7 +268,7 @@ class VoiceCallController(
                                 continuousWarning = if (enabled) "" else "设备未提供可控回声消除，扬声器声音可能被再次录入；建议使用耳机。"
                             } },
                             onProgress = { rms, elapsed, sound -> withContext(Dispatchers.Main) {
-                                if (rms >= .004f) lastSoundAt = android.os.SystemClock.elapsedRealtime()
+                                // Speech VAD owns this clock in continuous mode; a fan/background sound is not user speech.
                                 microphoneLevel = (rms * 30f).coerceIn(0f, 1f)
                                 recordingMillis = elapsed
                                 soundDetected = sound
@@ -353,6 +357,8 @@ class VoiceCallController(
                             var visual: Visual? = null
                             var visualOnly = false
                             var sentTurn = false
+                            var observationOnly = false
+                            var hasSpokenReply = false
                             try {
                                 phase = if (muted.value) Phase.MUTED else Phase.LISTENING
                                 transcript = ""
@@ -365,6 +371,7 @@ class VoiceCallController(
                                 }
                                 visualOnly = input?.visualOnly == true
                                 silenceTurnActive = input?.silence == true
+                                observationOnly = input?.observation == true
                                 val text = if (greetIncoming) {
                                     greetIncoming = false
                                     if (incoming) "[通话事件] 用户已接听你主动发起的电话，现在已经接通。请先对用户开口，不复述事件说明。"
@@ -411,6 +418,7 @@ class VoiceCallController(
                                                     )
                                                 )
                                                 if (cleaned.isNotBlank()) {
+                                                    hasSpokenReply = true
                                                     val queued = (speaker as? QueuedVoiceService)?.enqueueSpeech(cleaned) {
                                                         withContext(Dispatchers.Main) {
                                                             if (phase != Phase.ENDED && phase != Phase.ERROR) {
@@ -466,7 +474,7 @@ class VoiceCallController(
                                     activeVisual = null
                                     silenceTurnActive = false
                                     // Blank STT results must not restart the silence timer forever.
-                                    if (sentTurn) lastSoundAt = android.os.SystemClock.elapsedRealtime()
+                                    if (sentTurn && (!observationOnly || hasSpokenReply)) lastSoundAt = android.os.SystemClock.elapsedRealtime()
                                 }
                             }
                         }

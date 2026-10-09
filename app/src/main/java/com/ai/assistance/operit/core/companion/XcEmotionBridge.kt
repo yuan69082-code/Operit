@@ -110,10 +110,7 @@ object XcEmotionBridge {
             val plugin = binding.getString("plugin")
             val response = call(context, plugin, "xinchao_context", mapOf(
                 "session_id" to sessionId(chatId, scope), "mode" to "turn", "max_tokens" to 2200))
-            val snapshot = response.optJSONObject("structuredContent") ?: error("XC 状态接口缺少结构化内容。")
-            check(snapshot.optString("system") == "xinchao-dynamic-mind" && snapshot.optBoolean("delivered") &&
-                snapshot.optString("additionalContext").isNotBlank()) { "XC 未交付有效的状态上下文。" }
-            check(snapshot.toString().length <= 100_000) { "XC 状态返回过大。" }
+            val snapshot = decodeSnapshot(response)
             currentCoroutineContext().ensureActive()
             // Disabling/rebinding during a request must take effect before injection and caching.
             val current = authorize(context, chatId, roleId)
@@ -127,6 +124,14 @@ object XcEmotionBridge {
             }
             snapshot
         }
+    }
+
+    internal fun decodeSnapshot(response: JSONObject): JSONObject {
+        val snapshot = response.optJSONObject("structuredContent") ?: error("XC 状态接口缺少结构化内容。")
+        check(snapshot.optString("system") == "xinchao-dynamic-mind" && snapshot.optBoolean("delivered") &&
+            snapshot.optString("additionalContext").isNotBlank()) { "XC 未交付有效的状态上下文。" }
+        check(snapshot.toString().length <= 100_000) { "XC 状态返回过大。" }
+        return snapshot
     }
 
     /** Idempotent event IDs are supplied by the AI and must be reused for a retry. */

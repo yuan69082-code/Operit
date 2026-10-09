@@ -290,12 +290,13 @@ class AIForegroundService : Service() {
             characterName: String?,
             rawReplyContent: String?,
             avatarUri: String?,
-            notifyReplyOverride: Boolean? = null
+            notifyReplyOverride: Boolean? = null,
+            notifyWhileForeground: Boolean = false
         ) {
             try {
                 AppLogger.d(TAG, "检查是否需要发送会话完成通知: chatId=$chatId")
 
-                if (ActivityLifecycleManager.getCurrentActivity() != null) {
+                if (!notifyWhileForeground && ActivityLifecycleManager.getCurrentActivity() != null) {
                     AppLogger.d(TAG, "应用在前台，无需发送会话完成通知")
                     return
                 }

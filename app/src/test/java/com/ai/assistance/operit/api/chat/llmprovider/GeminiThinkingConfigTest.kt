@@ -12,6 +12,7 @@ import org.junit.Test
 import org.json.JSONObject
 
 class GeminiThinkingConfigTest {
+    @get:org.junit.Rule val appLog = com.ai.assistance.operit.util.JvmAppLogRule()
     private val thinkingConfigurations =
         ModelThinkingConfigDefaults.forProvider(ApiProviderType.GOOGLE.name)
 

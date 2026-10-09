@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.data.stats
 
 import com.ai.assistance.operit.data.model.ApiProviderType
+import com.ai.assistance.operit.data.model.FunctionType
 
 internal data class ReleasedProviderModelKey(
     val storedProviderModel: String,
@@ -11,6 +12,7 @@ internal data class ReleasedProviderModelKey(
 /** Decodes released `provider:model` keys stored as `provider_model`. */
 internal object ReleasedProviderModelKeyDecoder {
     private val builtInProviderAliases = ApiProviderType.entries.associate { it.name to it.name }
+    private val legacyFunctionKeys = FunctionType.entries.mapTo(mutableSetOf()) { it.name } + "FILE_BINDING"
 
     fun decode(
         encoded: String,
@@ -45,10 +47,13 @@ internal object ReleasedProviderModelKeyDecoder {
     fun decodeOrNull(
         encoded: String,
         additionalProviderAliases: Map<String, String> = emptyMap(),
-    ): ReleasedProviderModelKey? =
-        try {
+    ): ReleasedProviderModelKey? {
+        // Old function-only counters contain no provider/model identity, even if their name has an underscore.
+        if (encoded in legacyFunctionKeys) return null
+        return try {
             decode(encoded, additionalProviderAliases)
         } catch (_: IllegalArgumentException) {
             null
         }
+    }
 }

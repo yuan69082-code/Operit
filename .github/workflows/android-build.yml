@@ -296,6 +296,7 @@ jobs:
           tag="v$version"
           notes="$RUNNER_TEMP/personal-update-notes.md"
           printf '个人版更新 %s\n\n沿用固定个人签名，可覆盖第 12 版及后续个人版，保留应用数据。\n请下载 app-debug.apk，或在已接入个人更新源的应用内更新。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
+          cat docs/TODO/mobile-continuity/release-notes.md >> "$notes"
           gh release create "$tag" "$apk" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \

@@ -15,6 +15,7 @@ import org.junit.Test
  * opened by the message right before its run. See issue #1027.
  */
 class StructuredToolCallBridgeHistoryTest {
+    @get:org.junit.Rule val appLog = com.ai.assistance.operit.util.JvmAppLogRule()
 
     @Test
     fun `unanswered calls are closed before the trailing tool result text`() {

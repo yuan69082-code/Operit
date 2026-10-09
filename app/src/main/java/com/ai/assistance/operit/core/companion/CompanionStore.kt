@@ -3,7 +3,7 @@ package com.ai.assistance.operit.core.companion
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.AtomicFile
+import androidx.core.util.AtomicFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File

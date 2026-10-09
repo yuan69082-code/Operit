@@ -195,10 +195,15 @@ object CompanionRuntime {
             when (action) {
                 "message" -> {
                     core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = name, content = text), chatId)
-                    AIForegroundService.notifyReplyCompleted(context, chatId, name, text, null, true)
+                    AIForegroundService.notifyReplyCompleted(context, chatId, name, text, null,
+                        notifyReplyOverride = true, notifyWhileForeground = true)
                 }
                 "call" -> {
                     if (!canCall) return
+                    // Tool permissions can change while the model is deciding.
+                    val currentAccess = com.ai.assistance.operit.data.preferences.CharacterCardToolAccessResolver.getInstance(context)
+                        .resolve(roleCardId = roleId, packageManager = packages, globalToolVisibility = api.toolPromptVisibilityFlow.first())
+                    if (!api.enableToolsFlow.first() || !currentAccess.isBuiltinToolAllowed("request_voice_call")) return
                     // Do not repeatedly ring after a rejection/timeout without a new user turn.
                     val previousCallerTurn = store.read("contact:$chatId").optLong("last_call_user_turn", Long.MIN_VALUE)
                     if (previousCallerTurn == latestUserTurn) return
