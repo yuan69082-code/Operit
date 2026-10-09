@@ -40,6 +40,7 @@ jobs:
           Copy-Item examples/windows_control/resources/pc_agent/operit-pc-agent/src/services/process-service.js package/examples/windows_control/resources/pc_agent/operit-pc-agent/src/services
           Copy-Item examples/windows_control/resources/pc_agent/operit-pc-agent/src/services/file-service.js package/examples/windows_control/resources/pc_agent/operit-pc-agent/src/services
           Copy-Item (Get-Command node).Source package/runtime/node.exe
+          Copy-Item (Join-Path (Split-Path (Get-Command node).Source) 'LICENSE') package/runtime/LICENSE
           Copy-Item LICENSE package/LICENSE
           @{version=$version; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content package/desktop/build-version.json -Encoding utf8NoBOM
           Compress-Archive -Path package/* -DestinationPath operit-windows.zip
