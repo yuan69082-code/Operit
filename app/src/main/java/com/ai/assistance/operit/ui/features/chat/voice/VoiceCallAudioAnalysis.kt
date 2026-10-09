@@ -28,7 +28,10 @@ import javax.net.ssl.SSLException
 
 /** One audio request per captured window, never changes the conversational model or persona. */
 class VoiceCallAudioAnalysis(context: Context) {
-    class AnalysisFailure(message: String) : IllegalStateException(message)
+    open class AnalysisFailure(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
+    class InvalidAnalysisResult(cause: Exception) : AnalysisFailure(
+        "音频分析没有返回完整的说话者和声音信息。", cause,
+    )
     private val prefs = VoiceCallAnalysisPreferences(context)
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS).callTimeout(60, TimeUnit.SECONDS).build()
@@ -126,7 +129,8 @@ class VoiceCallAudioAnalysis(context: Context) {
                 try {
                     VoiceCallAnalysisResult.parse(text.toString())
                 } catch (error: Exception) {
-                    throw AnalysisFailure("音频分析没有返回完整的说话者和声音信息，")
+                    // Preserve the exact parser failure; this is a rejected window, not a recorder failure.
+                    throw InvalidAnalysisResult(error)
                 }
             }
         } catch (error: SocketTimeoutException) {

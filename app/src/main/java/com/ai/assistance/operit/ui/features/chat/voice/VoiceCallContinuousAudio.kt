@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.voice
 
 import android.content.Context
+import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -21,6 +22,7 @@ class VoiceCallContinuousAudio(
     private val onProgress: suspend (Float, Long, Boolean) -> Unit,
     private val onSpeechState: suspend (Boolean) -> Unit,
     private val onSkipped: suspend (Int) -> Unit,
+    private val onInvalidAnalysis: suspend () -> Unit,
     private val onAnalysis: suspend (VoiceCallAnalysisResult, VoiceCallAudioRecorder.Clip) -> Unit,
 ) {
     suspend fun run(): Unit = coroutineScope {
@@ -60,8 +62,17 @@ class VoiceCallContinuousAudio(
                     if (isMuted() || clip.inputEpoch != inputEpoch()) continue
                     val count = skipped.getAndSet(0)
                     if (count > 0) onSkipped(count)
-                    val analysis = analyzer.analyze(clip.file, reference, clip.quietIntervals,
-                        continuous = true, playbackText = clip.playbackText)
+                    val analysis = try {
+                        analyzer.analyze(clip.file, reference, clip.quietIntervals,
+                            continuous = true, playbackText = clip.playbackText)
+                    } catch (error: VoiceCallAudioAnalysis.InvalidAnalysisResult) {
+                        currentCoroutineContext().ensureActive()
+                        AppLogger.e("VoiceCall", "Rejected incomplete audio analysis window", error)
+                        // Reject only this result. Letting it escape cancels live capture and playback.
+                        // Never invent missing speaker/sound fields or deliver partial text to the model.
+                        if (!isMuted() && clip.inputEpoch == inputEpoch()) onInvalidAnalysis()
+                        continue
+                    }
                     currentCoroutineContext().ensureActive()
                     if (!isMuted() && clip.inputEpoch == inputEpoch()) onAnalysis(analysis, clip)
                 } finally {

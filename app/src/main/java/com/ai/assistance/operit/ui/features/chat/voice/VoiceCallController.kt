@@ -253,6 +253,9 @@ class VoiceCallController(
                             onSkipped = { count -> withContext(Dispatchers.Main) {
                                 continuousWarning = "音频分析跟不上，已跳过 $count 个较旧片段，继续处理最近声音。"
                             } },
+                            onInvalidAnalysis = { withContext(Dispatchers.Main) {
+                                continuousWarning = "有一段声音分析结果不完整，未发送给AI；通话继续收音。"
+                            } },
                             onSpeechState = { active ->
                                 speechTurnActive.set(active)
                                 // A queued observation must wait while a new sentence is being spoken.
