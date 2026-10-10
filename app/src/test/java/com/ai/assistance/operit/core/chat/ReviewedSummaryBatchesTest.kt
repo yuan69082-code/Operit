@@ -47,6 +47,20 @@ class ReviewedSummaryBatchesTest {
         assertEquals(1, drafts); assertEquals(1, reviews)
     }
 
+    @Test fun cacheProbeWaitsForAnOngoingReviewButNeverTreatsDraftAsApproved() = runTest {
+        val key = UUID.randomUUID().toString()
+        assertNull(ReviewedSummaryBatches.approved(key))
+        val decision = CompletableDeferred<String>()
+        val preparation = async { ReviewedSummaryBatches.resolve(key, { "draft" }, { decision.await() }, { _, _, _ -> }) }
+        runCurrent()
+        val probe = async { ReviewedSummaryBatches.approved(key) }
+        runCurrent()
+        assertFalse(probe.isCompleted)
+        decision.complete("reviewed")
+        preparation.await()
+        assertEquals("reviewed", probe.await())
+    }
+
     @Test fun failedReviewRetainsDraftButNeverReturnsItAsApproved() = runTest {
         val key = UUID.randomUUID().toString()
         var drafts = 0

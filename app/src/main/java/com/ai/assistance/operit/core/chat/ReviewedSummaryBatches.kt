@@ -15,6 +15,11 @@ internal object ReviewedSummaryBatches {
     }
     private val locks = Array(32) { Mutex() }
 
+    suspend fun approved(key: String): String? =
+        locks[(key.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
+            synchronized(cache) { cache[key]?.approved }
+        }
+
     fun fingerprint(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 

@@ -692,7 +692,8 @@ object AIMessageManager {
         chatModelConfigIdOverride: String? = null,
         chatModelIndexOverride: Int? = null,
         summaryProgress: Boolean = true,
-        batchLabel: String = ""
+        batchLabel: String = "",
+        cachedOnly: Boolean = false
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null
@@ -709,8 +710,37 @@ object AIMessageManager {
         }
 
         val batches = ReviewedSummaryBatches.plan(messagesToSummarize)
-        if (batches.size > 1) {
+        if (batches.size > 1 && batchLabel.isEmpty()) {
             var approved = previousSummary?.let { ChatMessage(sender = "summary", content = it) }
+            if (summaryProgress) {
+                // Reuse completed preparation, then process the remaining tail in one request.
+                // Splitting a cold foreground request into many serial reviews would make it slower.
+                var reused = 0
+                for ((index, batch) in batches.withIndex()) {
+                    val cached = summarizeMemory(
+                        enhancedAiService, listOfNotNull(approved) + batch,
+                        isGroupChat = isGroupChat, summaryConfig = summaryConfig, chatId = chatId,
+                        roleCardId = roleCardId, chatModelConfigIdOverride = chatModelConfigIdOverride,
+                        chatModelIndexOverride = chatModelIndexOverride, summaryProgress = false,
+                        batchLabel = "${index + 1}/${batches.size}", cachedOnly = true
+                    ) ?: break
+                    approved = cached
+                    reused++
+                }
+                if (reused == batches.size) {
+                    val result = requireNotNull(approved)
+                    return if (autoContinue) result.copy(content = context.getString(
+                        R.string.ai_message_continue_task_if_complete, result.content)) else result
+                }
+                return summarizeMemory(
+                    enhancedAiService, listOfNotNull(approved) + batches.drop(reused).flatten(),
+                    autoContinue = autoContinue, isGroupChat = isGroupChat,
+                    summaryConfig = summaryConfig, chatId = chatId, roleCardId = roleCardId,
+                    chatModelConfigIdOverride = chatModelConfigIdOverride,
+                    chatModelIndexOverride = chatModelIndexOverride, summaryProgress = true,
+                    batchLabel = "剩余 ${batches.size - reused} 批合并"
+                )
+            }
             for ((index, batch) in batches.withIndex()) {
                 approved = summarizeMemory(
                     enhancedAiService, listOfNotNull(approved) + batch,
@@ -1077,7 +1107,8 @@ object AIMessageManager {
                     org.json.JSONArray(listOf(it.first, it.second))
                 }).toString(), isGroupChat.toString()
             ).joinToString("\u0000"))
-            val reviewedSummary = ReviewedSummaryBatches.resolve(cacheKey, draft = {
+            val reviewedSummary = if (cachedOnly) ReviewedSummaryBatches.approved(cacheKey) ?: return null
+            else ReviewedSummaryBatches.resolve(cacheKey, draft = {
                 if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
                     com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
                     0.1f, "正在整理 $batchLabel（${conversationToSummarize.sumOf { it.second.length }} 字符）")
