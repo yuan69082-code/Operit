@@ -31,18 +31,18 @@ object FunctionalPrompts {
         【相处与交流】
         [保留双方使用的名字、称呼、相处方式、明确约定和表达。按来源写清谁说了什么，不替任何一方重新定义身份或关系。]
         [概括近期关键交流、分歧与修正；重要表达可保留短原话，不改写成旁观者对双方关系的评判。]
-        [若用户给出剧本/业务/策略等非技术内容，提炼要点并说明它们如何指导后续输出。]
+        [提炼用户实际提供的内容及要求，说明它们如何指导后续交流或输出。]
 
         【对话历程与概要】
         [按实际发生的顺序概括话题、行动与结果，篇幅随信息量决定；技术细节只在本次确实涉及并影响后续时记录。]
-        [突出转折、已解决的问题和形成的共识，引用必要的路径、命令、场景节点或原话，确保读者能看懂上下文和因果关系。]
+        [突出转折、已解决的问题和形成的共识，引用必要的路径、命令、时间节点或原话，确保读者能看懂上下文和因果关系。]
 
         【关键信息与上下文】
-        - [信息点1：用户需求、限制、背景或引用的文件/接口/角色等，说明其具体内容及作用。]
-        - [信息点2：技术或剧本结构中的关键元素（函数、配置、日志、人物动机等）及其意义。]
+        - [信息点1：用户需求、限制、背景或引用的资料，说明其具体内容及作用。]
+        - [信息点2：本次交流中影响后续的具体信息及其依据。]
         - [信息点3：问题或创意的探索路径、验证结果与当前状态。]
-        - [信息点4：影响后续决策的因素，如优先级、情绪基调、角色约束、外部依赖、时间节点。]
-        - [信息点5+：补充其他必要细节，覆盖现实与虚构信息。每条至少两句：先述事实，再讲影响或后续计划。]
+        - [信息点4：影响后续决策的因素，如优先级、情绪变化、明确约定、外部依赖、时间节点。]
+        - [信息点5+：补充其他必要细节。只写实际涉及的内容，不为填充栏目编造信息或计划。]
 
         ============================
 
@@ -58,7 +58,7 @@ object FunctionalPrompts {
         1. 以对话中 AI 的第一人称“我”写自己的连续性记录，用户用她的名字或“她”称呼。多人对话保留具体名字以免混淆。引用原话不改变说话者。
         2. 内容长度：压缩重复描述、过期过程和大段工具输出，通常用 800–1600 字，复杂任务最多 2400 字；短对话应更短。不为填满栏目凑字数。保留关键事实、约定、情绪变化、未完成事项及必要原话。
         3. 信息完整性：优先保证信息的完整性和准确性，技术与非技术内容都需提供必要证据或引用.
-        4. 内容还原：摘要既要说明“过程如何推进”，也要写清“实际产出/讨论内容是什么”，必要时引用结果文本、结论、代码片段或参数，确保在没有原始对话的情况下依然能完全还原信息本身.
+        4. 内容还原：写清实际讨论内容、重要变化及产出，必要时引用短原话或关键参数。摘要不能替代原始记录，不确定或未提及的信息不要补写.
         5. 目标：生成的摘要必须是自包含的。即使AI完全忘记了之前的对话，仅凭这份摘要也能够准确理解历史背景、当前状态、具体进度和下一步行动.
         6. 时序重点：请先聚焦于最新一段对话（约占输入的最后30%），明确最新指令、问题和进展，再回顾更早的内容。若新消息与旧内容冲突或更新，应以最新对话为准，并解释差异.
     """
@@ -79,18 +79,18 @@ object FunctionalPrompts {
         [Interaction & Communication]
         [Preserve names, forms of address, ways of relating, explicit agreements and expressions. Attribute statements to their speakers without redefining either participant's identity or relationship.]
         [Summarize relevant exchanges, disagreements and corrections. Keep short original quotations when useful rather than replacing the interaction with an observer's judgment.]
-        [If the user provided scripts/business/strategy or other non-technical content, extract the key points and explain how they guide future output.]
+        [Extract the user's actual content and requirements and explain how they guide future exchanges or output.]
 
         [Conversation Progress & Overview]
         [Describe topics, actions and results in their actual order, with length suited to the information. Include technical details only when involved in this exchange and needed later.]
-        [Highlight turning points, resolved issues, and agreements reached. Quote necessary file paths, commands, scenario nodes, or original wording so the reader can understand context and causality.]
+        [Highlight turning points, resolved issues, and agreements reached. Quote necessary file paths, commands, time points, or original wording so the reader can understand context and causality.]
 
         [Key Information & Context]
-        - [Info point 1: user requirements, constraints, background, referenced files/APIs/roles, and their purpose.]
-        - [Info point 2: key elements in the technical/script structure (functions, configs, logs, motivations, etc.) and their meaning.]
+        - [Info point 1: user requirements, constraints, background, referenced material, and its purpose.]
+        - [Info point 2: concrete information from this exchange that matters later, with its evidence.]
         - [Info point 3: exploration path, verification results, and current status.]
-        - [Info point 4: factors affecting future decisions, such as priorities, emotional tone, role constraints, external dependencies, deadlines.]
-        - [Info point 5+: any other necessary details covering both real and fictional information. Each point must have at least two sentences: state the fact, then explain its impact or next plan.]
+        - [Info point 4: factors affecting future decisions, such as priorities, emotional changes, explicit agreements, external dependencies, deadlines.]
+        - [Info point 5+: other necessary details actually present in the exchange. Do not invent information or plans to fill a section.]
 
         =======================================
 
@@ -220,8 +220,7 @@ object FunctionalPrompts {
             "$promptWithPreviousSummary\n\n$rules"
         } ?: promptWithPreviousSummary
         return configuredPrompt + "\n\n" + ConversationEvidencePrompts.forLanguage(useEnglish) +
-            if (useEnglish) "\nNarrate as the conversation AI using I; refer to the user by her established name or she, preserving speaker attribution."
-            else "\n叙述视角：用对话中 AI 的第一人称“我”，用户用原文名字或“她”；不要写成旁观者叙述，不混淆原话归属。"
+            "\n\n" + SummaryFidelityPrompts.forLanguage(useEnglish).trimIndent()
     }
 
     private fun applySummarySectionOverrides(

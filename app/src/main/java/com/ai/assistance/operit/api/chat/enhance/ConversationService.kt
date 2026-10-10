@@ -119,6 +119,7 @@ class ConversationService(
             summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
             recordTokenUsage: Boolean = true,
             awaitingReview: Boolean = false,
+            reportProgress: Boolean = true,
     ): String {
         try {
             val useEnglish = !LocaleUtils.usesChineseContent(context)
@@ -207,7 +208,7 @@ class ConversationService(
             // 使用summaryService发送请求，收集完整响应
             val contentBuilder = StringBuilder()
 
-            ToolProgressBus.update(
+            if (reportProgress) ToolProgressBus.update(
                 ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
                 0.05f,
                 context.getString(R.string.conversation_summary_preparing)
@@ -254,6 +255,7 @@ class ConversationService(
 
             var lastStageIndex = -1
             fun updateStageIfNeeded() {
+                if (!reportProgress) return
                 if (lastStageIndex + 1 >= stages.size) return
                 val snapshot = contentBuilder.toString()
                 while (lastStageIndex + 1 < stages.size) {
@@ -284,7 +286,7 @@ class ConversationService(
                 updateStageIfNeeded()
             }
 
-            ToolProgressBus.update(
+            if (reportProgress) ToolProgressBus.update(
                 ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
                 if (awaitingReview) 0.8f else 1f,
                 context.getString(if (awaitingReview) R.string.conversation_summary_draft_ready else R.string.conversation_summary_completed)

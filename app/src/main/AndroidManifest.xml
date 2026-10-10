@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -99,6 +101,9 @@
         tools:replace="android:theme,android:icon,android:roundIcon">
 
         <!-- OpenCL 库权限声明 (Android 10+ 命名空间隔离解决方案) -->
+        <activity android:name=".core.tools.photos.PhonePhotoActivity" android:exported="false"
+            android:excludeFromRecents="true" android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <uses-native-library 
             android:name="libOpenCL.so"
             android:required="false" />

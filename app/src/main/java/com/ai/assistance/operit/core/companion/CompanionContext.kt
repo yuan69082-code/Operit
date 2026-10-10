@@ -11,6 +11,8 @@ import org.json.JSONObject
 object CompanionContext {
     fun permissions(context: Context): JSONObject = JSONObject()
         .put("microphone_permission", context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+        .put("camera_permission", context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+        .put("photos_permission", com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.hasAlbumAccess(context))
         .put("notifications_enabled", NotificationManagerCompat.from(context).areNotificationsEnabled())
         .put("android_api", Build.VERSION.SDK_INT)
         .put("app_version", BuildConfig.VERSION_NAME)

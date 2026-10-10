@@ -95,6 +95,9 @@ class MessageCoordinationDelegate(
     private var summaryJob: Job? = null
     private var sendTriggeredSummaryJob: Job? = null
     private val summaryRetryAfter = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private var summaryPreparationJob: Job? = null
+    private var summaryPreparationChatId: String? = null
+    private val preparationRetryAfter = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     // 保存当前的 promptFunctionType，用于自动继续时保持提示词一致性
     private var currentPromptFunctionType: PromptFunctionType = PromptFunctionType.CHAT
@@ -710,6 +713,40 @@ class MessageCoordinationDelegate(
                 enableSummaryByMessageCount = chatContextSettings.enableSummaryByMessageCount,
                 summaryMessageCountThreshold = chatContextSettings.summaryMessageCountThreshold
             )
+
+            if (!isShouldGenerateSummary && chatContextSettings.enableSummary &&
+                summaryPreparationJob?.isActive != true &&
+                android.os.SystemClock.elapsedRealtime() >= (preparationRetryAfter[chatId] ?: 0L) &&
+                (maxTokensForSend > 0 && currentTokens >= maxTokensForSend * tokenUsageThresholdForSend * 0.7 ||
+                    chatContextSettings.enableSummaryByMessageCount &&
+                    currentMessages.drop(currentMessages.indexOfLast { it.sender == "summary" } + 1)
+                        .count { it.sender == "user" } >= chatContextSettings.summaryMessageCountThreshold * 0.7)) {
+                val prefix = com.ai.assistance.operit.core.chat.ReviewedSummaryBatches.preparationPrefix(currentMessages)
+                if (prefix.isNotEmpty()) {
+                    summaryPreparationChatId = chatId
+                    summaryPreparationJob = coroutineScope.launch {
+                        val serviceKey = "summary-preparation:${java.util.UUID.randomUUID()}"
+                        try {
+                            // Separate service and no processing-state changes: preparing must not lock input.
+                            AIMessageManager.summarizeMemory(
+                                enhancedAiService = EnhancedAIService.getChatInstance(context, serviceKey),
+                                messages = prefix.map { it.copy() }, summaryConfig = readSummaryConfig(),
+                                chatId = chatId, roleCardId = roleCardId,
+                                chatModelConfigIdOverride = resolvedChatModelConfigIdOverride,
+                                chatModelIndexOverride = resolvedChatModelIndexOverride,
+                                isGroupChat = isGroupChatSession(chatId), summaryProgress = false
+                            )
+                        } catch (cancelled: CancellationException) { throw cancelled
+                        } catch (error: Exception) {
+                            preparationRetryAfter[chatId] = android.os.SystemClock.elapsedRealtime() + 300_000
+                            AppLogger.e(TAG, "Background summary preparation failed", error)
+                        } finally {
+                            EnhancedAIService.releaseChatInstance(serviceKey)
+                            summaryPreparationChatId = null
+                        }
+                    }
+                }
+            }
 
             if (isShouldGenerateSummary) {
                 val snapshotMessages = currentMessages.toList()
@@ -1667,6 +1704,10 @@ class MessageCoordinationDelegate(
      * 取消正在进行的总结操作
      */
     private suspend fun cancelSummaryInternal(targetChatId: String? = null) {
+        if (targetChatId == null || summaryPreparationChatId == targetChatId) {
+            summaryPreparationJob?.cancel()
+            summaryPreparationJob?.join()
+        }
         val currentChatId = targetChatId ?: chatHistoryDelegate.currentChatId.value
         val shouldCancelSummary =
             _isSummarizing.value &&

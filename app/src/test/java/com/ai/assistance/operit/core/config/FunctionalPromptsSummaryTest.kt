@@ -9,6 +9,22 @@ import org.junit.Test
 
 class FunctionalPromptsSummaryTest {
     @Test
+    fun fidelityRulesRemainAfterOldSummaryAndCustomInstructionsInBothLanguages() {
+        for (english in listOf(false, true)) {
+            val prompt = FunctionalPrompts.buildSummarySystemPrompt(
+                previousSummary = "这是一次情感向角色扮演对话。",
+                useEnglish = english,
+                summaryConfig = ConversationSummaryConfig(
+                    globalRules = "自定义摘要要求",
+                    sectionOverrides = listOf(SummarySectionOverride(id = "interaction", enabled = false))
+                )
+            )
+            assertTrue(prompt.endsWith(SummaryFidelityPrompts.forLanguage(english).trimIndent()))
+            assertTrue(prompt.indexOf("自定义摘要要求") < prompt.lastIndexOf("revise"))
+        }
+    }
+
+    @Test
     fun buildSummarySystemPrompt_withoutOverridesIncludesEvidenceRules() {
         val prompt = FunctionalPrompts.buildSummarySystemPrompt(
             previousSummary = null,

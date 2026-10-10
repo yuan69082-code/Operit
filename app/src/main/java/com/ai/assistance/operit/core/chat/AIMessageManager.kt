@@ -690,7 +690,9 @@ object AIMessageManager {
         chatId: String? = null,
         roleCardId: String? = null,
         chatModelConfigIdOverride: String? = null,
-        chatModelIndexOverride: Int? = null
+        chatModelIndexOverride: Int? = null,
+        summaryProgress: Boolean = true,
+        batchLabel: String = ""
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null
@@ -706,8 +708,25 @@ object AIMessageManager {
             return null
         }
 
+        val batches = ReviewedSummaryBatches.plan(messagesToSummarize)
+        if (batches.size > 1) {
+            var approved = previousSummary?.let { ChatMessage(sender = "summary", content = it) }
+            for ((index, batch) in batches.withIndex()) {
+                approved = summarizeMemory(
+                    enhancedAiService, listOfNotNull(approved) + batch,
+                    autoContinue = autoContinue && index == batches.lastIndex,
+                    isGroupChat = isGroupChat, summaryConfig = summaryConfig, chatId = chatId,
+                    roleCardId = roleCardId, chatModelConfigIdOverride = chatModelConfigIdOverride,
+                    chatModelIndexOverride = chatModelIndexOverride, summaryProgress = summaryProgress,
+                    batchLabel = "${index + 1}/${batches.size}"
+                ) ?: return null
+            }
+            return approved
+        }
+
         val memoryTagRegex = Regex("<memory>.*?</memory>", RegexOption.DOT_MATCHES_ALL)
         val conversationReviewEntries = mutableListOf<Pair<String, String>>()
+        val seenSummaryToolResults = mutableSetOf<String>()
         fun normalizeForReview(text: String): String {
             return text
                 .replace("\r\n", "\n")
@@ -746,7 +765,7 @@ object AIMessageManager {
                     else -> ""
                 }
             }
-            return cleaned
+            return ReviewedSummaryBatches.deduplicateToolResults(cleaned, seenSummaryToolResults)
         }
 
         fun extractXmlBody(block: String): String {
@@ -1049,23 +1068,41 @@ object AIMessageManager {
             val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride)
             // Former pinned memory belongs in the library, not every subsequent summary.
             val protectedMemory = ""
-            val draft =
-                enhancedAiService.generateSummary(
+            val cacheKey = ReviewedSummaryBatches.fingerprint(listOf(
+                "reviewed-batches-v2-fidelity", chatId, reviewer.cacheIdentity(), summaryConfig.toString(),
+                LocaleUtils.usesChineseContent(context).toString(),
+                com.ai.assistance.operit.core.chat.hooks.SummaryHookRegistry.cacheRevision().toString(),
+                messagesToSummarize.joinToString("\u0000") { "${it.timestamp}:${it.roleName}:${it.content}" },
+                previousSummary, org.json.JSONArray(conversationToSummarize.map {
+                    org.json.JSONArray(listOf(it.first, it.second))
+                }).toString(), isGroupChat.toString()
+            ).joinToString("\u0000"))
+            val reviewedSummary = ReviewedSummaryBatches.resolve(cacheKey, draft = {
+                if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                    com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
+                    0.1f, "正在整理 $batchLabel（${conversationToSummarize.sumOf { it.second.length }} 字符）")
+                val draft = enhancedAiService.generateSummary(
                     conversationToSummarize + listOfNotNull(protectedMemory.takeIf { it.isNotBlank() }?.let { "user" to it }),
                     previousSummary,
                     summaryConfig,
-                    awaitingReview = true
+                    awaitingReview = true,
+                    reportProgress = false
                 )
             AppLogger.d(TAG, "AI生成压缩草稿完成，等待审阅")
 
             if (draft.isBlank()) {
                 AppLogger.e(TAG, "AI生成的总结内容为空，放弃本次总结")
-                null
+                error("压缩草稿为空，原上下文已保留。")
             } else {
                 // 如果是自动续写，在总结消息尾部添加续写提示
                 val trimmedSummary = draft.trim()
                 val useEnglish = !LocaleUtils.usesChineseContent(context)
-                val packageWarmupBlock = buildPackageWarmupBlock(messagesToSummarize, useEnglish)
+                // Package schemas are discoverable via use_package; duplicating them inside
+                // every reviewed summary both inflates the review and immediately regrows context.
+                val packages = extractTopPackageUsages(messagesToSummarize, limit = 2).map { it.packageName }
+                val packageWarmupBlock = if (packages.isEmpty()) "" else if (useEnglish)
+                    "Recent packages: ${packages.joinToString(", ")}. Use use_package to retrieve current tool definitions when needed."
+                    else "近期使用的工具包：${packages.joinToString("、")}。需要时用 use_package 获取当前定义。"
                 val summaryWithQuotes = buildString {
                     append(trimmedSummary)
                     if (summaryConfig.dialogueReviewEnabled && conversationReviewEntries.isNotEmpty()) {
@@ -1090,14 +1127,20 @@ object AIMessageManager {
                     }
                 }.trimEnd()
 
-                com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                summaryWithQuotes
+            }
+            }, review = { proposed ->
+                if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
                     com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
                     0.85f,
-                    context.getString(R.string.conversation_summary_reviewing)
+                    "AI 正在审阅 $batchLabel"
                 )
                 // Review the actual complete draft, including generated dialogue excerpts.
-                val reviewedSummary = reviewer.review(summaryWithQuotes, conversationToSummarize, previousSummary, protectedMemory)
-                com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                reviewer.review(proposed, conversationToSummarize, previousSummary, protectedMemory)
+            }, stage = { stage, hit, millis ->
+                AppLogger.d("SummaryTiming", "batch=$batchLabel stage=$stage cache=$hit elapsed_ms=$millis source_chars=${conversationToSummarize.sumOf { it.second.length }}")
+            })
+                if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
                     com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
                     0.98f,
                     context.getString(R.string.conversation_summary_reviewed)
@@ -1114,7 +1157,6 @@ object AIMessageManager {
                     timestamp = ChatMessageTimestampAllocator.next(),
                     roleName = "system" // 总结消息的角色名
                 )
-            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) {
                 throw e
@@ -1124,83 +1166,6 @@ object AIMessageManager {
         }
     }
 
-    private suspend fun buildPackageWarmupBlock(
-        messagesToSummarize: List<ChatMessage>,
-        useEnglish: Boolean
-    ): String {
-        val title = context.getString(R.string.ai_message_package_warmup_title)
-        val topPackages = extractTopPackageUsages(messagesToSummarize, limit = 2)
-
-        if (topPackages.isEmpty()) {
-            val emptyMessage =
-                if (useEnglish) {
-                    "No activated packages were detected in this summary window."
-                } else {
-                    context.getString(R.string.ai_message_package_warmup_empty)
-                }
-            return "$title\n$emptyMessage"
-        }
-
-        val intro =
-            if (useEnglish) {
-                "The following activated packages can be used directly."
-            } else {
-                context.getString(R.string.ai_message_package_warmup_intro)
-            }
-
-        val body = withContext(Dispatchers.IO) {
-            val packageManager = toolHandler.getOrCreatePackageManager()
-            buildString {
-                appendLine(intro)
-                appendLine()
-                topPackages.forEachIndexed { index, stat ->
-                    val resultText =
-                        runCatching { packageManager.usePackage(stat.packageName).trim() }
-                            .getOrElse { throwable ->
-                                if (useEnglish) {
-                                    "use_package failed: ${throwable.message ?: "unknown error"}"
-                                } else {
-                                    context.getString(
-                                        R.string.ai_message_use_package_failed,
-                                        throwable.message ?: context.getString(R.string.unknown_error)
-                                    )
-                                }
-                            }
-                            .ifBlank {
-                                if (useEnglish) {
-                                    "use_package returned empty content."
-                                } else {
-                                    context.getString(R.string.ai_message_use_package_empty)
-                                }
-                            }
-
-                    if (useEnglish) {
-                        appendLine("${index + 1}. Package ${stat.packageName} (${stat.count} hits)")
-                        appendLine("   Activated package: the tool prompt below can be used directly.")
-                    } else {
-                        appendLine(
-                            context.getString(
-                                R.string.ai_message_package_warmup_item,
-                                index + 1,
-                                stat.packageName,
-                                stat.count
-                            )
-                        )
-                        appendLine("   已激活包：以下工具提示可以直接使用。")
-                    }
-                    appendLine(indentBlock(resultText, "   "))
-                    if (index != topPackages.lastIndex) {
-                        appendLine()
-                    }
-                }
-            }.trimEnd()
-        }
-
-        return buildString {
-            appendLine(title)
-            append(body)
-        }.trimEnd()
-    }
 
     private fun extractTopPackageUsages(
         messagesToSummarize: List<ChatMessage>,
@@ -1279,17 +1244,6 @@ object AIMessageManager {
             }
     }
 
-    private fun indentBlock(text: String, prefix: String): String {
-        return text
-            .lines()
-            .joinToString("\n") { line ->
-                if (line.isBlank()) {
-                    line
-                } else {
-                    prefix + line
-                }
-            }
-    }
 
     /**
      * 判断是否应该生成对话总结。

@@ -35,16 +35,19 @@ interface SummaryGenerateHook {
 
 object SummaryHookRegistry {
     private val summaryGenerateHooks = CopyOnWriteArrayList<SummaryGenerateHook>()
+    private val revision = java.util.concurrent.atomic.AtomicLong()
+    fun cacheRevision(): Long = revision.get()
 
     @Synchronized
     fun registerSummaryGenerateHook(hook: SummaryGenerateHook) {
         unregisterSummaryGenerateHook(hook.id)
         summaryGenerateHooks.add(hook)
+        revision.incrementAndGet()
     }
 
     @Synchronized
     fun unregisterSummaryGenerateHook(hookId: String) {
-        summaryGenerateHooks.removeAll { it.id == hookId }
+        if (summaryGenerateHooks.removeAll { it.id == hookId }) revision.incrementAndGet()
     }
 
     fun dispatchSummaryGenerateHooks(initialContext: SummaryHookContext): SummaryHookContext {
