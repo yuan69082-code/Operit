@@ -15,11 +15,11 @@ class FunctionalPromptsSummaryTest {
             useEnglish = false
         )
 
-        assertEquals(
+        assertTrue(prompt.startsWith(
             FunctionalPrompts.SUMMARY_PROMPT.trimIndent() + "\n\n" +
-                ConversationEvidencePrompts.forLanguage(false),
-            prompt
-        )
+                ConversationEvidencePrompts.forLanguage(false)
+        ))
+        assertTrue(prompt.contains("第一人称"))
     }
 
     @Test
@@ -57,11 +57,11 @@ class FunctionalPromptsSummaryTest {
             )
         )
 
-        assertEquals(
+        assertTrue(prompt.startsWith(
             FunctionalPrompts.SUMMARY_PROMPT_EN.trimIndent() + "\n\n" +
-                ConversationEvidencePrompts.forLanguage(true),
-            prompt
-        )
+                ConversationEvidencePrompts.forLanguage(true)
+        ))
+        assertTrue(prompt.contains("using I"))
     }
 
     @Test

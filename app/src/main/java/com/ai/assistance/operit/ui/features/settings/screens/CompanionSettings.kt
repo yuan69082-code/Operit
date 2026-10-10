@@ -17,6 +17,7 @@ import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.core.companion.CompanionRuntime
 import com.ai.assistance.operit.core.companion.CompanionStore
+import com.ai.assistance.operit.core.companion.migrateMemory
 import com.ai.assistance.operit.core.companion.XcEmotionBridge
 import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.model.ActivePrompt
@@ -67,23 +68,16 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
     var source by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<String?>(null) }
-    var memory by remember { mutableStateOf(JSONObject()) }
-    var pinName by remember { mutableStateOf("") }
-    var pinText by remember { mutableStateOf("") }
-    var draft by remember { mutableStateOf("") }
     var target by remember { mutableStateOf(store.preferences.getString("target_chat", null)) }
 
     suspend fun refresh() {
         val selected = identity ?: return
+        chatId?.let { withContext(Dispatchers.IO) { store.migrateMemory(it, selected) } }
         withContext(Dispatchers.IO) {
             Triple(XcEmotionBridge.receipt(context, selected), store.entries(selected), store.categories(selected))
         }.let { (state, items, folders) -> xcReceipt = state; entries = items; categories = folders }
         xcConnections = withContext(Dispatchers.IO) { XcEmotionBridge.connections(context) }
         if (selectedXc == null) selectedXc = xcReceipt.optString("plugin").takeIf { it.isNotBlank() }
-        chatId?.let {
-            memory = withContext(Dispatchers.IO) { store.read("summary:$it") }
-            draft = memory.optString("draft")
-        }
     }
 
     fun perform(action: suspend () -> Unit) {
@@ -135,7 +129,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "保留记忆", "XC 情绪").forEachIndexed { index, label ->
+                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
                     }
                 }
@@ -161,7 +155,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                         com.ai.assistance.operit.api.chat.AIForegroundService.refreshBackgroundKeepAlive(context)
                     }
                     Text("主动联系可以发消息或来电，也可决定保持安静。运行时会观察空闲和设备事件，不需要另建定时工作流。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
-                    OutlinedTextField(minutes, { minutes = it }, label = { Text("主动判断最小间隔，分钟（1–240）") }, singleLine = true)
+                    OutlinedTextField(minutes, { minutes = it }, label = { Text("首次唤醒等待，分钟（1–240）；之后由 AI 安排") }, singleLine = true)
                     Text(if (target == null) "尚未选择主动联系的会话" else "主动联系会话已设置")
                     TextButton(enabled = chatId != null && !busy, onClick = {
                         val current = checkNotNull(chatId)
@@ -295,26 +289,10 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                         TextButton(enabled = id != null && !busy, onClick = { confirmDelete = id }) { Text("删除选中资料") }
                     }
                     }
-                } else {
-                    Text("保留片段不会交给压缩替换，每轮原样提供。合计上限16000字；过多会挤占模型上下文，请及时取消过期片段。")
-                    val pins = memory.optJSONObject("pins") ?: JSONObject()
-                    pins.keys().asSequence().toList().forEach { key ->
-                        TextButton(onClick = { pinName = key; pinText = pins.getString(key) }) { Text(key) }
-                    }
-                    OutlinedTextField(pinName, { pinName = it }, label = { Text("片段名称") })
-                    OutlinedTextField(pinText, { pinText = it }, label = { Text("原样保留内容") }, minLines = 3)
-                    Row {
-                        TextButton(enabled = !busy, onClick = { perform { withContext(Dispatchers.IO) {
-                            store.setMemory(checkNotNull(chatId), "pin", pinName, pinText)
-                        } } }) { Text("保留") }
-                        TextButton(enabled = !busy, onClick = { perform { withContext(Dispatchers.IO) {
-                            store.setMemory(checkNotNull(chatId), "unpin", pinName, "")
-                        } } }) { Text("取消保留") }
-                    }
-                    OutlinedTextField(draft, { draft = it }, label = { Text("摘要草稿，也可由 AI 自行编写") }, minLines = 3)
-                    TextButton(enabled = !busy, onClick = { perform { withContext(Dispatchers.IO) {
-                        store.setMemory(checkNotNull(chatId), "draft", "", draft)
-                    } } }) { Text("保存摘要草稿") }
+                } else if (section == 2) {
+                    CompanionTodoPanel(store, checkNotNull(identity))
+                } else if (section == 4) {
+                    CompanionActivityPanel(store, checkNotNull(chatId))
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (error.isNotBlank()) Text(error)

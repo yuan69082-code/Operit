@@ -583,6 +583,7 @@ object ToolExecutionManager {
         // 3. Hook 拦截与权限检查
         val permittedInvocations = mutableListOf<IndexedValue<ToolInvocation>>()
         for ((index, invocation) in roleCardPermittedInvocations) {
+            com.ai.assistance.operit.core.companion.CompanionRuntime.beforeTool(context, callerChatId, resolveDisplayToolName(invocation.tool))
             toolHandler.notifyToolCallRequested(invocation.tool)
             val interceptionTool = resolveToolTarget(invocation.tool).tool
             when (val interception = toolHandler.checkToolInterception(interceptionTool)) {
@@ -651,6 +652,7 @@ object ToolExecutionManager {
                         packageManager = packageManager,
                         runtimeContext = toolRuntimeContext
                     )
+                com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
                 orderedResults.complete(index, result)
             }
         }
@@ -664,6 +666,7 @@ object ToolExecutionManager {
                     packageManager = packageManager,
                     runtimeContext = toolRuntimeContext
                 )
+            com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
             orderedResults.complete(index, result)
         }
 

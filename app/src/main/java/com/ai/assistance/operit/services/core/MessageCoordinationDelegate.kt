@@ -94,6 +94,7 @@ class MessageCoordinationDelegate(
     // 保存总结任务的 Job 引用，用于取消
     private var summaryJob: Job? = null
     private var sendTriggeredSummaryJob: Job? = null
+    private val summaryRetryAfter = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     // 保存当前的 promptFunctionType，用于自动继续时保持提示词一致性
     private var currentPromptFunctionType: PromptFunctionType = PromptFunctionType.CHAT
@@ -336,7 +337,7 @@ class MessageCoordinationDelegate(
         preferActiveRoleCard: Boolean = false,
     ) {
         // 仅在没有指定 chatId 的情况下，才需要确保有当前对话
-        com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()
+        if (!turnOptions.proactiveWake) com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()
         if (chatIdOverride.isNullOrBlank() && chatHistoryDelegate.currentChatId.value == null) {
             AppLogger.d(TAG, "当前没有活跃对话，自动创建新对话")
 
@@ -545,7 +546,7 @@ class MessageCoordinationDelegate(
         val isBackgroundSend =
             !chatIdOverride.isNullOrBlank() && chatIdOverride != chatHistoryDelegate.currentChatId.value
         // 自动续聊由总结消息中的续接指令驱动，不能消费用户尚未提交的编辑器状态。
-        val shouldReadComposerState = !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded
+        val shouldReadComposerState = !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
         val effectiveMessageTextOverride = if (isAutoContinuation) "" else messageTextOverride
         // 获取当前聊天ID和工作区路径
         val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
@@ -681,7 +682,9 @@ class MessageCoordinationDelegate(
                 .toInt()
 
         // 如果不是续写，检查是否需要总结
-        if (turnOptions.persistTurn && !isBackgroundSend && !isContinuation && !skipSummaryCheck) {
+        if (turnOptions.persistTurn && !isBackgroundSend && !isContinuation && !skipSummaryCheck &&
+            sendTriggeredSummaryJob?.isActive != true && summaryJob?.isActive != true &&
+            android.os.SystemClock.elapsedRealtime() >= (summaryRetryAfter[chatId] ?: 0L)) {
             val currentMessages = runBlocking { chatHistoryDelegate.getCurrentRuntimeChatHistorySnapshot() }
             val currentTokens = tokenStatsDelegate.currentWindowSizeFlow.value
 
@@ -1765,6 +1768,7 @@ class MessageCoordinationDelegate(
         if (snapshotMessages.isEmpty() || originalChatId == null) {
             return
         }
+        if (sendTriggeredSummaryJob?.isActive == true || summaryJob?.isActive == true) return
         val reviewedSource = snapshotMessages.map { it.copy() }
 
         // 标记：有一次发送触发的异步总结正在进行
@@ -1827,6 +1831,9 @@ class MessageCoordinationDelegate(
                 throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Async summary during send failed: ${e.message}", e)
+                // A failing endpoint must not resubmit the same expensive two-stage operation
+                // on every message. Manual compression remains available immediately.
+                summaryRetryAfter[originalChatId] = android.os.SystemClock.elapsedRealtime() + 300_000
                 uiStateDelegate.showErrorMessage(context.getString(R.string.chat_summarize_generation_failed, e.message.orEmpty()))
             } finally {
                 _isSendTriggeredSummarizing.value = false

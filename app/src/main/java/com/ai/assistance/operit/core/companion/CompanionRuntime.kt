@@ -10,49 +10,62 @@ import androidx.core.content.ContextCompat
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
-import com.ai.assistance.operit.api.chat.EnhancedAIService
-import com.ai.assistance.operit.core.chat.hooks.PromptTurn
-import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
-import com.ai.assistance.operit.data.model.CharacterCardChatModelBindingMode
 import com.ai.assistance.operit.data.model.ChatMessage
-import com.ai.assistance.operit.data.model.FunctionType
-import com.ai.assistance.operit.data.model.PromptFunctionType
+import com.ai.assistance.operit.data.model.ChatTurnOptions
+import com.ai.assistance.operit.data.model.InputProcessingState
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
+import com.ai.assistance.operit.services.ChatServiceCore
 import com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming
 import com.ai.assistance.operit.ui.features.chat.voice.VoiceCallRuntime
-import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.ChatUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.first
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.coroutines.flow.*
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
-/** Owned by the existing Android foreground service; no wakeups after service destruction. */
+/** Service-owned, one-shot AI schedules; use the normal permission/tool pipeline. */
 object CompanionRuntime {
     @Volatile private var lastInteraction = SystemClock.elapsedRealtime()
     private val generation = java.util.concurrent.atomic.AtomicLong()
     @Volatile private var decision: Job? = null
+    private data class OwnedTurn(val core: ChatServiceCore, val chatId: String)
+    private val owned = AtomicReference<OwnedTurn?>()
+    private val toolCount = AtomicInteger()
     private val events = Channel<String>(Channel.CONFLATED)
     @Volatile private var running = false
 
     fun noteConversation(context: Context, chatId: String, roleId: String?) {
-        CompanionStore(context).update("conversation:$chatId") {
-            it.put("role_id", roleId.orEmpty())
-        }
+        val store = CompanionStore(context)
+        if (store.read("conversation:$chatId").optString("role_id") != roleId.orEmpty())
+            store.update("conversation:$chatId") { it.put("role_id", roleId.orEmpty()) }
     }
 
     fun noteUserInteraction() {
         lastInteraction = SystemClock.elapsedRealtime()
         generation.incrementAndGet()
+        // Cancel our own request before the user's next request starts, never in a late finally.
+        owned.getAndSet(null)?.let { it.core.cancelMessage(it.chatId) }
         decision?.cancel()
     }
 
-    /** Local integration point for a future engine/device adapter. Source must describe real data. */
+    fun beforeTool(context: Context, chatId: String?, tool: String) {
+        if (chatId == null || owned.get()?.chatId != chatId) return
+        check(tool == "companion_schedule" || toolCount.incrementAndGet() <= 12) { "本次主动活动已达到12次工具调用，请安排下次唤醒后结束。" }
+        CompanionStore(context).log(chatId, "工具", tool)
+    }
+
+    fun afterTool(context: Context, chatId: String?, tool: String, success: Boolean) {
+        if (chatId != null && owned.get()?.chatId == chatId)
+            CompanionStore(context).log(chatId, "工具结果", tool + if (success) "：成功" else "：失败")
+    }
+
+    fun isWake(chatId: String) = owned.get()?.chatId == chatId
+
     fun publishEvent(context: Context, source: String, description: String) {
         if (!CompanionStore(context).proactiveEnabled || !running) return
         require(source.isNotBlank() && source.length <= 80 && description.length <= 2000)
-        events.trySend(JSONObject().put("source", source).put("description", description).toString())
+        events.trySend("$source：$description")
     }
 
     suspend fun run(context: Context): Unit = withContext(Dispatchers.Main.immediate) {
@@ -60,164 +73,160 @@ object CompanionRuntime {
         running = true
         val app = context.applicationContext
         val store = CompanionStore(app)
-        var lastAttempt = SystemClock.elapsedRealtime()
-        var pendingEvent: String? = null
+        var pendingEvent = ""
+        var lastSkip = 0L
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (intent.action == Intent.ACTION_USER_PRESENT) {
-                    publishEvent(app, "android", "设备已解锁；这不表示用户发出了聊天请求。")
-                }
+                if (intent.action == Intent.ACTION_USER_PRESENT)
+                    publishEvent(app, "设备", "设备已解锁；不是用户新消息。")
             }
         }
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key in setOf("proactive_enabled", "target_chat", "proactive_minutes")) {
-                generation.incrementAndGet()
-                decision?.cancel()
-                lastAttempt = SystemClock.elapsedRealtime()
-                pendingEvent = null
-                while (events.tryReceive().isSuccess) { }
-                if (store.proactiveEnabled) events.trySend("软件主动联系设置已改变。")
+            if (key in setOf("proactive_enabled", "target_chat")) {
+                noteUserInteraction()
+                pendingEvent = ""
+                events.trySend("主动联系设置已改变")
             }
         }
-        var receiverRegistered = false
+        var registered = false
         try {
             store.preferences.registerOnSharedPreferenceChangeListener(listener)
             ContextCompat.registerReceiver(app, receiver, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_NOT_EXPORTED)
-            receiverRegistered = true
+            registered = true
             while (isActive) {
-                if (!store.proactiveEnabled) {
-                    events.receive()
-                    continue
-                }
-                // Runtime idle observation, independent of user-created scheduled workflows.
                 val event = withTimeoutOrNull(10_000) { events.receive() }
                 if (event != null) pendingEvent = event
-                val now = SystemClock.elapsedRealtime()
-                val interval = store.proactiveMinutes * 60_000L
-                if (!store.proactiveEnabled || now - lastAttempt < interval || now - lastInteraction < 30_000) continue
-                if (pendingEvent == null && now - lastInteraction < interval) continue
+                if (!store.proactiveEnabled) continue
                 val target = store.preferences.getString("target_chat", null) ?: continue
+                var schedule = store.read("schedule:$target")
+                if (!schedule.has("at") && !schedule.optBoolean("paused")) {
+                    schedule = store.update("schedule:$target") {
+                        it.put("at", System.currentTimeMillis() + store.proactiveMinutes * 60_000L)
+                            .put("purpose", "首次唤醒，了解情况并自行安排下次活动。").put("owner", "initial")
+                    }
+                    store.log(target, "安排", "首次唤醒已安排；此后由 AI 决定时间")
+                }
+                if (schedule.optBoolean("paused") || schedule.optLong("at") > System.currentTimeMillis()) continue
                 val holder = ChatRuntimeHolder.getInstance(app)
-                if (holder.activeConversationCount.value > 0 || VoiceCallRuntime.controller != null || VoiceCallIncoming.pending != null) continue
-                lastAttempt = now
+                if (holder.activeConversationCount.value > 0 || VoiceCallRuntime.controller != null ||
+                    VoiceCallIncoming.pending != null || SystemClock.elapsedRealtime() - lastInteraction < 60_000) {
+                    if (SystemClock.elapsedRealtime() - lastSkip > 60_000) {
+                        store.log(target, "延后", "正在对话、通话或刚收到用户消息；不插入重复回复，原计划等待空闲")
+                        lastSkip = SystemClock.elapsedRealtime()
+                    }
+                    continue
+                }
                 val epoch = generation.get()
-                val observation = pendingEvent ?: "用户一段时间未发送消息。可以决定保持安静，不要假定用户失落、危险或需要帮助。"
-                pendingEvent = null
+                val observation = schedule.optString("purpose") + "\n" + pendingEvent
+                pendingEvent = ""
+                store.update("schedule:$target") { it.put("paused", true).put("started", System.currentTimeMillis()) }
                 decision = launch {
                     try {
-                        withTimeout(120_000) {
-                            evaluate(app, target, observation, epoch)
-                        }
+                        withTimeout(300_000) { evaluate(app, target, observation, epoch) }
+                    } catch (timeout: TimeoutCancellationException) {
+                        currentCoroutineContext().ensureActive()
+                        if (generation.get() == epoch) owned.getAndSet(null)?.let { it.core.cancelMessage(it.chatId) }
+                        store.log(target, "超时", "主动活动超过5分钟，已停止；查看下次安排")
                     } catch (cancelled: CancellationException) {
+                        store.log(target, "取消", "用户开始对话、关闭功能或服务停止")
                         throw cancelled
                     } catch (error: Exception) {
-                        AppLogger.e("CompanionRuntime", "Proactive evaluation failed", error)
-                        store.preferences.edit().putString("last_status", "主动判断未完成：" + error.javaClass.simpleName).apply()
+                        store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
+                    } finally {
+                        if (generation.get() == epoch) owned.getAndSet(null)?.let { it.core.cancelMessage(it.chatId) }
+                        if (store.read("schedule:$target").optBoolean("paused"))
+                            store.log(target, "暂停", "本次未安排下一次；可在聊天中让 AI 安排，或点击一分钟后唤醒")
                     }
                 }
                 decision?.join()
                 decision = null
             }
         } finally {
+            noteUserInteraction()
             withContext(NonCancellable) {
                 decision?.cancelAndJoin()
-                decision = null
                 running = false
-                if (receiverRegistered) app.unregisterReceiver(receiver)
+                if (registered) app.unregisterReceiver(receiver)
                 store.preferences.unregisterOnSharedPreferenceChangeListener(listener)
                 while (events.tryReceive().isSuccess) { }
             }
         }
     }
 
-    private suspend fun evaluate(context: Context, chatId: String, event: String, epoch: Long) {
+    private suspend fun evaluate(context: Context, chatId: String, event: String, epoch: Long) = coroutineScope {
         val store = CompanionStore(context)
         val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
-        val chat = core.chatHistories.value.firstOrNull { it.id == chatId } ?: return
-        // Group turns need an explicit speaker planner; do not impersonate an arbitrary member.
-        if (!chat.characterGroupId.isNullOrBlank()) return
-        val known = store.read("conversation:$chatId")
-        if (!known.has("role_id")) return
-        val roleId = known.optString("role_id").takeIf { it.isNotBlank() }
-        val manager = CharacterCardManager.getInstance(context)
-        val card = roleId?.let { manager.getCharacterCard(it) }
-        val persona = roleId?.let { manager.combinePrompts(it, promptFunctionType = PromptFunctionType.CHAT) }.orEmpty()
-        val fullHistory = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId)
-        val history = fullHistory.takeLast(24)
-        val revision = history.lastOrNull()?.timestamp
-        val latestUserTurn = fullHistory.lastOrNull { it.sender == "user" && !it.content.startsWith("[语音通话]\n") }?.timestamp ?: 0L
-        val historyText = JSONArray(history.map {
-            JSONObject().put("speaker", it.roleName ?: it.sender).put("text", it.content.take(3000))
-                .put("truncated", it.content.length > 3000)
-        })
-        val emotion = XcEmotionBridge.prompt(context, chatId, roleId, actualSend = true)
-        val api = com.ai.assistance.operit.data.preferences.ApiPreferences.getInstance(context)
-        val packages = com.ai.assistance.operit.core.tools.packTool.PackageManager.getInstance(context,
-            com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context))
-        val access = com.ai.assistance.operit.data.preferences.CharacterCardToolAccessResolver.getInstance(context)
-            .resolve(roleCardId = roleId, packageManager = packages, globalToolVisibility = api.toolPromptVisibilityFlow.first())
-        val canCall = api.enableToolsFlow.first() && access.isBuiltinToolAllowed("request_voice_call")
-        val request = JSONObject().put("event", event).put("recent_history", historyText)
-            .put("emotion_state", emotion)
-            .put("may_request_call", canCall)
-            .put("memory", store.memoryContext(chatId))
-        if (store.capabilitiesEnabled) request.put("capabilities", CompanionContext.permissions(context))
-        val system = persona + """
-
-            你正在决定是否主动联系用户，这不是用户发言。根据历史和真实事件决定是否有值得主动说的话；没有则安静。
-            这里提供最近聊天的文字节选，truncated 表示文本已截短。没有新的音频、画面或传感器数据，不要声称正在看或听用户。
-            不要把无消息解释为危险，不要编造心率或身体数据，不因情绪词强迫用户回应。用户拒接后不要重复打。
-            may_request_call 为 false 时不能选择 call。这轮无工具调用，只返回一个 JSON 对象：
-            {"action":"quiet|message|call","text":"要发的自然语言消息或简短来电理由"}
-            quiet 的 text 为空；message/call 的 text 不超过1000字。不要输出内部事件说明、字段名或代码围栏。
+        val chat = core.chatHistories.value.firstOrNull { it.id == chatId } ?: error("目标会话不存在")
+        check(chat.characterGroupId.isNullOrBlank()) { "主动活动只支持单角色会话" }
+        val roleId = store.read("conversation:$chatId").optString("role_id").takeIf { it.isNotBlank() }
+            ?: error("请先在目标会话与角色聊天")
+        val card = CharacterCardManager.getInstance(context).getCharacterCard(roleId)
+        val history = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId).map { it.copy() }
+        val latest = history.lastOrNull()
+        val choices = store.preferences.getStringSet("learning_choices", emptySet()).orEmpty()
+        val activityNames = mapOf("mcp" to "已有MCP（包括hy）", "web" to "上网探索", "reading" to "阅读和复习资料", "organize" to "整理软件资料和待办")
+        val activities = choices.mapNotNull { activityNames[it] }.joinToString("、")
+        val instruction = """
+            [软件主动唤醒，不是用户新消息]
+            当前时间：${java.time.ZonedDateTime.now()}。
+            此次计划与事件：$event
+            最近一条消息时间：${latest?.timestamp}；发送者：${latest?.sender}。完整可用聊天历史已随本轮提供。
+            你拥有正常聊天中已授权的工具，可以查时间、当前应用、屏幕或其他内容，但必须实际调用工具后才知道结果。
+            先检查聊天是否还在等她回复。不要重发上次的话，不把沉默当成危险；可选择安静或有新内容时跟进。
+            允许的主动学习活动：${activities.ifBlank { "未开启，暂不自行展开学习" }}。可自行选题、规划，用资料库与待办记录实际进展。未授权的操作仍需按正常权限执行。
+            通话可使用正常的 request_voice_call 工具，不重复拨打未被接听的同一轮来电。
+            本轮最多12次工具调用、5分钟。必须在结束前用 companion_schedule 安排下次醒来的时间和目的，或主动 cancel 暂停。
+            先使用所需工具，最后若要发消息，用 <companion_message>这里仅写给她的新消息</companion_message>；若安静则只输出 <companion_quiet/>。
+            学习过程和内部状态写入资料或工具，不把计划、工具日志和控制标记直接发送给用户。确实发生互动或完成学习时主动回传 XC，不能编造她的回应。
         """.trimIndent()
-        val serviceKey = "companion-decision:$chatId"
+        val result = CompletableDeferred<String>()
+        store.log(chatId, "唤醒", event)
+        toolCount.set(0)
+        val turn = OwnedTurn(core, chatId)
+        owned.set(turn)
+        val started = async(start = CoroutineStart.UNDISPATCHED) { core.activeStreamingChatIds.first { chatId in it } }
         try {
-            val output = EnhancedAIService.getChatInstance(context, serviceKey).callFunctionModel(
-                FunctionType.CHAT,
-                listOf(PromptTurn(kind = PromptTurnKind.SYSTEM, content = system),
-                    PromptTurn(kind = PromptTurnKind.USER, content = request.toString())),
-                chatModelConfigIdOverride = if (card?.chatModelBindingMode == CharacterCardChatModelBindingMode.FIXED_CONFIG) card.chatModelConfigId else null,
-                chatModelIndexOverride = card?.chatModelIndex,
-            )
-            currentCoroutineContext().ensureActive()
-            val parsed = JSONObject(ChatUtils.removeThinkingContent(output).trim())
-            val action = parsed.getString("action")
-            val text = parsed.getString("text").trim()
-            require(action in setOf("quiet", "message", "call") && text.length <= 1000)
-            require(action == "quiet" || text.isNotBlank())
-            if (!store.proactiveEnabled || epoch != generation.get() || store.preferences.getString("target_chat", null) != chatId) return
-            if (VoiceCallRuntime.controller != null || VoiceCallIncoming.pending != null ||
-                ChatRuntimeHolder.getInstance(context).activeConversationCount.value > 0) return
-            if (core.chatHistories.value.none { it.id == chatId }) return
-            if (core.getChatHistoryDelegate().getRuntimeChatHistory(chatId).lastOrNull()?.timestamp != revision) return
-            val name = card?.name ?: "Operit"
-            when (action) {
-                "message" -> {
-                    core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = name, content = text), chatId)
-                    AIForegroundService.notifyReplyCompleted(context, chatId, name, text, null,
-                        notifyReplyOverride = true, notifyWhileForeground = true)
-                }
-                "call" -> {
-                    if (!canCall) return
-                    // Tool permissions can change while the model is deciding.
-                    val currentAccess = com.ai.assistance.operit.data.preferences.CharacterCardToolAccessResolver.getInstance(context)
-                        .resolve(roleCardId = roleId, packageManager = packages, globalToolVisibility = api.toolPromptVisibilityFlow.first())
-                    if (!api.enableToolsFlow.first() || !currentAccess.isBuiltinToolAllowed("request_voice_call")) return
-                    // Do not repeatedly ring after a rejection/timeout without a new user turn.
-                    val previousCallerTurn = store.read("contact:$chatId").optLong("last_call_user_turn", Long.MIN_VALUE)
-                    if (previousCallerTurn == latestUserTurn) return
-                    VoiceCallIncoming.request(context, chatId, roleId, text, name)
-                    store.update("contact:$chatId") { it.put("last_call_user_turn", latestUserTurn) }
-                }
+            core.sendUserMessage(roleCardIdOverride = roleId, chatIdOverride = chatId, messageTextOverride = instruction,
+                turnOptions = ChatTurnOptions(proactiveWake = true, persistTurn = false, hideUserMessage = true,
+                    notifyReply = false, onCompanionComplete = { result.complete(it) }))
+            withTimeout(30_000) { started.await() }
+            val failure = async(start = CoroutineStart.UNDISPATCHED) {
+                core.inputProcessingStateByChatId.first { it[chatId] is InputProcessingState.Error }[chatId] as InputProcessingState.Error
             }
-            store.preferences.edit().putString("last_status", when (action) {
-                "message" -> "已主动发出消息"
-                "call" -> "已发起来电，等待接听"
-                else -> "已判断，继续保持安静"
-            }).apply()
-        } finally {
-            EnhancedAIService.releaseChatInstance(serviceKey)
-        }
+            val raw = try {
+                kotlinx.coroutines.selects.select<String> {
+                    result.onAwait { it }
+                    failure.onAwait { error(it.message) }
+                }
+            } finally { failure.cancel() }
+            core.activeStreamingChatIds.first { chatId !in it }
+            owned.compareAndSet(turn, null)
+            currentCoroutineContext().ensureActive()
+            if (!store.proactiveEnabled || epoch != generation.get() || store.preferences.getString("target_chat", null) != chatId) return@coroutineScope
+            val current = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId)
+            if (current.lastOrNull()?.timestamp != latest?.timestamp || current.lastOrNull()?.content != latest?.content) {
+                store.log(chatId, "跳过", "聊天已更新，本次不插入旧回复")
+                return@coroutineScope
+            }
+            val cleaned = ChatUtils.removeThinkingContent(raw)
+                .replace(Regex("<tool(?:_result)?\\b[\\s\\S]*?</tool(?:_result)?>"), "")
+            val messages = Regex("<companion_message>([\\s\\S]*?)</companion_message>").findAll(cleaned).toList()
+            if (messages.isEmpty()) {
+                check(cleaned.contains("<companion_quiet/>")) { "没有明确的主动消息或安静决定" }
+                store.log(chatId, "安静", "本次未发送消息；使用工具${toolCount.get()}次")
+                return@coroutineScope
+            }
+            check(messages.size == 1) { "主动消息格式不明确" }
+            val text = messages.single().groupValues[1].trim()
+            require(text.isNotBlank() && text.length <= 4000) { "主动消息为空或过长" }
+            if (CompanionPolicy.duplicate(text, current.filter { it.sender == "ai" }.takeLast(5).map { it.content })) {
+                store.log(chatId, "拦截重复", "内容与近期已发送消息重复，本次未发送")
+                return@coroutineScope
+            }
+            core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text), chatId)
+            AIForegroundService.notifyReplyCompleted(context, chatId, card.name, text, null,
+                notifyReplyOverride = true, notifyWhileForeground = true)
+            store.log(chatId, "主动消息", text.take(240))
+        } finally { started.cancel() }
     }
 }

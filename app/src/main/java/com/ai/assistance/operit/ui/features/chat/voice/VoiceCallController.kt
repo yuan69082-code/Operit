@@ -58,6 +58,29 @@ class VoiceCallController(
     var soundDetected by mutableStateOf(false)
         private set
     private val submitRecording = java.util.concurrent.atomic.AtomicBoolean(false)
+    var manualMode by mutableStateOf(context.getSharedPreferences("voice_call_input", Context.MODE_PRIVATE).getBoolean("manual", false))
+        private set
+    var manualRecording by mutableStateOf(false)
+        private set
+    private val manualReady = Channel<Unit>(Channel.CONFLATED)
+
+    fun setManualInput(enabled: Boolean) {
+        if (manualMode == enabled || manualRecording || phase !in setOf(Phase.LISTENING, Phase.MUTED)) return
+        manualMode = enabled
+        context.getSharedPreferences("voice_call_input", Context.MODE_PRIVATE).edit().putBoolean("manual", enabled).apply()
+        microphoneEpoch.incrementAndGet()
+        if (phase == Phase.LISTENING || phase == Phase.RECOGNIZING) turnJob?.cancel()
+        lastSoundAt = android.os.SystemClock.elapsedRealtime()
+    }
+
+    fun startManualRecording() {
+        if (!manualMode || manualRecording || !isConnected || muted.value || phase != Phase.LISTENING) return
+        recordingMillis = 0
+        microphoneEpoch.incrementAndGet()
+        submitRecording.set(false)
+        manualRecording = true
+        manualReady.trySend(Unit)
+    }
     private val microphoneEpoch = java.util.concurrent.atomic.AtomicInteger()
     val isConfirmingVoice: Boolean get() = audioAnalysis && voiceReference == null
     var recordingNotice by mutableStateOf("")
@@ -127,7 +150,7 @@ class VoiceCallController(
     val isMuted: StateFlow<Boolean> = muted.asStateFlow()
     var continuousWarning by mutableStateOf("")
         private set
-    val continuousListening: Boolean get() = audioAnalysis && isConnected && isRunning && !muted.value &&
+    val continuousListening: Boolean get() = audioAnalysis && (!manualMode || manualRecording) && isConnected && isRunning && !muted.value &&
         phase != Phase.ERROR && phase != Phase.ENDED
     private var continuousJob: Job? = null
     private val heardReady = Channel<Unit>(Channel.CONFLATED)
@@ -234,7 +257,7 @@ class VoiceCallController(
                         delay(1000)
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (VoiceCallSilencePolicy.resetsClock(phase, companionOptions.silenceEnabled, muted.value,
-                            speechTurnActive.get() || pendingHeard.any { !it.observation } || pendingTyped.isNotEmpty())) {
+                            manualRecording || speechTurnActive.get() || pendingHeard.any { !it.observation } || pendingTyped.isNotEmpty())) {
                             lastSoundAt = now
                             silenceReady.tryReceive()
                         } else if (phase == Phase.LISTENING && now - lastSoundAt >= companionOptions.silenceSeconds * 1000L) {
@@ -264,6 +287,12 @@ class VoiceCallController(
                                 }
                             },
                             shouldSubmit = { submitRecording.getAndSet(false) },
+                            manualMode = { manualMode },
+                            captureAllowed = { !manualMode || manualRecording },
+                            onManualSubmitted = { withContext(Dispatchers.Main) {
+                                manualRecording = false; microphoneLevel = 0f
+                                if (manualMode && phase == Phase.LISTENING) phase = Phase.RECOGNIZING
+                            } },
                             onEcho = { enabled -> withContext(Dispatchers.Main) {
                                 continuousWarning = if (enabled) "" else "设备未提供可控回声消除，扬声器声音可能被再次录入；建议使用耳机。"
                             } },
@@ -278,6 +307,7 @@ class VoiceCallController(
                             } },
                             onInvalidAnalysis = { withContext(Dispatchers.Main) {
                                 continuousWarning = "有一段声音分析结果不完整，未发送给AI；通话继续收音。"
+                                if (manualMode && phase == Phase.RECOGNIZING) phase = Phase.LISTENING
                             } },
                             onSpeechState = { active -> withContext(Dispatchers.Main) {
                                 speechTurnActive.set(active)
@@ -322,6 +352,7 @@ class VoiceCallController(
                                     heardTurnReady = true
                                     heardReady.trySend(Unit)
                                 }
+                                if (manualMode && pendingHeard.isEmpty() && phase == Phase.RECOGNIZING) phase = Phase.LISTENING
                             } },
                         ).run()
                         } catch (error: CancellationException) {
@@ -408,7 +439,7 @@ class VoiceCallController(
                                         try {
                                             viewModel.sendVoiceCallTurn(text, chatId, if (audioAnalysis) null else audioFile?.absolutePath, roleCardId, audioAnalysis && input?.typed != true,
                                                 visual?.file?.absolutePath, visual?.video == true, visualOnly, typed = input?.typed == true,
-                                                continuous = audioAnalysis, observation = input?.observation == true, silence = input?.silence == true) { sentence ->
+                                                continuous = audioAnalysis && !manualMode, observation = input?.observation == true, silence = input?.silence == true) { sentence ->
                                                 // Display and speech share the same public text; protocol
                                                 // metadata and thinking never enter the call captions.
                                                 val cleaned = WaifuMessageProcessor.cleanContentForWaifu(
@@ -549,7 +580,7 @@ class VoiceCallController(
     private fun takeSilenceInput(): CallInput? {
         val elapsed = android.os.SystemClock.elapsedRealtime() - lastSoundAt
         if (!companionOptions.silenceEnabled || muted.value || !isConnected || phase != Phase.LISTENING ||
-            speechTurnActive.get() || pendingHeard.isNotEmpty() || pendingTyped.isNotEmpty() ||
+            manualRecording || speechTurnActive.get() || pendingHeard.isNotEmpty() || pendingTyped.isNotEmpty() ||
             elapsed < companionOptions.silenceSeconds * 1000L) return null
         lastSoundAt = android.os.SystemClock.elapsedRealtime()
         return CallInput(text = "[通话静默] 约 ${elapsed / 1000} 秒未检测到新的说话活动；用户并未发送消息。你可以自然接话，或仅输出 <voice_call_quiet/> 继续陪伴。不要推断沉默的原因。",
@@ -583,8 +614,13 @@ class VoiceCallController(
             }
         }
         val recorded = async {
-            if (nativeAudio) CallInput(audio = recordAudioTurn(recorder))
-            else CallInput(text = recognizeTurn(checkNotNull(recognizer)))
+            if (manualMode) {
+                while (!manualRecording) manualReady.receive()
+            }
+            try {
+                if (nativeAudio) CallInput(audio = recordAudioTurn(recorder))
+                else CallInput(text = recognizeTurn(checkNotNull(recognizer)))
+            } finally { manualRecording = false }
         }
         var input: CallInput? = null
         while (input == null) {
@@ -602,7 +638,7 @@ class VoiceCallController(
                 }
                 visualReady.onReceive {
                     // Never discard a phrase already being spoken just to send a scheduled frame.
-                    if (soundDetected || pendingVisual == null || !cameraEnabled) recorded.await()
+                    if (manualRecording || soundDetected || pendingVisual == null || !cameraEnabled) recorded.await()
                     else {
                         recorded.cancelAndJoin()
                         CallInput(visualOnly = true)
@@ -680,15 +716,21 @@ class VoiceCallController(
             }
         },
         shouldSubmit = { submitRecording.get() },
+        manual = manualMode,
         )
     }
 
     fun sendRecordingNow() {
-        if (continuousListening || (nativeAudio && phase == Phase.LISTENING)) submitRecording.set(true)
+        if (manualMode && !manualRecording) return
+        if (continuousListening || ((nativeAudio || manualMode) && phase == Phase.LISTENING)) {
+            submitRecording.set(true)
+            if (!nativeAudio && !audioAnalysis) scope.launch { speech?.stopRecognition() }
+        }
     }
 
     private suspend fun recognizeTurn(recognizer: SpeechService): String = coroutineScope {
         val result = CompletableDeferred<String>()
+        var manualTimer: Job? = null
         // Reuse the STT microphone meter; no second recorder is needed for animation.
         val levels = launch {
             recognizer.volumeLevelFlow.collect {
@@ -719,10 +761,19 @@ class VoiceCallController(
             check(recognizer.startRecognition(
                 continuousMode = false,
                 partialResults = true,
-                silenceDurationMs = 2000,
+                silenceDurationMs = if (manualMode) 60_000 else 2000,
             )) { context.getString(R.string.voice_call_stt_failed) }
+            if (manualMode) manualTimer = launch {
+                val start = android.os.SystemClock.elapsedRealtime()
+                while (!result.isCompleted && phase == Phase.LISTENING) {
+                    delay(100)
+                    recordingMillis = android.os.SystemClock.elapsedRealtime() - start
+                    if (recordingMillis >= 60_000) { recognizer.stopRecognition(); break }
+                }
+            }
             result.await()
         } finally {
+            manualTimer?.cancel()
             withContext(NonCancellable) { recognizer.cancelRecognition() }
             levels.cancel()
             microphoneLevel = 0f
@@ -737,6 +788,7 @@ class VoiceCallController(
         microphoneEpoch.incrementAndGet()
         muted.value = !muted.value
         if (muted.value) {
+            manualRecording = false
             pendingHeard.forEach { it.recordings.forEach { file -> file.delete() } }
             pendingHeard.clear()
             heardTurnReady = false
@@ -757,6 +809,7 @@ class VoiceCallController(
     fun finish(by: EndBy = EndBy.USER) {
         if (phase == Phase.ENDED) return
         endedBy = by
+        manualRecording = false
         if (viewModel.activeStreamingChatIds.value.contains(chatId)) viewModel.cancelMessage(chatId)
         phase = Phase.ENDED
         sessionJob?.cancel()

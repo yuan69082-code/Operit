@@ -670,7 +670,8 @@ class EnhancedAIService private constructor(private val context: Context) {
         enableThinking: Boolean = false,
         recordTokenUsage: Boolean = true,
         chatModelConfigIdOverride: String? = null,
-        chatModelIndexOverride: Int? = null
+        chatModelIndexOverride: Int? = null,
+        stream: Boolean = false
     ): String {
         ensureInitialized()
         val serviceForFunction = getAIServiceForFunction(functionType, chatModelConfigIdOverride, chatModelIndexOverride)
@@ -683,7 +684,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 chatHistory = turns,
                 modelParameters = modelParameters,
                 enableThinking = enableThinking,
-                stream = false,
+                stream = stream,
                 availableTools = emptyList(),
                 preserveThinkInHistory = true,
                 recordTokenUsage = recordTokenUsage

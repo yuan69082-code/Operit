@@ -11,6 +11,40 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 
 class CompanionStoreTest {
+    @Test fun legacyMemoryMigratesOnceWithoutDailyInjectionOrLoss() {
+        val library = store(temporary.newFolder())
+        library.setMemory("c", "pin", "原文", "字".repeat(13000))
+        library.setMemory("c", "draft", "", "旧草稿")
+        library.migrateMemory("c", "role:r")
+        library.migrateMemory("c", "role:r")
+        assertEquals(3, library.entries("role:r").size)
+        assertEquals(13000, library.entries("role:r").filter { it.getString("title").contains("原文") }.sumOf { it.getString("content").length })
+        assertTrue(library.entries("role:other").isEmpty())
+        assertTrue(library.read("summary:c").optBoolean("library_migrated"))
+    }
+
+    @Test fun unfinishedTodoCannotBeDistilledAndCompletedTodoBecomesKnowledge() {
+        val library = store(temporary.newFolder())
+        val todo = library.saveTodo("role:r", null, "学习录音", "还没做", "urgent", "long", "open")
+        val id = todo.getString("id")
+        assertThrows(IllegalArgumentException::class.java) { library.finishTodo("role:r", id, "distill", "收获") }
+        assertEquals(1, library.todos("role:r").size)
+        library.saveTodo("role:r", id, "学习录音", "完成实验", "urgent", "long", "done")
+        library.finishTodo("role:r", id, "distill", "环境音会影响自动断句，手动提交可以控制边界。")
+        assertTrue(library.todos("role:r").isEmpty())
+        assertEquals("待办沉淀", library.entries("role:r").single().getString("category"))
+        assertTrue(library.todos("role:other").isEmpty())
+    }
+
+    @Test fun auditIsPersistentBoundedAndNewestFirst() {
+        val root = temporary.newFolder()
+        val first = store(root)
+        repeat(310) { first.log("c", "唤醒", "event-$it") }
+        val rows = store(root).logs("c")
+        assertEquals(300, rows.size)
+        assertEquals("event-309", rows.first().getString("detail"))
+        assertTrue(store(root).logs("other").isEmpty())
+    }
     @get:Rule val temporary = TemporaryFolder()
 
     private fun store(root: File): CompanionStore {

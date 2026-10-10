@@ -1026,7 +1026,7 @@ object AIMessageManager {
                         message.content.replace(memoryTagRegex, "").trim()
                     )
                 } else {
-                    stripMediaLinksForAssistant(message.content)
+                    stripMediaLinksForAssistant(ChatUtils.removeThinkingContent(message.content))
                 }
                 if (cleanedContent.isNotBlank()) {
                     val displayContent =
@@ -1047,9 +1047,8 @@ object AIMessageManager {
         return try {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
             val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride)
-            val protectedMemory = chatId?.let {
-                com.ai.assistance.operit.core.companion.CompanionStore(context).memoryContext(it)
-            }.orEmpty()
+            // Former pinned memory belongs in the library, not every subsequent summary.
+            val protectedMemory = ""
             val draft =
                 enhancedAiService.generateSummary(
                     conversationToSummarize + listOfNotNull(protectedMemory.takeIf { it.isNotBlank() }?.let { "user" to it }),
@@ -1076,11 +1075,12 @@ object AIMessageManager {
                                 customTitle = summaryConfig.dialogueReviewTitle
                             )
                         )
-                        conversationReviewEntries.forEach { (speaker, content) ->
+                        // Unbounded excerpts regrew the history that had just been compressed.
+                        conversationReviewEntries.takeLast(6).forEach { (speaker, content) ->
                             append("- ")
                             append(speaker)
                             append(": ")
-                            append(content)
+                            append(content.take(240))
                             append("\n")
                         }
                     }
@@ -1312,6 +1312,13 @@ object AIMessageManager {
         if (!enableSummary) {
             return false
         }
+
+        val lastSummary = messages.indexOfLast { it.sender == "summary" }
+        val newTurns = messages.drop(lastSummary + 1).count { it.sender == "user" }
+        // Recompressing one or two fresh turns cannot meaningfully reduce fixed system/tool
+        // overhead. Keep the hard context limit authoritative while avoiding summary churn.
+        if (newTurns == 0) return false
+        if (lastSummary >= 0 && newTurns < 3 && maxTokens > 0 && currentTokens < maxTokens * 0.95) return false
 
         // 检查Token阈值
         if (maxTokens > 0) {

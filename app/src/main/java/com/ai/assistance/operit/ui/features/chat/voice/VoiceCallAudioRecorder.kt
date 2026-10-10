@@ -26,6 +26,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
     suspend fun recordTurn(
         onProgress: suspend (rms: Float, elapsedMillis: Long, soundDetected: Boolean) -> Unit = { _, _, _ -> },
         shouldSubmit: () -> Boolean = { false },
+        manual: Boolean = false,
     ): File = withContext(Dispatchers.IO) {
         lastQuietIntervals = emptyList()
         val rate = 16000
@@ -41,7 +42,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
             // even when it never crosses the automatic sound threshold.
             val manualFrames = ArrayDeque<ByteArray>()
             val pcm = ByteArrayOutputStream()
-            var recordingSound = false
+            var recordingSound = manual
             var quietFrames = 0
             var sampleCount = 0L
             var framesRead = 0
@@ -91,7 +92,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     }
                     quietFrames = if (hasSound) 0 else quietFrames + 1
                     // A natural thinking pause must not terminate the user's sentence.
-                    if (quietFrames >= 100 || pcm.size() >= rate * 2 * 60) break
+                    if ((!manual && quietFrames >= 100) || pcm.size() >= rate * 2 * 60) break
                 }
             }
             val data = pcm.toByteArray()
@@ -138,6 +139,9 @@ class VoiceCallAudioRecorder(private val context: Context) {
         onEcho: suspend (Boolean) -> Unit,
         onProgress: suspend (Float, Long, Boolean) -> Unit,
         onSpeechState: suspend (Boolean) -> Unit,
+        manualMode: () -> Boolean = { false },
+        captureAllowed: () -> Boolean = { true },
+        onManualSubmitted: suspend () -> Unit = {},
         onClip: suspend (Clip) -> Unit,
     ): Unit = withContext(Dispatchers.IO) {
         val rate = 16000
@@ -192,11 +196,12 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 val currentEpoch = inputEpoch()
                 val changedEpoch = currentEpoch != epoch
                 epoch = currentEpoch
-                val muted = isMuted()
+                val manual = manualMode()
+                val muted = isMuted() || !captureAllowed()
                 val rms = if (muted) 0f else sqrt(energy / count).toFloat()
                 // A sound gate, not a speech gate: non-word sounds can open a window too.
                 val hasSound = rms >= .004f
-                if (framesRead % 5 == 0) onProgress(rms, totalSamples * 1000 / rate, hasSound)
+                if (framesRead % 5 == 0) onProgress(rms, if (manual) pcm.size().toLong() * 1000 / (rate * 2) else totalSamples * 1000 / rate, hasSound)
                 if (muted || changedEpoch) {
                     pcm.reset()
                     preRoll.clear()
@@ -228,7 +233,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 if (pcm.size() == 0) {
                     preRoll.addLast(bytes.array())
                     if (preRoll.size > 10) preRoll.removeFirst()
-                    if (!hasSound && !speechTurnOpen && !manualSubmit) continue
+                    if (!manual && !hasSound && !speechTurnOpen && !manualSubmit) continue
                     clipStartSamples = totalSamples - preRoll.sumOf { it.size / 2 }
                     preRoll.forEach { pcm.write(it) }
                     preRoll.clear()
@@ -244,12 +249,10 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 }
                 // Speech and non-word sounds have separate clocks. Breathing cannot reset
                 // the speech-pause timer, and a 3 s sound window cannot cut a sentence.
-                val speechFinished = speechTurnOpen && nonSpeechSamples >= rate * 2L
-                val soundWindowFinished = !speechTurnOpen && pcm.size() >= rate * 2 * 3
-                // Bound memory on exceptionally long speech; this chunk is not an end-of-turn.
-                val windowEnded = speechTurnOpen && pcm.size() >= rate * 2 * 30 &&
-                    !speechFinished && !manualSubmit
-                if (windowEnded || speechFinished || soundWindowFinished || manualSubmit) {
+                val boundary = VoiceCallSegmentPolicy.boundary(manual, manualSubmit, speechTurnOpen,
+                    nonSpeechSamples * 1000 / rate, elapsed)
+                val windowEnded = boundary == VoiceCallSegmentPolicy.Boundary.CHUNK
+                if (boundary != VoiceCallSegmentPolicy.Boundary.CONTINUE) {
                     quietStart?.let { if (elapsed - it >= 120) quietIntervals.add(it to elapsed) }
                     val data = pcm.toByteArray()
                     val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
@@ -261,7 +264,8 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     try {
                         file.outputStream().use { it.write(header); it.write(data) }
                         onClip(Clip(file, quietIntervals.toList(), clipStartSamples * 1000 / rate,
-                            totalSamples * 1000 / rate, windowEnded, remoteText, epoch, speechTurnOpen))
+                            totalSamples * 1000 / rate, windowEnded, remoteText, epoch, speechTurnOpen || manual))
+                        if (manual) onManualSubmitted()
                     } catch (error: Throwable) {
                         file.delete()
                         throw error

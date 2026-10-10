@@ -127,7 +127,7 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                         Text(stringResource(status), color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         if (controller.isConnected) Text("${elapsedSeconds / 60}:${(elapsedSeconds % 60).toString().padStart(2, '0')}", style = MaterialTheme.typography.titleMedium)
                         CallMicrophoneWave(if (listening) controller.microphoneLevel else 0f)
-                        if (controller.continuousListening) Text("持续收音 · 对方说话时也能听见", style = MaterialTheme.typography.labelSmall)
+                        if (controller.continuousListening && !controller.manualMode) Text("持续收音 · 对方说话时也能听见", style = MaterialTheme.typography.labelSmall)
                         if (controller.continuousWarning.isNotBlank()) Text(controller.continuousWarning, style = MaterialTheme.typography.bodySmall, color = colors.error)
                         VoiceCallCameraControls(controller, showPreview = false) { video, interval ->
                             requestedVideo = video
@@ -156,7 +156,17 @@ fun VoiceCallDialog(controller: VoiceCallController, onDismiss: () -> Unit) {
                         if (controller.recordingNotice.isNotBlank()) {
                             Text(controller.recordingNotice, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                         }
-                        if ((controller.nativeAudio || controller.audioAnalysis) && listening) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = !controller.manualMode, onClick = { controller.setManualInput(false) }, label = { Text("实时收音") },
+                                enabled = !controller.manualRecording && phase in setOf(VoiceCallController.Phase.LISTENING, VoiceCallController.Phase.MUTED))
+                            FilterChip(selected = controller.manualMode, onClick = { controller.setManualInput(true) }, label = { Text("分段发送") },
+                                enabled = !controller.manualRecording && phase in setOf(VoiceCallController.Phase.LISTENING, VoiceCallController.Phase.MUTED))
+                        }
+                        if (controller.manualMode) Text("点开始录音，说完点发送。每段最长60秒，等待回复时暂停收音。", style = MaterialTheme.typography.bodySmall)
+                        if (controller.manualMode && !controller.manualRecording && phase == VoiceCallController.Phase.LISTENING && !muted) {
+                            Button(onClick = controller::startManualRecording) { Text("开始录音") }
+                        }
+                        if ((controller.nativeAudio || controller.audioAnalysis || controller.manualMode) && listening && (!controller.manualMode || controller.manualRecording)) {
                             TextButton(onClick = controller::sendRecordingNow, enabled = controller.recordingMillis > 0) {
                                 Text("发送这段录音 · ${controller.recordingMillis / 1000} 秒")
                             }

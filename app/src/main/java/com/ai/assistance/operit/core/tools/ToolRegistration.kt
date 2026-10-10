@@ -279,7 +279,16 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val reason = tool.parameters.find { it.name == "reason" }?.value.orEmpty()
                 val callerName = tool.parameters.find { it.name == "__operit_package_caller_name" }?.value.orEmpty()
                 val message = runBlocking(Dispatchers.Main.immediate) {
+                    val proactive = com.ai.assistance.operit.core.companion.CompanionRuntime.isWake(chatId)
+                    val store = com.ai.assistance.operit.core.companion.CompanionStore(context)
+                    val latestUser = if (proactive) com.ai.assistance.operit.api.chat.ChatRuntimeHolder.getInstance(context)
+                        .getCore(com.ai.assistance.operit.api.chat.ChatRuntimeSlot.MAIN).getChatHistoryDelegate()
+                        .getRuntimeChatHistory(chatId).lastOrNull { it.sender == "user" && !it.content.startsWith("[语音通话]") }?.timestamp ?: 0L else 0L
+                    if (proactive) check(store.read("contact:$chatId").optLong("last_call_user_turn", Long.MIN_VALUE) != latestUser) {
+                        "这一轮已主动呼叫过，请等用户新消息，不要重复拨打。"
+                    }
                     com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.request(context, chatId, roleId, reason, callerName)
+                        .also { if (proactive) store.update("contact:$chatId") { data -> data.put("last_call_user_turn", latestUser) } }
                 }
                 ToolResult(toolName = tool.name, success = true, result = StringResultData(message))
             } catch (error: kotlinx.coroutines.CancellationException) {

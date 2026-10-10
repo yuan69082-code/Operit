@@ -18,6 +18,9 @@ class VoiceCallContinuousAudio(
     private val playbackText: () -> String,
     private val referenceSnapshot: suspend () -> File?,
     private val shouldSubmit: () -> Boolean,
+    private val manualMode: () -> Boolean = { false },
+    private val captureAllowed: () -> Boolean = { true },
+    private val onManualSubmitted: suspend () -> Unit = {},
     private val onEcho: suspend (Boolean) -> Unit,
     private val onProgress: suspend (Float, Long, Boolean) -> Unit,
     private val onSpeechState: suspend (Boolean) -> Unit,
@@ -44,6 +47,7 @@ class VoiceCallContinuousAudio(
                 VoiceCallAudioRecorder(context).captureContinuous(
                     isMuted, inputEpoch, playbackText, shouldSubmit, onEcho, onProgress,
                     onSpeechState = { active -> capturingSpeech.set(active); publishSpeechState() },
+                    manualMode = manualMode, captureAllowed = captureAllowed, onManualSubmitted = onManualSubmitted,
                 ) { clip ->
                     if (clip.speechTurn) speechPending.incrementAndGet()
                     if (clips.trySend(clip).isFailure) {

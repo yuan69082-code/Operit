@@ -55,8 +55,8 @@ object FunctionalPrompts {
         6. 结尾使用等号分隔线.
 
         **内容要求：**
-        1. 语言风格：专业、清晰、客观.
-        2. 内容长度：不要限制字数，根据对话内容的复杂程度和重要性，自行决定合适的长度。可以写得详细一些，确保重要信息不丢失。宁可内容多一点，也不要因为过度精简导致关键信息丢失或失真。每个部分都要具备充分篇幅，绝不能以一句话敷衍.
+        1. 以对话中 AI 的第一人称“我”写自己的连续性记录，用户用她的名字或“她”称呼。多人对话保留具体名字以免混淆。引用原话不改变说话者。
+        2. 内容长度：压缩重复描述、过期过程和大段工具输出，通常用 800–1600 字，复杂任务最多 2400 字；短对话应更短。不为填满栏目凑字数。保留关键事实、约定、情绪变化、未完成事项及必要原话。
         3. 信息完整性：优先保证信息的完整性和准确性，技术与非技术内容都需提供必要证据或引用.
         4. 内容还原：摘要既要说明“过程如何推进”，也要写清“实际产出/讨论内容是什么”，必要时引用结果文本、结论、代码片段或参数，确保在没有原始对话的情况下依然能完全还原信息本身.
         5. 目标：生成的摘要必须是自包含的。即使AI完全忘记了之前的对话，仅凭这份摘要也能够准确理解历史背景、当前状态、具体进度和下一步行动.
@@ -103,8 +103,8 @@ object FunctionalPrompts {
         6. End with the separator line.
 
         **Content requirements:**
-        1. Style: professional, clear, objective.
-        2. Length: do not limit length. Decide an appropriate length based on complexity and importance. Prefer being detailed to avoid missing key information.
+        1. Write from the conversation AI's first-person perspective ("I"). Refer to the user by her established name or "she". Preserve speaker attribution in quotations and use names to distinguish group participants.
+        2. Be concise: normally 500–1000 words, at most 1500 for complex tasks, shorter for short conversations. Remove repetition, obsolete process and large tool dumps. Preserve key facts, agreements, emotional changes, unfinished tasks and necessary quotations.
         3. Completeness: prioritize completeness and accuracy. Provide evidence/quotes when needed.
         4. Reconstruction: the summary must describe both “how the process progressed” and “what the actual outputs/discussion were”. Quote resulting text, conclusions, code snippets, or parameters when needed.
         5. Goal: the summary must be self-contained so that even if the AI forgets the original conversation, it can fully reconstruct context, current status, progress, and next actions.
@@ -219,7 +219,9 @@ object FunctionalPrompts {
         val configuredPrompt = summaryConfig.globalRules?.trim()?.takeIf { it.isNotBlank() }?.let { rules ->
             "$promptWithPreviousSummary\n\n$rules"
         } ?: promptWithPreviousSummary
-        return configuredPrompt + "\n\n" + ConversationEvidencePrompts.forLanguage(useEnglish)
+        return configuredPrompt + "\n\n" + ConversationEvidencePrompts.forLanguage(useEnglish) +
+            if (useEnglish) "\nNarrate as the conversation AI using I; refer to the user by her established name or she, preserving speaker attribution."
+            else "\n叙述视角：用对话中 AI 的第一人称“我”，用户用原文名字或“她”；不要写成旁观者叙述，不混淆原话归属。"
     }
 
     private fun applySummarySectionOverrides(

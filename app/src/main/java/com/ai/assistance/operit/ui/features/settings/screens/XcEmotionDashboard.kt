@@ -27,6 +27,12 @@ internal fun XcEmotionDashboard(receipt: JSONObject, enabled: Boolean) {
             Text("心潮 · 当前状态", style = MaterialTheme.typography.titleLarge)
             Text(if (enabled) "随对话同步" else "自动同步已关闭", color = MaterialTheme.colorScheme.primary)
             if (receipt.optString("error").isNotBlank()) Text(receipt.getString("error"), color = MaterialTheme.colorScheme.error)
+            receipt.optJSONObject("last_event")?.let { event ->
+                val outcome = event.optJSONObject("interaction")
+                Text("最近互动回执：" + outcome?.optString("reasonCode").orEmpty(), style = MaterialTheme.typography.bodySmall)
+                if (outcome?.optString("reasonCode") == "no_interaction_outcome")
+                    Text("服务端未确认互动类型；不表示情绪必定没有变化。请查看唤醒与日志中的 XC 互动记录。", style = MaterialTheme.typography.bodySmall)
+            }
             if (snapshot == null || emotion == null) {
                 Text("还没有情绪快照。绑定并开启后，下一次对话会自动从 XC 读取。")
             } else {

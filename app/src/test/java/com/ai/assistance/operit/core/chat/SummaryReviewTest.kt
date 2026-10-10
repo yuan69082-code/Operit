@@ -13,6 +13,17 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SummaryReviewTest {
+    @Test fun explicitTextDecisionsAndFencedJson() = runTest {
+        assertEquals("draft", SummaryReview.finalize("draft") { "<summary_review>approve</summary_review>" })
+        assertEquals("我记得她说地点还没定。", SummaryReview.finalize("wrong") {
+            "<summary_review>revise</summary_review>\n我记得她说地点还没定。"
+        })
+        assertEquals("draft", SummaryReview.finalize("draft") { "```json\n{\"decision\":\"approve\"}\n```" })
+        try {
+            SummaryReview.finalize("draft") { "I have reviewed the conversation." }
+            fail("Ordinary conversation is not approval")
+        } catch (e: IllegalArgumentException) { assertTrue(e.message.orEmpty().contains("明确")) }
+    }
     @Test fun approvalReturnsTheExactDraftOnlyAfterReviewFinishes() = runTest {
         val answer = CompletableDeferred<String>()
         val draft = "  约好明天见；地点尚未确定。\n"
@@ -67,7 +78,7 @@ class SummaryReviewTest {
     @Test fun stalledReviewerTimesOutWithoutReturningTheDraft() = runTest {
         val result = async { runCatching { SummaryReview.finalize("draft") { awaitCancellation() } } }
         runCurrent()
-        advanceTimeBy(120_001)
+        advanceTimeBy(300_001)
         runCurrent()
         assertTrue(result.await().isFailure)
         assertTrue(result.await().exceptionOrNull()?.message.orEmpty().contains("审阅超时"))
