@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: implementation
+status: released-awaiting-device-feedback
 ---
 
 # 手机实测反馈修复
@@ -16,3 +16,5 @@ status: implementation
 7. 核对窗口估算与额外模型调用，减少无效唤醒、过长摘要及重复注入。
 
 验证包括协议解析、取消、日志和调度、资料匹配与迁移、待办状态转换、音频模式测试，以及签名固定的 Android CI 构建。手机麦克风、后台权限和已部署 XC 的授权调用仍需要真机验证。
+
+已发布第46版，详见[实现说明](implementation.md)与[验证记录](validation.md)。
