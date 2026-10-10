@@ -13,5 +13,6 @@ fork: https://github.com/yuan69082-code/Operit
 步骤：
 - [01-summary.md](01-summary.md)
 - [02-photos.md](02-photos.md)
+- [验证记录](validation.md)
 
 完成后验证取消、编辑来源失效、缓存复用、图片参数和权限失败，沿用固定 Debug 签名构建覆盖更新包。
