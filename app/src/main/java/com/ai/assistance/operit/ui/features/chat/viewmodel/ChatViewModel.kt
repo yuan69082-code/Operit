@@ -1615,6 +1615,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     fun enqueuePendingQueueMessage(chatId: String, text: String, isQueueBlocked: Boolean) {
         pendingMessageQueueStore.enqueue(chatId, text, isQueueBlocked)
+        // The normal busy UI queues typed input. A proactive activity must yield immediately;
+        // once cancellation clears busy state, the existing queue sends the saved message.
+        if (com.ai.assistance.operit.core.companion.CompanionRuntime.isWake(chatId))
+            com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()
     }
 
     fun removePendingQueueMessage(chatId: String, messageId: Long): PendingQueueMessageItem? =

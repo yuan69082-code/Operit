@@ -337,7 +337,20 @@ class MessageCoordinationDelegate(
         preferActiveRoleCard: Boolean = false,
     ) {
         // 仅在没有指定 chatId 的情况下，才需要确保有当前对话
-        if (!turnOptions.proactiveWake) com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()
+        val wakeCancellation = if (!turnOptions.proactiveWake)
+            com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction() else null
+        if (wakeCancellation != null) {
+            // Cancellation is asynchronous. Wait for our owned background turn to release the
+            // normal chat runtime, otherwise the real message is silently rejected as "busy".
+            coroutineScope.launch {
+                wakeCancellation.join()
+                sendUserMessage(promptFunctionType = promptFunctionType, roleCardIdOverride = roleCardIdOverride,
+                    chatIdOverride = chatIdOverride, messageTextOverride = messageTextOverride,
+                    proxySenderNameOverride = proxySenderNameOverride, chatModelConfigIdOverride = chatModelConfigIdOverride,
+                    chatModelIndexOverride = chatModelIndexOverride, turnOptions = turnOptions, preferActiveRoleCard = preferActiveRoleCard)
+            }
+            return
+        }
         if (chatIdOverride.isNullOrBlank() && chatHistoryDelegate.currentChatId.value == null) {
             AppLogger.d(TAG, "当前没有活跃对话，自动创建新对话")
 

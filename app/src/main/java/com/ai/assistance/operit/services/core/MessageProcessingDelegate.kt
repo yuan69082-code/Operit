@@ -562,8 +562,12 @@ class MessageProcessingDelegate(
     }
 
     fun cancelMessage(chatId: String) {
+        cancelMessageAndWait(chatId)
+    }
+
+    fun cancelMessageAndWait(chatId: String): Job {
         val expectedTurnId = runtimeFor(chatId).activeTurnId
-        coroutineScope.launch(Dispatchers.IO) {
+        return coroutineScope.launch(Dispatchers.IO) {
             cancelMessageInternal(
                 chatId = chatId,
                 keepPartialResponse = true,

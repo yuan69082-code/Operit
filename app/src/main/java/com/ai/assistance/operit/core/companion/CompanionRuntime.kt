@@ -29,6 +29,7 @@ object CompanionRuntime {
     @Volatile private var lastInteraction = SystemClock.elapsedRealtime()
     private val generation = java.util.concurrent.atomic.AtomicLong()
     @Volatile private var decision: Job? = null
+    @Volatile private var cancellationBarrier: Job? = null
     private data class OwnedTurn(val core: ChatServiceCore, val chatId: String)
     private val owned = AtomicReference<OwnedTurn?>()
     private val toolCount = AtomicInteger()
@@ -41,12 +42,13 @@ object CompanionRuntime {
             store.update("conversation:$chatId") { it.put("role_id", roleId.orEmpty()) }
     }
 
-    fun noteUserInteraction() {
+    fun noteUserInteraction(): Job? {
         lastInteraction = SystemClock.elapsedRealtime()
         generation.incrementAndGet()
         // Cancel our own request before the user's next request starts, never in a late finally.
-        owned.getAndSet(null)?.let { it.core.cancelMessage(it.chatId) }
+        owned.getAndSet(null)?.let { cancellationBarrier = it.core.cancelMessageAndWait(it.chatId) }
         decision?.cancel()
+        return cancellationBarrier?.takeIf { it.isActive }
     }
 
     fun beforeTool(context: Context, chatId: String?, tool: String) {

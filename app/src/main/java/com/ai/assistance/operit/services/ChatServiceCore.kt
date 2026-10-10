@@ -289,6 +289,11 @@ class ChatServiceCore(
         messageProcessingDelegate.cancelMessage(chatId)
     }
 
+    fun cancelMessageAndWait(chatId: String): kotlinx.coroutines.Job {
+        messageCoordinationDelegate.cancelSummaryForChat(chatId)
+        return messageProcessingDelegate.cancelMessageAndWait(chatId)
+    }
+
     suspend fun cancelMessageForDestructiveMutation(chatId: String) {
         messageCoordinationDelegate.cancelSummaryForDestructiveMutation(chatId)
         messageProcessingDelegate.cancelMessageForDestructiveMutation(chatId)
