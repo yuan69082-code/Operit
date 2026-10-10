@@ -103,11 +103,11 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         category: String,
         sourceUri: Uri
     ): Result<CustomEmoji> = withContext(Dispatchers.IO) {
-        initializeBuiltinEmojis(target)
         importMutex.withLock {
             var imported: File? = null
             var saved: File? = null
             try {
+                initializeBuiltinEmojis(target)
                 require(isValidCategoryName(category)) { "分类名称无效" }
                 val image = StickerImageStorage.importImage(context, sourceUri.toString())
                 imported = image

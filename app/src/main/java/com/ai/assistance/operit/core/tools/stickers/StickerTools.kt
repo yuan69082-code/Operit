@@ -62,7 +62,11 @@ object StickerTools {
                         "send" -> {
                             val emoji = byId()
                             val file = StickerImageStorage.snapshot(context, repository.getEmojiFile(target, emoji))
-                            "请将下一行原样放进给用户的回复：\n" + StickerProtocol.markdown(emoji.emotionCategory.take(40).trim(), Uri.fromFile(file).toString())
+                            // Only user bubbles need the internal marker. AI replies use ordinary
+                            // image Markdown so speech output never reads a "sticker:" prefix.
+                            "请将下一行原样放进给用户的回复：\n" +
+                                StickerProtocol.markdown(emoji.emotionCategory.take(40).trim(), Uri.fromFile(file).toString())
+                                    .replace("![sticker:", "![")
                         }
                         "view" -> {
                             val file = if (arg("id") != null) repository.getEmojiFile(target, byId())
