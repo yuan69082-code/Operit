@@ -23,12 +23,15 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.data.model.CustomEmoji
 import com.ai.assistance.operit.data.preferences.ActivePromptManager
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
+import com.ai.assistance.operit.data.preferences.CharacterGroupCardManager
 import com.ai.assistance.operit.data.preferences.WaifuPreferences
 import com.ai.assistance.operit.data.repository.CustomEmojiRepository
 import com.ai.assistance.operit.data.repository.StickerImageStorage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -41,8 +44,25 @@ fun StickerPickerDialog(onSelect: (String) -> Unit, onDismiss: () -> Unit) {
     val preferences = remember { WaifuPreferences.getInstance(context) }
     val aiEnabled by preferences.waifuEnableEmoticonsFlow.collectAsState(initial = false)
     var aiLibrary by remember { mutableStateOf(false) }
+    var aiTarget by remember(activePrompt) { mutableStateOf(activePrompt) }
+    var groupChoices by remember(activePrompt) { mutableStateOf(emptyList<Pair<ActivePrompt, String>>()) }
+    LaunchedEffect(activePrompt) {
+        val prompt = activePrompt
+        if (prompt is ActivePrompt.CharacterGroup) {
+            val group = CharacterGroupCardManager.getInstance(context).getCharacterGroupCardFlow(prompt.id).first()
+            if (group != null) {
+                val choices = mutableListOf<Pair<ActivePrompt, String>>()
+                choices.add(prompt to group.name)
+                for (member in group.members) {
+                    val card = CharacterCardManager.getInstance(context).getCharacterCardFlow(member.characterCardId).first()
+                    if (card != null) choices.add(ActivePrompt.CharacterCard(card.id) to card.name)
+                }
+                groupChoices = choices
+            }
+        }
+    }
     // null is the independent user library, never a fictitious AI role.
-    val target = if (aiLibrary) activePrompt else null
+    val target = if (aiLibrary) aiTarget else null
     var category by remember(target) { mutableStateOf<String?>(null) }
     var importCategory by remember { mutableStateOf(context.getString(R.string.sticker_favorites)) }
     var selected by remember(target) { mutableStateOf<CustomEmoji?>(null) }
@@ -82,6 +102,14 @@ fun StickerPickerDialog(onSelect: (String) -> Unit, onDismiss: () -> Unit) {
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Text(stringResource(R.string.sticker_ai_enabled), Modifier.weight(1f))
                     Switch(checked = aiEnabled, onCheckedChange = { scope.launch { preferences.saveWaifuEnableEmoticons(it) } })
+                }
+                if (aiLibrary && groupChoices.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(groupChoices) { (owner, name) ->
+                            FilterChip(selected = aiTarget == owner, enabled = !busy,
+                                onClick = { aiTarget = owner }, label = { Text(name) })
+                        }
+                    }
                 }
                 Text(stringResource(R.string.sticker_choose_hint), style = MaterialTheme.typography.bodySmall)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

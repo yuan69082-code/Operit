@@ -116,7 +116,7 @@ object ToolExecutionManager {
         params.add(ToolParameter(name, value))
     }
 
-    private fun injectPackageCallContext(
+    internal fun injectPackageCallContext(
         invocation: ToolInvocation,
         jsPackageNames: Set<String>,
         callerName: String?,
