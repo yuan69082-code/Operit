@@ -2000,7 +2000,7 @@ class MessageProcessingDelegate(
                             "autoRead[final] enabled=${getIsAutoReadEnabled()} skipFinalAutoRead=$skipFinalAutoRead len=${finalContent.length} preview=\"${speechPreview(finalContent)}\""
                         )
                         // 如果启用了自动朗读，则朗读完整消息
-                        if (getIsAutoReadEnabled() && !skipFinalAutoRead) {
+                        if (getIsAutoReadEnabled() && !skipFinalAutoRead && !turnOptions.proactiveWake) {
                             speakMessageHandler(finalContent, true)
                         }
                         forceEmitScrollToBottom(chatId)
