@@ -431,7 +431,8 @@ fun BubbleUserMessageComposable(
                                     subtitleColor = effectiveTextColor.copy(alpha = 0.72f),
                                 )
                             } else {
-                                Text(
+                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                    enableDialogs = enableDialogs,
                                     text = textContent,
                                     color = effectiveTextColor,
                                     style = MaterialTheme.typography.bodyMedium,
@@ -490,7 +491,8 @@ fun BubbleUserMessageComposable(
                                     )
                                 }
                             } else {
-                                Text(
+                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                    enableDialogs = enableDialogs,
                                     text = textContent,
                                     modifier =
                                         Modifier.padding(
@@ -572,7 +574,8 @@ fun BubbleUserMessageComposable(
                                     subtitleColor = effectiveTextColor.copy(alpha = 0.72f),
                                 )
                             } else {
-                                Text(
+                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                    enableDialogs = enableDialogs,
                                     text = textContent,
                                     color = effectiveTextColor,
                                     style = MaterialTheme.typography.bodyMedium,
@@ -631,7 +634,8 @@ fun BubbleUserMessageComposable(
                                     )
                                 }
                             } else {
-                                Text(
+                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                    enableDialogs = enableDialogs,
                                     text = textContent,
                                     modifier =
                                         Modifier.padding(

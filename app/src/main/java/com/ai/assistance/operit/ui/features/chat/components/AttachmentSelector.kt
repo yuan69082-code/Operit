@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Memory
@@ -106,6 +107,13 @@ fun AttachmentSelectorPanel(
     )
 
     var showPackageDialog by remember { mutableStateOf(false) }
+    var showStickerDialog by remember { mutableStateOf(false) }
+    if (showStickerDialog) {
+        StickerPickerDialog(
+            onSelect = { onAttachImage(it); onDismiss() },
+            onDismiss = { showStickerDialog = false }
+        )
+    }
 
     // 文件/图片选择器启动器
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -174,6 +182,11 @@ fun AttachmentSelectorPanel(
 
                 val panelItems =
                         listOf(
+                                AttachmentPanelItem(
+                                        icon = Icons.Default.EmojiEmotions,
+                                        label = context.getString(R.string.sticker_title),
+                                        onClick = { showStickerDialog = true }
+                                ),
                                 AttachmentPanelItem(
                                         icon = Icons.Default.Image,
                                         label = context.getString(R.string.attachment_photo),
@@ -347,6 +360,13 @@ fun AttachmentSelectorPopupPanel(
     )
 
     var showPackageDialog by remember { mutableStateOf(false) }
+    var showStickerDialog by remember { mutableStateOf(false) }
+    if (showStickerDialog) {
+        StickerPickerDialog(
+            onSelect = { onAttachImage(it); onDismiss() },
+            onDismiss = { showStickerDialog = false }
+        )
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.GetMultipleContents()
@@ -380,6 +400,11 @@ fun AttachmentSelectorPopupPanel(
 
     val panelItems =
             listOf(
+                    AttachmentPanelItem(
+                            icon = Icons.Default.EmojiEmotions,
+                            label = context.getString(R.string.sticker_title),
+                            onClick = { showStickerDialog = true }
+                    ),
                     AttachmentPanelItem(
                             icon = Icons.Default.Image,
                             label = context.getString(R.string.attachment_photo),

@@ -212,7 +212,18 @@ object AIMessageManager {
         val attachmentTags = if (attachments.isNotEmpty()) {
             attachments.joinToString(" ") { attachment ->
                 // 如果启用直接图片处理且附件是图片，转换为link标签
-                if (enableDirectImageProcessing && attachment.mimeType.startsWith("image/", ignoreCase = true)) {
+                if (attachment.stickerCategory != null) {
+                    val markdown = com.ai.assistance.operit.util.StickerProtocol.markdown(
+                        attachment.stickerCategory, android.net.Uri.fromFile(java.io.File(attachment.filePath)).toString()
+                    )
+                    if (enableDirectImageProcessing) {
+                        val imageId = ImagePoolManager.addImage(attachment.filePath)
+                        check(imageId != "error") { "表情包图片读取失败" }
+                        "$markdown\n${MediaLinkBuilder.image(context, imageId)}"
+                    } else {
+                        markdown
+                    }
+                } else if (enableDirectImageProcessing && attachment.mimeType.startsWith("image/", ignoreCase = true)) {
                     try {
                         val imageId = ImagePoolManager.addImage(attachment.filePath)
                         val attributes = buildString {

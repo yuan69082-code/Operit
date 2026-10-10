@@ -41,7 +41,7 @@ object SystemToolPrompts {
     // ==================== 基础工具 ====================
     val basicTools = SystemToolPromptCategory(
         categoryName = "Available tools",
-        tools = com.ai.assistance.operit.core.companion.CompanionTools.prompts() + com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.prompts() + listOf(
+        tools = com.ai.assistance.operit.core.tools.stickers.StickerTools.prompts() + com.ai.assistance.operit.core.companion.CompanionTools.prompts() + com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.prompts() + listOf(
             ToolPrompt(
                 name = "request_voice_call",
                 description = "Call the user in this conversation. Invoke this tool when you want to call or the user asks you to call; saying you will call does not initiate a call. It shows an incoming call and notification. Success means ringing, not connected; wait for acceptance. Do not repeatedly dial after rejection or timeout. A scheduled or event-triggered conversation can invoke it while running; this tool does not wake the model by itself.",
@@ -76,7 +76,7 @@ object SystemToolPrompts {
     
     val basicToolsCn = SystemToolPromptCategory(
         categoryName = "可用工具",
-        tools = com.ai.assistance.operit.core.companion.CompanionTools.prompts() + com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.prompts() + listOf(
+        tools = com.ai.assistance.operit.core.tools.stickers.StickerTools.prompts() + com.ai.assistance.operit.core.companion.CompanionTools.prompts() + com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.prompts() + listOf(
             ToolPrompt(
                 name = "request_voice_call",
                 description = "向本会话用户打电话。你想主动打来或用户让你打来时，直接调用 request_voice_call，无需寻找包或应用，也不能只说‘给你打电话’。工具显示来电和通知，成功只表示等待接听，不能假装已接通。接听后客户端会通知你，再开始通话。拒接或超时后不要重复拨打。定时或事件触发的对话运行时也可调用；这个工具不会自行唤醒模型。",

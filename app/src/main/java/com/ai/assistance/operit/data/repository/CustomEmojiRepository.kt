@@ -2,14 +2,16 @@ package com.ai.assistance.operit.data.repository
 
 import android.content.Context
 import android.net.Uri
-import android.provider.OpenableColumns
-import android.webkit.MimeTypeMap
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.data.model.CustomEmoji
 import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.preferences.CustomEmojiPreferences
 import com.ai.assistance.operit.util.AppLogger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.ai.assistance.operit.util.StickerProtocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -44,6 +46,8 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         private val SUPPORTED_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp")
     }
 
+    private val initializationMutex = Mutex()
+    private val importMutex = Mutex()
     private val preferences = CustomEmojiPreferences.getInstance(context)
     private val activePromptManager by lazy { ActivePromptManager.getInstance(context) }
     @Volatile
@@ -53,15 +57,16 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         initializeBuiltinEmojis(activePromptManager.getActivePrompt())
     }
 
-    suspend fun initializeBuiltinEmojis(target: ActivePrompt) = withContext(Dispatchers.IO) {
-        purgeLegacyGlobalStorage()
-        if (preferences.isBuiltinEmojisInitialized(target).first()) {
-            return@withContext
+    suspend fun initializeBuiltinEmojis(target: ActivePrompt?) = withContext(Dispatchers.IO) {
+        initializationMutex.withLock {
+            purgeLegacyGlobalStorage()
+            if (preferences.isBuiltinEmojisInitialized(target).first()) {
+                return@withLock
+            }
+            copyBuiltinEmojisFromAssets(target)
+            preferences.setBuiltinEmojisInitialized(target, true)
+            AppLogger.d(TAG, "Built-in emojis initialized successfully for target: $target")
         }
-
-        copyBuiltinEmojisFromAssets(target)
-        preferences.setBuiltinEmojisInitialized(target, true)
-        AppLogger.d(TAG, "Built-in emojis initialized successfully for target: $target")
     }
 
     suspend fun resetToDefault() = withContext(Dispatchers.IO) {
@@ -71,7 +76,7 @@ class CustomEmojiRepository private constructor(private val context: Context) {
     /**
      * 重置指定目标的表情库为默认表情（重新从 assets 复制）
      */
-    suspend fun resetToDefault(target: ActivePrompt) = withContext(Dispatchers.IO) {
+    suspend fun resetToDefault(target: ActivePrompt?) = withContext(Dispatchers.IO) {
         try {
             preferences.clearAllEmojis(target)
             getTargetBaseDir(target).deleteRecursively()
@@ -94,52 +99,48 @@ class CustomEmojiRepository private constructor(private val context: Context) {
      * 为指定目标添加自定义表情
      */
     suspend fun addCustomEmoji(
-        target: ActivePrompt,
+        target: ActivePrompt?,
         category: String,
         sourceUri: Uri
     ): Result<CustomEmoji> = withContext(Dispatchers.IO) {
-        try {
-            initializeBuiltinEmojis(target)
-
-            val extension = getFileExtension(sourceUri) ?: return@withContext Result.failure(
-                IllegalArgumentException(context.getString(R.string.emoji_cannot_determine_extension))
-            )
-
-            if (extension.lowercase() !in SUPPORTED_EXTENSIONS) {
-                return@withContext Result.failure(
-                    IllegalArgumentException(context.getString(R.string.emoji_unsupported_image_format, extension))
-                )
-            }
-
-            val fileName = "${UUID.randomUUID()}.$extension"
-            val categoryDir = getCategoryDir(target, category)
-            if (!categoryDir.exists()) {
-                categoryDir.mkdirs()
-            }
-
-            val targetFile = File(categoryDir, fileName)
-            context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
+        initializeBuiltinEmojis(target)
+        importMutex.withLock {
+            var imported: File? = null
+            var saved: File? = null
+            try {
+                require(isValidCategoryName(category)) { "分类名称无效" }
+                val image = StickerImageStorage.importImage(context, sourceUri.toString())
+                imported = image
+                val hash = StickerProtocol.digest(image)
+                val existing = getAllEmojis(target).first().firstOrNull { emoji ->
+                    val file = getEmojiFile(target, emoji)
+                    file.isFile && StickerProtocol.digest(file) == hash
                 }
-            } ?: return@withContext Result.failure(
-                IllegalStateException(context.getString(R.string.emoji_cannot_read_source))
-            )
+                if (existing != null) return@withLock Result.success(existing)
 
-            val emoji = CustomEmoji(
-                emotionCategory = category,
-                fileName = fileName,
-                isBuiltInCategory = category in CustomEmojiPreferences.BUILTIN_EMOTIONS
-            )
-
-            preferences.addCategory(target, category)
-            preferences.addCustomEmoji(target, emoji)
-
-            AppLogger.d(TAG, "Successfully added emoji: $fileName to target: $target category: $category")
-            Result.success(emoji)
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error adding custom emoji for target: $target", e)
-            Result.failure(e)
+                val fileName = "${UUID.randomUUID()}.${image.extension}"
+                val categoryDir = getCategoryDir(target, category).apply { mkdirs() }
+                val destination = File(categoryDir, fileName)
+                saved = destination
+                image.copyTo(destination)
+                val emoji = CustomEmoji(
+                    emotionCategory = category,
+                    fileName = fileName,
+                    isBuiltInCategory = category in CustomEmojiPreferences.BUILTIN_EMOTIONS
+                )
+                preferences.addCategory(target, category)
+                preferences.addCustomEmoji(target, emoji)
+                saved = null // Metadata now owns the file.
+                Result.success(emoji)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLogger.e(TAG, "Error importing sticker for $target", error)
+                Result.failure(error)
+            } finally {
+                imported?.delete()
+                saved?.delete()
+            }
         }
     }
 
@@ -147,7 +148,7 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         deleteCustomEmoji(activePromptManager.getActivePrompt(), emojiId)
     }
 
-    suspend fun deleteCustomEmoji(target: ActivePrompt, emojiId: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun deleteCustomEmoji(target: ActivePrompt?, emojiId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val emoji = preferences.getCustomEmojisFlow(target).first()
                 .find { it.id == emojiId }
@@ -175,7 +176,7 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         deleteCategory(activePromptManager.getActivePrompt(), category)
     }
 
-    suspend fun deleteCategory(target: ActivePrompt, category: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun deleteCategory(target: ActivePrompt?, category: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val emojis = preferences.getEmojisForCategory(target, category).first()
             emojis.forEach { emoji ->
@@ -200,37 +201,38 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         }
     }
 
-    fun getEmojiFile(target: ActivePrompt, emoji: CustomEmoji): File {
+    fun getEmojiFile(target: ActivePrompt?, emoji: CustomEmoji): File {
         return File(getCategoryDir(target, emoji.emotionCategory), emoji.fileName)
     }
 
-    fun getEmojiUri(target: ActivePrompt, emoji: CustomEmoji): Uri {
+    fun getEmojiUri(target: ActivePrompt?, emoji: CustomEmoji): Uri {
         return Uri.fromFile(getEmojiFile(target, emoji))
     }
 
-    fun getEmojisForCategory(target: ActivePrompt, category: String): Flow<List<CustomEmoji>> {
+    fun getEmojisForCategory(target: ActivePrompt?, category: String): Flow<List<CustomEmoji>> {
         return preferences.getEmojisForCategory(target, category)
     }
 
-    fun getAllCategories(target: ActivePrompt): Flow<List<String>> {
+    fun getAllCategories(target: ActivePrompt?): Flow<List<String>> {
         return preferences.getAllCategories(target)
     }
 
-    fun getAllEmojis(target: ActivePrompt): Flow<List<CustomEmoji>> {
+    fun getAllEmojis(target: ActivePrompt?): Flow<List<CustomEmoji>> {
         return preferences.getCustomEmojisFlow(target)
     }
 
-    suspend fun addCategory(target: ActivePrompt, categoryName: String) {
+    suspend fun addCategory(target: ActivePrompt?, categoryName: String) {
+        require(isValidCategoryName(categoryName)) { "分类名称无效" }
         initializeBuiltinEmojis(target)
         preferences.addCategory(target, categoryName)
     }
 
-    suspend fun categoryExists(target: ActivePrompt, categoryName: String): Boolean {
+    suspend fun categoryExists(target: ActivePrompt?, categoryName: String): Boolean {
         initializeBuiltinEmojis(target)
         return getAllCategories(target).first().contains(categoryName)
     }
 
-    suspend fun cloneEmojiSet(source: ActivePrompt, target: ActivePrompt) = withContext(Dispatchers.IO) {
+    suspend fun cloneEmojiSet(source: ActivePrompt, target: ActivePrompt?) = withContext(Dispatchers.IO) {
         if (source == target) {
             initializeBuiltinEmojis(target)
             return@withContext
@@ -262,7 +264,7 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         preferences.setBuiltinEmojisInitialized(target, true)
     }
 
-    suspend fun deleteTarget(target: ActivePrompt) = withContext(Dispatchers.IO) {
+    suspend fun deleteTarget(target: ActivePrompt?) = withContext(Dispatchers.IO) {
         preferences.deleteTarget(target)
         getTargetBaseDir(target).deleteRecursively()
     }
@@ -290,10 +292,10 @@ class CustomEmojiRepository private constructor(private val context: Context) {
     }
 
     fun isValidCategoryName(categoryName: String): Boolean {
-        return categoryName.matches(Regex("^[a-z0-9_]+$"))
+        return com.ai.assistance.operit.util.StickerProtocol.validCategory(categoryName)
     }
 
-    private suspend fun copyBuiltinEmojisFromAssets(target: ActivePrompt) {
+    private suspend fun copyBuiltinEmojisFromAssets(target: ActivePrompt?) {
         try {
             val emojiAssetsDir = "emoji"
             val categories = context.assets.list(emojiAssetsDir)
@@ -341,11 +343,8 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         }
     }
 
-    private fun getTargetScopeDirName(target: ActivePrompt): String {
-        return when (target) {
-            is ActivePrompt.CharacterCard -> "character_card_${target.id}"
-            is ActivePrompt.CharacterGroup -> "character_group_${target.id}"
-        }
+    private fun getTargetScopeDirName(target: ActivePrompt?): String {
+        return EmojiScope.directory(target)
     }
 
     private suspend fun purgeLegacyGlobalStorage() {
@@ -356,7 +355,7 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         val emojiRootDir = File(context.filesDir, EMOJI_DIR)
         emojiRootDir.listFiles()?.forEach { child ->
             val isCurrentScopeDir = child.isDirectory &&
-                (child.name.startsWith("character_card_") || child.name.startsWith("character_group_"))
+                (child.name == "user" || child.name.startsWith("character_card_") || child.name.startsWith("character_group_"))
             if (!isCurrentScopeDir) {
                 child.deleteRecursively()
             }
@@ -365,59 +364,14 @@ class CustomEmojiRepository private constructor(private val context: Context) {
         legacyStoragePurged = true
     }
 
-    private fun getTargetBaseDir(target: ActivePrompt): File {
+    private fun getTargetBaseDir(target: ActivePrompt?): File {
         return File(context.filesDir, "$EMOJI_DIR/${getTargetScopeDirName(target)}")
     }
 
-    private fun getCategoryDir(target: ActivePrompt, category: String): File {
+    private fun getCategoryDir(target: ActivePrompt?, category: String): File {
+        // Existing releases allowed arbitrarily long ASCII category names; keep those readable.
+        require(isValidCategoryName(category) || category.matches(Regex("^[a-z0-9_]+$"))) { "分类名称无效" }
         return File(getTargetBaseDir(target), category)
     }
 
-    private fun getFileExtension(uri: Uri): String? {
-        return try {
-            val extensionFromMimeType =
-                if ("content" == uri.scheme) {
-                    val mimeType = context.contentResolver.getType(uri)
-                    MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
-                } else {
-                    null
-                }
-
-            extensionFromMimeType
-                ?.takeIf { it.isNotBlank() }
-                ?.lowercase()
-                ?: getFileNameFromUri(uri)
-                    ?.substringAfterLast('.', "")
-                    ?.takeIf { it.isNotEmpty() }
-                    ?.lowercase()
-                ?: uri.path
-                    ?.substringAfterLast('.', "")
-                    ?.takeIf { it.isNotEmpty() }
-                    ?.lowercase()
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error getting file extension", e)
-            null
-        }
-    }
-
-    private fun getFileNameFromUri(uri: Uri): String? {
-        if ("content" != uri.scheme) {
-            return uri.lastPathSegment
-        }
-
-        return context.contentResolver.query(
-            uri,
-            arrayOf(OpenableColumns.DISPLAY_NAME),
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            val columnIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (columnIndex >= 0 && cursor.moveToFirst()) {
-                cursor.getString(columnIndex)
-            } else {
-                null
-            }
-        }
-    }
 }

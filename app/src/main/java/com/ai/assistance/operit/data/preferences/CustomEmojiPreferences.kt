@@ -55,20 +55,17 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         encodeDefaults = true
     }
 
-    private fun targetPrefix(target: ActivePrompt): String {
-        return when (target) {
-            is ActivePrompt.CharacterCard -> "character_card_custom_emoji_${target.id}_"
-            is ActivePrompt.CharacterGroup -> "character_group_custom_emoji_${target.id}_"
-        }
+    private fun targetPrefix(target: ActivePrompt?): String {
+        return com.ai.assistance.operit.data.repository.EmojiScope.preferencePrefix(target)
     }
 
-    private fun customEmojisKey(target: ActivePrompt) =
+    private fun customEmojisKey(target: ActivePrompt?) =
         stringPreferencesKey("${targetPrefix(target)}custom_emojis")
 
-    private fun categoriesKey(target: ActivePrompt) =
+    private fun categoriesKey(target: ActivePrompt?) =
         stringSetPreferencesKey("${targetPrefix(target)}all_categories")
 
-    private fun builtinInitializedKey(target: ActivePrompt) =
+    private fun builtinInitializedKey(target: ActivePrompt?) =
         booleanPreferencesKey("${targetPrefix(target)}builtin_emojis_initialized")
 
     private fun decodeCustomEmojis(jsonString: String): List<CustomEmoji> {
@@ -80,19 +77,19 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    fun getCustomEmojisFlow(target: ActivePrompt): Flow<List<CustomEmoji>> {
+    fun getCustomEmojisFlow(target: ActivePrompt?): Flow<List<CustomEmoji>> {
         return context.customEmojiDataStore.data.map { preferences ->
             decodeCustomEmojis(preferences[customEmojisKey(target)] ?: "[]")
         }
     }
 
-    suspend fun setCustomEmojis(target: ActivePrompt, emojis: List<CustomEmoji>) {
+    suspend fun setCustomEmojis(target: ActivePrompt?, emojis: List<CustomEmoji>) {
         context.customEmojiDataStore.edit { preferences ->
             preferences[customEmojisKey(target)] = json.encodeToString(emojis)
         }
     }
 
-    suspend fun addCustomEmoji(target: ActivePrompt, emoji: CustomEmoji) {
+    suspend fun addCustomEmoji(target: ActivePrompt?, emoji: CustomEmoji) {
         context.customEmojiDataStore.edit { preferences ->
             val currentList = decodeCustomEmojis(preferences[customEmojisKey(target)] ?: "[]")
             preferences[customEmojisKey(target)] = json.encodeToString(currentList + emoji)
@@ -100,7 +97,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    suspend fun deleteCustomEmoji(target: ActivePrompt, emojiId: String) {
+    suspend fun deleteCustomEmoji(target: ActivePrompt?, emojiId: String) {
         context.customEmojiDataStore.edit { preferences ->
             val currentList = decodeCustomEmojis(preferences[customEmojisKey(target)] ?: "[]")
             val updatedList = currentList.filter { it.id != emojiId }
@@ -109,13 +106,13 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    fun getEmojisForCategory(target: ActivePrompt, category: String): Flow<List<CustomEmoji>> {
+    fun getEmojisForCategory(target: ActivePrompt?, category: String): Flow<List<CustomEmoji>> {
         return getCustomEmojisFlow(target).map { emojis ->
             emojis.filter { it.emotionCategory == category }
         }
     }
 
-    suspend fun deleteCategory(target: ActivePrompt, category: String) {
+    suspend fun deleteCategory(target: ActivePrompt?, category: String) {
         context.customEmojiDataStore.edit { preferences ->
             val currentList = decodeCustomEmojis(preferences[customEmojisKey(target)] ?: "[]")
             val updatedList = currentList.filter { it.emotionCategory != category }
@@ -132,7 +129,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    fun getAllCategories(target: ActivePrompt): Flow<List<String>> {
+    fun getAllCategories(target: ActivePrompt?): Flow<List<String>> {
         return context.customEmojiDataStore.data.map { preferences ->
             val storedCategories = preferences[categoriesKey(target)] ?: emptySet()
             val builtin = BUILTIN_EMOTIONS.filter { it in storedCategories }
@@ -141,7 +138,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    suspend fun setAllCategories(target: ActivePrompt, categories: Set<String>) {
+    suspend fun setAllCategories(target: ActivePrompt?, categories: Set<String>) {
         context.customEmojiDataStore.edit { preferences ->
             if (categories.isEmpty()) {
                 preferences.remove(categoriesKey(target))
@@ -151,7 +148,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    suspend fun addCategory(target: ActivePrompt, categoryName: String) {
+    suspend fun addCategory(target: ActivePrompt?, categoryName: String) {
         context.customEmojiDataStore.edit { preferences ->
             val currentCategories = preferences[categoriesKey(target)] ?: emptySet()
             if (!currentCategories.contains(categoryName)) {
@@ -161,7 +158,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    suspend fun addCategories(target: ActivePrompt, categoryNames: List<String>) {
+    suspend fun addCategories(target: ActivePrompt?, categoryNames: List<String>) {
         context.customEmojiDataStore.edit { preferences ->
             val currentCategories = preferences[categoriesKey(target)] ?: emptySet()
             val newCategories = categoryNames.filter { it !in currentCategories }
@@ -172,7 +169,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    suspend fun clearAllEmojis(target: ActivePrompt) {
+    suspend fun clearAllEmojis(target: ActivePrompt?) {
         context.customEmojiDataStore.edit { preferences ->
             preferences[customEmojisKey(target)] = "[]"
             preferences.remove(categoriesKey(target))
@@ -181,13 +178,13 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    fun isBuiltinEmojisInitialized(target: ActivePrompt): Flow<Boolean> {
+    fun isBuiltinEmojisInitialized(target: ActivePrompt?): Flow<Boolean> {
         return context.customEmojiDataStore.data.map { preferences ->
             preferences[builtinInitializedKey(target)] ?: false
         }
     }
 
-    suspend fun setBuiltinEmojisInitialized(target: ActivePrompt, initialized: Boolean) {
+    suspend fun setBuiltinEmojisInitialized(target: ActivePrompt?, initialized: Boolean) {
         context.customEmojiDataStore.edit { preferences ->
             if (initialized) {
                 preferences[builtinInitializedKey(target)] = true
@@ -197,7 +194,7 @@ class CustomEmojiPreferences private constructor(private val context: Context) {
         }
     }
 
-    suspend fun deleteTarget(target: ActivePrompt) {
+    suspend fun deleteTarget(target: ActivePrompt?) {
         context.customEmojiDataStore.edit { preferences ->
             preferences.remove(customEmojisKey(target))
             preferences.remove(categoriesKey(target))

@@ -302,7 +302,8 @@ fun UserMessageComposable(
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    Text(
+                    com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                        enableDialogs = enableDialogs,
                         text = textContent,
                         color = effectiveTextColor,
                         style = MaterialTheme.typography.bodyMedium

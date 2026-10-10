@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sticker_title">表情包</string>
+    <string name="sticker_mine">我的</string>
+    <string name="sticker_ai_library">AI 的收藏</string>
+    <string name="sticker_ai_enabled">允许 AI 使用和收藏表情包</string>
+    <string name="sticker_choose_hint">点一张预览，再添加到消息；最后点聊天发送键。</string>
+    <string name="sticker_all">全部</string>
+    <string name="sticker_import_category">添加到分类（可以自己命名）</string>
+    <string name="sticker_import">从相册添加</string>
+    <string name="sticker_add_to_message">添加到消息</string>
+    <string name="sticker_favorites">收藏</string>
+    <string name="sticker_save_to_mine">收藏到我的表情包</string>
+    <string name="sticker_saved">已收藏，可在聊天加号的表情包里找到</string>
+    <string name="sticker_save">收藏</string>
+    <string name="sticker_sad">难过</string>
+    <string name="sticker_surprised">惊讶</string>
+    <string name="sticker_confused">疑惑</string>
+    <string name="sticker_crying">哭哭</string>
+    <string name="sticker_like_you">喜欢你</string>
+    <string name="sticker_miss_you">想你</string>
+    <string name="sticker_speechless">无语</string>
+</resources>

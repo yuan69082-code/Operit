@@ -36,6 +36,7 @@ import org.json.JSONObject
 fun registerAllTools(handler: AIToolHandler, context: Context) {
     com.ai.assistance.operit.core.companion.CompanionTools.register(handler, context)
     com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.register(handler, context)
+    com.ai.assistance.operit.core.tools.stickers.StickerTools.register(handler, context)
 
     // Helper function to wrap UI tool execution with visibility changes
     suspend fun executeUiToolWithVisibility(

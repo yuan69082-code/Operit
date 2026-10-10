@@ -92,7 +92,13 @@ private fun AttachmentItem(attachment: AttachmentInfo, onRemove: () -> Unit, onI
     ) {
         Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // Icon based on file type
-            Icon(
+            if (attachment.stickerCategory != null) {
+                coil.compose.AsyncImage(
+                    model = java.io.File(attachment.filePath),
+                    contentDescription = attachment.fileName,
+                    modifier = Modifier.size(48.dp)
+                )
+            } else Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,

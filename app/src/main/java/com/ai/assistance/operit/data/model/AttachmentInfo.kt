@@ -9,5 +9,6 @@ data class AttachmentInfo(
         val fileName: String,
         val mimeType: String,
         val fileSize: Long,
-        val content: String = "" // Field to store inline content
+        val content: String = "", // Field to store inline content
+        val stickerCategory: String? = null
 )

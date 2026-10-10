@@ -636,6 +636,14 @@ class ConversationService(
                         append("\n</assistant_role>")
                     }
                     append(waifuRulesText)
+                    if (includeConversationIdentity && !waifuPreferences.waifuEnableEmoticonsFlow.first()) {
+                        append("\n[表情包] AI 表情包已关闭，本轮不要发送表情包或调用 stickers。用户仍可发送表情包。")
+                    }
+                    if (includeConversationIdentity && enableTools &&
+                        roleCardToolAccess.effectiveBuiltinToolVisibility["stickers"] != false &&
+                        waifuPreferences.waifuEnableEmoticonsFlow.first()) {
+                        append(com.ai.assistance.operit.core.tools.stickers.StickerTools.USAGE_RULE)
+                    }
                     if (!disableUserPreferenceDescription && userProfileMarkdown.isNotEmpty()) {
                         append("\n\n<user_profile source=\"memory-space/$effectiveMemorySpaceId/user.md\">\n")
                         append(userProfileMarkdown)

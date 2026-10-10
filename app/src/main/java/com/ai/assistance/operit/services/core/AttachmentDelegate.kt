@@ -191,6 +191,23 @@ class AttachmentDelegate(private val context: Context, private val toolHandler: 
             withContext(Dispatchers.IO) {
                 try {
                     when {
+                        filePath.startsWith("operit-sticker://attach") -> {
+                            val request = Uri.parse(filePath)
+                            val source = requireNotNull(request.getQueryParameter("source"))
+                            val category = requireNotNull(request.getQueryParameter("category"))
+                            require(com.ai.assistance.operit.util.StickerProtocol.validCategory(category))
+                            val file = File(source).canonicalFile
+                            // Only the picker creates this request; never accept arbitrary paths as saved stickers.
+                            require(file.parentFile == File(context.filesDir, "sent_stickers").canonicalFile && file.isFile)
+                            appendAttachment(AttachmentInfo(
+                                filePath = file.absolutePath,
+                                fileName = context.getString(R.string.sticker_title) + " · " + category,
+                                mimeType = requireNotNull(getMimeTypeFromPath(file.absolutePath)),
+                                fileSize = file.length(),
+                                stickerCategory = category
+                            ))
+                            return@withContext
+                        }
                         filePath == "screen_capture" -> {
                             captureScreenContent()
                             return@withContext

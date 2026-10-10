@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -119,7 +120,7 @@ fun MarkdownImageRenderer(
         return
     }
 
-    val imageAlt = extractMarkdownImageAlt(imageMarkdown)
+    val imageAlt = extractMarkdownImageAlt(imageMarkdown).removePrefix("sticker:")
     val imageUrl = extractMarkdownImageUrl(imageMarkdown)
 
     if (imageUrl.isEmpty()) {
@@ -242,6 +243,10 @@ private fun FullScreenImageDialog(imageUrl: String, imageAlt: String, onDismiss:
     val scope = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
     var savedSuccess by remember { mutableStateOf<Boolean?>(null) }
+    var showSaveSticker by remember { mutableStateOf(false) }
+    if (showSaveSticker) {
+        com.ai.assistance.operit.ui.features.chat.components.SaveStickerDialog(imageUrl) { showSaveSticker = false }
+    }
 
     // 缩放和平移状态
     var scale by remember { mutableStateOf(1f) }
@@ -361,6 +366,12 @@ private fun FullScreenImageDialog(imageUrl: String, imageAlt: String, onDismiss:
                             overflow = TextOverflow.Ellipsis
                     )
 
+                    IconButton(
+                        onClick = { showSaveSticker = true },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 48.dp)
+                    ) {
+                        Icon(Icons.Default.FavoriteBorder, contentDescription = stringResource(R.string.sticker_save_to_mine), tint = Color.White)
+                    }
                     IconButton(
                             onClick = {
                                 if (!isSaving) {

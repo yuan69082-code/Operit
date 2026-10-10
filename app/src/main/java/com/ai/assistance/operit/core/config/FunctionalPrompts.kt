@@ -462,7 +462,7 @@ object FunctionalPrompts {
     }
 
     fun waifuEmotionRule(emotionListText: String): String {
-        return "**表达情绪规则：你必须在每个句末判断句中包含的情绪或增强语气，并使用<emotion>标签在句末插入情绪状态。后续会根据情绪生成表情包。可用情绪包括：$emotionListText。例如：<emotion>happy</emotion>、<emotion>miss_you</emotion>等。如果没有这些情绪则不插入。**"
+        return "可按聊天语境主动发一张表情包，不必每句都发。可用 <emotion>分类</emotion> 随机选择，可用分类：$emotionListText；想看清并选择某一张、或收藏聊天中的图片时用 stickers 工具。"
     }
 
     fun waifuNoCustomEmojiRule(): String {

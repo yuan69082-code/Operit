@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sticker_title">Stickers</string>
+    <string name="sticker_mine">Mine</string>
+    <string name="sticker_ai_library">AI collection</string>
+    <string name="sticker_ai_enabled">AI can use and collect stickers</string>
+    <string name="sticker_choose_hint">Tap to preview, add to your message, then send in chat.</string>
+    <string name="sticker_all">All</string>
+    <string name="sticker_import_category">Import category (choose a name)</string>
+    <string name="sticker_import">Import from photos</string>
+    <string name="sticker_add_to_message">Add to message</string>
+    <string name="sticker_favorites">Favorites</string>
+    <string name="sticker_save_to_mine">Save to my stickers</string>
+    <string name="sticker_saved">Saved. Open Stickers from the chat plus button.</string>
+    <string name="sticker_save">Save</string>
+    <string name="sticker_sad">Sad</string>
+    <string name="sticker_surprised">Surprised</string>
+    <string name="sticker_confused">Confused</string>
+    <string name="sticker_crying">Crying</string>
+    <string name="sticker_like_you">Like you</string>
+    <string name="sticker_miss_you">Miss you</string>
+    <string name="sticker_speechless">Speechless</string>
+</resources>
