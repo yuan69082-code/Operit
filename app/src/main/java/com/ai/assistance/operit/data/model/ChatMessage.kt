@@ -27,6 +27,9 @@ data class ChatMessage(
         val isFavorite: Boolean = false,
         @Transient
         val isVariantPreview: Boolean = false,
+        // Request-only attribution resolved from immutable group author metadata.
+        @Transient
+        val speakerIsCurrentAssistant: Boolean? = null,
         @Transient
         var contentStream: Stream<String>? =
                 null // 修改为Stream<String>类型，与EnhancedAIService.sendMessage返回类型匹配

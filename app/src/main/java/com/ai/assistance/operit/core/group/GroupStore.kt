@@ -22,7 +22,7 @@ class GroupStore(context: Context) {
         revision.value += 1
         value
     }
-    fun ids(): Set<String> = prefs.all.keys
+    fun ids(): Set<String> = prefs.all.keys.filterNot { it.startsWith("authors:") }.toSet()
     fun log(chat: String, kind: String, detail: String, actor: String = "") {
         update(chat) { state ->
             val previous = state.optJSONArray("log") ?: JSONArray()

@@ -1194,7 +1194,10 @@ class MessageProcessingDelegate(
                     disableWarning = turnOptions.disableWarning
                 )
                 // AIMessageManager 已返回可重放的共享流，这里直接复用，避免在 viewModelScope 上再包一层。
-                val sharedCharStream = responseStream
+                val sharedCharStream = if (isGroupOrchestrationTurn &&
+                    com.ai.assistance.operit.core.group.GroupGames(context).state(activeChatId)?.phase?.let { it != "ended" } == true) {
+                    com.ai.assistance.operit.core.group.GroupGamePrivacy.publicDisplay(responseStream, coroutineScope)
+                } else responseStream
                 chatRuntime.responseStream = sharedCharStream
 
                 aiMessage = ChatMessage(

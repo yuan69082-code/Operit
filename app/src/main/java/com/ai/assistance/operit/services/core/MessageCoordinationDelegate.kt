@@ -918,6 +918,7 @@ class MessageCoordinationDelegate(
                 }
         )
         chatHistoryDelegate.addMessageToChat(userMessage, chatId)
+        com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
         titleFallback?.let { fallbackTitle ->
             launchConversationTitleGeneration(
                 chatId = chatId,
@@ -926,18 +927,6 @@ class MessageCoordinationDelegate(
                 fallbackTitle = fallbackTitle
             )
         }
-
-        var userMessageInsertedForCurrentUserTurn = true
-        val memberCardsById = orderedMembers
-            .associate { member ->
-                member.characterCardId to runCatching { characterCardManager.getCharacterCard(member.characterCardId) }.getOrNull()
-            }
-            .filterValues { it != null }
-            .mapValues { it.value!! }
-        val groupParticipantNamesText = buildGroupParticipantNamesText(
-            members = orderedMembers,
-            memberCardsById = memberCardsById
-        )
 
         val selected = com.ai.assistance.operit.core.group.GroupPolicy.targets(
             orderedMembers.map { it.characterCardId }, groupStore.selected(chatId))
@@ -959,6 +948,9 @@ class MessageCoordinationDelegate(
                 barrier?.join()
                 groupStore.update(chatId) { it.put("status", "running").remove("decision") }
                 action()
+                if (groupStore.read(chatId).optString("status") == "running") {
+                    messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Completed)
+                }
                 groupStore.update(chatId) {
                     if (it.optString("status") == "running") it.put("status", "idle").remove("pending")
                     it.remove("speaker")
@@ -984,7 +976,9 @@ class MessageCoordinationDelegate(
         if (!isGroupChatSession(chatId) && !groupJobs.containsKey(chatId)) return
         groupJobs.remove(chatId)?.cancel()
         groupStore.update(chatId) {
-            it.put("status", if (paused) "paused" else "ended").remove("speaker").remove("decision")
+            it.put("status", if (paused) "paused" else "ended")
+            it.remove("speaker")
+            it.remove("decision")
             if (!paused) it.remove("pending")
         }
         groupStore.log(chatId, if (paused) "暂停" else "结束", "用户操作，取消后续排队")
@@ -1057,7 +1051,7 @@ class MessageCoordinationDelegate(
             if (state is InputProcessingState.Error) error(state.message)
             first = false
             completedTurns++
-            com.ai.assistance.operit.core.group.GroupContext.remember(context, chatId, actor)
+            com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
             val latest = chatHistoryDelegate.getRuntimeChatHistory(chatId).lastOrNull { it.sender == "ai" }
             groupStore.log(chatId, "完成", "输入 ${latest?.inputTokens ?: 0} / 输出 ${latest?.outputTokens ?: 0} token", actor)
             val decision = groupStore.takeDecision(chatId)

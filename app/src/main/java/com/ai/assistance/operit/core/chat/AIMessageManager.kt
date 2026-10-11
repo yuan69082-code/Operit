@@ -1149,7 +1149,8 @@ object AIMessageManager {
                     previousSummary,
                     summaryConfig,
                     awaitingReview = true,
-                    reportProgress = false
+                    reportProgress = false,
+                    groupSummary = isGroupChat
                 )
             AppLogger.d(TAG, "AI生成压缩草稿完成，等待审阅")
 
@@ -1452,7 +1453,7 @@ object AIMessageManager {
 
         // 角色隔离模式：判断是当前角色还是其他角色
         val messageRoleName = message.roleName.trim()
-        return if (messageRoleName == targetRoleName) {
+        return if (message.speakerIsCurrentAssistant ?: (messageRoleName == targetRoleName)) {
             // 当前角色的消息：作为 assistant 返回
             PromptTurn(
                 kind = PromptTurnKind.ASSISTANT,

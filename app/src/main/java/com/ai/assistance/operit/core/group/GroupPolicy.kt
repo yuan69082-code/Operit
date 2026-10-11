@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.group
 
 /** Assistant IDs, never model names, are the routing authority. */
 object GroupPolicy {
+    fun ownsTurn(actor: String?, author: String?): Boolean = actor != null && author != null && actor == author
     fun targets(memberIds: List<String>, selected: List<String>): List<String> {
         require(selected.all { it in memberIds }) { "@ 的助手已离开本群，请重新选择" }
         return if (selected.isEmpty()) memberIds.distinct() else selected.distinct()

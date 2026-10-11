@@ -50,7 +50,7 @@ internal class SummaryReviewer private constructor(
                 }))
                 .put("protected_memory", protectedMemory)
                 .put("draft", proposed)
-            val instructions = """
+            val baseInstructions = """
                 这是软件压缩上下文前的内部审阅步骤，不是新的用户发言，也不要继续聊天。
                 请以本次对话中 AI 的视角，对照 source 原文、previous_summary 既有摘要及 protected_memory 保留要求，检查 draft 压缩草稿。
                 检查人物归属、事实、约定、情绪及关系变化、用户偏好、未完成事项、时间顺序与不确定性；不要把猜测改成事实。
@@ -63,6 +63,7 @@ internal class SummaryReviewer private constructor(
                 不加代码围栏，不调用工具，不输出分析过程。不要重复抄写整段对话；只保留后续需要的事实、约定和必要原话。
                 中文修改稿以800至1600字为目标，必要时至多2400字；英文以500至1000词为目标。优先保留事实与未完成约定，删除重复说明。
             """.trimIndent().let { if (groupChat) it.replace("用当前 AI 的第一人称“我”记录，用户用原文名字或“她”称呼；不替用户发言、不改变事实或名字。", com.ai.assistance.operit.core.group.GroupProvenance.SUMMARY_RULE) else it } + "\n\n" + SummaryFidelityPrompts.ZH.trimIndent()
+            val instructions = if (groupChat) com.ai.assistance.operit.core.group.GroupProvenance.summaryInstructions(baseInstructions) else baseInstructions
             val output = service.callFunctionModel(
                     FunctionType.CHAT,
                     listOf(
