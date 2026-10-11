@@ -55,6 +55,9 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
     }
 
     private fun resolveCallerCardId(tool: AITool): String? {
+        // An AI-supplied argument cannot impersonate another assistant's memory scope.
+        ToolExecutionManager.currentToolRuntimeContext()?.callerCardId
+            ?.takeIf { it.isNotBlank() }?.let { return it }
         val explicitCallerCardId =
             tool.parameters
                 .find { it.name == "caller_card_id" }
@@ -72,6 +75,7 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
 
     private suspend fun resolveRoleCardProfileId(callerCardId: String?): String? {
         val resolvedCardId = callerCardId?.takeIf { it.isNotBlank() } ?: return null
+        CharacterCardManager.getInstance(context).ensureIndependentSettings(resolvedCardId)
         val characterCard = CharacterCardManager.getInstance(context).getCharacterCard(resolvedCardId)
         val bindingMode =
             CharacterCardMemoryProfileBindingMode.normalize(characterCard.memoryProfileBindingMode)

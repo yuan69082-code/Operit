@@ -160,8 +160,9 @@ object CompanionRuntime {
         val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
         val chat = core.chatHistories.value.firstOrNull { it.id == chatId } ?: error("目标会话不存在")
         check(chat.characterGroupId.isNullOrBlank()) { "主动活动只支持单角色会话" }
-        val roleId = store.read("conversation:$chatId").optString("role_id").takeIf { it.isNotBlank() }
-            ?: error("请先在目标会话与角色聊天")
+        val roleId = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+            .getChatMetadata(chatId)?.characterCardId ?: error("请先指定目标会话所属助手")
+        CharacterCardManager.getInstance(context).ensureIndependentSettings(roleId)
         val card = CharacterCardManager.getInstance(context).getCharacterCard(roleId)
         val history = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId).map { it.copy() }
         val latest = history.lastOrNull()

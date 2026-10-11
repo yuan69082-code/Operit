@@ -87,6 +87,12 @@ fun CharacterSelectorPanel(
     val activePromptManager = remember { ActivePromptManager.getInstance(context) }
     var allCards by remember { mutableStateOf<List<CharacterCard>>(emptyList()) }
     var allGroups by remember { mutableStateOf<List<CharacterGroupCard>>(emptyList()) }
+    var showCreateGroup by remember { mutableStateOf(false) }
+    if (showCreateGroup) {
+        CreateGroupChatDialog(cards = allCards,
+            onDismiss = { showCreateGroup = false },
+            onCreated = { showCreateGroup = false; onDismiss() })
+    }
     val activePrompt by activePromptManager.activePromptFlow.collectAsState(
         initial = ActivePrompt.CharacterCard(CharacterCardManager.DEFAULT_CHARACTER_CARD_ID)
     )
@@ -245,6 +251,11 @@ fun CharacterSelectorPanel(
                             }
                         }
                         
+                        TextButton(onClick = { showCreateGroup = true }) {
+                            Icon(Icons.Rounded.Groups, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(context.getString(R.string.assistant_create_group))
+                        }
                         // 角色列表
                         LazyColumn(
                             modifier = Modifier.heightIn(max = 320.dp),

@@ -93,7 +93,7 @@ class CharacterCardToolAccessResolver private constructor(private val context: C
             .getManageableToolPrompts(useEnglish = false)
             .mapTo(LinkedHashSet()) { it.name }
         val effectiveBuiltinToolVisibility = manageableBuiltinNames.associateWith { toolName ->
-            (effectiveGlobalToolVisibility[toolName] ?: true) && allowedBuiltinTools.contains(toolName)
+            allowedBuiltinTools.contains(toolName)
         }
 
         val canUsePackageSystem = effectiveBuiltinToolVisibility["use_package"] == true

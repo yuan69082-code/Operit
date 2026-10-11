@@ -591,6 +591,20 @@ class ModelConfigManager(
     }
 
     // 创建新配置
+    suspend fun copyForAssistant(sourceId: String, assistantId: String, name: String): String {
+        val id = "assistant_$assistantId"
+        val source = requireNotNull(getModelConfig(sourceId)) { "助手的模型配置不存在，请重新选择模型" }
+        configDataStore.edit { preferences ->
+            val key = stringPreferencesKey("config_$id")
+            if (!preferences.contains(key)) {
+                preferences[key] = json.encodeToString(source.copy(id = id, name = name))
+                val ids = preferences[CONFIG_LIST_KEY]?.let { json.decodeFromString<List<String>>(it) }.orEmpty()
+                preferences[CONFIG_LIST_KEY] = json.encodeToString((ids + id).distinct())
+            }
+        }
+        return id
+    }
+
     suspend fun createConfig(name: String): String {
         val configId = UUID.randomUUID().toString()
         val configList = configListFlow.first().toMutableList()

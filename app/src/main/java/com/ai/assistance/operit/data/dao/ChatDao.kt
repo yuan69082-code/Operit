@@ -13,6 +13,15 @@ import kotlinx.coroutines.flow.Flow
 /** 聊天DAO接口，定义对聊天表的数据访问方法 */
 @Dao
 interface ChatDao {
+    @Query("UPDATE chats SET characterCardId = :cardId WHERE id = :chatId AND characterCardId IS NULL AND characterGroupId IS NULL")
+    suspend fun pinLegacyCharacterCardId(chatId: String, cardId: String)
+
+    @Query("UPDATE chats SET characterCardName = :name, characterCardId = :cardId, characterGroupId = :groupId, updatedAt = :timestamp WHERE id = :chatId")
+    suspend fun setChatOwner(chatId: String, name: String?, cardId: String?, groupId: String?, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE chats SET characterCardName = :name WHERE characterCardId = :cardId")
+    suspend fun renameCharacterById(cardId: String, name: String)
+
     /** 获取所有聊天，按显示顺序排列 */
     @Query("SELECT * FROM chats ORDER BY pinned DESC, displayOrder ASC")
     fun getAllChats(): Flow<List<ChatEntity>>
@@ -188,7 +197,7 @@ interface ChatDao {
     ): Int
 
     /** 批量重命名角色群组绑定 */
-    @Query("UPDATE chats SET characterCardName = NULL, characterGroupId = :targetGroupId, updatedAt = :timestamp WHERE characterGroupId = :sourceGroupId")
+    @Query("UPDATE chats SET characterCardName = NULL, characterCardId = NULL, characterGroupId = :targetGroupId, updatedAt = :timestamp WHERE characterGroupId = :sourceGroupId")
     suspend fun renameCharacterGroupBinding(
         sourceGroupId: String,
         targetGroupId: String,
@@ -203,22 +212,23 @@ interface ChatDao {
     ): Int
 
     /** 将所有未绑定角色群组的聊天归类到指定角色群组 */
-    @Query("UPDATE chats SET characterCardName = NULL, characterGroupId = :targetGroupId, updatedAt = :timestamp WHERE characterGroupId IS NULL AND characterCardName IS NULL")
+    @Query("UPDATE chats SET characterCardName = NULL, characterCardId = NULL, characterGroupId = :targetGroupId, updatedAt = :timestamp WHERE characterGroupId IS NULL AND characterCardName IS NULL")
     suspend fun assignCharacterGroupToUnbound(
         targetGroupId: String,
         timestamp: Long = System.currentTimeMillis()
     ): Int
 
     /** 批量为指定聊天更新角色卡绑定 */
-    @Query("UPDATE chats SET characterCardName = :newName, characterGroupId = NULL, updatedAt = :timestamp WHERE id IN (:chatIds)")
+    @Query("UPDATE chats SET characterCardName = :newName, characterCardId = :cardId, characterGroupId = NULL, updatedAt = :timestamp WHERE id IN (:chatIds)")
     suspend fun updateCharacterCardForChats(
         chatIds: List<String>,
         newName: String?,
+        cardId: String,
         timestamp: Long = System.currentTimeMillis()
     ): Int
 
     /** 批量为指定聊天更新角色群组绑定 */
-    @Query("UPDATE chats SET characterCardName = NULL, characterGroupId = :characterGroupId, updatedAt = :timestamp WHERE id IN (:chatIds)")
+    @Query("UPDATE chats SET characterCardName = NULL, characterCardId = CASE WHEN :characterGroupId IS NULL THEN 'unassigned:' || id ELSE NULL END, characterGroupId = :characterGroupId, updatedAt = :timestamp WHERE id IN (:chatIds)")
     suspend fun updateCharacterGroupForChats(
         chatIds: List<String>,
         characterGroupId: String?,
@@ -226,14 +236,14 @@ interface ChatDao {
     ): Int
 
     /** 批量为指定聊天移除角色群组绑定 */
-    @Query("UPDATE chats SET characterGroupId = NULL, updatedAt = :timestamp WHERE id IN (:chatIds)")
+    @Query("UPDATE chats SET characterGroupId = NULL, characterCardId = 'unassigned:' || id, updatedAt = :timestamp WHERE id IN (:chatIds) AND characterGroupId IS NOT NULL")
     suspend fun clearCharacterGroupForChats(
         chatIds: List<String>,
         timestamp: Long = System.currentTimeMillis()
     ): Int
 
     /** 批量清理绑定特定角色群组ID的对话（将characterGroupId设为null） */
-    @Query("UPDATE chats SET characterGroupId = NULL, updatedAt = :timestamp WHERE characterGroupId = :sourceGroupId")
+    @Query("UPDATE chats SET characterGroupId = NULL, characterCardId = 'unassigned:' || id, updatedAt = :timestamp WHERE characterGroupId = :sourceGroupId")
     suspend fun clearCharacterGroupBinding(
         sourceGroupId: String,
         timestamp: Long = System.currentTimeMillis()

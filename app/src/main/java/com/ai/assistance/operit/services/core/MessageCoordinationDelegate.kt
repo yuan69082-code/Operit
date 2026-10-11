@@ -210,12 +210,11 @@ class MessageCoordinationDelegate(
         if (chatId.isNullOrBlank()) {
             return null
         }
-        val chatMeta = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == chatId } ?: return null
+        val chatMeta = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId) ?: return null
         if (!chatMeta.characterGroupId.isNullOrBlank()) {
             return null
         }
-        val characterCardName = chatMeta.characterCardName?.takeIf { it.isNotBlank() } ?: return null
-        return runCatching { characterCardManager.findCharacterCardByName(characterCardName)?.id }.getOrNull()
+        return chatMeta.characterCardId?.takeIf { id -> characterCardManager.getAllCharacterCards().any { it.id == id } }
     }
 
     private suspend fun resolveRoleCardId(
@@ -223,28 +222,26 @@ class MessageCoordinationDelegate(
         roleCardId: String?,
         preferActiveRoleCard: Boolean = false,
     ): String {
-        if (roleCardId != null) {
-            return roleCardId
+        val selected = if (chatId == null) roleCardId ?: activePromptManager.resolveActiveCardIdForSend() else {
+            val chat = requireNotNull(com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)) { "会话不存在" }
+            val members = chat.characterGroupId?.let { characterGroupCardManager.getCharacterGroupCard(it)?.members }
+                .orEmpty().sortedBy { it.orderIndex }.map { it.characterCardId }
+            com.ai.assistance.operit.data.model.ChatOwnership.speaker(chat, roleCardId, members)
         }
-
-        if (preferActiveRoleCard) {
-            return activePromptManager.resolveActiveCardIdForSend()
-        }
-
-        return resolveBoundRoleCardId(chatId)
-            ?: activePromptManager.resolveActiveCardIdForSend()
+        characterCardManager.ensureIndependentSettings(selected)
+        return selected
     }
 
     private suspend fun resolveRegenerationRoleCardId(
         chatId: String,
         message: ChatMessage,
     ): String {
-        val roleName = message.roleName.trim()
-        if (roleName.isNotEmpty()) {
-            val card = characterCardManager.findCharacterCardByName(roleName)
-            if (card != null) {
-                return card.id
-            }
+        val chat = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)
+        val group = chat?.characterGroupId?.let { characterGroupCardManager.getCharacterGroupCard(it) }
+        if (group != null) {
+            val memberIds = group.members.map { it.characterCardId }.toSet()
+            val card = characterCardManager.getAllCharacterCards().singleOrNull { it.id in memberIds && it.name == message.roleName.trim() }
+            return resolveRoleCardId(chatId, requireNotNull(card) { "无法确定需要重新生成的群成员" }.id)
         }
         return resolveRoleCardId(chatId, null)
     }
@@ -632,13 +629,17 @@ class MessageCoordinationDelegate(
         // 获取当前附件列表
         val currentAttachments =
             if (shouldReadComposerState) attachmentDelegate.attachments.value else emptyList()
-        // 手动发送必须与选择器一致；后台和定向消息仍由窗口绑定决定角色卡。
-        val roleCardId = runBlocking {
+        // Every request, including background wakes, is scoped to the persisted owner.
+        val roleCardId = try { runBlocking {
             resolveRoleCardId(
                 chatId = chatId,
                 roleCardId = roleCardIdOverride,
                 preferActiveRoleCard = preferActiveRoleCard,
             )
+        } } catch (e: Exception) {
+            AppLogger.e(TAG, "解析聊天所属助手失败", e)
+            uiStateDelegate.showErrorMessage(e.message ?: "无法确定聊天所属助手")
+            return
         }
         val resolvedOverrides = try {
             if (promptFunctionType == PromptFunctionType.CHAT) {
@@ -666,7 +667,7 @@ class MessageCoordinationDelegate(
                     resolvedMemorySpaceIdOverride
                 )
             } else {
-                Triple(null, null, null)
+                Triple(null, null, resolveRoleCardMemoryProfileOverride(roleCardId))
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "解析角色卡对话模型绑定失败", e)
@@ -833,9 +834,11 @@ class MessageCoordinationDelegate(
         if (!proxySenderNameOverride.isNullOrBlank()) return false
         if (!messageTextOverride.isNullOrBlank()) return false
         if (!chatIdOverride.isNullOrBlank()) return false
-        val activePrompt = runBlocking { activePromptManager.getActivePrompt() }
-        if (activePrompt !is ActivePrompt.CharacterGroup) return false
-        return true
+        val chatId = chatHistoryDelegate.currentChatId.value ?: return false
+        return runBlocking {
+            !com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+                .getChatMetadata(chatId)?.characterGroupId.isNullOrBlank()
+        }
     }
 
     private suspend fun orchestrateGroupConversation(
@@ -856,12 +859,9 @@ class MessageCoordinationDelegate(
             return false
         }
 
-        val existingBinding = chatHistoryDelegate.chatHistories.value
-            .firstOrNull { it.id == chatId }
-            ?.characterGroupId
-        if (existingBinding != group.id) {
-            chatHistoryDelegate.updateChatCharacterBinding(chatId, null, group.id)
-        }
+        val existingBinding = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+            .getChatMetadata(chatId)?.characterGroupId
+        check(existingBinding == group.id) { "群聊归属不一致，请重新打开群聊" }
 
         val originalUserText = messageProcessingDelegate.userMessage.value.text.trim()
         val hasAttachments = attachmentDelegate.attachments.value.isNotEmpty()
@@ -1267,25 +1267,9 @@ class MessageCoordinationDelegate(
     }
 
     private suspend fun resolveTargetGroupForChat(chatId: String): com.ai.assistance.operit.data.model.CharacterGroupCard? {
-        val activePrompt = activePromptManager.getActivePrompt()
-        val activeGroupId = (activePrompt as? ActivePrompt.CharacterGroup)
-            ?.id
-            ?.takeIf { it.isNotBlank() }
-        if (!activeGroupId.isNullOrBlank()) {
-            return characterGroupCardManager.getCharacterGroupCard(activeGroupId)
-        }
-
-        val boundGroupId = chatHistoryDelegate.chatHistories.value
-            .firstOrNull { it.id == chatId }
-            ?.characterGroupId
-            ?.takeIf { it.isNotBlank() }
-        if (!boundGroupId.isNullOrBlank()) {
-            AppLogger.d(
-                TAG,
-                "发送判定按当前选择执行，忽略会话绑定群组: chatId=$chatId, boundGroupId=$boundGroupId"
-            )
-        }
-        return null
+        val boundGroupId = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+            .getChatMetadata(chatId)?.characterGroupId ?: return null
+        return characterGroupCardManager.getCharacterGroupCard(boundGroupId)
     }
 
     private fun extractEffectiveSpeechContent(content: String): String {

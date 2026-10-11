@@ -439,7 +439,7 @@ class UserPreferencesManager private constructor(private val context: Context) {
     }
 
     suspend fun createMemorySpace(name: String, isDefault: Boolean = false): String {
-        val id = if (isDefault) DEFAULT_PROFILE_ID else "memory_${System.currentTimeMillis()}"
+        val id = if (isDefault) DEFAULT_PROFILE_ID else "memory_${java.util.UUID.randomUUID()}"
         val space = MemorySpace(id, name)
         context.userPreferencesDataStore.edit { preferences ->
             val ids = decodeIdList(preferences[MEMORY_SPACE_LIST]).toMutableList()
@@ -448,6 +448,19 @@ class UserPreferencesManager private constructor(private val context: Context) {
             preferences[stringPreferencesKey("memory_space_$id")] = Json.encodeToString(space)
             if (preferences[ACTIVE_MEMORY_SPACE_ID] == null) {
                 preferences[ACTIVE_MEMORY_SPACE_ID] = id
+            }
+        }
+        MemorySpaceProfileDocumentRepository.getInstance(context).load(id)
+        return id
+    }
+
+    suspend fun ensureAssistantMemorySpace(assistantId: String, name: String): String {
+        val id = "assistant_$assistantId"
+        context.userPreferencesDataStore.edit { preferences ->
+            val key = stringPreferencesKey("memory_space_$id")
+            if (!preferences.contains(key)) {
+                preferences[key] = Json.encodeToString(MemorySpace(id, name))
+                preferences[MEMORY_SPACE_LIST] = Json.encodeToString((decodeIdList(preferences[MEMORY_SPACE_LIST]) + id).distinct())
             }
         }
         MemorySpaceProfileDocumentRepository.getInstance(context).load(id)

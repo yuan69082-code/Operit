@@ -29,6 +29,8 @@ import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -418,9 +420,10 @@ class CharacterCardManager private constructor(private val context: Context) {
     }
 
     private suspend fun createCharacterCardLocked(card: CharacterCard): String {
+        ChatHistoryManager.getInstance(context).pinLegacyChatOwners()
         val emojiSourcePrompt = resolveEmojiSourcePrompt()
         val id = if (card.isDefault) DEFAULT_CHARACTER_CARD_ID else UUID.randomUUID().toString()
-        val newCard = card.copy(id = id)
+        val newCard = independentCard(card.copy(id = id), isNew = !card.isDefault)
         var activatedCard = false
 
         dataStore.edit { preferences ->
@@ -459,6 +462,7 @@ class CharacterCardManager private constructor(private val context: Context) {
                 preferences[memoryProfileIdKey] = newCard.memoryProfileId
             }
             writeToolAccessConfig(preferences, id, newCard.toolAccessConfig)
+            preferences[booleanPreferencesKey("character_card_${id}_independent_v1")] = true
             preferences[booleanPreferencesKey("character_card_${id}_is_default")] = newCard.isDefault
             preferences[longPreferencesKey("character_card_${id}_created_at")] = newCard.createdAt
             preferences[longPreferencesKey("character_card_${id}_updated_at")] = newCard.updatedAt
@@ -484,9 +488,53 @@ class CharacterCardManager private constructor(private val context: Context) {
         
         return id
     }
+
+    private suspend fun independentCard(card: CharacterCard, isNew: Boolean): CharacterCard {
+        val models = ModelConfigManager(context)
+        val global = FunctionalConfigManager(context).getConfigMappingForFunction(com.ai.assistance.operit.data.model.FunctionType.CHAT)
+        val needsModel = isNew || card.chatModelBindingMode == CharacterCardChatModelBindingMode.FOLLOW_GLOBAL
+        val sourceModelId = if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FIXED_CONFIG)
+            requireNotNull(card.chatModelConfigId) { "请选择助手模型" } else global.configId
+        val modelId = if (needsModel) models.copyForAssistant(sourceModelId, card.id, "${card.name} · 模型") else card.chatModelConfigId
+        val needsMemory = isNew || card.memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL
+        // Shared legacy memory stays intact in its original space. Never clone another
+        // assistant's memories into a new identity or guess ownership of mixed records.
+        val memoryId = if (needsMemory) userPreferencesManager.ensureAssistantMemorySpace(card.id, "${card.name} · 记忆") else card.memoryProfileId
+        val access = if (card.toolAccessConfig.enabled) card.toolAccessConfig else {
+            val visibility = ApiPreferences.getInstance(context).toolPromptVisibilityFlow.first()
+            val builtins = com.ai.assistance.operit.core.config.SystemToolPrompts.getManageableToolPrompts(false)
+                .map { it.name }.filter { visibility[it] != false }
+            if (isNew) CharacterCardToolAccessConfig(enabled = true, allowedBuiltinTools = builtins)
+            else {
+                val packages = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context).getOrCreatePackageManager()
+                val existing = CharacterCardToolAccessResolver.getInstance(context).resolve(null, packages)
+                CharacterCardToolAccessConfig(true, builtins, existing.allowedPackageNames.toList(),
+                    existing.allowedSkillNames.toList(), existing.allowedMcpServerNames.toList())
+            }
+        }
+        return card.copy(chatModelBindingMode = CharacterCardChatModelBindingMode.FIXED_CONFIG,
+            chatModelConfigId = modelId,
+            chatModelIndex = if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FOLLOW_GLOBAL) global.modelIndex else card.chatModelIndex,
+            memoryProfileBindingMode = CharacterCardMemoryProfileBindingMode.FIXED_PROFILE,
+            memoryProfileId = memoryId, toolAccessConfig = access)
+    }
+
+    private val independentSettingsMutex = Mutex()
+
+    suspend fun ensureIndependentSettings(id: String) = independentSettingsMutex.withLock {
+        val card = getAllCharacterCards().firstOrNull { it.id == id } ?: error("助手不存在")
+        val migrated = booleanPreferencesKey("character_card_${id}_independent_v1")
+        if (dataStore.data.first()[migrated] == true) return@withLock
+        if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FOLLOW_GLOBAL ||
+            card.memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL || !card.toolAccessConfig.enabled) {
+            updateCharacterCard(independentCard(card, isNew = false))
+        }
+        dataStore.edit { it[migrated] = true }
+    }
     
     // 更新角色卡
     suspend fun updateCharacterCard(card: CharacterCard) {
+        ChatHistoryManager.getInstance(context).pinLegacyChatOwners()
         val previousName = getCharacterCard(card.id).name
         dataStore.edit { preferences ->
             preferences[stringPreferencesKey("character_card_${card.id}_name")] = card.name
@@ -521,7 +569,7 @@ class CharacterCardManager private constructor(private val context: Context) {
             preferences[longPreferencesKey("character_card_${card.id}_updated_at")] = System.currentTimeMillis()
         }
         if (previousName != card.name) {
-            ChatHistoryManager.getInstance(context).renameCharacterCardInChats(previousName, card.name)
+            ChatHistoryManager.getInstance(context).renameCharacterById(card.id, card.name)
         }
     }
     

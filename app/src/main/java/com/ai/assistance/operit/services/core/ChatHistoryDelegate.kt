@@ -573,6 +573,12 @@ class ChatHistoryDelegate(
                             }
                             AppLogger.d(TAG, "检测到聊天ID变化: ${_currentChatId.value} -> $chatId")
                             _currentChatId.value = chatId
+                            clearCurrentChatHistoryInMemory()
+                            try {
+                                chatHistoryManager.getChatMetadata(chatId)?.let { activePromptManager.activateForChat(it) }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (error: Exception) { AppLogger.e(TAG, "恢复会话所属助手失败", error) }
+                            if (chatHistoryManager.currentChatIdFlow.value != chatId) return@collect
                             loadChatMessages(chatId)
                         } else if (chatId == null && _currentChatId.value == null) {
                             AppLogger.d(TAG, "首次初始化，没有当前聊天")
@@ -667,7 +673,7 @@ class ChatHistoryDelegate(
         AppLogger.d(TAG, "开始同步开场白，聊天ID: $chatId")
 
         historyUpdateMutex.withLock {
-            val chatMeta = _chatHistories.value.firstOrNull { it.id == chatId }
+            val chatMeta = chatHistoryManager.getChatMetadata(chatId)
             if (!chatMeta?.characterGroupId.isNullOrBlank()) {
                 AppLogger.d(TAG, "聊天 $chatId 绑定群组角色卡，跳过开场白同步")
                 return@withLock
@@ -686,13 +692,8 @@ class ChatHistoryDelegate(
             }
 
             val boundCardName = chatMeta?.characterCardName
-            val boundCard = boundCardName?.let { characterCardManager.findCharacterCardByName(it) }
-            val activePrompt = activePromptManager.getActivePrompt()
-            val activeCard = when (activePrompt) {
-                is ActivePrompt.CharacterCard -> characterCardManager.getCharacterCard(activePrompt.id)
-                is ActivePrompt.CharacterGroup -> null
-            }
-            val effectiveCard = boundCard ?: activeCard
+            val boundCard = characterCardManager.getAllCharacterCards().firstOrNull { it.id == chatMeta?.characterCardId }
+            val effectiveCard = boundCard
 
             // 如果没有有效的角色卡，使用默认角色卡
             if (effectiveCard == null) {
@@ -791,15 +792,20 @@ class ChatHistoryDelegate(
             
             // 获取当前活跃的角色卡
             val activePrompt = activePromptManager.getActivePrompt()
+            val effectiveGroupId = characterGroupId ?: (activePrompt as? ActivePrompt.CharacterGroup)?.id
+                ?.takeIf { characterCardId == null && characterCardName == null }
             val activeCard = when (activePrompt) {
                 is ActivePrompt.CharacterCard -> characterCardManager.getCharacterCard(activePrompt.id)
                 is ActivePrompt.CharacterGroup -> null
             }
             val resolvedCard =
-                if (characterGroupId.isNullOrBlank()) {
+                if (effectiveGroupId.isNullOrBlank()) {
                     characterCardId
                         ?.takeIf { it.isNotBlank() }
                         ?.let { characterCardManager.getCharacterCard(it) }
+                        ?: characterCardName?.let { name ->
+                            requireNotNull(characterCardManager.getAllCharacterCards().singleOrNull { it.name == name }) { "请选择唯一的助手" }
+                        }
                         ?: activeCard
                 } else {
                     null  // 群组模式下不使用角色卡
@@ -807,7 +813,7 @@ class ChatHistoryDelegate(
 
             // 确定角色卡名称：如果参数指定了则使用参数，否则使用目标角色卡
             val effectiveCharacterCardName =
-                if (characterGroupId.isNullOrBlank()) {
+                if (effectiveGroupId.isNullOrBlank()) {
                     characterCardName ?: resolvedCard?.name
                 } else {
                     null  // 群组模式下不使用角色卡名称
@@ -821,12 +827,13 @@ class ChatHistoryDelegate(
                 group = group,
                 inheritGroupFromChatId = inheritGroupFromChatId,
                 characterCardName = effectiveCharacterCardName,
-                characterGroupId = characterGroupId,
+                characterGroupId = effectiveGroupId,
+                characterCardId = resolvedCard?.id,
                 setAsCurrentChat = shouldSyncCurrentChatToGlobal
             )
 
             // --- 新增：检查并添加开场白（群组模式跳过） ---
-            if (characterGroupId.isNullOrBlank() && characterCardName == null && resolvedCard != null && resolvedCard.openingStatement.isNotBlank()) {
+            if (effectiveGroupId.isNullOrBlank() && characterCardName == null && resolvedCard != null && resolvedCard.openingStatement.isNotBlank()) {
                 val openingMessage = ChatMessage(
                     sender = "ai",
                     content = resolvedCard.openingStatement,
@@ -942,67 +949,20 @@ class ChatHistoryDelegate(
             return ChatDeletionReplacementTarget(characterGroupId = normalizedGroupId)
         }
 
-        val normalizedCardName = chat.characterCardName?.trim()?.takeIf { it.isNotBlank() }
-        if (!normalizedCardName.isNullOrBlank()) {
-            val matchedCard = runCatching {
-                characterCardManager.findCharacterCardByName(normalizedCardName)
-            }.getOrNull()
-            return ChatDeletionReplacementTarget(
-                characterCardName = normalizedCardName,
-                characterCardId = matchedCard?.id,
-                includeUnboundChats = matchedCard?.isDefault == true
-            )
-        }
-
-        return when (val activePrompt = runCatching { activePromptManager.getActivePrompt() }.getOrNull()) {
-            is ActivePrompt.CharacterGroup -> {
-                ChatDeletionReplacementTarget(
-                    characterGroupId = activePrompt.id.trim().takeIf { it.isNotBlank() }
-                )
-            }
-
-            is ActivePrompt.CharacterCard -> {
-                val activeCard = runCatching {
-                    characterCardManager.getCharacterCard(activePrompt.id)
-                }.getOrNull()
-                if (activeCard != null) {
-                    ChatDeletionReplacementTarget(
-                        characterCardName = activeCard.name,
-                        characterCardId = activeCard.id,
-                        includeUnboundChats = activeCard.isDefault
-                    )
-                } else {
-                    ChatDeletionReplacementTarget()
-                }
-            }
-
-            null -> ChatDeletionReplacementTarget()
-        }
+        val card = characterCardManager.getAllCharacterCards().firstOrNull { it.id == chat.characterCardId }
+        return ChatDeletionReplacementTarget(
+            characterCardName = card?.name,
+            characterCardId = card?.id ?: CharacterCardManager.DEFAULT_CHARACTER_CARD_ID
+        )
     }
 
     private fun matchesDeletionReplacementTarget(
         history: ChatHistory,
         target: ChatDeletionReplacementTarget
-    ): Boolean {
-        val historyGroupId = history.characterGroupId?.trim()?.takeIf { it.isNotBlank() }
-        val historyCardName = history.characterCardName?.trim()?.takeIf { it.isNotBlank() }
-
-        if (!target.characterGroupId.isNullOrBlank()) {
-            return historyGroupId == target.characterGroupId
-        }
-
-        if (!target.characterCardName.isNullOrBlank()) {
-            if (!historyGroupId.isNullOrBlank()) {
-                return false
-            }
-            return if (target.includeUnboundChats) {
-                historyCardName == null || historyCardName == target.characterCardName
-            } else {
-                historyCardName == target.characterCardName
-            }
-        }
-
-        return historyGroupId == null && historyCardName == null
+    ): Boolean = if (target.characterGroupId != null) {
+        history.characterGroupId == target.characterGroupId
+    } else {
+        history.characterGroupId == null && history.characterCardId == target.characterCardId
     }
 
     private fun findLatestDeletionReplacementChat(
@@ -1285,12 +1245,15 @@ class ChatHistoryDelegate(
     ) {
         coroutineScope.launch {
             chatHistoryManager.updateChatCharacterBinding(chatId, characterCardName, characterGroupId)
+            val metadata = chatHistoryManager.getChatMetadata(chatId)
+            metadata?.let { activePromptManager.activateForChat(it) }
 
             val updatedHistories = _chatHistories.value.map {
                 if (it.id == chatId) {
                     it.copy(
                         characterCardName = characterCardName,
                         characterGroupId = characterGroupId,
+                        characterCardId = metadata?.characterCardId,
                         updatedAt = LocalDateTime.now()
                     )
                 } else {

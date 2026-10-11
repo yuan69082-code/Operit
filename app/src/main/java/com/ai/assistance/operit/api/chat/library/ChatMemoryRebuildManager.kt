@@ -108,13 +108,19 @@ class ChatMemoryRebuildManager private constructor(private val context: Context)
             require(selectedHistories.isNotEmpty()) { "No selected chat history found" }
             val activeProfileId = preferencesManager.activeMemorySpaceIdFlow.first()
 
-            val plannedChats = selectedHistories.map { history ->
+            val plannedChats = selectedHistories.flatMap { history ->
                 val messages = chatHistoryManager.loadChatMessages(history.id)
-                PlannedChat(
+                val profileIds = if (!history.characterGroupId.isNullOrBlank()) {
+                    val members = com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+                        .getCharacterGroupCard(history.characterGroupId)?.members.orEmpty()
+                    require(members.isNotEmpty()) { "群聊没有可用成员，不能重建记忆" }
+                    members.map { member -> resolveMemoryProfileId(history.copy(characterGroupId = null, characterCardId = member.characterCardId), activeProfileId) }.distinct()
+                } else listOf(resolveMemoryProfileId(history, activeProfileId))
+                profileIds.map { profileId -> PlannedChat(
                     history = history,
                     windows = ChatMemoryWindowPlanner.plan(messages, windowMessageCount, timeScope),
-                    memoryProfileId = resolveMemoryProfileId(history, activeProfileId)
-                )
+                    memoryProfileId = profileId
+                ) }
             }
             val totalWindows = plannedChats.sumOf { it.windows.size }
             val totalSourceMessages = plannedChats.sumOf { plannedChat ->
@@ -219,12 +225,10 @@ class ChatMemoryRebuildManager private constructor(private val context: Context)
         history: ChatHistory,
         activeProfileId: String
     ): String {
-        if (!history.characterGroupId.isNullOrBlank()) {
-            return activeProfileId
-        }
-        val cardName = history.characterCardName ?: return activeProfileId
-        val card = CharacterCardManager.getInstance(context).getAllCharacterCards()
-            .firstOrNull { it.name == cardName }
+        val manager = CharacterCardManager.getInstance(context)
+        val cardId = requireNotNull(history.characterCardId) { "请先指定聊天所属助手" }
+        manager.ensureIndependentSettings(cardId)
+        val card = requireNotNull(manager.getAllCharacterCards().firstOrNull { it.id == cardId }) { "聊天所属助手已删除" }
         return if (
             card != null &&
                 CharacterCardMemoryProfileBindingMode.normalize(card.memoryProfileBindingMode) ==

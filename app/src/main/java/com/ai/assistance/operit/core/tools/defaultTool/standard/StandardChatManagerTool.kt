@@ -93,6 +93,26 @@ sealed class MessageSendStreamStartResult {
  * 负责管理对话、浮窗服务，以及按指定 runtime 发送消息
  */
 class StandardChatManagerTool(private val context: Context) {
+    private fun callerCardId(): String? =
+        com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.currentToolRuntimeContext()?.callerCardId
+
+    private suspend fun canAccessChat(chat: ChatHistory): Boolean {
+        val caller = callerCardId() ?: return true // Direct, user-initiated management is unrestricted.
+        val members = chat.characterGroupId?.let {
+            com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(appContext)
+                .getCharacterGroupCard(it)?.members?.map { member -> member.characterCardId }
+        }.orEmpty()
+        return com.ai.assistance.operit.data.model.ChatOwnership.canAccess(chat, caller, members)
+    }
+
+    private suspend fun requireChatAccess(chatId: String?) {
+        if (callerCardId() == null) return
+        val chat = chatId?.let { ChatHistoryManager.getInstance(appContext).getChatMetadata(it) }
+        require(chat != null && canAccessChat(chat)) { "只能访问自己的私聊或已加入的群聊，无法读取其他助手的私聊。" }
+    }
+
+    private suspend fun accessibleChats(): List<ChatHistory> =
+        ChatHistoryManager.getInstance(appContext).getAllChatMetadata().filter { canAccessChat(it) }
 
     companion object {
         private const val TAG = "StandardChatManagerTool"
@@ -496,9 +516,7 @@ class StandardChatManagerTool(private val context: Context) {
             inputTokens = chat.inputTokens,
             outputTokens = chat.outputTokens,
             characterCardName = chat.characterCardName,
-            characterCardId = chat.characterCardName
-                ?.takeIf { it.isNotBlank() }
-                ?.let { characterCardIdsByName[it] },
+            characterCardId = chat.characterCardId,
             characterGroupId = chat.characterGroupId
         )
     }
@@ -534,6 +552,7 @@ class StandardChatManagerTool(private val context: Context) {
     suspend fun getChatMessages(tool: AITool): ToolResult {
         return try {
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
+            requireChatAccess(chatId)
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
                     toolName = tool.name,
@@ -604,6 +623,7 @@ class StandardChatManagerTool(private val context: Context) {
     suspend fun getChatMessagesRange(tool: AITool): ToolResult {
         return try {
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
+            requireChatAccess(chatId)
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
                     toolName = tool.name,
@@ -714,6 +734,7 @@ class StandardChatManagerTool(private val context: Context) {
     suspend fun agentStatus(tool: AITool): ToolResult {
         return try {
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
+            requireChatAccess(chatId)
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
                     toolName = tool.name,
@@ -872,7 +893,7 @@ class StandardChatManagerTool(private val context: Context) {
 
             val targetIndex = index ?: 0
             val chatHistoryManager = ChatHistoryManager.getInstance(appContext)
-            val chatHistories = chatHistoryManager.chatHistoriesFlow.first()
+            val chatHistories = accessibleChats()
             val currentChatId = chatHistoryManager.currentChatIdFlow.first()
             val messageCounts = chatHistoryManager.getMessageCountsByChatId()
 
@@ -929,6 +950,7 @@ class StandardChatManagerTool(private val context: Context) {
     suspend fun updateChatTitle(tool: AITool): ToolResult {
         return try {
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
+            requireChatAccess(chatId)
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
                     toolName = tool.name,
@@ -983,6 +1005,7 @@ class StandardChatManagerTool(private val context: Context) {
     suspend fun deleteChat(tool: AITool): ToolResult {
         return try {
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
+            requireChatAccess(chatId)
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
                     toolName = tool.name,
@@ -1393,7 +1416,9 @@ class StandardChatManagerTool(private val context: Context) {
             }
 
             val characterCardId =
-                tool.parameters.find { it.name == "character_card_id" }?.value?.trim()
+                tool.parameters.find { it.name == "character_card_id" }?.value?.trim()?.takeIf { it.isNotBlank() }
+                    ?: callerCardId()
+            require(callerCardId() == null || characterCardId == callerCardId()) { "请在群聊中联系其他助手，不能创建其私聊。" }
             if (!characterCardId.isNullOrBlank()) {
                 val roleCardManager = CharacterCardManager.getInstance(appContext)
                 val targetCard = roleCardManager.getCharacterCard(characterCardId)
@@ -1418,7 +1443,7 @@ class StandardChatManagerTool(private val context: Context) {
                 withTimeout(5000L) {
                     var newId: String? = null
                     while (newId == null) {
-                        val newChat = core.chatHistories.value.firstOrNull { it.id !in previousChatIds }
+                        val newChat = core.chatHistories.value.firstOrNull { it.id !in previousChatIds && (characterCardId == null || it.characterCardId == characterCardId) }
                         newId = newChat?.id
                         if (newId == null) {
                             delay(50)
@@ -1482,7 +1507,7 @@ class StandardChatManagerTool(private val context: Context) {
     suspend fun listChats(tool: AITool): ToolResult {
         return try {
             val chatHistoryManager = ChatHistoryManager.getInstance(appContext)
-            val chatHistories = chatHistoryManager.chatHistoriesFlow.first()
+            val chatHistories = accessibleChats()
             val currentChatId = chatHistoryManager.currentChatIdFlow.first()
             val messageCounts = chatHistoryManager.getMessageCountsByChatId()
 
@@ -1606,6 +1631,7 @@ class StandardChatManagerTool(private val context: Context) {
             )
 
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value
+            requireChatAccess(chatId)
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
                     toolName = tool.name,
@@ -1748,7 +1774,8 @@ class StandardChatManagerTool(private val context: Context) {
             }
 
             val roleCardManager = CharacterCardManager.getInstance(appContext)
-            val roleCardId = tool.parameters.find { it.name == "role_card_id" }?.value?.trim()
+            val roleCardId = tool.parameters.find { it.name == "role_card_id" }?.value?.trim()?.takeIf { it.isNotBlank() } ?: callerCardId()
+            require(callerCardId() == null || roleCardId == callerCardId()) { "不能代替其他助手访问其私聊" }
             if (!roleCardId.isNullOrBlank()) {
                 val cardExists = runCatching { roleCardManager.getCharacterCard(roleCardId) }.isSuccess
                 if (!cardExists) {
@@ -1868,6 +1895,7 @@ class StandardChatManagerTool(private val context: Context) {
                 }
 
                 val preflightChatId = targetChatId ?: core.currentChatId.value
+                requireChatAccess(preflightChatId)
                 val preflightResponseStream = preflightChatId?.let { chatId ->
                     core.getResponseStream(chatId)
                 }

@@ -8504,4 +8504,9 @@
     <string name="codex_usage_unavailable">额度暂时不可用</string>
     <string name="codex_reset_after_days">%1$d 天后重置</string>
     <string name="codex_reset_after_clock">%1$02d:%2$02d 后重置</string>
+    <string name="assistant_history_isolation_notice">切换助手会进入它自己的聊天；打开历史记录时，也会恢复该聊天所属助手。</string>
+    <string name="assistant_create_group">创建群聊</string>
+    <string name="assistant_group_name">群聊名称</string>
+    <string name="assistant_group_explanation">选择至少两位助手。群聊另开一份记录，成员使用各自的模型、记忆和工具。</string>
+    <string name="assistant_create_and_open">创建并进入</string>
 </resources>

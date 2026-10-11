@@ -427,8 +427,8 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
     }.collectAsState(initial = null)
     var historyDisplayMode by rememberLocal(
-        "chat_history_display_mode",
-        ChatHistoryDisplayMode.BY_FOLDER
+        "chat_history_display_mode_assistant_v1",
+        ChatHistoryDisplayMode.CURRENT_CHARACTER_ONLY
     )
     var autoSwitchCharacterCard by rememberLocal(
         "chat_history_auto_switch_character_card",
@@ -457,12 +457,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                     is ActivePrompt.CharacterCard -> {
                         val activeCard = activeCharacterCard ?: return@remember emptyList()
                         chatHistories.filter { history ->
-                            val historyCard = history.characterCardName
-                            if (activeCard.isDefault) {
-                                historyCard == null || historyCard == activeCard.name
-                            } else {
-                                historyCard == activeCard.name
-                            }
+                            history.characterGroupId.isNullOrBlank() && history.characterCardId == activeCard.id
                         }
                     }
                 }

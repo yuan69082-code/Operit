@@ -38,6 +38,7 @@ data class OperitArchivedChat(
     val characterGroupId: String? = null,
     val locked: Boolean = false,
     val pinned: Boolean = false,
+    val characterCardId: String? = null,
 ) {
     fun toChatHistory(): ChatHistory {
         return ChatHistory(
@@ -55,6 +56,7 @@ data class OperitArchivedChat(
             workspaceEnv = workspaceEnv,
             parentChatId = parentChatId,
             characterCardName = characterCardName,
+            characterCardId = characterCardId,
             characterGroupId = characterGroupId,
             locked = locked,
             pinned = pinned,
@@ -81,6 +83,7 @@ data class OperitArchivedChat(
                 workspaceEnv = history.workspaceEnv,
                 parentChatId = history.parentChatId,
                 characterCardName = history.characterCardName,
+                characterCardId = history.characterCardId,
                 characterGroupId = history.characterGroupId,
                 locked = history.locked,
                 pinned = history.pinned,

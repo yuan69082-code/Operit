@@ -613,6 +613,7 @@ fun ModelPromptsSettingsScreen(
             scope.launch {
                 if (!isExistingCard) {
                     val newCardId = characterCardManager.createCharacterCard(card)
+                    activePromptManager.setActivePrompt(ActivePrompt.CharacterCard(newCardId))
                     activePromptManager.saveCustomChatTitleForPrompt(
                         ActivePrompt.CharacterCard(newCardId),
                         card.name.ifEmpty { null },
@@ -731,6 +732,7 @@ fun ModelPromptsSettingsScreen(
                 val isNew = group.id.isBlank()
                 if (isNew) {
                     val newGroupId = characterGroupCardManager.createCharacterGroupCard(group)
+                    activePromptManager.setActivePrompt(ActivePrompt.CharacterGroup(newGroupId))
                     activePromptManager.saveCustomChatTitleForPrompt(
                         ActivePrompt.CharacterGroup(newGroupId),
                         group.name.ifEmpty { null },

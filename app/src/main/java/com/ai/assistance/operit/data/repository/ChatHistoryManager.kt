@@ -12,6 +12,9 @@ import com.ai.assistance.operit.data.backup.OperitBackupDirs
 import com.ai.assistance.operit.data.db.AppDatabase
 import com.ai.assistance.operit.data.model.ChatEntity
 import com.ai.assistance.operit.data.model.ChatHistory
+import com.ai.assistance.operit.data.model.ActivePrompt
+import com.ai.assistance.operit.data.model.ChatOwnership
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ChatMessageLocatorPreview
 import com.ai.assistance.operit.data.model.CharacterCardChatStats
@@ -480,6 +483,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
             workspaceEnv = this.workspaceEnv, // 映射workspaceEnv字段
             parentChatId = this.parentChatId, // 映射parentChatId字段
             characterCardName = this.characterCardName, // 映射characterCardName字段
+            characterCardId = this.characterCardId,
             characterGroupId = this.characterGroupId, // 映射characterGroupId字段
             locked = this.locked,
             pinned = this.pinned
@@ -494,7 +498,8 @@ class ChatHistoryManager private constructor(private val context: Context) {
 
             // 使用withContext将处理移至IO线程
             kotlinx.coroutines.withContext(Dispatchers.IO) {
-                chatEntities.map { it.toChatHistory() }
+                val cards = CharacterCardManager.getInstance(context).getAllCharacterCards()
+                chatEntities.map { resolveLegacyOwner(it, cards).toChatHistory() }
             }
         }
 
@@ -505,6 +510,51 @@ class ChatHistoryManager private constructor(private val context: Context) {
             SharingStarted.Lazily,
             emptyList()
         )
+
+    private val selectionMutex = Mutex()
+
+    private suspend fun resolveLegacyOwner(chat: ChatEntity, cards: List<com.ai.assistance.operit.data.model.CharacterCard>): ChatEntity {
+        if (chat.characterCardId != null || !chat.characterGroupId.isNullOrBlank()) return chat
+        // Pin legacy names once, before another assistant can reuse a name. Unknown owners
+        // remain available in All Chats, but are never silently assigned to another assistant.
+        val id = ChatOwnership.legacyCardId(chat.characterCardName, cards) ?: "unassigned:${chat.id}"
+        chatDao.pinLegacyCharacterCardId(chat.id, id)
+        return chatDao.getChatById(chat.id) ?: chat.copy(characterCardId = id)
+    }
+
+    suspend fun pinLegacyChatOwners() {
+        val cards = CharacterCardManager.getInstance(context).getAllCharacterCards()
+        chatDao.getAllChatsDirectly().forEach { resolveLegacyOwner(it, cards) }
+    }
+
+    suspend fun getChatMetadata(chatId: String): ChatHistory? {
+        val chat = chatDao.getChatById(chatId) ?: return null
+        val cards = CharacterCardManager.getInstance(context).getAllCharacterCards()
+        return resolveLegacyOwner(chat, cards).toChatHistory()
+    }
+
+    suspend fun getAllChatMetadata(): List<ChatHistory> {
+        pinLegacyChatOwners()
+        return chatDao.getAllChatsDirectly().map { it.toChatHistory() }
+    }
+
+    suspend fun activateChatForPrompt(prompt: ActivePrompt) = selectionMutex.withLock {
+        pinLegacyChatOwners()
+        val histories = chatDao.getAllChatsDirectly().map { it.toChatHistory() }
+        val current = currentChatIdFlow.value
+        val selected = histories.firstOrNull { it.id == current && ChatOwnership.belongsTo(it, prompt) }
+            ?: histories.filter { ChatOwnership.belongsTo(it, prompt) }.maxByOrNull { it.updatedAt }
+        val target = selected ?: when (prompt) {
+            is ActivePrompt.CharacterCard -> {
+                val card = CharacterCardManager.getInstance(context).getCharacterCard(prompt.id)
+                createNewChat(characterCardName = card.name, characterCardId = card.id, setAsCurrentChat = false)
+            }
+            is ActivePrompt.CharacterGroup -> createNewChat(characterGroupId = prompt.id, setAsCurrentChat = false)
+        }
+        setCurrentChatId(target.id)
+    }
+
+    suspend fun renameCharacterById(cardId: String, name: String) = chatDao.renameCharacterById(cardId, name)
 
     suspend fun getTotalChatCount(): Int {
         return withContext(Dispatchers.IO) { chatDao.getTotalChatCount() }
@@ -1387,7 +1437,9 @@ class ChatHistoryManager private constructor(private val context: Context) {
     suspend fun updateChatCharacterCardName(chatId: String, characterCardName: String?) {
         chatMutex(chatId).withLock {
             try {
-                chatDao.updateChatCharacterCardName(chatId, characterCardName)
+                val owner = ChatOwnership.legacyCardId(characterCardName, CharacterCardManager.getInstance(context).getAllCharacterCards())
+                requireNotNull(owner) { "请选择唯一的助手" }
+                chatDao.setChatOwner(chatId, characterCardName, owner, null)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to update chat character card for chat $chatId", e)
                 throw e
@@ -1494,7 +1546,8 @@ class ChatHistoryManager private constructor(private val context: Context) {
         inheritGroupFromChatId: String? = null,
         characterCardName: String? = null,
         characterGroupId: String? = null,
-        setAsCurrentChat: Boolean = true
+        setAsCurrentChat: Boolean = true,
+        characterCardId: String? = null
     ): ChatHistory {
         val dateTime = LocalDateTime.now()
         val formattedTime =
@@ -1524,7 +1577,10 @@ class ChatHistoryManager private constructor(private val context: Context) {
                 outputTokens = 0,
                 group = finalGroup,
                 characterCardName = characterCardName, // 使用传入的角色卡名称，如果为null则不绑定
-                characterGroupId = characterGroupId // 绑定群组角色卡ID（可选）
+                characterGroupId = characterGroupId,
+                characterCardId = if (characterGroupId != null) null else {
+                    characterCardId ?: requireNotNull(ChatOwnership.legacyCardId(characterCardName, CharacterCardManager.getInstance(context).getAllCharacterCards())) { "请选择唯一的助手" }
+                }
             )
 
         // 保存新聊天
@@ -1751,7 +1807,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
         return globalMutex.withLock {
             try {
                 // 获取父对话
-                val parentChat = chatDao.getChatById(parentChatId)
+                val parentChat = getChatMetadata(parentChatId)
                     ?: throw IllegalArgumentException(context.getString(R.string.chat_history_parent_not_exist, parentChatId))
 
                 val branchEntity =
@@ -1765,6 +1821,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
                         workspaceEnv = parentChat.workspaceEnv,
                         parentChatId = parentChatId,
                         characterCardName = parentChat.characterCardName,
+                        characterCardId = parentChat.characterCardId,
                         characterGroupId = parentChat.characterGroupId,
                         locked = false,
                         pinned = false,
@@ -2344,11 +2401,10 @@ class ChatHistoryManager private constructor(private val context: Context) {
     ): Int {
         return withContext(Dispatchers.IO) {
             try {
-                val updated = if (sourceCharacterCardName == null) {
-                    chatDao.assignCharacterCardToUnbound(targetCharacterCardName)
-                } else {
-                    chatDao.renameCharacterCardBinding(sourceCharacterCardName, targetCharacterCardName)
-                }
+                val ids = chatDao.getAllChatsDirectly().filter {
+                    it.characterGroupId == null && it.characterCardName == sourceCharacterCardName
+                }.map { it.id }
+                val updated = assignCharacterCardToChats(ids, targetCharacterCardName)
                 AppLogger.d(
                         TAG,
                         "角色卡聊天重分配: ${sourceCharacterCardName ?: "未绑定"} -> $targetCharacterCardName, 更新 $updated 条记录"
@@ -2679,7 +2735,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
     suspend fun updateChatCharacterGroupId(chatId: String, characterGroupId: String?) {
         chatMutex(chatId).withLock {
             try {
-                chatDao.updateChatCharacterGroupId(chatId, characterGroupId)
+                chatDao.setChatOwner(chatId, null, if (characterGroupId == null) "unassigned:$chatId" else null, characterGroupId)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to update chat character group for chat $chatId", e)
                 throw e
@@ -2691,11 +2747,15 @@ class ChatHistoryManager private constructor(private val context: Context) {
     suspend fun updateChatCharacterBinding(
         chatId: String,
         characterCardName: String?,
-        characterGroupId: String?
+        characterGroupId: String?,
+        characterCardId: String? = null
     ) {
         chatMutex(chatId).withLock {
             try {
-                chatDao.updateChatCharacterBinding(chatId, characterCardName, characterGroupId)
+                val owner = if (characterGroupId != null) null else {
+                    characterCardId ?: requireNotNull(ChatOwnership.legacyCardId(characterCardName, CharacterCardManager.getInstance(context).getAllCharacterCards())) { "请选择唯一的助手" }
+                }
+                chatDao.setChatOwner(chatId, if (characterGroupId == null) characterCardName else null, owner, characterGroupId)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to update chat character binding for chat $chatId", e)
                 throw e
@@ -2778,7 +2838,8 @@ class ChatHistoryManager private constructor(private val context: Context) {
         }
         return withContext(Dispatchers.IO) {
             try {
-                chatDao.updateCharacterCardForChats(chatIds, targetCharacterCardName)
+                val owner = requireNotNull(ChatOwnership.legacyCardId(targetCharacterCardName, CharacterCardManager.getInstance(context).getAllCharacterCards())) { "请选择唯一的助手" }
+                chatDao.updateCharacterCardForChats(chatIds, targetCharacterCardName, owner)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "批量更新聊天角色卡失败: $targetCharacterCardName, chatIds=$chatIds", e)
                 throw e

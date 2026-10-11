@@ -8,6 +8,13 @@ import org.junit.Test
 
 class AppDatabaseMigrationTest {
     @Test
+    fun migration21To22AddsNullableOwnerWithoutRebuildingOrDeletingTables() {
+        val executedSql = mutableListOf<String>()
+        AppDatabase.MIGRATION_21_22.migrate(recordingDatabase(executedSql))
+        org.junit.Assert.assertEquals(listOf("ALTER TABLE chats ADD COLUMN characterCardId TEXT"), executedSql)
+    }
+
+    @Test
     fun migration20To21CreatesMessageIndexesExpectedByRoom() {
         val executedSql = mutableListOf<String>()
 

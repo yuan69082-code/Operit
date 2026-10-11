@@ -8518,4 +8518,9 @@
     <string name="market_version_too_low_message">Current client version %1$s is lower than the minimum required version %2$s for this resource. Please update the client before downloading.</string>
     <string name="market_version_too_high_message">Current client version %1$s is higher than the maximum supported version %2$s for this resource. Please use a supported client version.</string>
     <string name="thinking_config_invalid_json">Invalid Thinking Configuration</string>
+    <string name="assistant_history_isolation_notice">Switching assistants opens their own chats. Opening a past chat also restores its owning assistant.</string>
+    <string name="assistant_create_group">Create group chat</string>
+    <string name="assistant_group_name">Group name</string>
+    <string name="assistant_group_explanation">Select at least two assistants. The group has its own history; members use their own models, memories and tools.</string>
+    <string name="assistant_create_and_open">Create and open</string>
 </resources>

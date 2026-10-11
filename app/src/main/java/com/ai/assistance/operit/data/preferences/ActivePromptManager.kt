@@ -8,13 +8,16 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
-class ActivePromptManager private constructor(context: Context) {
+class ActivePromptManager private constructor(private val context: Context) {
 
     private val characterCardManager = CharacterCardManager.getInstance(context)
     private val characterGroupCardManager = CharacterGroupCardManager.getInstance(context)
     private val userPreferencesManager = UserPreferencesManager.getInstance(context)
     private val themeOperations = ThemeTargetOperationCoordinator()
+    private val selectionMutex = Mutex()
 
     val activePromptFlow: Flow<ActivePrompt> =
         combine(
@@ -48,19 +51,39 @@ class ActivePromptManager private constructor(context: Context) {
 
     suspend fun getActivePrompt(): ActivePrompt = activePromptFlow.first()
 
-    suspend fun setActivePrompt(prompt: ActivePrompt) {
+    suspend fun setActivePrompt(prompt: ActivePrompt, synchronizeChat: Boolean = true) = selectionMutex.withLock {
+        applyPrompt(prompt)
+        if (synchronizeChat) {
+            com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).activateChatForPrompt(prompt)
+        }
+    }
+
+    private suspend fun applyPrompt(prompt: ActivePrompt) {
         themeOperations.runTransition {
             when (prompt) {
                 is ActivePrompt.CharacterGroup -> {
+                    val group = requireNotNull(characterGroupCardManager.getCharacterGroupCard(prompt.id)) { "群聊不存在" }
+                    group.members.forEach { characterCardManager.ensureIndependentSettings(it.characterCardId) }
                     characterGroupCardManager.setActiveCharacterGroupCard(prompt.id)
                     characterCardManager.clearActiveCharacterCard()
                 }
                 is ActivePrompt.CharacterCard -> {
+                    characterCardManager.ensureIndependentSettings(prompt.id)
                     characterCardManager.setActiveCharacterCard(prompt.id)
                     characterGroupCardManager.setActiveCharacterGroupCard(null)
                 }
             }
         }
+    }
+
+    suspend fun activateForChat(chat: com.ai.assistance.operit.data.model.ChatHistory) = selectionMutex.withLock {
+        val history = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+        // A queued collector for the previous window must never undo a newer selection.
+        if (history.currentChatIdFlow.value != chat.id) return@withLock
+        val prompt = com.ai.assistance.operit.data.model.ChatOwnership.prompt(chat) ?: return@withLock
+        if (prompt is ActivePrompt.CharacterCard && characterCardManager.getAllCharacterCards().none { it.id == prompt.id }) return@withLock
+        if (prompt is ActivePrompt.CharacterGroup && characterGroupCardManager.getCharacterGroupCard(prompt.id) == null) return@withLock
+        applyPrompt(prompt)
     }
 
     internal suspend fun <T> runThemeTransition(action: suspend () -> T): T {
@@ -131,20 +154,20 @@ class ActivePromptManager private constructor(context: Context) {
     suspend fun activateForChatBinding(characterCardName: String?, characterGroupId: String?) {
         val normalizedGroupId = characterGroupId?.trim()?.takeIf { it.isNotBlank() }
         if (!normalizedGroupId.isNullOrBlank()) {
-            setActivePrompt(ActivePrompt.CharacterGroup(normalizedGroupId))
+            setActivePrompt(ActivePrompt.CharacterGroup(normalizedGroupId), synchronizeChat = false)
             return
         }
 
         val normalizedCardName = characterCardName?.trim()?.takeIf { it.isNotBlank() }
         if (normalizedCardName != null) {
-            val targetCard = characterCardManager.findCharacterCardByName(normalizedCardName)
+            val targetCard = characterCardManager.getAllCharacterCards().singleOrNull { it.name == normalizedCardName }
             if (targetCard != null) {
-                setActivePrompt(ActivePrompt.CharacterCard(targetCard.id))
+                setActivePrompt(ActivePrompt.CharacterCard(targetCard.id), synchronizeChat = false)
                 return
             }
         }
 
-        setActivePrompt(ActivePrompt.CharacterCard(CharacterCardManager.DEFAULT_CHARACTER_CARD_ID))
+        if (normalizedCardName == null) setActivePrompt(ActivePrompt.CharacterCard(CharacterCardManager.DEFAULT_CHARACTER_CARD_ID), synchronizeChat = false)
     }
 
     suspend fun resolveActiveCardIdForSend(): String {

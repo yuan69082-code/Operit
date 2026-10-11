@@ -705,11 +705,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             }
         }
 
-        if (_autoSwitchCharacterCard.value) {
-            viewModelScope.launch {
-                autoSwitchCharacterTargetForChat(chatId)
-            }
-        }
+        // The history delegate restores the selected chat's owner unconditionally.
     }
 
     fun loadOlderMessagesForCurrentChat() {
@@ -765,6 +761,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     fun switchActiveCharacterTarget(target: CharacterSelectorTarget) {
         viewModelScope.launch {
+            try {
             when (target) {
                 is CharacterSelectorTarget.CharacterCardTarget -> {
                     activePromptManager.setActivePrompt(ActivePrompt.CharacterCard(target.id))
@@ -774,8 +771,11 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 }
             }
 
-            if (_autoSwitchChatOnCharacterSelect.value) {
-                autoSwitchChatForCharacterTarget(target)
+            // ActivePromptManager switches to the target's own session for every entry point.
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                AppLogger.e(TAG, "切换助手失败", failure)
+                uiStateDelegate.showErrorMessage(failure.message ?: "切换助手失败")
             }
         }
     }
@@ -783,10 +783,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     private suspend fun autoSwitchCharacterTargetForChat(chatId: String) {
         val targetHistory = chatHistories.value.firstOrNull { it.id == chatId } ?: return
         runCatching {
-            activePromptManager.activateForChatBinding(
-                characterCardName = targetHistory.characterCardName,
-                characterGroupId = targetHistory.characterGroupId
-            )
+            activePromptManager.activateForChat(targetHistory)
         }.onFailure { throwable ->
             AppLogger.w(TAG, "Auto switch character target failed: ${throwable.message}")
         }
@@ -834,12 +831,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 if (!historyGroupId.isNullOrBlank()) {
                     return@filter false
                 }
-                val historyCardName = history.characterCardName?.trim()?.takeIf { it.isNotBlank() }
-                if (targetCard.isDefault) {
-                    historyCardName == null || historyCardName == targetCardName
-                } else {
-                    historyCardName == targetCardName
-                }
+                history.characterCardId == targetCard.id
             }
             .maxByOrNull { it.updatedAt }
     }
