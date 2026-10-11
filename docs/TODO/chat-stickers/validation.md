@@ -12,4 +12,17 @@
 
 自动检查不能替代设备上的弹窗、授权、动图播放和模型自主调用验证。当前环境没有连接可运行此 APK 的手机，未声称通过这些设备检查。
 
-构建、测试数量、签名和发布版本待流水线完成后补记。
+提交 `ea7b8e4bf4cc91ff02640d8b820d3be54b9b4b6e` 的 [Android Tests 45](https://github.com/yuan69082-code/Operit/actions/runs/38096410178) 已通过。
+
+- 测试报告共 1388 项，1382 项通过、6 项原有测试跳过、0 项失败。
+- 本次新增的 `StickerProtocolTest` 9 项与 `StickerToolContextTest` 2 项全部通过。
+- 已下载报告并核对归档 SHA-256：`a5c963e5a717afb25b45f540c9524611214f7835009c744bacdcc582f4ea6299`，与 GitHub 产物摘要一致。
+
+[Android Build 51](https://github.com/yuan69082-code/Operit/actions/runs/38096410186) 已完成单元测试、APK 构建、成品签名检查和发布，版本为 [1.12.2+51](https://github.com/yuan69082-code/Operit/releases/tag/v1.12.2%2B51)。
+
+- 发布提交：`ea7b8e4bf4cc91ff02640d8b820d3be54b9b4b6e`。
+- `app-debug.apk` 大小为 441509221 字节；GitHub 发布资产 SHA-256 为 `a382be8c75248932dbf1802af27a3be827c1504af572be644c3045ac801810be`。
+- 成品通过 APK Signature Scheme v2 校验；证书 SHA-256 为 `11aab8ecd6c292e507fe4d75c9f6ae7bb6da535262b91d8c9618af815c4992dc`，与既有个人版固定证书一致。
+- 发布时间为 2026-10-11 08:14，中国标准时间；发布为正式的最新版本，可从应用内个人更新源取得。
+
+以上记录来自构建日志、测试报告和发布资产元数据；手机上的交互与实际模型调用仍按上面的设备验收路径验证。
