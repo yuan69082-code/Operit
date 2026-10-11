@@ -16,7 +16,7 @@ object GroupContext {
         message.copy(content = GroupGamePrivacy.publicText(message.content))
     }
     fun visible(message: ChatMessage): String = ChatUtils.removeThinkingContent(message.content)
-        .replace(Regex("<tool(?:_result)?\\b[\\s\\S]*?</tool(?:_result)?>"), "[工具记录]")
+        .replace(com.ai.assistance.operit.util.ChatMarkupRegex.toolOrToolResultBlock, "[工具记录]")
         .take(900)
 
     suspend fun compose(context: Context, chatId: String, actor: String?): String {

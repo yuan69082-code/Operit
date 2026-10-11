@@ -5,6 +5,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupPrivacyTest {
+    @Test fun runtimeRandomizedToolTagsUseTheSamePrivacyRules() {
+        val raw = "<tool_aB12 name = 'group_game'><param name='move'>秘密行动</param></tool_aB12><tool_result_X1 name=\"assistant_admin\"><content>秘密聊天</content></tool_result_X1>公开部分"
+        val public = GroupGamePrivacy.publicText(raw)
+        assertFalse(public.contains("秘密")); assertTrue(public.contains("公开部分"))
+    }
     @Test fun privateLookupResultsAreNotForwardedToTheNextGroupMember() {
         for (tool in listOf("assistant_admin", "group_chat", "assistant_relationship")) {
             val text = GroupGamePrivacy.publicText("<tool_result name=\"$tool\" status=\"success\"><content>另一窗口的私事</content></tool_result>我已查看")
