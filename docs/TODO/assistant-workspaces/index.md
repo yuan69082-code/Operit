@@ -1,5 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
+status: released-v1.12.2+61-device-validation-pending
 ---
 
 # 独立助手工作区与主助手
@@ -11,3 +12,5 @@ fork: https://github.com/yuan69082-code/Operit
 用户可指定一位主助手，查看其他助手的聊天、时间和能力使用记录，并管理软件内的助手配置。主助手资格由用户界面授予和撤销，普通助手不能自行提升身份。
 
 实施和验收见 [01-workspaces.md](01-workspaces.md)。
+
+已发布 [Vio Life 1.12.2+61](https://github.com/yuan69082-code/Operit/releases/tag/v1.12.2%2B61)，保留现有安装身份和签名。主助手入口为“设置 → 角色卡编辑 → 角色卡”页顶部。
