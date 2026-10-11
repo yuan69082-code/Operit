@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupPrivacyTest {
+    @Test fun privateLookupResultsAreNotForwardedToTheNextGroupMember() {
+        for (tool in listOf("assistant_admin", "group_chat", "assistant_relationship")) {
+            val text = GroupGamePrivacy.publicText("<tool_result name=\"$tool\" status=\"success\"><content>另一窗口的私事</content></tool_result>我已查看")
+            assertFalse(text.contains("另一窗口的私事")); assertTrue(text.contains("我已查看"))
+        }
+    }
     @Test fun publicHistoryNeverIncludesSecretToolParametersOrReasoning() {
         val raw = "<think>我的身份是狼人</think>轮到我了<tool name=\"group_game\"><param name=\"move\">{\"hidden\":\"藏钥匙\",\"target\":\"a\"}</param></tool>公开发言"
         val text = GroupGamePrivacy.publicText(raw)

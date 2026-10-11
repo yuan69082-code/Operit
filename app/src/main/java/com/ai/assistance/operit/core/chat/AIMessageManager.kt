@@ -1065,6 +1065,9 @@ object AIMessageManager {
             // 打包所有消息到一条用户消息
             val packedContent = buildString {
                 append(com.ai.assistance.operit.core.group.GroupProvenance.SUMMARY_RULE + "\n")
+                chatId?.let { com.ai.assistance.operit.core.group.GroupGames(context).state(it) }?.let {
+                    append("本群包含一起玩 ${it.kind} 的记录；当前阶段=${it.phase}。游戏事件保留参与者署名并标为游戏经历。\n")
+                }
                 messagesToSummarize.forEach { message ->
                     // 清理消息内容：移除 memory 标签和 thinking 内容
                     val cleanedContent = if (message.sender == "user") {

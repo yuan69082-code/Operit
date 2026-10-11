@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 object GroupGamePrivacy {
     fun publicText(text: String): String = ChatUtils.removeThinkingContent(text)
         .replace(Regex("<tool\\b[^>]*name=[\"']group_game[\"'][^>]*>[\\s\\S]*?(?:</tool>|$)"), "[游戏行动记录，最新公开局面见游戏状态]")
+        .replace(Regex("<tool_result\\b[^>]*name=[\"'](?:group_chat|assistant_admin|assistant_relationship)[\"'][^>]*>[\\s\\S]*?(?:</tool_result>|$)"), "[此助手查询的私人资料不在群公共上下文中展开]")
 
     // The provider/tool loop runs normally upstream. Publish only after secret tool arguments
     // and reasoning have been removed, so neither streaming UI nor persisted history exposes them.

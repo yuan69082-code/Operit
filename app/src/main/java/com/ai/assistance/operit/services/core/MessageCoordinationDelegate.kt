@@ -242,8 +242,10 @@ class MessageCoordinationDelegate(
         val group = chat?.characterGroupId?.let { characterGroupCardManager.getCharacterGroupCard(it) }
         if (group != null) {
             val memberIds = group.members.map { it.characterCardId }.toSet()
-            val card = characterCardManager.getAllCharacterCards().singleOrNull { it.id in memberIds && it.name == message.roleName.trim() }
-            return resolveRoleCardId(chatId, requireNotNull(card) { "无法确定需要重新生成的群成员" }.id)
+            check(com.ai.assistance.operit.core.group.GroupGames(context).state(chatId)?.phase?.let { it != "ended" } != true) { "游戏进行中不能重新生成已执行的行动，请使用游戏页继续" }
+            val author = com.ai.assistance.operit.core.group.GroupProvenance.author(context, chatId, message)
+            require(author != null && author in memberIds) { "这条消息缺少可确认的现有成员身份，请新发一条消息并 @ 目标助手" }
+            return resolveRoleCardId(chatId, author)
         }
         return resolveRoleCardId(chatId, null)
     }
@@ -1075,7 +1077,7 @@ class MessageCoordinationDelegate(
                 queue.addLast(ids[(ids.indexOf(actor) + 1) % ids.size])
             }
             groupStore.update(chatId) { it.put("pending", JSONArray(queue.toList())) }
-            if (gamePending == null) maybeSummarizeAfterGroupRound(chatId, PromptFunctionType.CHAT)
+            maybeSummarizeAfterGroupRound(chatId, PromptFunctionType.CHAT)
             if (queue.isNotEmpty()) delay(500)
         }
         groupStore.log(chatId, "结束", if (quiet > 0) "成员选择暂时安静" else "本轮发言完成")
@@ -1431,10 +1433,14 @@ class MessageCoordinationDelegate(
         uiStateDelegate.showToast(context.getString(R.string.chat_summarizing_memory))
 
         try {
-            val history = sourceMessages.map { it.sender to it.content }
+            val owner = resolveRoleCardId(currentChatId, null)
+            val attributed = if (currentChatId != null && isGroupChatSession(currentChatId)) {
+                com.ai.assistance.operit.core.group.GroupProvenance.forRequest(context, currentChatId, owner, sourceMessages)
+            } else sourceMessages
+            val history = attributed.map { it.sender to it.content }
             val lastMessageContent =
                 lastContentOverride?.takeIf { it.isNotBlank() }
-                    ?: sourceMessages.lastOrNull()?.content
+                    ?: attributed.lastOrNull()?.content
                     ?: ""
             val roleCardId =
                 resolveRoleCardId(

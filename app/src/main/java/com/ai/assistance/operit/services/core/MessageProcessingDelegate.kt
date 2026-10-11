@@ -1798,7 +1798,7 @@ class MessageProcessingDelegate(
                     enhancedAiService = service,
                     chatId = chatId,
                     messageContent = effectiveRequestMessageContent,
-                    chatHistory = requestHistory,
+                    chatHistory = if (groupOrchestrationMode) com.ai.assistance.operit.core.group.GroupProvenance.forRequest(context, chatId, roleCardId, requestHistory) else requestHistory,
                     workspacePath = workspacePath,
                     promptFunctionType = promptFunctionType,
                     enableThinking = enableThinking,
