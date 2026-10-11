@@ -541,7 +541,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
     suspend fun activateChatForPrompt(prompt: ActivePrompt) = selectionMutex.withLock {
         pinLegacyChatOwners()
         val histories = chatDao.getAllChatsDirectly().map { it.toChatHistory() }
-        val current = currentChatIdFlow.value
+        val current = getSelectedChatId()
         val selected = histories.firstOrNull { it.id == current && ChatOwnership.belongsTo(it, prompt) }
             ?: histories.filter { ChatOwnership.belongsTo(it, prompt) }.maxByOrNull { it.updatedAt }
         val target = selected ?: when (prompt) {
@@ -1474,6 +1474,9 @@ class ChatHistoryManager private constructor(private val context: Context) {
     }
 
     // 设置当前聊天ID
+    suspend fun getSelectedChatId(): String? =
+        context.currentChatIdDataStore.data.first()[PreferencesKeys.CURRENT_CHAT_ID]
+
     suspend fun setCurrentChatId(chatId: String) {
         context.currentChatIdDataStore.edit { preferences ->
             preferences[PreferencesKeys.CURRENT_CHAT_ID] = chatId

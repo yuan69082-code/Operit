@@ -79,7 +79,7 @@ class ActivePromptManager private constructor(private val context: Context) {
     suspend fun activateForChat(chat: com.ai.assistance.operit.data.model.ChatHistory) = selectionMutex.withLock {
         val history = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
         // A queued collector for the previous window must never undo a newer selection.
-        if (history.currentChatIdFlow.value != chat.id) return@withLock
+        if (history.getSelectedChatId() != chat.id) return@withLock
         val prompt = com.ai.assistance.operit.data.model.ChatOwnership.prompt(chat) ?: return@withLock
         if (prompt is ActivePrompt.CharacterCard && characterCardManager.getAllCharacterCards().none { it.id == prompt.id }) return@withLock
         if (prompt is ActivePrompt.CharacterGroup && characterGroupCardManager.getCharacterGroupCard(prompt.id) == null) return@withLock

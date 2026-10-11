@@ -2495,10 +2495,7 @@ class WebChatHttpBridge(
             return false
         }
         if (syncActivePromptFromBinding) {
-            activePromptManager.activateForChatBinding(
-                characterCardName = chatMeta.characterCardName,
-                characterGroupId = chatMeta.characterGroupId
-            )
+            chatHistoryManager.getChatMetadata(chatId)?.let { activePromptManager.activateForChat(it) }
         }
         return true
     }

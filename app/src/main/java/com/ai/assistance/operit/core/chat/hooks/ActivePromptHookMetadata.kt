@@ -38,18 +38,7 @@ private suspend fun resolveHookActivePrompt(
         return ActivePrompt.CharacterCard(resolvedRoleCardId)
     }
 
-    val boundCardName = boundChat?.characterCardName?.trim()?.takeIf { it.isNotBlank() }
-    if (boundCardName != null) {
-        val boundCardId =
-            CharacterCardManager.getInstance(context)
-                .findCharacterCardByName(boundCardName)
-                ?.id
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-        if (boundCardId != null) {
-            return ActivePrompt.CharacterCard(boundCardId)
-        }
-    }
+    boundChat?.characterCardId?.let { return ActivePrompt.CharacterCard(it) }
 
     return ActivePromptManager.getInstance(context).getActivePrompt()
 }
@@ -59,10 +48,7 @@ private suspend fun resolveBoundChat(
     chatId: String?
 ): ChatHistory? {
     val normalizedChatId = chatId?.trim()?.takeIf { it.isNotBlank() } ?: return null
-    return ChatHistoryManager.getInstance(context)
-        .chatHistoriesFlow
-        .first()
-        .firstOrNull { it.id == normalizedChatId }
+    return ChatHistoryManager.getInstance(context).getChatMetadata(normalizedChatId)
 }
 
 private suspend fun activePromptToMetadata(

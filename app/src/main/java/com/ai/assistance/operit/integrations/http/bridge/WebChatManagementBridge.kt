@@ -49,10 +49,7 @@ internal class WebChatManagementBridge(
                 characterGroupId = normalizedCharacterGroupId
             )
             if (core.currentChatId.value == chatId) {
-                activePromptManager.activateForChatBinding(
-                    characterCardName = normalizedCharacterCardName,
-                    characterGroupId = normalizedCharacterGroupId
-                )
+                chatHistoryManager.getChatMetadata(chatId)?.let { activePromptManager.activateForChat(it) }
             }
         }
         return currentChatMeta(chatId)?.let { buildChatSummary(it) }

@@ -370,11 +370,8 @@ class CharacterCardManager private constructor(private val context: Context) {
         userPreferencesManager.deleteCharacterCardTheme(characterCardId)
         // 同时也复制当前Waifu模式配置
         waifuPreferences.copyCurrentWaifuSettingsToCharacterCard(characterCardId)
-        // 同时复制创建前活跃目标的自定义表情配置
-        customEmojiRepository.cloneEmojiSet(
-            emojiSourcePrompt,
-            ActivePrompt.CharacterCard(characterCardId)
-        )
+        // New identities start with built-ins. Explicit Duplicate still copies the source set.
+        customEmojiRepository.initializeBuiltinEmojis(ActivePrompt.CharacterCard(characterCardId))
     }
 
 

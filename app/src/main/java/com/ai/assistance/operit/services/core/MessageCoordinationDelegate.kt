@@ -567,6 +567,16 @@ class MessageCoordinationDelegate(
             uiStateDelegate.showErrorMessage(context.getString(R.string.chat_no_active_conversation))
             return
         }
+        if (shouldReadComposerState && messageTextOverride == null && roleCardIdOverride == null) {
+            val ownerMatches = runBlocking {
+                val bound = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)
+                bound != null && com.ai.assistance.operit.data.model.ChatOwnership.belongsTo(bound, activePromptManager.getActivePrompt())
+            }
+            if (!ownerMatches) {
+                uiStateDelegate.showErrorMessage("助手正在切换，请等聊天加载完成后再发送。")
+                return
+            }
+        }
         if (!isAutoContinuation) {
             cancelPendingAutoContinuation(chatId, restoreIdleIfPendingState = false)
         }
@@ -585,34 +595,16 @@ class MessageCoordinationDelegate(
             )
         ) {
             coroutineScope.launch {
-                val handled = runCatching {
-                    orchestrateGroupConversation(
-                        chatId = chatId,
-                        promptFunctionType = promptFunctionType,
-                        turnOptions = turnOptions
-                    )
-                }.getOrElse { throwable ->
-                    AppLogger.e(TAG, "群组编排失败，回退普通发送", throwable)
-                    false
-                }
-                if (!handled) {
-                    sendMessageInternal(
-                        promptFunctionType = promptFunctionType,
-                        isContinuation = isContinuation,
-                        skipSummaryCheck = skipSummaryCheck,
-                        isAutoContinuation = isAutoContinuation,
-                        roleCardIdOverride = roleCardIdOverride,
-                        preferActiveRoleCard = preferActiveRoleCard,
-                        chatIdOverride = chatIdOverride,
-                        messageTextOverride = messageTextOverride,
-                        proxySenderNameOverride = proxySenderNameOverride,
-                        chatModelConfigIdOverride = chatModelConfigIdOverride,
-                        chatModelIndexOverride = chatModelIndexOverride,
-                        suppressUserMessageInHistory = suppressUserMessageInHistory,
-                        forceDisableSummary = forceDisableSummary,
-                        enableGroupOrchestration = false,
-                        turnOptions = turnOptions
-                    )
+                try {
+                    check(orchestrateGroupConversation(chatId, promptFunctionType, turnOptions)) {
+                        "群聊不存在或没有可用成员，请检查群聊设置。"
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    AppLogger.e(TAG, "群聊发送失败", failure)
+                    val message = failure.message ?: "群聊发送失败"
+                    uiStateDelegate.showErrorMessage(message)
+                    messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Error(message))
                 }
             }
             return
@@ -858,6 +850,8 @@ class MessageCoordinationDelegate(
         if (orderedMembers.isEmpty()) {
             return false
         }
+        val availableCards = characterCardManager.getAllCharacterCards().map { it.id }.toSet()
+        require(orderedMembers.all { it.characterCardId in availableCards }) { "群聊中有已删除的助手，请先调整群成员。" }
 
         val existingBinding = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
             .getChatMetadata(chatId)?.characterGroupId
