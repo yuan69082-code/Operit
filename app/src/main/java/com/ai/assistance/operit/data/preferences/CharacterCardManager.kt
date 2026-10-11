@@ -591,6 +591,15 @@ class CharacterCardManager private constructor(private val context: Context) {
     
     // 更新角色卡
     suspend fun updateCharacterCard(card: CharacterCard) {
+        // Old imports and management tools may still send FOLLOW_GLOBAL. Snapshot
+        // those values once instead of reintroducing a live shared binding.
+        val independent = independentCard(card, isNew = false)
+        require(!independent.chatModelConfigId.isNullOrBlank()) { "请选择助手模型" }
+        require(!independent.memoryProfileId.isNullOrBlank()) { "请选择助手的独立记忆库" }
+        saveIndependentCard(independent)
+    }
+
+    private suspend fun saveIndependentCard(card: CharacterCard) {
         if (!card.memoryProfileId.isNullOrBlank()) require(getAllCharacterCards().none {
             it.id != card.id && it.memoryProfileId == card.memoryProfileId
         }) { "记忆库已被另一位助手使用，请选择独立记忆库" }

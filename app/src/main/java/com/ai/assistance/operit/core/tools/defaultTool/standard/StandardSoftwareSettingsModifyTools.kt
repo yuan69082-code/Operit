@@ -1450,7 +1450,9 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
     suspend fun listCharacterCards(tool: AITool): ToolResult {
         return try {
             val characterCardManager = CharacterCardManager.getInstance(context)
-            val cards = characterCardManager.getAllCharacterCards()
+            val caller = com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
+            val canManageAll = caller == null || characterCardManager.isPrimaryAssistant(caller)
+            val cards = characterCardManager.getAllCharacterCards().filter { canManageAll || it.id == caller }
             ToolResult(
                 toolName = tool.name,
                 success = true,
@@ -1526,7 +1528,7 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
                 )
             val characterCardManager = CharacterCardManager.getInstance(context)
             val characterCardId = characterCardManager.createCharacterCard(draft)
-            val card = requireCharacterCard(characterCardManager, characterCardId)
+            val card = characterCardManager.getCharacterCard(characterCardId)
             ToolResult(
                 toolName = tool.name,
                 success = true,
@@ -1921,13 +1923,18 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
     private suspend fun activeCharacterCardId(
         characterCardManager: CharacterCardManager
     ): String? {
-        return characterCardManager.observeActiveCharacterCardId().first()
+        return com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
+            ?: characterCardManager.observeActiveCharacterCardId().first()
     }
 
     private suspend fun requireCharacterCard(
         characterCardManager: CharacterCardManager,
         characterCardId: String
     ): CharacterCard {
+        val caller = com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
+        require(caller == null || caller == characterCardId || characterCardManager.isPrimaryAssistant(caller)) {
+            "只有用户指定的主助手可以读取或更改其他助手的配置"
+        }
         return characterCardManager
             .getAllCharacterCards()
             .firstOrNull { card -> card.id == characterCardId }
