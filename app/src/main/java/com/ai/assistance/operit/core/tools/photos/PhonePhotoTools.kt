@@ -61,7 +61,7 @@ object PhonePhotoTools {
 
     fun register(handler: AIToolHandler, context: Context) {
         handler.registerTool(name = "phone_photos", descriptionGenerator = { "手机相机与相册" }, executor = { tool ->
-            runBlocking(Dispatchers.IO) {
+            runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                 try {
                     fun arg(name: String) = tool.parameters.firstOrNull { it.name == name }?.value
                     val action = arg("action") ?: error("缺少 action")

@@ -3,7 +3,7 @@ name: Android Tests
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feat/assistant-workspaces]
     paths:
       - .github/workflows/android-tests.yml
       - .gitmodules

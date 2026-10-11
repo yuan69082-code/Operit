@@ -82,14 +82,19 @@ fun PackageDetailsDialog(
     var subpackageDialogTools by remember { mutableStateOf<List<PackageTool>>(emptyList()) }
     var isLoadingSubpackageTools by remember { mutableStateOf(false) }
 
-    LaunchedEffect(packageName, toolPackage) {
+    val assistantAccess by remember { com.ai.assistance.operit.data.preferences.AssistantScope.accessFlow(context) }
+        .collectAsState(initial = com.ai.assistance.operit.data.model.CharacterCardToolAccessConfig(enabled = true))
+
+    LaunchedEffect(packageName, toolPackage, assistantAccess) {
         toolPkgDetails =
             try {
                 withContext(Dispatchers.IO) {
                     packageManager.getToolPkgContainerDetails(
                         packageName = packageName,
                         resolveContext = context
-                    )
+                    )?.let { details -> details.copy(subpackages = details.subpackages.map {
+                        it.copy(enabled = it.packageName in assistantAccess.allowedPackages)
+                    }) }
                 }
             } catch (e: Exception) {
                 AppLogger.e("PackageDetailsDialog", "Failed to load toolpkg details", e)
@@ -468,10 +473,8 @@ fun PackageDetailsDialog(
                                                 scope.launch {
                                                     val success =
                                                         withContext(Dispatchers.IO) {
-                                                            packageManager.setToolPkgSubpackageEnabled(
-                                                                subpackage.packageName,
-                                                                enabled
-                                                            )
+                                                            packageManager.setPackageSelected(subpackage.packageName, enabled)
+                                                            packageManager.isPackageSelected(subpackage.packageName) == enabled
                                                         }
                                                     if (!success) {
                                                         toolPkgToggleError = context.getString(R.string.pkg_toolpkg_subpackage_toggle_failed)
@@ -481,7 +484,9 @@ fun PackageDetailsDialog(
                                                             packageManager.getToolPkgContainerDetails(
                                                                 packageName = packageName,
                                                                 resolveContext = context
-                                                            )
+                                                            )?.let { updated -> updated.copy(subpackages = updated.subpackages.map {
+                                                                it.copy(enabled = packageManager.isPackageSelected(it.packageName))
+                                                            }) }
                                                         }
                                                 }
                                             }

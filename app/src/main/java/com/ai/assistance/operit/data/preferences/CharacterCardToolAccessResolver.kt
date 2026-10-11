@@ -59,10 +59,10 @@ class CharacterCardToolAccessResolver private constructor(private val context: C
         globalToolVisibility: Map<String, Boolean>? = null
     ): ResolvedCharacterCardToolAccess {
         val effectiveGlobalToolVisibility = globalToolVisibility
-            ?: runCatching { apiPreferences.toolPromptVisibilityFlow.first() }.getOrElse { emptyMap() }
+            ?: runCatching { apiPreferences.legacyToolPromptVisibilityFlow.first() }.getOrElse { emptyMap() }
 
         val globalPackageNames = buildGlobalPackageNames(packageManager)
-        val globalSkillNames = LinkedHashSet(skillRepository.getAiVisibleSkillPackages().keys)
+        val globalSkillNames = LinkedHashSet(skillRepository.getAvailableSkillPackages().keys)
         val globalMcpServerNames = LinkedHashSet(packageManager.getAvailableServerPackages().keys)
 
         val roleCardConfig = roleCardId

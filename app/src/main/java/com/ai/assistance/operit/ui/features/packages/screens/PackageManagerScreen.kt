@@ -137,6 +137,9 @@ fun PackageManagerScreen(
         PackageManager.getInstance(context, toolHandler)
     }
     val scope = rememberCoroutineScope()
+    val assistantAccess by remember { com.ai.assistance.operit.data.preferences.AssistantScope.accessFlow(context) }
+        .collectAsState(initial = com.ai.assistance.operit.data.model.CharacterCardToolAccessConfig(enabled = true))
+
     val mcpRepository = remember { MCPRepository(context) }
     val skillRepository = remember { SkillRepository.getInstance(context.applicationContext) }
 
@@ -241,6 +244,10 @@ fun PackageManagerScreen(
         }
     }
 
+    LaunchedEffect(assistantAccess) {
+        importedPackages.value = assistantAccess.allowedPackages
+        visibleImportedPackages.value = assistantAccess.allowedPackages
+    }
     LaunchedEffect(pluginSearchInput) {
         delay(320)
         pluginSearchQuery = pluginSearchInput.trim()
@@ -358,7 +365,7 @@ fun PackageManagerScreen(
                                                 packageManager
                                                     .getToolPkgPluginContainerDetails(context)
                                                     .associateBy { it.packageName }
-                                            val imported = packageManager.getEnabledPackageNames()
+                                            val imported = packageManager.getSelectedPackageNames()
                                             val errors = packageManager.getPackageLoadErrors()
                                             val errorInfos = packageManager.getPackageLoadErrorInfos()
                                             val newErrors =
@@ -454,7 +461,7 @@ fun PackageManagerScreen(
                         packageManager
                             .getToolPkgPluginContainerDetails(context)
                             .associateBy { it.packageName }
-                    val imported = packageManager.getEnabledPackageNames()
+                    val imported = packageManager.getSelectedPackageNames()
                     val errors = packageManager.getPackageLoadErrors()
                     val errorInfos = packageManager.getPackageLoadErrorInfos()
                     PackageManagerSnapshot(
@@ -806,11 +813,11 @@ fun PackageManagerScreen(
                                         val updatedImported =
                                             withContext(Dispatchers.IO) {
                                                 if (isChecked) {
-                                                    packageManager.enablePackage(details.packageName)
+                                                    packageManager.setPackageSelected(details.packageName, true)
                                                 } else {
-                                                    packageManager.disablePackage(details.packageName)
+                                                    packageManager.setPackageSelected(details.packageName, false)
                                                 }
-                                                packageManager.getEnabledPackageNames()
+                                                packageManager.getSelectedPackageNames()
                                             }
 
                                         importedPackages.value = updatedImported
@@ -877,11 +884,11 @@ fun PackageManagerScreen(
                                         val updatedImported =
                                             withContext(Dispatchers.IO) {
                                                 if (isChecked) {
-                                                    packageManager.enablePackage(packageName)
+                                                    packageManager.setPackageSelected(packageName, true)
                                                 } else {
-                                                    packageManager.disablePackage(packageName)
+                                                    packageManager.setPackageSelected(packageName, false)
                                                 }
-                                                packageManager.getEnabledPackageNames()
+                                                packageManager.getSelectedPackageNames()
                                             }
 
                                         importedPackages.value = updatedImported
@@ -952,7 +959,7 @@ fun PackageManagerScreen(
                     onDismiss = {
                         showDetails = false
                         scope.launch {
-                            val imported = withContext(Dispatchers.IO) { packageManager.getEnabledPackageNames() }
+                            val imported = withContext(Dispatchers.IO) { packageManager.getSelectedPackageNames() }
                             importedPackages.value = imported
                             visibleImportedPackages.value = imported.toList()
                         }
@@ -974,7 +981,7 @@ fun PackageManagerScreen(
                                         packageManager
                                             .getToolPkgPluginContainerDetails(context)
                                             .associateBy { it.packageName }
-                                    val imported = packageManager.getEnabledPackageNames()
+                                    val imported = packageManager.getSelectedPackageNames()
                                     PackageManagerSnapshot(
                                         availablePackages = available,
                                         allAvailablePackages = allAvailable,
@@ -1067,7 +1074,7 @@ fun PackageManagerScreen(
                                             packageManager
                                                 .getToolPkgPluginContainerDetails(context)
                                                 .associateBy { it.packageName },
-                                        importedPackages = packageManager.getEnabledPackageNames(),
+                                        importedPackages = packageManager.getSelectedPackageNames(),
                                         packageLoadErrors = packageManager.getPackageLoadErrors(),
                                         packageLoadErrorInfos = packageManager.getPackageLoadErrorInfos()
                                     )

@@ -965,6 +965,7 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         val eventChannel = MutableSharedStream<TextStreamEvent>(replay = Int.MAX_VALUE)
         val wrappedStream = stream {
+            withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
             val execContext =
                 MessageExecutionContext(
                     executionId = nextExecutionContextId.incrementAndGet(),
@@ -1327,6 +1328,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     }
                 }
             }
+        }
         }
         return wrappedStream.withEventChannel(eventChannel)
     }

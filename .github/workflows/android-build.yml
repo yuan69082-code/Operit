@@ -14,7 +14,7 @@ on:
           - ':app:assembleClone'
           - ':app:bundleRelease'
   push:
-    branches: [main, feat/mobile-continuity-release]
+    branches: [main, feat/mobile-continuity-release, feat/assistant-workspaces]
     paths:
       - .github/workflows/android-build.yml
       - .gitmodules

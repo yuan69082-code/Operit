@@ -22,6 +22,9 @@ import com.ai.assistance.operit.data.stats.ReleasedProviderModelKey
 import com.ai.assistance.operit.data.stats.ReleasedProviderModelKeyDecoder
 import com.ai.assistance.operit.plugins.toolpkg.ToolPkgAiProviderRegistry
 import com.ai.assistance.operit.util.AppLogger
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -228,11 +231,14 @@ class ApiPreferences private constructor(private val context: Context) {
     }
 
     val featureTogglesFlow: Flow<Map<String, Boolean>> =
-        context.apiDataStore.data.map { preferences ->
-            val json = preferences[FEATURE_TOGGLES_JSON] ?: DEFAULT_FEATURE_TOGGLES_JSON
-            runCatching {
-                Json.decodeFromString<Map<String, Boolean>>(json)
-            }.getOrElse { emptyMap() }
+        AssistantScope.idFlow(context).flatMapLatest { id ->
+            flow {
+                val key = stringPreferencesKey("assistant_${id}_feature_toggles")
+                context.apiDataStore.edit { prefs ->
+                    if (!prefs.contains(key)) prefs[key] = prefs[FEATURE_TOGGLES_JSON] ?: DEFAULT_FEATURE_TOGGLES_JSON
+                }
+                emitAll(context.apiDataStore.data.map { Json.decodeFromString<Map<String, Boolean>>(it[key] ?: "{}") })
+            }
         }
 
     fun featureToggleFlow(featureKey: String, defaultValue: Boolean = false): Flow<Boolean> {
@@ -252,37 +258,47 @@ class ApiPreferences private constructor(private val context: Context) {
             }
 
     // Flow for Thinking Mode
-    val enableThinkingModeFlow: Flow<Boolean> =
-        context.apiDataStore.data.map { preferences ->
-            preferences[ENABLE_THINKING_MODE] ?: DEFAULT_ENABLE_THINKING_MODE
-        }
+    val enableThinkingModeFlow: Flow<Boolean> = scopedBoolean(ENABLE_THINKING_MODE, DEFAULT_ENABLE_THINKING_MODE)
 
     // Flow for Memory Auto Update
-    val enableMemoryAutoUpdateFlow: Flow<Boolean> =
-        context.apiDataStore.data.map { preferences ->
-            preferences[ENABLE_MEMORY_AUTO_UPDATE] ?: DEFAULT_ENABLE_MEMORY_AUTO_UPDATE
-        }
+    val enableMemoryAutoUpdateFlow: Flow<Boolean> = scopedBoolean(ENABLE_MEMORY_AUTO_UPDATE, DEFAULT_ENABLE_MEMORY_AUTO_UPDATE)
 
     // Flow for Auto Read
-    val enableAutoReadFlow: Flow<Boolean> =
-        context.apiDataStore.data.map { preferences ->
-            preferences[ENABLE_AUTO_READ] ?: DEFAULT_ENABLE_AUTO_READ
-        }
+    val enableAutoReadFlow: Flow<Boolean> = scopedBoolean(ENABLE_AUTO_READ, DEFAULT_ENABLE_AUTO_READ)
 
     // Flow for Tools Enable/Disable
-    val enableToolsFlow: Flow<Boolean> =
-        context.apiDataStore.data.map { preferences ->
-            preferences[ENABLE_TOOLS] ?: DEFAULT_ENABLE_TOOLS
-        }
+    val enableToolsFlow: Flow<Boolean> = scopedBoolean(ENABLE_TOOLS, DEFAULT_ENABLE_TOOLS)
 
     // Flow for per-tool prompt visibility
-    val toolPromptVisibilityFlow: Flow<Map<String, Boolean>> =
+    val legacyToolPromptVisibilityFlow: Flow<Map<String, Boolean>> =
         context.apiDataStore.data.map { preferences ->
             val json = preferences[TOOL_PROMPT_VISIBILITY_JSON] ?: DEFAULT_TOOL_PROMPT_VISIBILITY_JSON
             runCatching {
                 Json.decodeFromString<Map<String, Boolean>>(json)
             }.getOrElse { emptyMap() }
         }
+
+    val toolPromptVisibilityFlow: Flow<Map<String, Boolean>> =
+        AssistantScope.accessFlow(context).map { access ->
+            com.ai.assistance.operit.core.config.SystemToolPrompts.getManageableToolPrompts(false)
+                .associate { it.name to (it.name in access.allowedBuiltinTools) }
+        }
+
+    private fun scopedBoolean(key: Preferences.Key<Boolean>, defaultValue: Boolean): Flow<Boolean> =
+        AssistantScope.idFlow(context).flatMapLatest { id ->
+            flow {
+                val scoped = booleanPreferencesKey("assistant_${id}_${key.name}")
+                context.apiDataStore.edit { preferences ->
+                    if (!preferences.contains(scoped)) preferences[scoped] = preferences[key] ?: defaultValue
+                }
+                emitAll(context.apiDataStore.data.map { it[scoped] ?: defaultValue })
+            }
+        }
+
+    private suspend fun saveScopedBoolean(key: Preferences.Key<Boolean>, value: Boolean) {
+        val id = AssistantScope.currentId(context)
+        context.apiDataStore.edit { it[booleanPreferencesKey("assistant_${id}_${key.name}")] = value }
+    }
 
     // Flow for per-tool prompt order
     val toolPromptOrderFlow: Flow<List<String>> =
@@ -312,16 +328,10 @@ class ApiPreferences private constructor(private val context: Context) {
         }
 
     // Flow for Disable Stream Output
-    val disableStreamOutputFlow: Flow<Boolean> =
-        context.apiDataStore.data.map { preferences ->
-            preferences[DISABLE_STREAM_OUTPUT] ?: DEFAULT_DISABLE_STREAM_OUTPUT
-        }
+    val disableStreamOutputFlow: Flow<Boolean> = scopedBoolean(DISABLE_STREAM_OUTPUT, DEFAULT_DISABLE_STREAM_OUTPUT)
 
     // Flow for Disable User Preference Description
-    val disableUserPreferenceDescriptionFlow: Flow<Boolean> =
-        context.apiDataStore.data.map { preferences ->
-            preferences[DISABLE_USER_PREFERENCE_DESCRIPTION] ?: DEFAULT_DISABLE_USER_PREFERENCE_DESCRIPTION
-        }
+    val disableUserPreferenceDescriptionFlow: Flow<Boolean> = scopedBoolean(DISABLE_USER_PREFERENCE_DESCRIPTION, DEFAULT_DISABLE_USER_PREFERENCE_DESCRIPTION)
 
     // Custom System Prompt Template Flow
     val customSystemPromptTemplateFlow: Flow<String> =
@@ -343,14 +353,16 @@ class ApiPreferences private constructor(private val context: Context) {
         val normalizedKey = featureKey.trim()
         if (normalizedKey.isEmpty()) return
 
+        val id = AssistantScope.currentId(context)
+        val scopedKey = stringPreferencesKey("assistant_${id}_feature_toggles")
         context.apiDataStore.edit { preferences ->
             val currentMap =
                 runCatching {
-                    val json = preferences[FEATURE_TOGGLES_JSON] ?: DEFAULT_FEATURE_TOGGLES_JSON
+                    val json = preferences[scopedKey] ?: DEFAULT_FEATURE_TOGGLES_JSON
                     Json.decodeFromString<Map<String, Boolean>>(json)
                 }.getOrElse { emptyMap() }
 
-            preferences[FEATURE_TOGGLES_JSON] =
+            preferences[scopedKey] =
                 Json.encodeToString(currentMap + (normalizedKey to isEnabled))
         }
     }
@@ -368,51 +380,38 @@ class ApiPreferences private constructor(private val context: Context) {
     suspend fun updateThinkingSettings(
         enableThinkingMode: Boolean? = null
     ) {
-        context.apiDataStore.edit { preferences ->
-            enableThinkingMode?.let { preferences[ENABLE_THINKING_MODE] = it }
-        }
+        enableThinkingMode?.let { saveScopedBoolean(ENABLE_THINKING_MODE, it) }
     }
 
     // Save Memory Auto Update setting
     suspend fun saveEnableMemoryAutoUpdate(isEnabled: Boolean) {
-        context.apiDataStore.edit { preferences -> preferences[ENABLE_MEMORY_AUTO_UPDATE] = isEnabled }
+        saveScopedBoolean(ENABLE_MEMORY_AUTO_UPDATE, isEnabled)
     }
 
     // Save Auto Read setting
     suspend fun saveEnableAutoRead(isEnabled: Boolean) {
-        context.apiDataStore.edit { preferences -> preferences[ENABLE_AUTO_READ] = isEnabled }
+        saveScopedBoolean(ENABLE_AUTO_READ, isEnabled)
     }
 
     // Save Tools Enable/Disable setting
     suspend fun saveEnableTools(isEnabled: Boolean) {
-        context.apiDataStore.edit { preferences -> preferences[ENABLE_TOOLS] = isEnabled }
+        saveScopedBoolean(ENABLE_TOOLS, isEnabled)
     }
 
     // Save prompt visibility for a single tool
     suspend fun saveToolPromptVisibility(toolName: String, isVisible: Boolean) {
-        context.apiDataStore.edit { preferences ->
-            val currentMap = runCatching {
-                val json = preferences[TOOL_PROMPT_VISIBILITY_JSON] ?: DEFAULT_TOOL_PROMPT_VISIBILITY_JSON
-                Json.decodeFromString<Map<String, Boolean>>(json)
-            }.getOrElse { emptyMap() }
-            preferences[TOOL_PROMPT_VISIBILITY_JSON] = Json.encodeToString(currentMap + (toolName to isVisible))
-        }
+        CharacterCardManager.getInstance(context).setToolSelected(
+            AssistantScope.currentId(context), "builtin", toolName, isVisible)
     }
 
-    // Save prompt visibility map for all tools
     suspend fun saveToolPromptVisibilityMap(visibilityMap: Map<String, Boolean>) {
-        context.apiDataStore.edit { preferences ->
-            preferences[TOOL_PROMPT_VISIBILITY_JSON] = Json.encodeToString(visibilityMap)
+        val id = AssistantScope.currentId(context)
+        visibilityMap.forEach { (name, visible) ->
+            CharacterCardManager.getInstance(context).setToolSelected(id, "builtin", name, visible)
         }
     }
 
-    suspend fun getToolPromptVisibilityMap(): Map<String, Boolean> {
-        val preferences = context.apiDataStore.data.first()
-        val json = preferences[TOOL_PROMPT_VISIBILITY_JSON] ?: DEFAULT_TOOL_PROMPT_VISIBILITY_JSON
-        return runCatching {
-            Json.decodeFromString<Map<String, Boolean>>(json)
-        }.getOrElse { emptyMap() }
-    }
+    suspend fun getToolPromptVisibilityMap(): Map<String, Boolean> = toolPromptVisibilityFlow.first()
 
     // Save tool prompt order (list of tool names)
     suspend fun saveToolPromptOrder(order: List<String>) {
@@ -461,14 +460,12 @@ class ApiPreferences private constructor(private val context: Context) {
 
     // Save Disable Stream Output setting
     suspend fun saveDisableStreamOutput(isDisabled: Boolean) {
-        context.apiDataStore.edit { preferences -> preferences[DISABLE_STREAM_OUTPUT] = isDisabled }
+        saveScopedBoolean(DISABLE_STREAM_OUTPUT, isDisabled)
     }
 
     // Save Disable User Preference Description setting
     suspend fun saveDisableUserPreferenceDescription(isDisabled: Boolean) {
-        context.apiDataStore.edit { preferences ->
-            preferences[DISABLE_USER_PREFERENCE_DESCRIPTION] = isDisabled
-        }
+        saveScopedBoolean(DISABLE_USER_PREFERENCE_DESCRIPTION, isDisabled)
     }
 
     // Save custom system prompt template

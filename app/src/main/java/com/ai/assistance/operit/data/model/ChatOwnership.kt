@@ -12,8 +12,9 @@ object ChatOwnership {
         return selected
     }
 
-    fun canAccess(chat: ChatHistory, cardId: String, groupMemberIds: List<String>): Boolean =
-        if (chat.characterGroupId.isNullOrBlank()) chat.characterCardId == cardId
+    fun canAccess(chat: ChatHistory, cardId: String, groupMemberIds: List<String>, primaryAssistantId: String? = null): Boolean =
+        if (cardId.isNotBlank() && cardId == primaryAssistantId) true
+        else if (chat.characterGroupId.isNullOrBlank()) chat.characterCardId == cardId
         else cardId in groupMemberIds
 
     fun legacyCardId(name: String?, cards: List<CharacterCard>): String? =

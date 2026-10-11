@@ -54,6 +54,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1073,9 +1074,11 @@ private fun SkillListItem(
     modifier: Modifier = Modifier
 ) {
     val accentColor = MaterialTheme.colorScheme.primary
-    var visibleToAi by remember(skill.name) {
-        mutableStateOf(skillVisibilityPreferences.isSkillVisibleToAi(skill.name))
-    }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val access by remember { com.ai.assistance.operit.data.preferences.AssistantScope.accessFlow(context) }
+        .collectAsState(initial = com.ai.assistance.operit.data.model.CharacterCardToolAccessConfig(enabled = true))
+    val visibleToAi = skill.name in access.allowedSkills
 
     Surface(
         onClick = onClick,
@@ -1131,8 +1134,11 @@ private fun SkillListItem(
                 modifier = Modifier.scale(0.8f),
                 checked = visibleToAi,
                 onCheckedChange = { checked ->
-                    visibleToAi = checked
-                    skillVisibilityPreferences.setSkillVisibleToAi(skill.name, checked)
+                    scope.launch {
+                        val id = com.ai.assistance.operit.data.preferences.AssistantScope.currentId(context)
+                        com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context)
+                            .setToolSelected(id, "skill", skill.name, checked)
+                    }
                 }
             )
         }

@@ -102,7 +102,9 @@ class StandardChatManagerTool(private val context: Context) {
             com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(appContext)
                 .getCharacterGroupCard(it)?.members?.map { member -> member.characterCardId }
         }.orEmpty()
-        return com.ai.assistance.operit.data.model.ChatOwnership.canAccess(chat, caller, members)
+        val cards = CharacterCardManager.getInstance(appContext)
+        val primary = caller.takeIf { cards.isPrimaryAssistant(it) }
+        return com.ai.assistance.operit.data.model.ChatOwnership.canAccess(chat, caller, members, primary)
     }
 
     private suspend fun requireChatAccess(chatId: String?) {

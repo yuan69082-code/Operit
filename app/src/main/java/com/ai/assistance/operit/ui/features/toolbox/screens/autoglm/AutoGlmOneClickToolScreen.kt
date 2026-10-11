@@ -182,10 +182,10 @@ private fun AutoGlmOneClickScreen(
                 try {
                     val enabledPackageNames = packageManager.getEnabledPackageNames()
                     if (enabledPackageNames.contains("Automatic_ui_base")) {
-                        packageManager.disablePackage("Automatic_ui_base")
+                        packageManager.setPackageSelected("Automatic_ui_base", false)
                     }
-                    if (!packageManager.isPackageEnabled("Automatic_ui_subagent")) {
-                        packageManager.enablePackage("Automatic_ui_subagent")
+                    if (!packageManager.isPackageSelected("Automatic_ui_subagent")) {
+                        packageManager.setPackageSelected("Automatic_ui_subagent", true)
                     }
                 } catch (e: Exception) {
                     AppLogger.e("AutoGlmOneClick", "Failed to update packages", e)
@@ -211,10 +211,10 @@ private fun AutoGlmOneClickScreen(
             try {
                 val enabledPackageNames = packageManager.getEnabledPackageNames()
                 if (!enabledPackageNames.contains("Automatic_ui_base")) {
-                    packageManager.enablePackage("Automatic_ui_base")
+                    packageManager.setPackageSelected("Automatic_ui_base", true)
                 }
-                if (packageManager.isPackageEnabled("Automatic_ui_subagent")) {
-                    packageManager.disablePackage("Automatic_ui_subagent")
+                if (packageManager.isPackageSelected("Automatic_ui_subagent")) {
+                    packageManager.setPackageSelected("Automatic_ui_subagent", false)
                 }
 
                 statusMessage = context.getString(R.string.autoglm_restore_success)

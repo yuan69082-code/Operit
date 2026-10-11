@@ -272,6 +272,58 @@ class CharacterCardManager private constructor(private val context: Context) {
 
     internal fun observeActiveCharacterCardId(): Flow<String?> = activeCharacterCardIdFlow
 
+    val primaryAssistantIdFlow: Flow<String?> = dataStore.data.map { it[stringPreferencesKey("primary_assistant_id")] }
+
+    suspend fun isPrimaryAssistant(id: String?): Boolean =
+        id != null && primaryAssistantIdFlow.first() == id && getAllCharacterCards().any { it.id == id }
+
+    /** Only the human-facing settings screen may grant this role. */
+    suspend fun setPrimaryAssistant(id: String?) {
+        check(AssistantScope.callerId() == null) { "主助手只能由用户指定" }
+        require(id == null || getAllCharacterCards().any { it.id == id }) { "助手不存在" }
+        dataStore.edit { preferences ->
+            val key = stringPreferencesKey("primary_assistant_id")
+            if (id == null) preferences.remove(key) else preferences[key] = id
+        }
+        if (id != null) listOf("assistant_admin", "list_chats", "get_chat_messages", "get_chat_messages_range")
+            .forEach { setToolSelected(id, "builtin", it, true) }
+    }
+
+    suspend fun selectChatModel(id: String, configId: String, modelIndex: Int) {
+        require(getAllCharacterCards().any { it.id == id }) { "助手不存在" }
+        dataStore.edit { preferences ->
+            preferences[stringPreferencesKey("character_card_${id}_chat_model_binding_mode")] = CharacterCardChatModelBindingMode.FIXED_CONFIG
+            preferences[stringPreferencesKey("character_card_${id}_chat_model_config_id")] = configId
+            preferences[intPreferencesKey("character_card_${id}_chat_model_index")] = modelIndex.coerceAtLeast(0)
+        }
+    }
+
+    suspend fun selectMemorySpace(id: String, profileId: String) {
+        require(getAllCharacterCards().none { it.id != id && it.memoryProfileId == profileId }) { "该记忆库属于另一位助手" }
+        require(profileId in userPreferencesManager.memorySpaceListFlow.first()) { "记忆库不存在" }
+        dataStore.edit { preferences ->
+            preferences[stringPreferencesKey("character_card_${id}_memory_profile_binding_mode")] = CharacterCardMemoryProfileBindingMode.FIXED_PROFILE
+            preferences[stringPreferencesKey("character_card_${id}_memory_profile_id")] = profileId
+        }
+    }
+
+    suspend fun setToolSelected(id: String, kind: String, name: String, selected: Boolean) {
+        require(!AssistantScope.isGroup(id)) { "请在具体助手的设置中选择能力；群成员分别使用自己的能力" }
+        ensureIndependentSettings(id)
+        dataStore.edit { preferences ->
+            val access = parseToolAccessConfig(preferences[toolAccessConfigKey(id)])
+            fun change(names: List<String>) = if (selected) (names + name).distinct() else names - name
+            val changed = when (kind) {
+                "builtin" -> access.copy(allowedBuiltinTools = change(access.allowedBuiltinTools))
+                "package" -> access.copy(allowedPackages = change(access.allowedPackages))
+                "skill" -> access.copy(allowedSkills = change(access.allowedSkills))
+                "mcp" -> access.copy(allowedMcpServers = change(access.allowedMcpServers))
+                else -> error("未知能力类型")
+            }
+            writeToolAccessConfig(preferences, id, changed.copy(enabled = true))
+        }
+    }
+
     private val toolAccessConfigJson = Json { ignoreUnknownKeys = true }
 
     private fun toolAccessConfigKey(id: String) =
@@ -488,17 +540,18 @@ class CharacterCardManager private constructor(private val context: Context) {
 
     private suspend fun independentCard(card: CharacterCard, isNew: Boolean): CharacterCard {
         val models = ModelConfigManager(context)
-        val global = FunctionalConfigManager(context).getConfigMappingForFunction(com.ai.assistance.operit.data.model.FunctionType.CHAT)
+        val global = FunctionalConfigManager(context, globalOnly = true).getConfigMappingForFunction(com.ai.assistance.operit.data.model.FunctionType.CHAT)
         val needsModel = isNew || card.chatModelBindingMode == CharacterCardChatModelBindingMode.FOLLOW_GLOBAL
         val sourceModelId = if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FIXED_CONFIG)
             requireNotNull(card.chatModelConfigId) { "请选择助手模型" } else global.configId
         val modelId = if (needsModel) models.copyForAssistant(sourceModelId, card.id, "${card.name} · 模型") else card.chatModelConfigId
-        val needsMemory = isNew || card.memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL
+        val needsMemory = isNew || card.memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL ||
+            (!card.memoryProfileId.isNullOrBlank() && getAllCharacterCards().any { it.id != card.id && it.memoryProfileId == card.memoryProfileId })
         // Shared legacy memory stays intact in its original space. Never clone another
         // assistant's memories into a new identity or guess ownership of mixed records.
         val memoryId = if (needsMemory) userPreferencesManager.ensureAssistantMemorySpace(card.id, "${card.name} · 记忆") else card.memoryProfileId
         val access = if (card.toolAccessConfig.enabled) card.toolAccessConfig else {
-            val visibility = ApiPreferences.getInstance(context).toolPromptVisibilityFlow.first()
+            val visibility = ApiPreferences.getInstance(context).legacyToolPromptVisibilityFlow.first()
             val builtins = com.ai.assistance.operit.core.config.SystemToolPrompts.getManageableToolPrompts(false)
                 .map { it.name }.filter { visibility[it] != false }
             if (isNew) CharacterCardToolAccessConfig(enabled = true, allowedBuiltinTools = builtins)
@@ -520,17 +573,27 @@ class CharacterCardManager private constructor(private val context: Context) {
 
     suspend fun ensureIndependentSettings(id: String) = independentSettingsMutex.withLock {
         val card = getAllCharacterCards().firstOrNull { it.id == id } ?: error("助手不存在")
-        val migrated = booleanPreferencesKey("character_card_${id}_independent_v1")
+        val migrated = booleanPreferencesKey("character_card_${id}_independent_v2")
         if (dataStore.data.first()[migrated] == true) return@withLock
         if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FOLLOW_GLOBAL ||
             card.memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL || !card.toolAccessConfig.enabled) {
             updateCharacterCard(independentCard(card, isNew = false))
+        }
+        val refreshed = getCharacterCard(id)
+        val sharedMemory = !refreshed.memoryProfileId.isNullOrBlank() &&
+            getAllCharacterCards().any { it.id != id && it.memoryProfileId == refreshed.memoryProfileId }
+        if (sharedMemory) {
+            val own = userPreferencesManager.ensureAssistantMemorySpace(id, "${refreshed.name} · 记忆")
+            selectMemorySpace(id, own)
         }
         dataStore.edit { it[migrated] = true }
     }
     
     // 更新角色卡
     suspend fun updateCharacterCard(card: CharacterCard) {
+        if (!card.memoryProfileId.isNullOrBlank()) require(getAllCharacterCards().none {
+            it.id != card.id && it.memoryProfileId == card.memoryProfileId
+        }) { "记忆库已被另一位助手使用，请选择独立记忆库" }
         ChatHistoryManager.getInstance(context).pinLegacyChatOwners()
         val previousName = getCharacterCard(card.id).name
         dataStore.edit { preferences ->

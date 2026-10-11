@@ -54,24 +54,8 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
         return kotlinx.coroutines.runBlocking { preferencesManager.activeMemorySpaceIdFlow.first() }
     }
 
-    private fun resolveCallerCardId(tool: AITool): String? {
-        // An AI-supplied argument cannot impersonate another assistant's memory scope.
-        ToolExecutionManager.currentToolRuntimeContext()?.callerCardId
-            ?.takeIf { it.isNotBlank() }?.let { return it }
-        val explicitCallerCardId =
-            tool.parameters
-                .find { it.name == "caller_card_id" }
-                ?.value
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-        if (explicitCallerCardId != null) {
-            return explicitCallerCardId
-        }
-        return ToolExecutionManager.currentToolRuntimeContext()
-            ?.callerCardId
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-    }
+    private fun resolveCallerCardId(tool: AITool): String? =
+        com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
 
     private suspend fun resolveRoleCardProfileId(callerCardId: String?): String? {
         val resolvedCardId = callerCardId?.takeIf { it.isNotBlank() } ?: return null

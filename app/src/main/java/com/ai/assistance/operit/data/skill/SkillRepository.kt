@@ -61,11 +61,8 @@ class SkillRepository private constructor(private val context: Context) {
 
     fun getSkillLoadErrors(): Map<String, String> = skillManager.getSkillLoadErrors()
 
-    fun getAiVisibleSkillPackages(): Map<String, SkillPackage> {
-        return skillManager.getAvailableSkills().filter { (skillName, _) ->
-            skillVisibilityPreferences.isSkillVisibleToAi(skillName)
-        }
-    }
+    fun getAiVisibleSkillPackages(): Map<String, SkillPackage> = getAvailableSkillPackages()
+
 
     fun readSkillContent(skillName: String): String? = skillManager.readSkillContent(skillName)
 

@@ -102,6 +102,11 @@ object ToolExecutionManager {
     internal fun currentToolRuntimeContext(): ToolRuntimeContext? =
         toolRuntimeContextThreadLocal.get()
 
+    internal fun inheritedRuntimeContext(): kotlin.coroutines.CoroutineContext =
+        toolRuntimeContextThreadLocal.asContextElement(currentToolRuntimeContext()) +
+            com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(
+                com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+
     private fun addPackageContextParamIfMissing(
         params: MutableList<ToolParameter>,
         name: String,

@@ -73,6 +73,9 @@ fun MCPConfigScreen(
     searchQuery: String = ""
 ) {
     val context = LocalContext.current
+    val assistantAccess by remember { com.ai.assistance.operit.data.preferences.AssistantScope.accessFlow(context) }
+        .collectAsState(initial = com.ai.assistance.operit.data.model.CharacterCardToolAccessConfig(enabled = true))
+
     val activity = context as? androidx.activity.ComponentActivity
     val mcpLocalServer = remember { MCPLocalServer.getInstance(context) }
     val mcpRepository = remember { MCPRepository(context) }
@@ -181,7 +184,7 @@ fun MCPConfigScreen(
             com.ai.assistance.operit.util.AppLogger.d("MCPConfigScreen", "已安装的MCP插件列表:")
             visiblePluginIds.forEach { pluginId ->
                 try {
-                    val isEnabled = mcpLocalServer.isServerEnabled(pluginId) // 从配置读取
+                    val isEnabled = (pluginId in assistantAccess.allowedMcpServers) // 从配置读取
                     com.ai.assistance.operit.util.AppLogger.d("MCPConfigScreen", "插件ID: $pluginId, 已启用: $isEnabled")
                 } catch (e: Exception) {
                     com.ai.assistance.operit.util.AppLogger.e("MCPConfigScreen", "无法读取插件 $pluginId 的启用状态: ${e.message}")
@@ -257,7 +260,7 @@ fun MCPConfigScreen(
 
     // 计算插件启动统计 - 只统计已启用的插件
     val totalEnabledPlugins = remember(visiblePluginIds) {
-        visiblePluginIds.count { pluginId -> mcpLocalServer.isServerEnabled(pluginId) }
+        visiblePluginIds.count { pluginId -> (pluginId in assistantAccess.allowedMcpServers) }
     }
     val successfulToolRequests = remember { mutableStateOf(0) }
     
@@ -276,7 +279,7 @@ fun MCPConfigScreen(
             .toList()
             .sortedWith(
                 compareBy<String> { pluginId ->
-                    val enabled = mcpLocalServer.isServerEnabled(pluginId)
+                    val enabled = (pluginId in assistantAccess.allowedMcpServers)
                     val loaded = pluginToolsMap[pluginId]?.isNotEmpty() == true
                     when {
                         enabled && loaded -> 0
@@ -1245,8 +1248,8 @@ fun MCPConfigScreen(
                             }
 
                             // 获取插件启用状态 - 从配置读取
-                            val pluginEnabledState = remember(pluginId) {
-                                mutableStateOf(mcpLocalServer.isServerEnabled(pluginId))
+                            val pluginEnabledState = remember(pluginId, assistantAccess) {
+                                mutableStateOf((pluginId in assistantAccess.allowedMcpServers))
                             }
 
                             // 获取插件运行状态
@@ -1271,7 +1274,7 @@ fun MCPConfigScreen(
                             // 监听配置变化（isEnabled状态）
                             LaunchedEffect(pluginId) {
                                 mcpLocalServer.mcpConfig.collect { _ ->
-                                    pluginEnabledState.value = mcpLocalServer.isServerEnabled(pluginId)
+                                    pluginEnabledState.value = (pluginId in assistantAccess.allowedMcpServers)
                                 }
                             }
 
@@ -1322,7 +1325,7 @@ fun MCPConfigScreen(
                                     isEnabled = pluginEnabledState.value,
                                     onEnabledChange = { isChecked ->
                                         scope.launch {
-                                            mcpLocalServer.setServerEnabled(pluginId, isChecked)
+                                            mcpLocalServer.setServerSelected(pluginId, isChecked)
                                         }
                                     },
                                     isRunning = pluginRunningState.value,

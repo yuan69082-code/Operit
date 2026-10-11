@@ -15,6 +15,8 @@ import com.ai.assistance.operit.data.model.LegacyUserProfile
 import com.ai.assistance.operit.data.model.MemorySpace
 import com.ai.assistance.operit.data.model.CharacterCardMemoryProfileBindingMode
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -392,9 +394,23 @@ class UserPreferencesManager private constructor(private val context: Context) {
     }
 
     val activeMemorySpaceIdFlow: Flow<String> =
-        context.userPreferencesDataStore.data.map { preferences ->
-            preferences[ACTIVE_MEMORY_SPACE_ID] ?: DEFAULT_PROFILE_ID
+        AssistantScope.idFlow(context).flatMapLatest { id ->
+            if (AssistantScope.isGroup(id)) kotlinx.coroutines.flow.flow { emit(AssistantScope.memoryId(context, id)) }
+            else kotlinx.coroutines.flow.flow {
+                val cards = CharacterCardManager.getInstance(context)
+                cards.ensureIndependentSettings(id)
+                emitAll(cards.getCharacterCardFlow(id).map { requireNotNull(it.memoryProfileId) })
+            }
         }
+
+    val assistantMemorySpaceListFlow: Flow<List<String>> =
+        activeMemorySpaceIdFlow.flatMapLatest { own ->
+            memorySpaceListFlow.map { ids ->
+                val used = CharacterCardManager.getInstance(context).getAllCharacterCards().mapNotNull { it.memoryProfileId }.toSet()
+                ids.filter { it == own || (it !in used && !it.startsWith("assistant_")) }
+            }
+        }
+
 
     val memorySpaceListFlow: Flow<List<String>> =
         context.userPreferencesDataStore.data.map { preferences ->
@@ -416,11 +432,9 @@ class UserPreferencesManager private constructor(private val context: Context) {
     }
 
     fun getMemorySpaceFlow(memorySpaceId: String = ""): Flow<MemorySpace> {
+        if (memorySpaceId.isBlank()) return activeMemorySpaceIdFlow.flatMapLatest { getMemorySpaceFlow(it) }
         return context.userPreferencesDataStore.data.map { preferences ->
-            val targetId =
-                memorySpaceId.ifBlank {
-                    preferences[ACTIVE_MEMORY_SPACE_ID] ?: DEFAULT_PROFILE_ID
-                }
+            val targetId = memorySpaceId
             val encoded =
                 requireNotNull(preferences[stringPreferencesKey("memory_space_$targetId")]) {
                     "Missing memory space metadata: $targetId"
@@ -468,11 +482,9 @@ class UserPreferencesManager private constructor(private val context: Context) {
     }
 
     suspend fun setActiveMemorySpace(memorySpaceId: String) {
-        context.userPreferencesDataStore.edit { preferences ->
-            val ids = decodeIdList(preferences[MEMORY_SPACE_LIST])
-            require(ids.contains(memorySpaceId)) { "Unknown memory space: $memorySpaceId" }
-            preferences[ACTIVE_MEMORY_SPACE_ID] = memorySpaceId
-        }
+        val id = AssistantScope.currentId(context)
+        require(!AssistantScope.isGroup(id)) { "群聊使用独立群聊记忆库" }
+        CharacterCardManager.getInstance(context).selectMemorySpace(id, memorySpaceId)
     }
 
     suspend fun updateMemorySpace(space: MemorySpace) {
@@ -484,16 +496,9 @@ class UserPreferencesManager private constructor(private val context: Context) {
     suspend fun deleteMemorySpace(memorySpaceId: String) {
         if (memorySpaceId == DEFAULT_PROFILE_ID) return
         val characterCardManager = CharacterCardManager.getInstance(context)
-        characterCardManager.getAllCharacterCards()
-            .filter { it.memoryProfileId == memorySpaceId }
-            .forEach { card ->
-                characterCardManager.updateCharacterCard(
-                    card.copy(
-                        memoryProfileBindingMode = CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL,
-                        memoryProfileId = null
-                    )
-                )
-            }
+        require(characterCardManager.getAllCharacterCards().none { it.memoryProfileId == memorySpaceId }) {
+            "该记忆库正在被助手使用，请先为助手选择另一个独立记忆库"
+        }
         context.userPreferencesDataStore.edit { preferences ->
             val ids = decodeIdList(preferences[MEMORY_SPACE_LIST]).toMutableList()
             ids.remove(memorySpaceId)

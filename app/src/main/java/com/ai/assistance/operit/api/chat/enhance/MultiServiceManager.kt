@@ -126,31 +126,14 @@ class MultiServiceManager(private val context: Context) {
     }
 
     private suspend fun getOrCreateServiceForFunctionLocked(functionType: FunctionType): ManagedService {
-        serviceInstances[functionType]?.let {
-            return it
-        }
-
-        val configMapping = functionalConfigManager.getConfigMappingForFunction(functionType)
-        val config = modelConfigManager.getModelConfigFlow(configMapping.configId).first()
-
-        val service = createServiceFromConfig(config, configMapping.modelIndex)
-        val managedService = ManagedService(
-            service = service,
-            modelConfig = config
-        )
-        serviceInstances[functionType] = managedService
-
-        if (functionType == FunctionType.CHAT) {
-            defaultService = managedService
-        }
-
-        AppLogger.d(TAG, "已为功能${functionType}创建服务实例，使用配置${config.name}，模型索引${configMapping.modelIndex}")
-        return managedService
+        val mapping = functionalConfigManager.getConfigMappingForFunction(functionType)
+        return getOrCreateServiceForConfigLocked(mapping.configId, mapping.modelIndex)
     }
 
     private suspend fun getOrCreateServiceForConfigLocked(configId: String, modelIndex: Int): ManagedService {
         val normalizedIndex = modelIndex.coerceAtLeast(0)
-        val cacheKey = "$configId#$normalizedIndex"
+        val actor = com.ai.assistance.operit.data.preferences.AssistantScope.currentId(context)
+        val cacheKey = "$actor#$configId#$normalizedIndex"
         customServiceInstances[cacheKey]?.let { return it }
 
         val config = modelConfigManager.getModelConfigFlow(configId).first()

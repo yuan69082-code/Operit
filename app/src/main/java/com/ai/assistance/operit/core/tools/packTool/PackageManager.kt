@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.tools.packTool
 
+import kotlinx.coroutines.flow.first
 import android.content.Context
 import android.os.Looper
 import com.ai.assistance.operit.core.chat.logMessageTiming
@@ -3347,13 +3348,6 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
             return generatePackageSystemPrompt(selectedPackage)
         }
 
-        // Then check if it's a Skill package
-        if (skillManager.getAvailableSkills().containsKey(normalizedPackageName) &&
-            !skillVisibilityPreferences.isSkillVisibleToAi(normalizedPackageName)
-        ) {
-            return "Skill '$normalizedPackageName' is set to not show to AI"
-        }
-
         val skillPrompt = skillManager.getSkillSystemPrompt(normalizedPackageName)
         if (skillPrompt != null) {
             return skillPrompt
@@ -3394,17 +3388,6 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
                 success = false,
                 result = StringResultData(""),
                 error = "ToolPkg container '$normalizedPackageName' is not a package and cannot be activated."
-            )
-        }
-
-        if (skillManager.getAvailableSkills().containsKey(normalizedPackageName) &&
-            !skillVisibilityPreferences.isSkillVisibleToAi(normalizedPackageName)
-        ) {
-            return ToolResult(
-                toolName = toolName,
-                success = false,
-                result = StringResultData(""),
-                error = "Skill '$normalizedPackageName' is set to not show to AI"
             )
         }
 
@@ -3782,6 +3765,25 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
             return enabledPackageSet.contains(subpackageRuntime.containerPackageName)
         }
         return true
+    }
+
+    suspend fun getSelectedPackageNames(): List<String> =
+        com.ai.assistance.operit.data.preferences.AssistantScope.accessFlow(context).first().allowedPackages
+
+    suspend fun isPackageSelected(packageName: String): Boolean = packageName in getSelectedPackageNames()
+
+    /** Deselecting only edits the caller's allow-list; shared runtime stays available to other assistants. */
+    suspend fun setPackageSelected(packageName: String, selected: Boolean): String {
+        val id = com.ai.assistance.operit.data.preferences.AssistantScope.currentId(context)
+        val normalized = normalizePackageName(packageName)
+        val message = if (selected) enablePackage(normalized) else "已从当前助手移除"
+        if (selected) require(isPackageEnabled(normalized)) { message }
+        val cards = com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context)
+        cards.setToolSelected(id, "package", normalized, selected)
+        toolPkgContainers[normalized]?.subpackages?.forEach {
+            cards.setToolSelected(id, "package", it.packageName, selected && isPackageEnabled(it.packageName))
+        }
+        return message
     }
 
     /**

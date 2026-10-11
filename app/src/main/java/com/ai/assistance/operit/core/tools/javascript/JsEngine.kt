@@ -90,6 +90,7 @@ class JsEngine(private val context: Context) {
         val dispatchIntermediateOnMain: Boolean,
         val envOverrides: Map<String, String>,
         val packageChatId: String?,
+        val assistantId: String?,
         val toolPkgApiVersion: ToolPkgApiVersion?,
         val toolPkgLogSnapshot: JsToolPkgExecutionContext.LogSnapshot,
         val runtimeMonitorCall: ToolPkgRuntimeMonitor.CallHandle?,
@@ -349,6 +350,7 @@ class JsEngine(private val context: Context) {
             intermediateResultCallback = onIntermediateResult,
             dispatchIntermediateOnMain = dispatchIntermediateOnMain,
             envOverrides = envOverrides,
+            assistantId = com.ai.assistance.operit.data.preferences.AssistantScope.callerId(),
             packageChatId =
                 params["__operit_package_chat_id"]
                     ?.toString()
@@ -1564,6 +1566,15 @@ class JsEngine(private val context: Context) {
     /** JavaScript 接口，提供 Native 调用方法 */
     @Keep
     inner class JsToolCallInterface {
+        private fun <T> withAssistantSelection(block: suspend () -> T): T {
+            val sessions = activeExecutionSessions.values.toList()
+            require(sessions.size <= 1) { "并发脚本不能使用无调用标识的设置接口，请使用 set_sandbox_package_enabled 工具" }
+            val actor = sessions.singleOrNull()?.assistantId
+            return kotlinx.coroutines.runBlocking(
+                com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(actor)
+            ) { block() }
+        }
+
 
         private val jsBridgeCallbackInvoker: (String, String, String) -> String =
             { jsObjectId, methodName, callbackArgsJson ->
@@ -1623,26 +1634,17 @@ class JsEngine(private val context: Context) {
 
         @JavascriptInterface
         fun isPackageImported(packageName: String): Boolean {
-            return JsNativeInterfaceDelegates.isPackageImported(
-                    packageManager = packageManager,
-                    packageName = packageName
-            )
+            return withAssistantSelection { packageManager.isPackageSelected(packageName) }
         }
 
         @JavascriptInterface
         fun importPackage(packageName: String): String {
-            return JsNativeInterfaceDelegates.importPackage(
-                    packageManager = packageManager,
-                    packageName = packageName
-            )
+            return withAssistantSelection { packageManager.setPackageSelected(packageName, true) }
         }
 
         @JavascriptInterface
         fun removePackage(packageName: String): String {
-            return JsNativeInterfaceDelegates.removePackage(
-                    packageManager = packageManager,
-                    packageName = packageName
-            )
+            return withAssistantSelection { packageManager.setPackageSelected(packageName, false) }
         }
 
         @JavascriptInterface

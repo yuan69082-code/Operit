@@ -284,40 +284,6 @@ fun AgentChatInputSection(
         )
     }
 
-    CharacterCardModelBindingSwitchConfirmDialog(
-        visible = showCharacterCardBindingSwitchConfirm,
-        onConfirm = {
-            val selection = pendingCharacterCardModelSelection
-            if (selection == null) {
-                showCharacterCardBindingSwitchConfirm = false
-                return@CharacterCardModelBindingSwitchConfirmDialog
-            }
-            scope.launch {
-                val activePrompt = activePromptManager.getActivePrompt()
-                val activeCard = when (activePrompt) {
-                    is ActivePrompt.CharacterCard -> characterCardManager.getCharacterCard(activePrompt.id)
-                    is ActivePrompt.CharacterGroup -> null
-                }
-                if (activeCard != null) {
-                    characterCardManager.updateCharacterCard(
-                        activeCard.copy(
-                            chatModelBindingMode = CharacterCardChatModelBindingMode.FIXED_CONFIG,
-                            chatModelConfigId = selection.first,
-                            chatModelIndex = selection.second.coerceAtLeast(0),
-                        ),
-                    )
-                }
-                showModelSelectorPopup.value = false
-                showCharacterCardBindingSwitchConfirm = false
-                pendingCharacterCardModelSelection = null
-            }
-        },
-        onDismiss = {
-            showCharacterCardBindingSwitchConfirm = false
-            pendingCharacterCardModelSelection = null
-        },
-    )
-
     CharacterCardMemoryBindingSwitchConfirmDialog(
         visible = showCharacterCardMemoryBindingSwitchConfirm,
         onConfirm = {
@@ -333,12 +299,7 @@ fun AgentChatInputSection(
                     is ActivePrompt.CharacterGroup -> null
                 }
                 if (activeCard != null) {
-                    characterCardManager.updateCharacterCard(
-                        activeCard.copy(
-                            memoryProfileBindingMode = CharacterCardMemoryProfileBindingMode.FIXED_PROFILE,
-                            memoryProfileId = profileId,
-                        ),
-                    )
+                    characterCardManager.selectMemorySpace(activeCard.id, profileId)
                     EnhancedAIService.refreshServiceForFunction(context, FunctionType.CHAT)
                 }
                 showCharacterCardMemoryBindingSwitchConfirm = false
@@ -385,8 +346,8 @@ fun AgentChatInputSection(
             activeProfileId
         }
 
-    LaunchedEffect(Unit) {
-        val profileIds = userPreferencesManager.memorySpaceListFlow.first()
+    LaunchedEffect(activeProfileId) {
+        val profileIds = userPreferencesManager.assistantMemorySpaceListFlow.first()
         preferenceProfiles =
             profileIds.map { profileId -> userPreferencesManager.getMemorySpaceFlow(profileId).first() }
     }
@@ -539,29 +500,10 @@ fun AgentChatInputSection(
         }
 
     val onSelectModel: (String, Int) -> Unit = { selectedId, modelIndex ->
-        if (isModelSelectionLockedByCharacterCard) {
-            val currentModelIndex = configSummaries.find { it.id == effectiveConfigMapping.configId }?.let { config ->
-                getValidModelIndex(config.modelName, effectiveConfigMapping.modelIndex)
-            } ?: effectiveConfigMapping.modelIndex.coerceAtLeast(0)
-            val isSameSelection =
-                selectedId == effectiveConfigMapping.configId && modelIndex == currentModelIndex
-            if (isSameSelection) {
-                showModelSelectorPopup.value = false
-            } else {
-                pendingCharacterCardModelSelection = selectedId to modelIndex
-                showModelSelectorPopup.value = false
-                showCharacterCardBindingSwitchConfirm = true
-            }
-        } else {
-            scope.launch {
-                functionalConfigManager.setConfigForFunction(
-                    FunctionType.CHAT,
-                    selectedId,
-                    modelIndex,
-                )
-                EnhancedAIService.refreshServiceForFunction(context, FunctionType.CHAT)
-                showModelSelectorPopup.value = false
-            }
+        scope.launch {
+            functionalConfigManager.setConfigForFunction(FunctionType.CHAT, selectedId, modelIndex)
+            EnhancedAIService.refreshServiceForFunction(context, FunctionType.CHAT)
+            showModelSelectorPopup.value = false
         }
     }
 

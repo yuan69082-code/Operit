@@ -34,7 +34,7 @@ object StickerTools {
 
     fun register(handler: AIToolHandler, context: Context) {
         handler.registerTool(name = NAME, descriptionGenerator = { "表情包收藏与发送" }, executor = { tool ->
-            runBlocking(Dispatchers.IO) {
+            runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                 try {
                     fun arg(name: String) = tool.parameters.firstOrNull { it.name == name }?.value
                     fun required(name: String) = requireNotNull(arg(name)?.takeIf { it.isNotBlank() }) { "缺少 $name" }

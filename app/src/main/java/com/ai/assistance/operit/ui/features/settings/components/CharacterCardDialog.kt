@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +77,7 @@ fun CharacterCardDialog(
     var advancedCustomPrompt by remember(characterCard.id) { mutableStateOf(characterCard.advancedCustomPrompt) }
     var marks by remember(characterCard.id) { mutableStateOf(characterCard.marks) }
     var chatModelBindingMode by remember(characterCard.id) {
-        mutableStateOf(CharacterCardChatModelBindingMode.normalize(characterCard.chatModelBindingMode))
+        mutableStateOf(CharacterCardChatModelBindingMode.FIXED_CONFIG)
     }
     var fixedChatModelConfigId by remember(characterCard.id) {
         mutableStateOf(characterCard.chatModelConfigId ?: "")
@@ -85,13 +86,13 @@ fun CharacterCardDialog(
         mutableStateOf(characterCard.chatModelIndex.coerceAtLeast(0))
     }
     var memoryProfileBindingMode by remember(characterCard.id) {
-        mutableStateOf(CharacterCardMemoryProfileBindingMode.normalize(characterCard.memoryProfileBindingMode))
+        mutableStateOf(CharacterCardMemoryProfileBindingMode.FIXED_PROFILE)
     }
     var fixedMemoryProfileId by remember(characterCard.id) {
         mutableStateOf(characterCard.memoryProfileId ?: "")
     }
     var toolAccessConfig by remember(characterCard.id) {
-        mutableStateOf(characterCard.toolAccessConfig.normalized())
+        mutableStateOf(characterCard.toolAccessConfig.normalized().copy(enabled = true))
     }
     var showFixedConfigPickerDialog by remember(characterCard.id) { mutableStateOf(false) }
     var popupExpandedFixedConfigId by remember(characterCard.id) { mutableStateOf<String?>(null) }
@@ -136,7 +137,9 @@ fun CharacterCardDialog(
 
     LaunchedEffect(Unit) {
         configSummaries = modelConfigManager.getAllConfigSummaries()
-        val profileIds = userPreferencesManager.memorySpaceListFlow.first()
+        val ownedByOthers = CharacterCardManager.getInstance(context).getAllCharacterCards()
+            .filter { it.id != characterCard.id }.mapNotNull { it.memoryProfileId }.toSet()
+        val profileIds = userPreferencesManager.memorySpaceListFlow.first().filter { it !in ownedByOthers }
         preferenceProfiles =
             profileIds.map { profileId -> userPreferencesManager.getMemorySpaceFlow(profileId).first() }
     }
@@ -187,7 +190,7 @@ fun CharacterCardDialog(
             )
         }
         packageOptions = buildCharacterCardPackageToolAccessOptions(context, packageManager, useEnglish)
-        skillOptions = skillRepository.getAiVisibleSkillPackages()
+        skillOptions = skillRepository.getAvailableSkillPackages()
             .toSortedMap(String.CASE_INSENSITIVE_ORDER)
             .map { (skillName, skillPackage) ->
                 CharacterCardToolAccessOption(
@@ -548,14 +551,7 @@ fun CharacterCardDialog(
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    chatModelBindingMode =
-                                        if (chatModelBindingMode == CharacterCardChatModelBindingMode.FIXED_CONFIG) {
-                                            CharacterCardChatModelBindingMode.FOLLOW_GLOBAL
-                                        } else {
-                                            CharacterCardChatModelBindingMode.FIXED_CONFIG
-                                        }
-                                },
+                                ,
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(
@@ -581,11 +577,6 @@ fun CharacterCardDialog(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-
-                                Switch(
-                                    checked = chatModelBindingMode == CharacterCardChatModelBindingMode.FIXED_CONFIG,
-                                    onCheckedChange = null
-                                )
                             }
                         }
 
@@ -676,14 +667,7 @@ fun CharacterCardDialog(
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    memoryProfileBindingMode =
-                                        if (memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FIXED_PROFILE) {
-                                            CharacterCardMemoryProfileBindingMode.FOLLOW_GLOBAL
-                                        } else {
-                                            CharacterCardMemoryProfileBindingMode.FIXED_PROFILE
-                                        }
-                                },
+                                ,
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(
@@ -709,11 +693,6 @@ fun CharacterCardDialog(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-
-                                Switch(
-                                    checked = memoryProfileBindingMode == CharacterCardMemoryProfileBindingMode.FIXED_PROFILE,
-                                    onCheckedChange = null
-                                )
                             }
                         }
 
@@ -788,7 +767,7 @@ fun CharacterCardDialog(
                                 .fillMaxWidth()
                                 .clickable {
                                     toolAccessConfig = normalizedToolAccessConfig.copy(
-                                        enabled = !normalizedToolAccessConfig.enabled
+                                        enabled = true
                                     )
                                 },
                             shape = RoundedCornerShape(8.dp),
@@ -816,11 +795,6 @@ fun CharacterCardDialog(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-
-                                Switch(
-                                    checked = normalizedToolAccessConfig.enabled,
-                                    onCheckedChange = null
-                                )
                             }
                         }
 
@@ -971,7 +945,7 @@ fun CharacterCardDialog(
                                     } else {
                                         null
                                     },
-                                    toolAccessConfig = finalToolAccessConfig
+                                    toolAccessConfig = finalToolAccessConfig.copy(enabled = true)
                                 )
                             )
                         },

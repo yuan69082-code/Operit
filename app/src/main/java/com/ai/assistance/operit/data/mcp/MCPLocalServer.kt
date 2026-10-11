@@ -879,6 +879,13 @@ class MCPLocalServer private constructor(private val context: Context) {
      * 设置服务器启用状态
      * 本地插件写入 mcpServers.disabled；远程插件写入 pluginMetadata.disabled
      */
+    suspend fun setServerSelected(serverId: String, selected: Boolean) {
+        val id = com.ai.assistance.operit.data.preferences.AssistantScope.currentId(context)
+        if (selected) setServerEnabled(serverId, true)
+        com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context)
+            .setToolSelected(id, "mcp", serverId, selected)
+    }
+
     suspend fun setServerEnabled(serverId: String, enabled: Boolean) {
         val serverConfig = getMCPServer(serverId)
         if (serverConfig != null) {

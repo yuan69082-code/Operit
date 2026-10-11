@@ -1991,6 +1991,12 @@ fun CharacterCardTab(
     onScanColorQrCode: () -> Unit,
     onExportCharacterCard: (String, String) -> Unit
 ) {
+    val context = LocalContext.current
+    val manager = remember { CharacterCardManager.getInstance(context) }
+    val scope = rememberCoroutineScope()
+    val primaryId by manager.primaryAssistantIdFlow.collectAsState(initial = null)
+    var primaryMenu by remember { mutableStateOf(false) }
+
     val sortOptionNameState = rememberLocal(
         key = "ModelPromptsSettingsScreen.CharacterCardTab.sortOption",
         defaultValue = CharacterCardSortOption.DEFAULT.name
@@ -2015,6 +2021,30 @@ fun CharacterCardTab(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        item {
+            Column {
+                Text("主助手", style = MaterialTheme.typography.titleMedium)
+                Text("可按需查看其他助手的聊天、对话时间和能力使用记录，并管理助手设置。只有你能指定或撤销。",
+                    style = MaterialTheme.typography.bodySmall)
+                Box {
+                    TextButton(onClick = { primaryMenu = true }) {
+                        Text(characterCards.firstOrNull { it.id == primaryId }?.name ?: "未指定")
+                    }
+                    DropdownMenu(expanded = primaryMenu, onDismissRequest = { primaryMenu = false }) {
+                        DropdownMenuItem(text = { Text("不指定主助手") }, onClick = {
+                            primaryMenu = false
+                            scope.launch { manager.setPrimaryAssistant(null) }
+                        })
+                        characterCards.forEach { card ->
+                            DropdownMenuItem(text = { Text(card.name) }, onClick = {
+                                primaryMenu = false
+                                scope.launch { manager.setPrimaryAssistant(card.id) }
+                            })
+                        }
+                    }
+                }
+            }
+        }
         item {
             // 标题和按钮区域
             Column(

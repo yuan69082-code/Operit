@@ -174,10 +174,10 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
         }
     }
 
-    fun listSandboxPackages(tool: AITool, packageManager: PackageManager): ToolResult {
+    suspend fun listSandboxPackages(tool: AITool, packageManager: PackageManager): ToolResult {
         return try {
             val availablePackages = packageManager.getAvailablePackages(forceRefresh = true)
-            val enabledSet = packageManager.getEnabledPackageNames().toSet()
+            val enabledSet = packageManager.getSelectedPackageNames().toSet()
             val disabledSet = packageManager.getDisabledPackages().toSet()
             val externalPackagesPath = packageManager.getExternalPackagesPath()
             val packageLoadErrors = packageManager.getPackageLoadErrors()
@@ -238,7 +238,7 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
         }
     }
 
-    fun setSandboxPackageEnabled(tool: AITool, packageManager: PackageManager): ToolResult {
+    suspend fun setSandboxPackageEnabled(tool: AITool, packageManager: PackageManager): ToolResult {
         val packageName = tool.parameters.find { it.name == "package_name" }?.value?.trim().orEmpty()
         if (packageName.isBlank()) {
             return ToolResult(
@@ -291,14 +291,14 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
             )
         }
 
-        val previousEnabled = packageManager.isPackageEnabled(packageName)
+        val previousEnabled = packageManager.isPackageSelected(packageName)
         val operationMessage =
             if (enabled) {
-                packageManager.enablePackage(packageName)
+                packageManager.setPackageSelected(packageName, true)
             } else {
-                packageManager.disablePackage(packageName)
+                packageManager.setPackageSelected(packageName, false)
             }
-        val currentEnabled = packageManager.isPackageEnabled(packageName)
+        val currentEnabled = packageManager.isPackageSelected(packageName)
         val success = currentEnabled == enabled
 
         return ToolResult(

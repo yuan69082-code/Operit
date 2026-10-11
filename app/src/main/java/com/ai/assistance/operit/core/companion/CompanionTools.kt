@@ -55,7 +55,7 @@ object CompanionTools {
                     val result = when (name) {
                         "companion_state" -> {
                             check(store.emotionEnabled) { "软件情绪延续已关闭。" }
-                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                                 when (action) {
                                     "event" -> XcEmotionBridge.event(context, chatId, roleId, required(tool, "event_id"), required(tool, "exchange"), value(tool, "tone"), value(tool, "interaction_type"))
                                     "get" -> XcEmotionBridge.cached(context, chatId, roleId)

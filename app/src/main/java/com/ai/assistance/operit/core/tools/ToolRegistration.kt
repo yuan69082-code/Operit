@@ -34,6 +34,7 @@ import org.json.JSONObject
  * @param context Application context for tools that need it
  */
 fun registerAllTools(handler: AIToolHandler, context: Context) {
+    com.ai.assistance.operit.core.tools.assistants.AssistantAdminTools.register(handler, context)
     com.ai.assistance.operit.core.companion.CompanionTools.register(handler, context)
     com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.register(handler, context)
     com.ai.assistance.operit.core.tools.stickers.StickerTools.register(handler, context)
@@ -187,7 +188,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
 
     fun resolveCurrentRoleCardToolAccess(): ResolvedCharacterCardToolAccess {
         val runtimeContext = ToolExecutionManager.currentToolRuntimeContext()
-        return runBlocking {
+        return runBlocking(com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
             CharacterCardToolAccessResolver
                 .getInstance(context)
                 .resolve(
@@ -240,7 +241,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             )
         }
 
-        val permissionResult = runBlocking {
+        val permissionResult = runBlocking(com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
             handler.getToolPermissionSystem().checkToolPermission(proxiedTool)
         }
         if (!permissionResult.isGranted) {
@@ -469,7 +470,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Play music: $source"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.play(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.play(tool) }
             }
     )
 
@@ -480,7 +481,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Play music queue: $items"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.playQueue(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.playQueue(tool) }
             }
     )
 
@@ -488,7 +489,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "music_pause",
             descriptionGenerator = { _ -> "Pause music playback" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.pause(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.pause(tool) }
             }
     )
 
@@ -496,7 +497,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "music_resume",
             descriptionGenerator = { _ -> "Resume music playback" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.resume(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.resume(tool) }
             }
     )
 
@@ -504,7 +505,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "music_stop",
             descriptionGenerator = { _ -> "Stop music playback" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.stop(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.stop(tool) }
             }
     )
 
@@ -515,7 +516,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Seek music playback to ${positionMs}ms"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.seek(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.seek(tool) }
             }
     )
 
@@ -526,7 +527,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Set music playback volume to $volume"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.setVolume(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.setVolume(tool) }
             }
     )
 
@@ -534,7 +535,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "music_status",
             descriptionGenerator = { _ -> "Get music playback status" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { musicPlaybackTools.status(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { musicPlaybackTools.status(tool) }
             }
     )
 
@@ -572,7 +573,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
                 val packageManager = handler.getOrCreatePackageManager()
-                softwareSettingsTools.listSandboxPackages(tool, packageManager)
+                runBlocking(ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.listSandboxPackages(tool, packageManager) }
             }
     )
 
@@ -586,7 +587,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
                 val packageManager = handler.getOrCreatePackageManager()
-                softwareSettingsTools.setSandboxPackageEnabled(tool, packageManager)
+                runBlocking(ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.setSandboxPackageEnabled(tool, packageManager) }
             }
     )
 
@@ -621,7 +622,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.restartMcpWithLogs(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.restartMcpWithLogs(tool) }
             }
     )
 
@@ -632,7 +633,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.getSpeechServicesConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.getSpeechServicesConfig(tool) }
             }
     )
 
@@ -643,7 +644,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.setSpeechServicesConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.setSpeechServicesConfig(tool) }
             }
     )
 
@@ -656,7 +657,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.testTtsPlayback(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.testTtsPlayback(tool) }
             }
     )
 
@@ -667,7 +668,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.listModelConfigs(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.listModelConfigs(tool) }
             }
     )
 
@@ -679,7 +680,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.createModelConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.createModelConfig(tool) }
             }
     )
 
@@ -691,7 +692,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.updateModelConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.updateModelConfig(tool) }
             }
     )
 
@@ -703,7 +704,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.deleteModelConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.deleteModelConfig(tool) }
             }
     )
 
@@ -714,7 +715,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.listFunctionModelConfigs(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.listFunctionModelConfigs(tool) }
             }
     )
 
@@ -726,7 +727,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.getFunctionModelConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.getFunctionModelConfig(tool) }
             }
     )
 
@@ -740,7 +741,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.setFunctionModelConfig(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.setFunctionModelConfig(tool) }
             }
     )
 
@@ -753,7 +754,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.testModelConfigConnection(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.testModelConfigConnection(tool) }
             }
     )
 
@@ -764,7 +765,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.listCharacterCards(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.listCharacterCards(tool) }
             }
     )
 
@@ -776,7 +777,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.getCharacterCard(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.getCharacterCard(tool) }
             }
     )
 
@@ -788,7 +789,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.createCharacterCard(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.createCharacterCard(tool) }
             }
     )
 
@@ -800,7 +801,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.updateCharacterCard(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.updateCharacterCard(tool) }
             }
     )
 
@@ -812,7 +813,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.deleteCharacterCard(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.deleteCharacterCard(tool) }
             }
     )
 
@@ -824,7 +825,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.setActiveCharacterCard(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.setActiveCharacterCard(tool) }
             }
     )
 
@@ -833,7 +834,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             descriptionGenerator = { _ -> "Clear the active character card" },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) { softwareSettingsTools.clearActiveCharacterCard(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { softwareSettingsTools.clearActiveCharacterCard(tool) }
             }
     )
 
@@ -842,7 +843,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             descriptionGenerator = { _ -> "Import one character card from Tavern JSON" },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     softwareSettingsTools.importCharacterCardFromTavernJson(tool)
                 }
             }
@@ -856,7 +857,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val softwareSettingsTools = ToolGetter.getSoftwareSettingsModifyTools(context)
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     softwareSettingsTools.exportCharacterCardToTavernJson(tool)
                 }
             }
@@ -1106,7 +1107,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     ?: CliToolModeSupport.defaultSearchLimit()
 
                 val roleCardToolAccess = resolveCurrentRoleCardToolAccess()
-                val hiddenCatalog = runBlocking {
+                val hiddenCatalog = runBlocking(com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     CliToolModeSupport.buildHiddenToolCatalog(
                         context = context,
                         packageManager = handler.getOrCreatePackageManager(),
@@ -1450,7 +1451,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val safeDuration = durationMs.coerceAtLeast(0)
 
                 // Use runBlocking with Dispatchers.IO to ensure sleep happens on background thread
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     delay(safeDuration.toLong())
                 }
 
@@ -1490,7 +1491,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val intentTool = ToolGetter.getIntentToolExecutor(context)
-                runBlocking(Dispatchers.IO) { intentTool.invoke(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { intentTool.invoke(tool) }
             }
     )
 
@@ -1503,7 +1504,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 val sendBroadcastTool = ToolGetter.getSendBroadcastToolExecutor(context)
-                runBlocking(Dispatchers.IO) { sendBroadcastTool.invoke(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { sendBroadcastTool.invoke(tool) }
             }
     )
 
@@ -1574,7 +1575,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     handler.registerTool(
             name = "get_all_workflows",
             descriptionGenerator = { _ -> s(R.string.toolreg_get_all_workflows_desc) },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.getAllWorkflows(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.getAllWorkflows(tool) } }
     )
 
     // 创建工作流
@@ -1584,7 +1585,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val name = tool.parameters.find { it.name == "name" }?.value ?: ""
                 s(R.string.toolreg_create_workflow_desc, name)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.createWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.createWorkflow(tool) } }
     )
 
     // 获取工作流详情
@@ -1594,7 +1595,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val id = tool.parameters.find { it.name == "workflow_id" }?.value ?: ""
                 s(R.string.toolreg_get_workflow_desc, id)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.getWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.getWorkflow(tool) } }
     )
 
     // 更新工作流
@@ -1609,7 +1610,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     s(R.string.toolreg_update_workflow_desc, id)
                 }
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.updateWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.updateWorkflow(tool) } }
     )
 
     // 差异更新工作流
@@ -1619,7 +1620,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val id = tool.parameters.find { it.name == "workflow_id" }?.value ?: ""
                 s(R.string.toolreg_patch_workflow_desc, id)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.patchWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.patchWorkflow(tool) } }
     )
 
     // 启用工作流
@@ -1629,7 +1630,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val id = tool.parameters.find { it.name == "workflow_id" }?.value ?: ""
                 s(R.string.toolreg_enable_workflow_desc, id)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.enableWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.enableWorkflow(tool) } }
     )
 
     // 禁用工作流
@@ -1639,7 +1640,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val id = tool.parameters.find { it.name == "workflow_id" }?.value ?: ""
                 s(R.string.toolreg_disable_workflow_desc, id)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.disableWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.disableWorkflow(tool) } }
     )
 
     // 删除工作流
@@ -1649,7 +1650,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val id = tool.parameters.find { it.name == "workflow_id" }?.value ?: ""
                 s(R.string.toolreg_delete_workflow_desc, id)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.deleteWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.deleteWorkflow(tool) } }
     )
 
     // 触发工作流执行
@@ -1659,7 +1660,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val id = tool.parameters.find { it.name == "workflow_id" }?.value ?: ""
                 s(R.string.toolreg_trigger_workflow_desc, id)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { workflowTools.triggerWorkflow(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { workflowTools.triggerWorkflow(tool) } }
     )
 
     // 对话管理工具
@@ -1669,14 +1670,14 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     handler.registerTool(
             name = "start_chat_service",
             descriptionGenerator = { _ -> s(R.string.toolreg_start_chat_service_desc) },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.startChatService(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.startChatService(tool) } }
     )
 
     // 停止聊天服务
     handler.registerTool(
             name = "stop_chat_service",
             descriptionGenerator = { _ -> s(R.string.toolreg_stop_chat_service_desc) },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.stopChatService(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.stopChatService(tool) } }
     )
 
     // 新建对话
@@ -1690,14 +1691,14 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     s(R.string.toolreg_create_new_chat_in_group_desc, group)
                 }
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.createNewChat(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.createNewChat(tool) } }
     )
 
     // 列出所有对话
     handler.registerTool(
             name = "list_chats",
             descriptionGenerator = { _ -> s(R.string.toolreg_list_chats_desc) },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.listChats(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.listChats(tool) } }
     )
 
     // 查找对话
@@ -1707,7 +1708,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val query = tool.parameters.find { it.name == "query" }?.value ?: ""
                 s(R.string.toolreg_find_chat_desc, query)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.findChat(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.findChat(tool) } }
     )
 
     // 查询对话输入状态
@@ -1717,7 +1718,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val chatId = tool.parameters.find { it.name == "chat_id" }?.value ?: ""
                 s(R.string.toolreg_agent_status_desc, chatId)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.agentStatus(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.agentStatus(tool) } }
     )
 
     // 切换对话
@@ -1727,7 +1728,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val chatId = tool.parameters.find { it.name == "chat_id" }?.value ?: ""
                 s(R.string.toolreg_switch_chat_desc, chatId)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.switchChat(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.switchChat(tool) } }
     )
 
     // 更新对话标题
@@ -1737,7 +1738,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val chatId = tool.parameters.find { it.name == "chat_id" }?.value ?: ""
                 s(R.string.toolreg_update_chat_title_desc, chatId)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.updateChatTitle(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.updateChatTitle(tool) } }
     )
 
     // 删除对话
@@ -1747,7 +1748,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val chatId = tool.parameters.find { it.name == "chat_id" }?.value ?: ""
                 s(R.string.toolreg_delete_chat_desc, chatId)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.deleteChat(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.deleteChat(tool) } }
     )
 
     // 发送消息给AI
@@ -1758,7 +1759,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val preview = if (message.length > 30) "${message.take(30)}..." else message
                 s(R.string.toolreg_send_message_to_ai_desc, preview)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.sendMessageToAI(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.sendMessageToAI(tool) } }
     )
 
     handler.registerTool(
@@ -1771,7 +1772,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor =
                     object : ToolExecutor {
                         override fun invoke(tool: AITool): ToolResult {
-                            return runBlocking(Dispatchers.IO) { chatManagerTool.sendMessageToAI(tool) }
+                            return runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.sendMessageToAI(tool) }
                         }
 
                         override fun invokeAndStream(
@@ -1788,14 +1789,14 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val functionType = tool.parameters.find { it.name == "function_type" }?.value ?: ""
                 s(R.string.toolreg_call_chat_model_desc, functionType)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.callChatModel(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.callChatModel(tool) } }
     )
 
     // 列出所有角色卡
     handler.registerTool(
             name = "list_character_cards",
             descriptionGenerator = { _ -> s(R.string. toolreg_list_character_cards_desc) },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.listCharacterCards(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.listCharacterCards(tool) } }
     )
 
     handler.registerTool(
@@ -1808,7 +1809,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val limitInfo = if (!limit.isNullOrBlank()) " ($limit)" else ""
                 s(R.string.toolreg_get_chat_messages_desc, chatId, orderInfo, limitInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.getChatMessages(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.getChatMessages(tool) } }
     )
 
     handler.registerTool(
@@ -1822,7 +1823,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val rangeInfo = if (!start.isNullOrBlank() && !end.isNullOrBlank()) " ($start-$end)" else ""
                 s(R.string.toolreg_get_chat_messages_desc, chatId, orderInfo, rangeInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { chatManagerTool.getChatMessagesRange(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { chatManagerTool.getChatMessagesRange(tool) } }
     )
 
     // 文件系统工具
@@ -1838,7 +1839,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_list_files_desc, path, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.listFiles(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.listFiles(tool) }
             }
     )
 
@@ -1851,7 +1852,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_read_file_desc, path, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.readFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.readFile(tool) } }
     )
 
     // 按行号范围读取文件内容
@@ -1872,7 +1873,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_read_file_part_desc, rangeInfo, path, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.readFilePart(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.readFilePart(tool) }
             }
     )
 
@@ -1885,7 +1886,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_read_file_full_desc, path, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.readFileFull(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.readFileFull(tool) } }
     )
 
     // 读取二进制文件内容（Base64编码）
@@ -1897,7 +1898,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_read_file_binary_desc, path, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.readFileBinary(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.readFileBinary(tool) } }
     )
 
     // 写入文件
@@ -1917,7 +1918,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_write_file_desc, operation, path, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.writeFile(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.writeFile(tool) }
             }
     )
 
@@ -1931,7 +1932,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             s(R.string.toolreg_write_file_binary_desc, path, envInfo)
         },
         executor = { tool ->
-            runBlocking(Dispatchers.IO) { fileSystemTools.writeFileBinary(tool) }
+            runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.writeFileBinary(tool) }
         }
     )
 
@@ -1951,7 +1952,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                         }
                 s(R.string.toolreg_delete_file_desc, operation, path, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.deleteFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.deleteFile(tool) } }
     )
 
     // UI自动化工具
@@ -1982,7 +1983,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 }
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.clickElement(it) }
                 }
             }
@@ -1997,7 +1998,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_tap_desc, x, y)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.tap(it) }
                 }
             }
@@ -2011,7 +2012,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_long_press_desc, x, y)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.longPress(it) }
                 }
             }
@@ -2031,13 +2032,13 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor =
                     object : ToolExecutor {
                         override fun invoke(tool: AITool): ToolResult {
-                            return runBlocking(Dispatchers.IO) { httpTools.httpRequest(tool) }
+                            return runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { httpTools.httpRequest(tool) }
                         }
 
                         override fun invokeAndStream(
                                 tool: AITool
                         ): kotlinx.coroutines.flow.Flow<ToolResult> {
-                            return runBlocking(Dispatchers.IO) { httpTools.httpRequestStream(tool) }
+                            return runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { httpTools.httpRequestStream(tool) }
                         }
                     }
     )
@@ -2057,7 +2058,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_multipart_request_desc, url, filesCount)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { httpTools.multipartRequest(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { httpTools.multipartRequest(tool) }
             }
     )
 
@@ -2085,7 +2086,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     else -> s(R.string.toolreg_manage_cookies_desc, action)
                 }
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { httpTools.manageCookies(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { httpTools.manageCookies(tool) } }
     )
 
     // 检查文件是否存在
@@ -2098,7 +2099,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_file_exists_desc, path, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.fileExists(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.fileExists(tool) }
             }
     )
 
@@ -2112,7 +2113,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_move_file_desc, source, destination, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.moveFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.moveFile(tool) } }
     )
 
     // 复制文件或目录
@@ -2132,7 +2133,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvArrowInfo(srcEnv, dstEnv)
                 s(R.string.toolreg_copy_file_desc, source, destination, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.copyFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.copyFile(tool) } }
     )
 
     // 创建目录
@@ -2145,7 +2146,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_make_directory_desc, path, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.makeDirectory(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.makeDirectory(tool) }
             }
     )
 
@@ -2160,7 +2161,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_find_files_desc, path, pattern, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.findFiles(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.findFiles(tool) }
             }
     )
 
@@ -2173,7 +2174,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_file_info_desc, path, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.fileInfo(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.fileInfo(tool) } }
     )
 
     // 智能应用文件绑定
@@ -2188,7 +2189,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor =
                     object : ToolExecutor {
                         override fun invoke(tool: AITool): ToolResult {
-                            return runBlocking { fileSystemTools.applyFile(tool).last() }
+                            return runBlocking(com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.applyFile(tool).last() }
                         }
 
                         override fun invokeAndStream(
@@ -2207,7 +2208,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 "Create file $path$envInfo"
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.createFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.createFile(tool) } }
     )
 
     handler.registerTool(
@@ -2218,7 +2219,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 "Edit file $path$envInfo"
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.editFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.editFile(tool) } }
     )
 
     // 压缩文件/目录
@@ -2231,7 +2232,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_zip_files_desc, source, destination, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.zipFiles(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.zipFiles(tool) } }
     )
 
     // 解压缩文件
@@ -2245,7 +2246,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_unzip_files_desc, source, destination, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.unzipFiles(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.unzipFiles(tool) }
             }
     )
 
@@ -2258,7 +2259,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val envInfo = formatEnvInfo(environment)
                 s(R.string.toolreg_open_file_desc, path, envInfo)
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.openFile(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.openFile(tool) } }
     )
 
     // 分享文件
@@ -2271,7 +2272,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_share_file_desc, path, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.shareFile(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.shareFile(tool) }
             }
     )
 
@@ -2291,7 +2292,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 }
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.grepCode(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.grepCode(tool) }
             }
     )
 
@@ -2307,7 +2308,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_grep_context_desc, path, preview, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.grepContext(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.grepContext(tool) }
             }
     )
 
@@ -2322,7 +2323,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_download_file_desc, url, destination, envInfo)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { fileSystemTools.downloadFile(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { fileSystemTools.downloadFile(tool) }
             }
     )
 
@@ -2332,14 +2333,14 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     handler.registerTool(
             name = "toast",
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.toast(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.toast(tool) }
             }
     )
 
     handler.registerTool(
             name = "send_notification",
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.sendNotification(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.sendNotification(tool) }
             }
     )
 
@@ -2352,7 +2353,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_modify_system_setting_desc, key, value)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.modifySystemSetting(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.modifySystemSetting(tool) }
             }
     )
 
@@ -2364,7 +2365,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_get_system_setting_desc, key)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.getSystemSetting(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.getSystemSetting(tool) }
             }
     )
 
@@ -2376,7 +2377,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_install_app_desc, path)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.installApp(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.installApp(tool) }
             }
     )
 
@@ -2388,7 +2389,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_uninstall_app_desc, packageName)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.uninstallApp(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.uninstallApp(tool) }
             }
     )
 
@@ -2397,7 +2398,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "list_installed_apps",
             descriptionGenerator = { _ -> s(R.string.toolreg_list_installed_apps_desc) },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.listInstalledApps(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.listInstalledApps(tool) }
             }
     )
 
@@ -2409,7 +2410,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_start_app_desc, packageName)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.startApp(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.startApp(tool) }
             }
     )
 
@@ -2421,7 +2422,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_stop_app_desc, packageName)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.stopApp(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.stopApp(tool) }
             }
     )
 
@@ -2440,7 +2441,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 }
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.getNotifications(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.getNotifications(tool) }
             }
     )
 
@@ -2457,7 +2458,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 }
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.getAppUsageTime(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.getAppUsageTime(tool) }
             }
     )
 
@@ -2474,7 +2475,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 }
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.getDeviceLocation(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.getDeviceLocation(tool) }
             }
     )
 
@@ -2482,7 +2483,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "request_bluetooth_permission",
             descriptionGenerator = { _ -> "Request Bluetooth nearby devices permission" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.requestBluetoothPermission(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.requestBluetoothPermission(tool) }
             }
     )
 
@@ -2490,7 +2491,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "get_bluetooth_state",
             descriptionGenerator = { _ -> "Get Bluetooth adapter state" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.getBluetoothState(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.getBluetoothState(tool) }
             }
     )
 
@@ -2498,7 +2499,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "request_enable_bluetooth",
             descriptionGenerator = { _ -> "Open the system dialog to enable Bluetooth" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.requestEnableBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.requestEnableBluetooth(tool) }
             }
     )
 
@@ -2506,7 +2507,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "list_bluetooth_bonded_devices",
             descriptionGenerator = { _ -> "List bonded Bluetooth devices" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.listBluetoothBondedDevices(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.listBluetoothBondedDevices(tool) }
             }
     )
 
@@ -2514,7 +2515,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "scan_bluetooth_devices",
             descriptionGenerator = { _ -> "Scan nearby Bluetooth classic and BLE devices" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.scanBluetoothDevices(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.scanBluetoothDevices(tool) }
             }
     )
 
@@ -2525,7 +2526,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Connect to Bluetooth classic device $address"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.connectBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.connectBluetooth(tool) }
             }
     )
 
@@ -2533,7 +2534,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "bluetooth_listen",
             descriptionGenerator = { _ -> "Listen for an incoming Bluetooth classic connection" },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.listenBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.listenBluetooth(tool) }
             }
     )
 
@@ -2544,7 +2545,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Accept an incoming Bluetooth classic connection from listener $listenerId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.acceptBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.acceptBluetooth(tool) }
             }
     )
 
@@ -2555,7 +2556,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Send data to Bluetooth session $sessionId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.sendBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.sendBluetooth(tool) }
             }
     )
 
@@ -2566,7 +2567,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Read data from Bluetooth session $sessionId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.readBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.readBluetooth(tool) }
             }
     )
 
@@ -2577,7 +2578,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Send data and read response from Bluetooth session $sessionId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.sendAndReadBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.sendAndReadBluetooth(tool) }
             }
     )
 
@@ -2588,7 +2589,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Close Bluetooth session $sessionId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.closeBluetooth(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.closeBluetooth(tool) }
             }
     )
 
@@ -2599,7 +2600,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Connect to BLE device $address"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.connectBle(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.connectBle(tool) }
             }
     )
 
@@ -2610,7 +2611,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Discover BLE services for session $sessionId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.discoverBleServices(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.discoverBleServices(tool) }
             }
     )
 
@@ -2621,7 +2622,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Read BLE characteristic $characteristicUuid"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.readBleCharacteristic(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.readBleCharacteristic(tool) }
             }
     )
 
@@ -2632,7 +2633,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Write BLE characteristic $characteristicUuid"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.writeBleCharacteristic(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.writeBleCharacteristic(tool) }
             }
     )
 
@@ -2644,7 +2645,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Write BLE characteristic $writeCharacteristicUuid and read $readCharacteristicUuid"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.writeAndReadBleCharacteristic(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.writeAndReadBleCharacteristic(tool) }
             }
     )
 
@@ -2655,7 +2656,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Subscribe BLE characteristic $characteristicUuid"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.subscribeBleCharacteristic(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.subscribeBleCharacteristic(tool) }
             }
     )
 
@@ -2666,7 +2667,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 "Read BLE notifications from session $sessionId"
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) { systemOperationTools.readBleNotifications(tool) }
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { systemOperationTools.readBleNotifications(tool) }
             }
     )
 
@@ -2675,7 +2676,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "get_page_info",
             descriptionGenerator = { _ -> s(R.string.toolreg_get_page_info_desc) },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.getPageInfo(it) }
                 }
             }
@@ -2685,7 +2686,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             name = "capture_screenshot",
             descriptionGenerator = { _ -> s(R.string.toolreg_capture_screenshot_desc) },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(
                         tool = tool,
                         showStatusIndicator = false,
@@ -2716,7 +2717,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     append(s(R.string.toolreg_run_ui_subagent_hint))
                 }
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { uiTools.runUiSubAgent(tool) } }
+            executor = { tool -> runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) { uiTools.runUiSubAgent(tool) } }
     )
 
     // 在输入框中设置文本
@@ -2727,7 +2728,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_set_input_text_desc, text)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.setInputText(it) }
                 }
             }
@@ -2741,7 +2742,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_press_key_desc, keyCode)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.pressKey(it) }
                 }
             }
@@ -2758,7 +2759,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_swipe_desc, startX, startY, endX, endY)
             },
             executor = { tool ->
-                runBlocking(Dispatchers.IO) {
+                runBlocking(Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                     executeUiToolWithVisibility(tool) { uiTools.swipe(it) }
                 }
             }

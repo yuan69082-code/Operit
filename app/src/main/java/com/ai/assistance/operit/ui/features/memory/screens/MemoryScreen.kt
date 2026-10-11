@@ -134,9 +134,9 @@ fun MemorySearchBar(
 @Composable
 fun MemoryScreen() {
     val context = LocalContext.current
-    val profileList by preferencesManager.memorySpaceListFlow.collectAsState(initial = emptyList())
+    val profileList by preferencesManager.assistantMemorySpaceListFlow.collectAsState(initial = emptyList())
     val activeProfileId by
-    preferencesManager.activeMemorySpaceIdFlow.collectAsState(initial = "default")
+    preferencesManager.activeMemorySpaceIdFlow.collectAsState(initial = "")
 
     // 获取所有配置文件的名称映射(id -> name)
     val profileNameMap = remember { mutableStateMapOf<String, String>() }
@@ -149,6 +149,10 @@ fun MemoryScreen() {
         }
     }
 
+    if (activeProfileId.isBlank()) {
+        CircularProgressIndicator()
+        return
+    }
     var selectedProfileId by remember { mutableStateOf(activeProfileId) }
     var showFolderNavigator by remember { mutableStateOf(false) }
 
