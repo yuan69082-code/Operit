@@ -93,7 +93,7 @@ fun UserPreferencesSettingsScreen(
     val preferencesManager = remember(context) { UserPreferencesManager.getInstance(context) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val profileIds by preferencesManager.memorySpaceListFlow.collectAsState(initial = emptyList())
+    val profileIds by preferencesManager.assistantMemorySpaceListFlow.collectAsState(initial = emptyList())
     val activeProfileId by preferencesManager.activeMemorySpaceIdFlow.collectAsState(initial = "default")
 
     val draftEditorState = rememberTextFieldState()

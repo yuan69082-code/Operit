@@ -651,6 +651,10 @@ class CharacterCardManager private constructor(private val context: Context) {
             val currentList = preferences[CHARACTER_CARD_LIST]?.toMutableSet() ?: mutableSetOf(DEFAULT_CHARACTER_CARD_ID)
             currentList.remove(id)
             preferences[CHARACTER_CARD_LIST] = currentList
+            val primaryKey = stringPreferencesKey("primary_assistant_id")
+            if (preferences[primaryKey] == id) preferences.remove(primaryKey)
+            preferences.remove(booleanPreferencesKey("character_card_${id}_independent_v1"))
+            preferences.remove(booleanPreferencesKey("character_card_${id}_independent_v2"))
             
             // 清除角色卡数据
             val keysToRemove = listOf(

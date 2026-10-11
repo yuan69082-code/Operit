@@ -86,7 +86,11 @@ object AssistantAdminTools {
                                 }
                                 else -> error("未知能力类型")
                             }
-                            cards.setToolSelected(id, kind, name, enabled)
+                            if (kind == "package") {
+                                withContext(AssistantScope.executionContext(id)) {
+                                    packages.setPackageSelected(name, enabled)
+                                }
+                            } else cards.setToolSelected(id, kind, name, enabled)
                             JSONObject().put("updated", id).put("kind", kind).put("name", name).put("enabled", enabled)
                         }
                         "chats" -> {

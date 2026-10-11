@@ -645,13 +645,7 @@ class ModelConfigManager(
         }
 
         val functionalConfigManager = FunctionalConfigManager(context)
-        val mappingRepair = remapDeletedConfigReferences(
-            mapping = functionalConfigManager.functionConfigMappingWithIndexFlow.first(),
-            deletedConfigId = configId,
-        )
-        if (mappingRepair.affectedFunctions.isNotEmpty()) {
-            functionalConfigManager.saveFunctionConfigMappingWithIndex(mappingRepair.mapping)
-        }
+        val affectedFunctions = functionalConfigManager.remapDeletedConfigInAllScopes(configId)
 
         configDataStore.edit { preferences ->
             // 删除配置记录 - 修复null赋值问题
@@ -659,7 +653,7 @@ class ModelConfigManager(
             // 更新配置列表
             preferences[CONFIG_LIST_KEY] = json.encodeToString(configList)
         }
-        return mappingRepair.affectedFunctions
+        return affectedFunctions
     }
 
     // 更新配置基本信息（名称等）

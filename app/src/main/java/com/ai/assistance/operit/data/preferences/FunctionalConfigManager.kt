@@ -154,6 +154,34 @@ class FunctionalConfigManager(private val context: Context, private val assistan
     private fun readScoped(preferences: Preferences, id: String): Map<FunctionType, FunctionConfigMapping> =
         normalizeMapping(json.decodeFromString(requireNotNull(preferences[scopedKey(id)])))
 
+    // Removing a provider is a catalog operation, so repair every stored scope,
+    // including groups and assistants that are not currently open.
+    suspend fun remapDeletedConfigInAllScopes(configId: String): List<FunctionType> {
+        val affected = mutableSetOf<FunctionType>()
+        context.functionalConfigDataStore.edit { preferences ->
+            val global = remapDeletedConfigReferences(readFunctionConfigMapping(preferences), configId)
+            affected.addAll(global.affectedFunctions)
+            writeFunctionConfigMapping(preferences, global.mapping)
+            preferences.asMap().keys.filter {
+                it.name.startsWith("assistant_") && it.name.endsWith("_function_configs")
+            }.forEach { storedKey ->
+                val key = stringPreferencesKey(storedKey.name)
+                val mapping = normalizeMapping(json.decodeFromString<Map<String, FunctionConfigMapping>>(requireNotNull(preferences[key])))
+                val repair = remapDeletedConfigReferences(mapping, configId)
+                affected.addAll(repair.affectedFunctions)
+                if (repair.affectedFunctions.isNotEmpty()) {
+                    preferences[key] = json.encodeToString(repair.mapping.mapKeys { it.key.name })
+                }
+            }
+        }
+        val cards = CharacterCardManager.getInstance(context)
+        cards.getAllCharacterCards().filter { it.chatModelConfigId == configId }.forEach { card ->
+            cards.selectChatModel(card.id, DEFAULT_CONFIG_ID, 0)
+            affected.add(FunctionType.CHAT)
+        }
+        return affected.sortedBy { it.name }
+    }
+
     val functionConfigMappingWithIndexFlow: Flow<Map<FunctionType, FunctionConfigMapping>> = flow {
         if (globalOnly) {
             emitAll(context.functionalConfigDataStore.data.map { readFunctionConfigMapping(it) })

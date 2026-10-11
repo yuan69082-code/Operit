@@ -238,7 +238,7 @@ fun ChatHistorySettingsScreen() {
         }
     }
 
-    val profileIds by userPreferencesManager.memorySpaceListFlow.collectAsState(initial = listOf("default"))
+    val profileIds by userPreferencesManager.assistantMemorySpaceListFlow.collectAsState(initial = emptyList())
     var allProfiles by remember { mutableStateOf<List<MemorySpace>>(emptyList()) }
     
     LaunchedEffect(profileIds) {
@@ -2573,4 +2573,3 @@ private suspend fun deleteSelectedChatHistories(
             skippedLockedCount = skippedLockedCount
         )
     }
-
