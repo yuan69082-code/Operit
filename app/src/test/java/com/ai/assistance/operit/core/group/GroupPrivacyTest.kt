@@ -1,10 +1,17 @@
 package com.ai.assistance.operit.core.group
 
 import com.ai.assistance.operit.core.config.FunctionalPrompts
+import com.ai.assistance.operit.data.model.ChatMessage
 import org.junit.Assert.*
 import org.junit.Test
 
 class GroupPrivacyTest {
+    @Test fun interruptedPrivateLookupIsRemovedFromContinuitySnapshots() {
+        val message = ChatMessage(sender = "ai", content = "公开发言<tool_result_x1 name='assistant_admin'><content>另一助手的私聊")
+        val preview = GroupContext.visible(message)
+        assertTrue(preview.contains("公开发言"))
+        assertFalse(preview.contains("另一助手的私聊"))
+    }
     @Test fun runtimeRandomizedToolTagsUseTheSamePrivacyRules() {
         val raw = "<tool_aB12 name = 'group_game'><param name='move'>秘密行动</param></tool_aB12><tool_result_X1 name=\"assistant_admin\"><content>秘密聊天</content></tool_result_X1>公开部分"
         val public = GroupGamePrivacy.publicText(raw)

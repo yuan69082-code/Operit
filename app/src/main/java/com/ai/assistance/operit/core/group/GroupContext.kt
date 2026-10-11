@@ -4,7 +4,6 @@ import android.content.Context
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.preferences.CharacterGroupCardManager
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
-import com.ai.assistance.operit.util.ChatUtils
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,7 +14,8 @@ object GroupContext {
     fun publicGameHistory(messages: List<ChatMessage>): List<ChatMessage> = messages.map { message ->
         message.copy(content = GroupGamePrivacy.publicText(message.content))
     }
-    fun visible(message: ChatMessage): String = ChatUtils.removeThinkingContent(message.content)
+    // Snapshots and history lookup share the public-history boundary, including interrupted tools.
+    fun visible(message: ChatMessage): String = GroupGamePrivacy.publicText(message.content)
         .replace(com.ai.assistance.operit.util.ChatMarkupRegex.toolOrToolResultBlock, "[工具记录]")
         .take(900)
 
