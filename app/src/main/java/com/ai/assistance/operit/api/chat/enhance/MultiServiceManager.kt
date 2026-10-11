@@ -48,13 +48,20 @@ class MultiServiceManager(private val context: Context) {
         var released: Boolean = false
     )
 
+    private data class ServiceKey(
+        val assistantId: String,
+        val function: FunctionType,
+        val configId: String,
+        val modelIndex: Int
+    )
+
     // 配置管理器
     private val functionalConfigManager = FunctionalConfigManager(context)
     private val modelConfigManager = ModelConfigManager(context)
 
     // 服务实例缓存
     private val serviceInstances = mutableMapOf<FunctionType, ManagedService>()
-    private val customServiceInstances = mutableMapOf<String, ManagedService>()
+    private val customServiceInstances = mutableMapOf<ServiceKey, ManagedService>()
     private val retiredServices = mutableSetOf<ManagedService>()
     private val serviceMutex = Mutex()
 
@@ -127,13 +134,17 @@ class MultiServiceManager(private val context: Context) {
 
     private suspend fun getOrCreateServiceForFunctionLocked(functionType: FunctionType): ManagedService {
         val mapping = functionalConfigManager.getConfigMappingForFunction(functionType)
-        return getOrCreateServiceForConfigLocked(mapping.configId, mapping.modelIndex)
+        return getOrCreateServiceForConfigLocked(mapping.configId, mapping.modelIndex, functionType)
     }
 
-    private suspend fun getOrCreateServiceForConfigLocked(configId: String, modelIndex: Int): ManagedService {
+    private suspend fun getOrCreateServiceForConfigLocked(
+        configId: String,
+        modelIndex: Int,
+        functionType: FunctionType = FunctionType.CHAT
+    ): ManagedService {
         val normalizedIndex = modelIndex.coerceAtLeast(0)
         val actor = com.ai.assistance.operit.data.preferences.AssistantScope.currentId(context)
-        val cacheKey = "$actor#$configId#$normalizedIndex"
+        val cacheKey = ServiceKey(actor, functionType, configId, normalizedIndex)
         customServiceInstances[cacheKey]?.let { return it }
 
         val config = modelConfigManager.getModelConfigFlow(configId).first()
@@ -213,6 +224,11 @@ class MultiServiceManager(private val context: Context) {
                 customServiceInstances.clear()
                 customServices.forEach { service ->
                     retireManagedServiceLocked(service)
+                }
+            } else {
+                val keys = customServiceInstances.keys.filter { it.function == functionType }
+                keys.forEach { key ->
+                    customServiceInstances.remove(key)?.let { retireManagedServiceLocked(it) }
                 }
             }
 
