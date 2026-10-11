@@ -70,7 +70,7 @@ class RemoteMcpRuntimeSession(
 
             val mcpClient = Client(
                 clientInfo = Implementation(
-                    name = "Operit",
+                    name = "Vio Life",
                     version = "mcp-runtime"
                 )
             )

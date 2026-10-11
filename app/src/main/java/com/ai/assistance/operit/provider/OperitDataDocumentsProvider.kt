@@ -52,7 +52,7 @@ class OperitDataDocumentsProvider : DocumentsProvider() {
             dataRootCanonical = dataRoot.canonicalFile
             dataRootCanonicalPath = dataRootCanonical.path
             if (!dataRootCanonical.isDirectory) {
-                throw FileNotFoundException("Operit data directory not found: $dataRootCanonicalPath")
+                throw FileNotFoundException("Vio Life data directory not found: $dataRootCanonicalPath")
             }
             AppLogger.d(TAG, "Initialized root: $dataRootCanonicalPath")
             true
@@ -73,7 +73,7 @@ class OperitDataDocumentsProvider : DocumentsProvider() {
                 DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD
         )
         row.add(DocumentsContract.Root.COLUMN_ICON, android.R.drawable.ic_menu_manage)
-        row.add(DocumentsContract.Root.COLUMN_TITLE, "Operit Data")
+        row.add(DocumentsContract.Root.COLUMN_TITLE, "Vio Life Data")
         row.add(DocumentsContract.Root.COLUMN_SUMMARY, dataRootCanonicalPath)
         row.add(DocumentsContract.Root.COLUMN_DOCUMENT_ID, DOC_ID_ROOT)
         row.add(DocumentsContract.Root.COLUMN_AVAILABLE_BYTES, dataRootCanonical.usableSpace)
@@ -144,7 +144,7 @@ class OperitDataDocumentsProvider : DocumentsProvider() {
 
     override fun deleteDocument(documentId: String) {
         if (documentId == DOC_ID_ROOT) {
-            throw IllegalArgumentException("Cannot delete Operit data root")
+            throw IllegalArgumentException("Cannot delete Vio Life data root")
         }
 
         val file = getExistingFile(documentId)
@@ -160,7 +160,7 @@ class OperitDataDocumentsProvider : DocumentsProvider() {
 
     override fun renameDocument(documentId: String, displayName: String): String {
         if (documentId == DOC_ID_ROOT) {
-            throw IllegalArgumentException("Cannot rename Operit data root")
+            throw IllegalArgumentException("Cannot rename Vio Life data root")
         }
 
         val source = getExistingFile(documentId)
@@ -181,7 +181,7 @@ class OperitDataDocumentsProvider : DocumentsProvider() {
         targetParentDocumentId: String
     ): String {
         if (sourceDocumentId == DOC_ID_ROOT) {
-            throw IllegalArgumentException("Cannot move Operit data root")
+            throw IllegalArgumentException("Cannot move Vio Life data root")
         }
 
         val source = getExistingFile(sourceDocumentId)
@@ -307,7 +307,7 @@ class OperitDataDocumentsProvider : DocumentsProvider() {
     private fun ensureInsideDataRoot(file: File): File {
         val canonical = file.canonicalFile
         if (!isSameOrChild(dataRootCanonical, canonical)) {
-            throw SecurityException("Path escapes Operit data root: ${canonical.path}")
+            throw SecurityException("Path escapes Vio Life data root: ${canonical.path}")
         }
         return canonical
     }

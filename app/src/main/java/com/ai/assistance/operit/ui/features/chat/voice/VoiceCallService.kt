@@ -63,7 +63,7 @@ class VoiceCallService : Service() {
         } catch (error: SecurityException) {
             if (intent?.action != ACTION_CAMERA_ON) throw error
             com.ai.assistance.operit.util.AppLogger.e("VoiceCall", "Camera foreground access rejected", error)
-            controller.reportCameraError("请在 Operit 前台开启摄像头，再切到小窗使用。")
+            controller.reportCameraError("请在 Vio Life 前台开启摄像头，再切到小窗使用。")
             return START_NOT_STICKY
         }
         if (wakeLock == null) {

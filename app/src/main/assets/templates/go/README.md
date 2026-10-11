@@ -1,6 +1,6 @@
-# Operit Go 项目
+# Vio Life Go 项目
 
-这是一个使用 Operit 创建的 Go 项目。
+这是一个使用 Vio Life 创建的 Go 项目。
 
 ## 快速开始
 
@@ -13,7 +13,7 @@
 
 - `main.go` - 主程序入口
 - `go.mod` - Go 模块定义
-- `.operit/config.json` - Operit 工作区配置
+- `.operit/config.json` - Vio Life 工作区配置
 
 ## 自定义
 

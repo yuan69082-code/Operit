@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Operit AI</string>
+    <string name="app_name">Vio Life</string>
     <string name="accessibility_service_description">Utilizat pentru a obțineUIIerarhie, pentruAIAsistentul oferă capacități mai rapide de analiză a interfeței și nu colectează sau stochează nicio informație personală.</string>
 
     <!-- 模型选择器相关 -->
@@ -584,12 +584,12 @@
     <string name="termux_setup_guide">Termux Ghidul de configurare</string>
 
     <!-- About Screen -->
-    <string name="about_title">Despre Operit AI</string>
+    <string name="about_title">Despre Vio Life</string>
     <string name="about_version">Versiune: %1$s</string>
-    <string name="about_description">Operit AIEste o aplicație de asistență inteligentă, care ajută utilizatorii să-și folosească dispozitivele mai eficient, oferind funcții precum analiza interfeței și conversații prin chat.</string>
+    <string name="about_description">Vio Life este o aplicație de asistență inteligentă, care ajută utilizatorii să-și folosească dispozitivele mai eficient, oferind funcții precum analiza interfeței și conversații prin chat.\n\nBased on the open-source Operit project. Original author credits and licenses are retained.</string>
     <string name="about_developer">Dezvoltator: &lt;a href="https://github.com/AAswordman"&gt;AAswordman&lt;/a&gt;</string>
     <string name="about_contact">Contactați-ne: aaswordsman@foxmail.com</string>
-    <string name="about_website">&lt;a href="https://github.com/AAswordman/Operit"&gt;GitHub: https://github.com/AAswordman/Operit&lt;/a&gt;</string>
+    <string name="about_website">&lt;a href="https://github.com/yuan69082-code/Operit"&gt;GitHub: https://github.com/yuan69082-code/Operit&lt;/a&gt;</string>
     <string name="about_copyright">© 2025 - 2026 Operit. Toate drepturile rezervate.</string>
     <string name="star_on_github">în GitHub Dă un clic pe Star</string>
     <string name="update_log">Jurnalul de actualizări</string>
@@ -609,7 +609,7 @@
     <string name="network_status_label">Starea rețelei</string>
 
     <!-- Configuration Screen -->
-    <string name="config_title">Operit AI asistent</string>
+    <string name="config_title">Vio Life asistent</string>
     <string name="config_description">Utilizare DeepSeek API Key, sau să configurați alte servicii de modelare</string>
     <string name="config_api_key_label">APICheie</string>
     <string name="config_api_key_placeholder">DeepSeek APICheie</string>
@@ -668,7 +668,7 @@
 
     <!-- Plugin Loading Screen -->
     <string name="plugin_skip">Sari peste</string>
-    <string name="plugin_app_name">OPERIT</string>
+    <string name="plugin_app_name">Vio Life</string>
     <string name="plugin_status">A fost lansat: %1$d / %2$d</string>
     <string name="plugin_loading_status_title">Starea de încărcare a pluginului</string>
     <string name="plugin_loading_success">S-a încărcat cu succes</string>
@@ -1113,13 +1113,13 @@
     <string name="agreement_subtitle">Vă rugăm să citiți cu atenție și să acceptați următoarele condiții înainte de utilizare.</string>
     <string name="agreement_version">Versiunea acordului:%1$s</string>
     <string name="agreement_human_readable_title">Versiunea simplificată a acordului (nu este versiunea juridică)</string>
-    <string name="agreement_human_readable_content">Descrierea limitelor serviciului:Operit Nu se oferă servicii de interacțiune emoțională antropomorfă destinate publicului larg.Operit Este un client open-source care rulează local pe dispozitivul utilizatorului; nu operează servicii de inferență a modelelor, nu găzduiește sesiuni de chat sau date de interacțiune și nu distribuie utilizatorilor datele de autentificare ale modelelor partajate. Solicitările către modelele din cloud sunt trimise direct de pe dispozitiv către furnizorul de modele selectat, utilizând datele de autentificare configurate de utilizator, iar datele relevante sunt supuse regulilor respectivului furnizor; modelele locale efectuează inferența în interiorul dispozitivului.\n\nAceastă aplicație poate accesa fișiere, terminalul, funcțiile de automatizare,Root,ADB și capacități precum extensiile. Vă rugăm să verificați conținutul înainte de a efectua operațiunile, să faceți o copie de rezervă a datelor importante și să acordați permisiunile cu prudență; orice pierderi legate de dispozitiv, date, conturi sau de altă natură, cauzate de acțiunile utilizatorului, configurația utilizatorului, serviciile terțe sau extensiile terțe, vor fi gestionate de către persoana care a efectuat operațiunea, în conformitate cu legislația aplicabilă.\n\nPlugin-uri, scripturi și alte elemente de la terți disponibile pe piața de plugin-uri,Skill, kiturile de instrumente și alte conținuturi, ale căror drepturi de autor și responsabilități aferente aparțin autorilor sau titularilor de drepturi menționați. Prezentarea sau instalarea pe piață nu implică Operit Nu oferim nicio garanție, aviz de conformitate sau drepturi asupra acestui conținut. Vă rugăm să verificați personal statutul licenței și al drepturilor înainte de utilizare, modificare, publicare sau redistribuire.</string>
+    <string name="agreement_human_readable_content">Descrierea limitelor serviciului:Vio Life Nu se oferă servicii de interacțiune emoțională antropomorfă destinate publicului larg. Vio Life Este un client open-source care rulează local pe dispozitivul utilizatorului; nu operează servicii de inferență a modelelor, nu găzduiește sesiuni de chat sau date de interacțiune și nu distribuie utilizatorilor datele de autentificare ale modelelor partajate. Solicitările către modelele din cloud sunt trimise direct de pe dispozitiv către furnizorul de modele selectat, utilizând datele de autentificare configurate de utilizator, iar datele relevante sunt supuse regulilor respectivului furnizor; modelele locale efectuează inferența în interiorul dispozitivului.\n\nAceastă aplicație poate accesa fișiere, terminalul, funcțiile de automatizare,Root,ADB și capacități precum extensiile. Vă rugăm să verificați conținutul înainte de a efectua operațiunile, să faceți o copie de rezervă a datelor importante și să acordați permisiunile cu prudență; orice pierderi legate de dispozitiv, date, conturi sau de altă natură, cauzate de acțiunile utilizatorului, configurația utilizatorului, serviciile terțe sau extensiile terțe, vor fi gestionate de către persoana care a efectuat operațiunea, în conformitate cu legislația aplicabilă.\n\nPlugin-uri, scripturi și alte elemente de la terți disponibile pe piața de plugin-uri,Skill, kiturile de instrumente și alte conținuturi, ale căror drepturi de autor și responsabilități aferente aparțin autorilor sau titularilor de drepturi menționați. Prezentarea sau instalarea pe piață nu implică Vio Life Nu oferim nicio garanție, aviz de conformitate sau drepturi asupra acestui conținut. Vă rugăm să verificați personal statutul licenței și al drepturilor înainte de utilizare, modificare, publicare sau redistribuire.</string>
     <string name="agreement_serious_title">Versiunea riguroasă a acordului juridic</string>
     <string name="agreement_serious_content">
-        &lt;p&gt;&lt;b&gt;Operit Termenii și condițiile de utilizare și politica de confidențialitate&lt;/b&gt;&lt;br&gt;Versiune:2026-07-15; Data prevăzută pentru intrarea în vigoare:2026 an 7 Luna 15 Zi.&lt;/p&gt;
-        &lt;p&gt;&lt;b&gt;1. Domeniul de aplicare și versiunea acordului&lt;/b&gt;&lt;br&gt;Prezentul acord se aplică Operit Publicat oficial Android Aplicația și funcțiile sale opționale online. Utilizarea acestei aplicații înseamnă că ați citit și ați acceptat versiunea actuală. La lansare, aplicația înregistrează versiunea acordului pe care ați confirmat-o; în cazul unor actualizări substanțiale ale acordului, aplicația vă va solicita să confirmați din nou înainte de a putea continua utilizarea. Licența codului sursă deschis din depozit se găsește în directorul rădăcină &lt;code&gt;LICENSE&lt;/code&gt; prezentat GNU Licența publică generală largă, ediția a treia (LGPLv3); prezentul acord nu exclude și nu limitează drepturile care vă sunt conferite de legislația aplicabilă și de licențele open source.&lt;/p&gt;
-        &lt;p&gt;&lt;b&gt;2. Poziționarea produsului și serviciile terțe&lt;/b&gt;&lt;br&gt;Operit Este un software client open-source, care nu oferă funcții de inferență sau partajare pentru modelele lingvistice de mari dimensiuni API Key, redirecționarea cererilor de chat sau stocarea în cloud a istoricului conversațiilor. Modelul cloud, funcțiile vocale în cloud, căutarea, desenarea,MCP Alte funcții de rețea pot fi selectate, configurate și activate la alegerea dumneavoastră. Atunci când utilizați aceste servicii, datele vor fi transmise direct furnizorului de servicii respectiv și vor fi supuse termenilor și condițiilor de utilizare, precum și politicii de confidențialitate ale acestuia. Este responsabilitatea dumneavoastră să evaluați securitatea, legalitatea și adecvarea furnizorului de servicii, a modelului, a punctelor de acces și a extensiilor, precum și să păstrați în siguranță datele de autentificare corespunzătoare.&lt;/p&gt;
-        &lt;p&gt;&lt;b&gt;3. Prelucrarea datelor și confidențialitatea&lt;/b&gt;&lt;br&gt;Istoric de conversații, fișe de personaj, amintiri, configurații de modele și API Key De obicei, acestea sunt stocate în datele aplicației de pe dispozitiv. Puteți exporta, face copii de rezervă, încărca fișiere, utiliza funcții de rețea ale unor terți sau transmite către surse externe HTTP Atunci când trimiteți o solicitare de serviciu, datele relevante vor fi copiate, transmise sau divulgate în funcție de acțiunile dumneavoastră. Piață, anunțuri, verificarea actualizărilor,GitHub Funcțiile de autentificare și publicare vor accesa Operit,GitHub sau resurse terțe relevante; aceste funcții nu transmit cererile către modelul de chat. Vă rugăm să vă gestionați datele și datele de autentificare ținând cont de setările de securitate ale dispozitivului, de termenii și condițiile serviciilor terțe și de prezentul acord.&lt;/p&gt;
+        &lt;p&gt;&lt;b&gt;Vio Life Termenii și condițiile de utilizare și politica de confidențialitate&lt;/b&gt;&lt;br&gt;Versiune:2026-07-15; Data prevăzută pentru intrarea în vigoare:2026 an 7 Luna 15 Zi.&lt;/p&gt;
+        &lt;p&gt;&lt;b&gt;1. Domeniul de aplicare și versiunea acordului&lt;/b&gt;&lt;br&gt;Prezentul acord se aplică Vio Life Publicat oficial Android Aplicația și funcțiile sale opționale online. Utilizarea acestei aplicații înseamnă că ați citit și ați acceptat versiunea actuală. La lansare, aplicația înregistrează versiunea acordului pe care ați confirmat-o; în cazul unor actualizări substanțiale ale acordului, aplicația vă va solicita să confirmați din nou înainte de a putea continua utilizarea. Licența codului sursă deschis din depozit se găsește în directorul rădăcină &lt;code&gt;LICENSE&lt;/code&gt; prezentat GNU Licența publică generală largă, ediția a treia (LGPLv3); prezentul acord nu exclude și nu limitează drepturile care vă sunt conferite de legislația aplicabilă și de licențele open source.&lt;/p&gt;
+        &lt;p&gt;&lt;b&gt;2. Poziționarea produsului și serviciile terțe&lt;/b&gt;&lt;br&gt;Vio Life Este un software client open-source, care nu oferă funcții de inferență sau partajare pentru modelele lingvistice de mari dimensiuni API Key, redirecționarea cererilor de chat sau stocarea în cloud a istoricului conversațiilor. Modelul cloud, funcțiile vocale în cloud, căutarea, desenarea,MCP Alte funcții de rețea pot fi selectate, configurate și activate la alegerea dumneavoastră. Atunci când utilizați aceste servicii, datele vor fi transmise direct furnizorului de servicii respectiv și vor fi supuse termenilor și condițiilor de utilizare, precum și politicii de confidențialitate ale acestuia. Este responsabilitatea dumneavoastră să evaluați securitatea, legalitatea și adecvarea furnizorului de servicii, a modelului, a punctelor de acces și a extensiilor, precum și să păstrați în siguranță datele de autentificare corespunzătoare.&lt;/p&gt;
+        &lt;p&gt;&lt;b&gt;3. Prelucrarea datelor și confidențialitatea&lt;/b&gt;&lt;br&gt;Istoric de conversații, fișe de personaj, amintiri, configurații de modele și API Key De obicei, acestea sunt stocate în datele aplicației de pe dispozitiv. Puteți exporta, face copii de rezervă, încărca fișiere, utiliza funcții de rețea ale unor terți sau transmite către surse externe HTTP Atunci când trimiteți o solicitare de serviciu, datele relevante vor fi copiate, transmise sau divulgate în funcție de acțiunile dumneavoastră. Piață, anunțuri, verificarea actualizărilor,GitHub Funcțiile de autentificare și publicare vor accesa Vio Life,GitHub sau resurse terțe relevante; aceste funcții nu transmit cererile către modelul de chat. Vă rugăm să vă gestionați datele și datele de autentificare ținând cont de setările de securitate ale dispozitivului, de termenii și condițiile serviciilor terțe și de prezentul acord.&lt;/p&gt;
         &lt;p&gt;&lt;b&gt;4. Responsabilități privind desfășurarea și operarea în străinătate&lt;/b&gt;&lt;br&gt;Extern HTTP Servicii,QQ Bot, răspunsurile automate și funcțiile similare pot fi activate la alegerea dumneavoastră. Atunci când le puneți la dispoziția altor persoane sau a publicului larg, trebuie să vă asumați, în calitate de operator sau administrator efectiv, responsabilitatea pentru controlul accesului, autorizarea utilizatorilor, securitatea conținutului, protecția datelor, protecția minorilor, afișarea avertismentelor necesare și îndeplinirea celorlalte obligații aplicabile. Atunci când furnizați în mod continuu publicului din China servicii de interacțiune emoțională care simulează trăsăturile de personalitate, modurile de gândire sau stilurile de comunicare ale persoanelor fizice, trebuie să evaluați în mod independent și să respectați „Măsurile provizorii privind gestionarea serviciilor de interacțiune antropomorfă bazate pe inteligența artificială” și alte reglementări aplicabile. Nu aveți dreptul să utilizați această aplicație pentru a furniza servicii de relații intime virtuale destinate minorilor, cum ar fi rude virtuale sau parteneri virtuali; nu aveți dreptul să induceți dependență emoțională sau adicție, să practicați manipularea emoțională sau să vă angajați în alte activități care încalcă drepturile și interesele legitime ale altor persoane.&lt;/p&gt;
         &lt;p&gt;&lt;b&gt;5. Utilizarea legală și responsabilitatea privind conținutul&lt;/b&gt;&lt;br&gt;Trebuie să respectați legislația și reglementările aplicabile, regulile serviciilor terțe și regulile platformei; nu aveți dreptul să utilizați această aplicație, extensiile sau configurațiile pentru a desfășura activități ilegale, a încălca drepturile și interesele altor persoane, a accesa fără autorizație sistemele sau datele, sau a difuza conținut ilegal sau dăunător. Sunteți responsabil pentru conținutul și comportamentul pe care le introduceți, configurați, generați, publicați, redistribuiți sau gestionați.AI Informațiile prezentate pot conține erori, omisiuni sau inexactități și nu constituie sfaturi medicale, de gestionare a crizelor psihologice, juridice, financiare sau de altă natură profesională; în situații de urgență sau pericol, vă rugăm să contactați imediat serviciile locale de urgență, instituțiile medicale sau o persoană de încredere.&lt;/p&gt;
         &lt;p&gt;&lt;b&gt;6. Software-ul este furnizat „așa cum este”&lt;/b&gt;&lt;br&gt;În măsura permisă de legislația aplicabilă, acest software este furnizat „așa cum este” și „așa cum este disponibil”. Contribuitorii nu oferă nicio garanție, expresă sau implicită, cu privire la disponibilitatea continuă, acuratețea, securitatea, caracterul comercializabil, adecvarea pentru un scop anume sau lipsa încălcării drepturilor de autor ale software-ului sau ale serviciilor terțe. Pierderile rezultate din utilizarea acestui software, a serviciilor terțe, a extensiilor, a configurărilor utilizatorului sau a modificărilor efectuate de utilizator vor fi tratate în conformitate cu legislația aplicabilă și cu acordurile de servicii corespunzătoare.&lt;/p&gt;
@@ -1705,7 +1705,7 @@
     <string name="permission_guide_intro_2_title">O trusă de instrumente puternică concepută pentru pasionații de tehnologie și dezvoltatori</string>
     <string name="permission_guide_intro_2_desc">Cu peste40O serie de instrumente profesionale, care acoperă gestionarea fișierelor, solicitările de rețea, executarea scripturilor și controlul sistemului. Împreună cu un sistem puternic de pluginuri, puteți automatiza sarcinile și obține un control complet asupra dispozitivului dumneavoastră.</string>
     <string name="permission_guide_intro_3_title">Dă frâu liber creativității, fii mereu pregătit</string>
-    <string name="permission_guide_intro_3_desc">Fie că este vorba de proiectarea paginilor web, gestionarea fișierelor media sau activarea oricând prin fereastra flotantăAI,OperitToate acestea vă oferă un mediu de creație și asistență puternic, flexibil și sigur. Datele dvs. sunt sub controlul dvs.</string>
+    <string name="permission_guide_intro_3_desc">Fie că este vorba de proiectarea paginilor web, gestionarea fișierelor media sau activarea oricând prin fereastra flotantăAI, Vio Life Toate acestea vă oferă un mediu de creație și asistență puternic, flexibil și sigur. Datele dvs. sunt sub controlul dvs.</string>
     <string name="permission_guide_intro_page_indicator">Prezentarea funcțiilor %1$d/%2$d</string>
 
     <!-- 调试模式 -->
@@ -2102,7 +2102,7 @@
     <string name="tool_user_agreement">Acordul de utilizare</string>
     <string name="tool_user_agreement_desc">Consultați Termenii și condițiile de utilizare și Politica de confidențialitate ale aplicației</string>
     <string name="tool_default_assistant_guide">Setările implicite ale Asistentului</string>
-    <string name="tool_default_assistant_guide_desc">SetăriOperitAsistența vocală este setată ca asistență implicită a sistemului</string>
+    <string name="tool_default_assistant_guide_desc">Setări Vio Life Asistența vocală este setată ca asistență implicită a sistemului</string>
     <string name="tool_terminal">Terminalul de comenzi</string>
     <string name="tool_terminal_desc">Un terminal de linie de comandă puternic, care execută comenzi de sistem</string>
     <string name="tool_terminal_auto_config">Configurarea automată a terminalelor</string>
@@ -4877,14 +4877,14 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="mcp_issue_body_title_install_info">## Informații privind instalarea</string>
     <string name="mcp_issue_body_repo_address">**Adresa depozitului:** %1$s</string>
     <string name="mcp_issue_body_title_install_method">### Modalități de instalare</string>
-    <string name="mcp_issue_body_install_step1">1. în Operit MCP Pe pagina de configurare, faceți clic pe „Import”</string>
+    <string name="mcp_issue_body_install_step1">1. în Vio Life MCP Pe pagina de configurare, faceți clic pe „Import”</string>
     <string name="mcp_issue_body_install_step2">2. Selectați „Import din depozit”</string>
     <string name="mcp_issue_body_install_step3">3. Introduceți adresa depozitului: `%1$s`</string>
     <string name="mcp_issue_body_install_step4">4. Setați numele pluginului și faceți clic pe „Import”</string>
     <string name="mcp_issue_body_title_tech_info">## Informații tehnice</string>
     <string name="mcp_issue_body_tech_platform">- **Platforma de publicare:** Operit MCP Piața</string>
     <string name="mcp_issue_body_tech_publish_time">- **Data publicării:** %1$s</string>
-    <string name="mcp_issue_body_footer_note">*AcestaIssueDe către Operit Generare automată*</string>
+    <string name="mcp_issue_body_footer_note">*AcestaIssueDe către Vio Life Generare automată*</string>
 
     <string name="mcp_publish_body_section_plugin_info">## 📋 Informații despre plugin</string>
     <string name="mcp_publish_body_label_description">**Descriere:** %1$s</string>
@@ -4893,12 +4893,12 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="mcp_publish_body_section_quick_install">## ⚡ Instalare rapidă</string>
     <string name="mcp_publish_body_section_install_method">## 📦 Mod de instalare</string>
     <string name="mcp_publish_body_method_repo_import_title">### Metoda 1: Import din depozit</string>
-    <string name="mcp_publish_body_method_repo_import_step1">1. Deschide Operit MCP Pagina de configurare</string>
+    <string name="mcp_publish_body_method_repo_import_step1">1. Deschide Vio Life MCP Pagina de configurare</string>
     <string name="mcp_publish_body_method_repo_import_step2">2. Faceți clic pe „Import” → „Import din depozit”</string>
     <string name="mcp_publish_body_method_repo_import_step3">3. Introduceți adresa depozitului:`%1$s`</string>
     <string name="mcp_publish_body_method_repo_import_step4">4. Configurați numele pluginului și importați-l</string>
     <string name="mcp_publish_body_method_config_import_title">### Metoda 2: Importarea configurației</string>
-    <string name="mcp_publish_body_method_config_import_step1">1. Deschide Operit MCP Pagina de configurare</string>
+    <string name="mcp_publish_body_method_config_import_step1">1. Deschide Vio Life MCP Pagina de configurare</string>
     <string name="mcp_publish_body_method_config_import_step2">2. Faceți clic pe „Import” → „Import configurare”</string>
     <string name="mcp_publish_body_method_config_import_step3">3. Lipiți următoarea configurație:</string>
     <string name="mcp_publish_body_section_tech_info">## 🛠️ Informații tehnice</string>
@@ -5059,7 +5059,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="custom">Personalizare</string>
 
     <!-- Voice Assistant Widget -->
-    <string name="voice_assistant_widget_description">Pornire rapidă Operit Asistent vocal</string>
+    <string name="voice_assistant_widget_description">Pornire rapidă Vio Life Asistent vocal</string>
     <string name="voice_assistant_widget_title">Asistent vocal</string>
     <string name="toolpkg_widget_host_label">Widgeturi personalizate</string>
     <string name="toolpkg_widget_host_description">După adăugare, poate fi asociat cu pagina unui widget înregistrat de un anumit plugin</string>
@@ -5210,22 +5210,22 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
 
     <!-- 默认助手设置引导 -->
     <string name="default_assistant_guide_title">Setarea asistentului vocal implicit</string>
-    <string name="default_assistant_guide_subtitle">SăOperitSă fiu asistentul tău inteligent</string>
-    <string name="default_assistant_guide_intro">VaOperitDupă ce l-ați setat ca asistent implicit al sistemului, puteți, prin apăsarea îndelungatăHomeApăsați tasta sau folosiți activarea vocală pentru pornire rapidăOperitAsistentul vocal, pentru o experiență mai comodăAIExperiența interactivă.</string>
+    <string name="default_assistant_guide_subtitle">Să Vio Life Să fiu asistentul tău inteligent</string>
+    <string name="default_assistant_guide_intro">Va Vio Life După ce l-ați setat ca asistent implicit al sistemului, puteți, prin apăsarea îndelungatăHomeApăsați tasta sau folosiți activarea vocală pentru pornire rapidă Vio Life Asistentul vocal, pentru o experiență mai comodăAIExperiența interactivă.</string>
     <string name="default_assistant_guide_steps_title">Pași de configurare</string>
 
     <!-- 步骤1: 设置为默认助理 -->
     <string name="default_assistant_guide_step1_title">Setează ca asistent implicit</string>
-    <string name="default_assistant_guide_step1_desc">Va Operit Setați ca aplicație implicită de asistență digitală a sistemului</string>
+    <string name="default_assistant_guide_step1_desc">Va Vio Life Setați ca aplicație implicită de asistență digitală a sistemului</string>
     <string name="default_assistant_guide_step1_detail1">• Deschideți Setări sistem → Aplicații → Aplicații implicite → Aplicația Asistent digital</string>
-    <string name="default_assistant_guide_step1_detail2">• Găsiți și selectați „” din lista de aplicații a asistentuluiOperit AI"</string>
+    <string name="default_assistant_guide_step1_detail2">• Găsiți și selectați „” din lista de aplicații a asistentuluiVio Life"</string>
     <string name="default_assistant_guide_step1_detail_android12">Android 12+: Setări → Aplicații → Aplicații implicite → Aplicația Asistent digital → Aplicația implicită pentru Asistentul digital</string>
     <string name="default_assistant_guide_open_settings">Deschideți setările Asistentului</string>
 
     <!-- 步骤2: 配置启动手势 -->
     <string name="default_assistant_guide_open_gesture_settings">Deschide setările pentru gesturi</string>
     <string name="default_assistant_guide_step2_title">Configurarea gesturilor de pornire</string>
-    <string name="default_assistant_guide_step2_desc">Setări pentru activare rapidă Operit asistent</string>
+    <string name="default_assistant_guide_step2_desc">Setări pentru activare rapidă Vio Life asistent</string>
     <string name="default_assistant_guide_step2_detail1">• Apăsați și țineți apăsatHomeTastă: cea mai utilizată metodă, disponibilă pe majoritatea dispozitivelor</string>
     <string name="default_assistant_guide_step2_detail2">• Glisați în sus din partea de jos a ecranului: anumite dispozitive care acceptă gesturile pentru ecranul integral</string>
     <string name="default_assistant_guide_step2_detail_android12">Android 12+: Setări → Aplicații → Aplicații implicite → Aplicația Asistent digital → Aplicația implicită pentru Asistentul digital</string>
@@ -5235,22 +5235,22 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <!-- 步骤4: 测试语音助手 -->
     <string name="default_assistant_guide_step4_title">Testarea asistentului vocal</string>
     <string name="default_assistant_guide_step4_desc">După finalizarea configurării, verificați dacă sistemul pornește corect</string>
-    <string name="default_assistant_guide_step4_detail1">• Apăsați și țineți apăsatHomeTasta (butonul de pe ecranul principal) ar trebui să activeze Operit Asistent vocal</string>
-    <string name="default_assistant_guide_step4_detail2">• Dacă dispozitivul acceptă activarea prin comandă vocală, spuneți „Hey Google„Este posibil ca și cuvintele de activare specificate de dispozitiv să declanșeze această funcție” Operit</string>
+    <string name="default_assistant_guide_step4_detail1">• Apăsați și țineți apăsatHomeTasta (butonul de pe ecranul principal) ar trebui să activeze Vio Life Asistent vocal</string>
+    <string name="default_assistant_guide_step4_detail2">• Dacă dispozitivul acceptă activarea prin comandă vocală, spuneți „Hey Google„Este posibil ca și cuvintele de activare specificate de dispozitiv să declanșeze această funcție” Vio Life</string>
 
     <!-- 步骤3: 测试助手功能 -->
     <string name="default_assistant_guide_step3_title">Funcția Asistent de testare</string>
-    <string name="default_assistant_guide_step3_desc">După finalizarea configurării, efectuați un test Operit Se poate activa în mod normal?</string>
+    <string name="default_assistant_guide_step3_desc">După finalizarea configurării, efectuați un test Vio Life Se poate activa în mod normal?</string>
     <string name="default_assistant_guide_step3_detail1">• Folosiți gesturile pe care le-ați configurat (de exemplu, apăsarea îndelungatăHome(Tastă) Activare asistent</string>
-    <string name="default_assistant_guide_step3_detail2">• Dacă operațiunea are succes, ar trebui să vedeți Operit Interfața asistentului vocal</string>
+    <string name="default_assistant_guide_step3_detail2">• Dacă operațiunea are succes, ar trebui să vedeți Vio Life Interfața asistentului vocal</string>
     <string name="default_assistant_guide_step3_detail3">• Puteți încerca să interacționați cu asistentul vorbind sau introducând text</string>
 
     <!-- 疑难解答 -->
     <string name="default_assistant_guide_troubleshooting_title">Ai vreo problemă?</string>
-    <string name="default_assistant_guide_troubleshooting_content">Dacă nu îl găsiți în listăOperit, vă rugăm să vă asigurați că:\n\n• Aplicația a fost instalată corect și nu a fost dezactivată\n• Au fost acordate permisiunile necesare (microfon, fereastră flotantă etc.)\n• Încercați să reconfigurați dispozitivul după ce îl reporniți\n\nAnumite sisteme personalizate pot restricționa utilizarea aplicațiilor terțe ca asistenți impliciți; în acest caz, puteți utiliza în continuare aplicația prin intermediul funcției de fereastră plutitoare din cadrul acesteiaOperit.</string>
+    <string name="default_assistant_guide_troubleshooting_content">Dacă nu îl găsiți în listăVio Life, vă rugăm să vă asigurați că:\n\n• Aplicația a fost instalată corect și nu a fost dezactivată\n• Au fost acordate permisiunile necesare (microfon, fereastră flotantă etc.)\n• Încercați să reconfigurați dispozitivul după ce îl reporniți\n\nAnumite sisteme personalizate pot restricționa utilizarea aplicațiilor terțe ca asistenți impliciți; în acest caz, puteți utiliza în continuare aplicația prin intermediul funcției de fereastră plutitoare din cadrul acesteia Vio Life .</string>
 
     <!-- Voice Interaction Service -->
-    <string name="voice_interaction_service_name">Operit AI asistent</string>
+    <string name="voice_interaction_service_name">Vio Life asistent</string>
     <string name="voice_interaction_service_summary">Servicii de asistență vocală inteligentă</string>
 
     <!-- Tool Permission Settings -->
@@ -5541,7 +5541,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="start_with_new_chat_description">După activare, la fiecare pornire a aplicației se va deschide o nouă fereastră de chat goală, iar conversația anterioară nu se va mai deschide automat.</string>
     <string name="software_identity_title">Logo-ul software-ului</string>
     <string name="software_identity_description">Modificați sigla aplicației afișată în partea de sus a barei laterale.</string>
-    <string name="software_identity_option_operit">Operit AI</string>
+    <string name="software_identity_option_operit">Vio Life</string>
     <string name="software_identity_option_lingshu">Ling Shu AI</string>
     <string name="reset_all_display_settings">Resetează toate setările de afișare</string>
     <string name="ui_accessibility_mode">Modul de adaptare pentru accesibilitate</string>
@@ -5630,7 +5630,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="backup_memory_count">Intrări de memorie</string>
     <string name="backup_memory_link_count">Asocieri de memorie</string>
     <string name="backup_files_statistics">Statistici privind fișierele de rezervă</string>
-    <string name="backup_files_statistics_subtitle">Operit Exportarea fișierelor de rezervă din director</string>
+    <string name="backup_files_statistics_subtitle">Vio Life Exportarea fișierelor de rezervă din director</string>
     <string name="backup_refresh">Reîmprospătare</string>
     <string name="backup_scanning">Se scanează</string>
     <string name="backup_chat_files">Istoric de conversații</string>
@@ -5734,7 +5734,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="backup_select_export_format">Alegeți formatul de export</string>
     <string name="backup_select_format_hint">Vă rugăm să selectați formatul în care doriți să exportați istoricul conversațiilor:</string>
     <string name="backup_format_json">JSON(Recomandat)</string>
-    <string name="backup_format_json_desc">Operit Format nativ, care păstrează integral toate datele, inclusiv comutarea mesajelor</string>
+    <string name="backup_format_json_desc">Vio Life Format nativ, care păstrează integral toate datele, inclusiv comutarea mesajelor</string>
     <string name="backup_format_markdown">Markdown</string>
     <string name="backup_format_markdown_desc">Un format de marcare ușor, ușor de citit și de editat</string>
     <string name="backup_format_html">HTML</string>
@@ -5745,7 +5745,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <!-- 导入格式选择 -->
     <string name="backup_select_import_format">Alegeți formatul de import</string>
     <string name="backup_import_format_hint">Vă rugăm să selectați formatul în care doriți să importați istoricul conversațiilor:</string>
-    <string name="backup_format_operit">Operit JSON(Recomandat)</string>
+    <string name="backup_format_operit">Vio Life JSON(Recomandat)</string>
     <string name="backup_format_operit_desc">Formatul nativ al acestei aplicații, care păstrează integral toate datele, inclusiv comutarea mesajelor</string>
     <string name="backup_format_chatgpt">ChatGPT</string>
     <string name="backup_format_chatgpt_desc">OpenAI ChatGPT conversations.json Formate de export</string>
@@ -5855,7 +5855,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
 
     <!-- Logcat -->
     <string name="logcat_no_logs_to_save">Nu există jurnale care pot fi salvate</string>
-    <string name="logcat_header">=== Operit Jurnal ===</string>
+    <string name="logcat_header">=== Vio Life Jurnal ===</string>
     <string name="logcat_date">Data: %1$s</string>
     <string name="logcat_total_count">Numărul total de articole: %1$d</string>
     <string name="logcat_save_failed">Eroare la salvare:%1$s</string>
@@ -6311,7 +6311,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="skill_publish_body_section_repo_info">## 🔗 Informații despre depozit</string>
     <string name="skill_publish_body_label_repo_url">**Adresa depozitului:** %1$s</string>
     <string name="skill_publish_body_section_install_method">## 📦 Mod de instalare</string>
-    <string name="skill_publish_body_install_step1">1. Deschide Operit → Gestionarea pachetelor → Skills</string>
+    <string name="skill_publish_body_install_step1">1. Deschide Vio Life → Gestionarea pachetelor → Skills</string>
     <string name="skill_publish_body_install_step2">2. Faceți clic pe „Import” Skill」→ 「Import din depozit」</string>
     <string name="skill_publish_body_install_step3">3. Introduceți adresa depozitului:`%1$s`</string>
     <string name="skill_publish_body_install_step4">4. Confirmare import</string>
@@ -7381,15 +7381,15 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="chat_summarize_generation_failed">Eșecul generării rezumatului: %1$s</string>
 
     <!-- AIForegroundService (新增) -->
-    <string name="service_operit_running">Operit În curs de execuție</string>
+    <string name="service_operit_running">Vio Life În curs de execuție</string>
     <string name="service_chat_complete_reminder">Notificare privind finalizarea conversației</string>
     <string name="service_chat_complete_reminder_sound">Notificare privind finalizarea conversației (semnal sonor)</string>
     <string name="service_chat_complete_reminder_vibration">Notificare privind finalizarea conversației (vibrație)</string>
     <string name="service_chat_complete_reminder_sound_vibration">Notificare la finalizarea conversației (sunet și vibrație)</string>
-    <string name="service_keep_background">Menținere Operit Se execută în fundal.</string>
+    <string name="service_keep_background">Menținere Vio Life Se execută în fundal.</string>
     <string name="service_notify_when_complete">Te va avertiza după finalizarea conversației.</string>
-    <string name="service_running_wake_pause">Operit În curs de execuție (în așteptare)</string>
-    <string name="service_running_wake_listening">Operit În execuție (în așteptare de activare)</string>
+    <string name="service_running_wake_pause">Vio Life În curs de execuție (în așteptare)</string>
+    <string name="service_running_wake_listening">Vio Life În execuție (în așteptare de activare)</string>
     <string name="service_running_stats">Fereastra de dialog de execuție %1$d · Instrumente de apelare %2$d</string>
     <string name="service_running_http_listening">Extern HTTP Se monitorizează portul %1$d</string>
     <string name="service_running_with_http">%1$s · Extern HTTP %2$d</string>
@@ -7436,7 +7436,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="html_export_updated">Actualizare</string>
     <string name="html_export_group">Grupare</string>
     <string name="html_export_message_count">Numărul de mesaje</string>
-    <string name="html_export_footer">Extras din Operit AI Assistant</string>
+    <string name="html_export_footer">Extras din Vio Life</string>
 
     <!-- MnnModelDownloadManager (新增) -->
     <string name="mnn_no_cache_data">Date fără cache</string>

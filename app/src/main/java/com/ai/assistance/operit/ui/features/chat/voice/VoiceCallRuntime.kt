@@ -48,7 +48,7 @@ object VoiceCallRuntime {
 
     fun enableCamera(context: Context, video: Boolean, interval: Int) {
         check(controller?.isConnected == true && controller?.isRunning == true) { "请先接通语音电话" }
-        check(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) { "请先在 Operit 通话界面授予摄像头权限" }
+        check(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) { "请先在 Vio Life 通话界面授予摄像头权限" }
         context.startService(Intent(context, VoiceCallService::class.java).setAction(VoiceCallService.ACTION_CAMERA_ON)
             .putExtra("video", video).putExtra("interval", interval))
     }

@@ -41,8 +41,8 @@ class A2aHttpHandler(
         }
         val card = JSONObject().apply {
             put("protocolVersion", A2A_PROTOCOL_VERSION)
-            put("name", "Operit")
-            put("description", "Operit assistant with text chat and tool-use capabilities")
+            put("name", "Vio Life")
+            put("description", "Vio Life assistant with text chat and tool-use capabilities")
             put(
                 "supportedInterfaces",
                 JSONArray().put(
@@ -67,8 +67,8 @@ class A2aHttpHandler(
                 JSONArray().put(
                     JSONObject().apply {
                         put("id", "operit-chat")
-                        put("name", "Operit Chat")
-                        put("description", "Send a text task to Operit and receive a text response")
+                        put("name", "Vio Life Chat")
+                        put("description", "Send a text task to Vio Life and receive a text response")
                         put("tags", JSONArray().put("chat").put("assistant").put("tools"))
                     }
                 )
@@ -81,7 +81,7 @@ class A2aHttpHandler(
                         "httpAuthSecurityScheme",
                         JSONObject().apply {
                             put("scheme", "Bearer")
-                            put("bearerFormat", "Operit Bearer Token")
+                            put("bearerFormat", "Vio Life Bearer Token")
                         }
                     )
                 )
@@ -359,7 +359,7 @@ class A2aHttpHandler(
         message.requiredString("messageId")
         if (message.optionalString("taskId") != null) {
             throw A2aUnsupportedOperationException(
-                "Operit does not accept messages for an existing A2A task"
+                "Vio Life does not accept messages for an existing A2A task"
             )
         }
         val parts = message.optJSONArray("parts")
@@ -675,7 +675,7 @@ private fun JSONObject.validateAcceptedOutputModes() {
     }
     if (!acceptsText) {
         throw A2aProtocolException(
-            "Operit supports text/plain A2A output only",
+            "Vio Life supports text/plain A2A output only",
             errorCode = -32005
         )
     }

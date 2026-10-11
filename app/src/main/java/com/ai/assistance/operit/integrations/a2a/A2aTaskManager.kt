@@ -51,7 +51,7 @@ class A2aTaskSubscription internal constructor(
 
 /**
  * Keeps A2A tasks within the lifetime of the external HTTP service and maps them to isolated
- * Operit chats. The A2A protocol layer owns serialization; this class only manages execution.
+ * Vio Life chats. The A2A protocol layer owns serialization; this class only manages execution.
  */
 class A2aTaskManager(
     context: Context,
@@ -368,7 +368,7 @@ class A2aTaskNotCancelableException(taskId: String) :
     A2aProtocolException("A2A task is not cancelable: $taskId", errorCode = -32002)
 
 class A2aPushNotificationNotSupportedException :
-    A2aProtocolException("Operit does not support A2A push notifications", errorCode = -32003)
+    A2aProtocolException("Vio Life does not support A2A push notifications", errorCode = -32003)
 
 class A2aUnsupportedOperationException(message: String) :
     A2aProtocolException(message, errorCode = -32004)

@@ -1012,7 +1012,7 @@ class MessageProcessingDelegate(
                     AppLogger.e(TAG, "获取角色信息失败: ${e.message}", e)
                     Pair(null, null)
                 }
-                val currentRoleName = characterName ?: "Operit"
+                val currentRoleName = characterName ?: "Vio Life"
                 logMessageTiming(
                     stage = "delegate.loadRoleInfo",
                     startTimeMs = loadRoleInfoStartTime,

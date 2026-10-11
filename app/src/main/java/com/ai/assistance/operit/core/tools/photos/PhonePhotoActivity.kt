@@ -44,7 +44,7 @@ class PhonePhotoActivity : Activity() {
         worker.start(); workerHandler = Handler(worker.looper)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF171717.toInt()) }
         val label = TextView(this).apply {
-            text = if (intent.getBooleanExtra("authorize", false)) "允许 Operit 查看你选择的相册照片" else "AI 正在拍照 · ${if (intent.getStringExtra("camera") == "front") "前置" else "后置"}摄像头"
+            text = if (intent.getBooleanExtra("authorize", false)) "允许 Vio Life 查看你选择的相册照片" else "AI 正在拍照 · ${if (intent.getStringExtra("camera") == "front") "前置" else "后置"}摄像头"
             setTextColor(0xFFFFFFFF.toInt()); setPadding(24, 24, 24, 24); textSize = 18f
         }
         layout.addView(label)

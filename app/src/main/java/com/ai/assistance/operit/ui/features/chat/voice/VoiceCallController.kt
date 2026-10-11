@@ -43,7 +43,7 @@ class VoiceCallController(
         private set
     var reply by mutableStateOf("")
         private set
-    var participantName by mutableStateOf("Operit")
+    var participantName by mutableStateOf("Vio Life")
         private set
     var participantAvatarUri by mutableStateOf<String?>(null)
         private set
