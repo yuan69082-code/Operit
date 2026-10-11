@@ -965,6 +965,7 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         val eventChannel = MutableSharedStream<TextStreamEvent>(replay = Int.MAX_VALUE)
         val wrappedStream = stream {
+            val requestCollector = this
             withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
             val execContext =
                 MessageExecutionContext(
@@ -1287,7 +1288,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 try {
                     // 确保流处理完成后调用；如果本轮已被取消，则不能再继续跑完成逻辑。
                     if (!hadFatalError && isExecutionContextActive(execContext)) {
-                        val collector = this
+                        val collector = requestCollector
                         withContext(Dispatchers.IO) {
                             processStreamCompletion(
                                 execContext,

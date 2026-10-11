@@ -178,7 +178,7 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
         return try {
             val availablePackages = packageManager.getAvailablePackages(forceRefresh = true)
             val enabledSet = packageManager.getSelectedPackageNames().toSet()
-            val disabledSet = packageManager.getDisabledPackages().toSet()
+            val disabledSet = availablePackages.keys - enabledSet
             val externalPackagesPath = packageManager.getExternalPackagesPath()
             val packageLoadErrors = packageManager.getPackageLoadErrors()
 

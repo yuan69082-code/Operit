@@ -464,8 +464,12 @@ class MessageCoordinationDelegate(
                 promptFunctionType = currentPromptFunctionType,
                 roleCardId = roleCardId,
                 currentRoleName = currentRoleName,
-                enableThinking = apiConfigDelegate.enableThinkingMode.value,
-                enableMemoryAutoUpdate = apiConfigDelegate.enableMemoryAutoUpdate.value,
+                enableThinking = runBlocking(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
+                    com.ai.assistance.operit.data.preferences.ApiPreferences.getInstance(context).enableThinkingModeFlow.first()
+                },
+                enableMemoryAutoUpdate = runBlocking(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
+                    com.ai.assistance.operit.data.preferences.ApiPreferences.getInstance(context).enableMemoryAutoUpdateFlow.first()
+                },
                 maxTokens =
                     (chatContextSettings.effectiveContextLength * 1024)
                         .toLong()
@@ -719,7 +723,7 @@ class MessageCoordinationDelegate(
                 val prefix = com.ai.assistance.operit.core.chat.ReviewedSummaryBatches.preparationPrefix(currentMessages)
                 if (prefix.isNotEmpty()) {
                     summaryPreparationChatId = chatId
-                    summaryPreparationJob = coroutineScope.launch {
+                    summaryPreparationJob = coroutineScope.launch(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
                         val serviceKey = "summary-preparation:${java.util.UUID.randomUUID()}"
                         try {
                             // Separate service and no processing-state changes: preparing must not lock input.
@@ -770,7 +774,9 @@ class MessageCoordinationDelegate(
 
         // 如果是proxy sender，视为关闭记忆自动更新
         val shouldEnableMemoryAutoUpdate = if (proxySenderName.isNullOrBlank()) {
-            apiConfigDelegate.enableMemoryAutoUpdate.value
+            runBlocking(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
+                    com.ai.assistance.operit.data.preferences.ApiPreferences.getInstance(context).enableMemoryAutoUpdateFlow.first()
+                }
         } else {
             false
         }
@@ -786,7 +792,9 @@ class MessageCoordinationDelegate(
             workspaceEnv = workspaceEnv,
             promptFunctionType = promptFunctionType,
             roleCardId = roleCardId,
-            enableThinking = apiConfigDelegate.enableThinkingMode.value,
+            enableThinking = runBlocking(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
+                    com.ai.assistance.operit.data.preferences.ApiPreferences.getInstance(context).enableThinkingModeFlow.first()
+                },
             enableMemoryAutoUpdate = shouldEnableMemoryAutoUpdate,
             maxTokens = maxTokensForSend,
             tokenUsageThreshold = tokenUsageThresholdForSend,
@@ -1816,7 +1824,7 @@ class MessageCoordinationDelegate(
         )
 
         val asyncSummaryJob =
-            coroutineScope.launch {
+            coroutineScope.launch(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)) {
             try {
                 val service = getEnhancedAiService() ?: return@launch
 
@@ -1959,7 +1967,7 @@ class MessageCoordinationDelegate(
                 summaryInsertReferenceMessages.getOrNull(insertPosition - 1)?.timestamp
             val afterTimestamp =
                 summaryInsertReferenceMessages.getOrNull(insertPosition)?.timestamp
-            val summaryConfig = readSummaryConfig()
+            val summaryConfig = readSummaryConfig(resolveRoleCardId(currentChatId, roleCardIdOverride))
             val summaryMessage =
                 AIMessageManager.summarizeMemory(
                     service,
@@ -2082,9 +2090,9 @@ class MessageCoordinationDelegate(
     }
 
     /** 从当前聊天绑定的模型配置中读取总结配置。 */
-    suspend fun readSummaryConfig(): ConversationSummaryConfig {
+    suspend fun readSummaryConfig(assistantId: String? = null): ConversationSummaryConfig {
         return try {
-            val functionalConfigManager = FunctionalConfigManager(context)
+            val functionalConfigManager = FunctionalConfigManager(context, assistantId = assistantId)
             val modelConfigManager = ModelConfigManager(context)
             val functionMappings = functionalConfigManager.functionConfigMappingWithIndexFlow.first()
             val chatMapping = functionMappings[FunctionType.CHAT] ?: FunctionConfigMapping()

@@ -3781,7 +3781,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         val cards = com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context)
         cards.setToolSelected(id, "package", normalized, selected)
         toolPkgContainers[normalized]?.subpackages?.forEach {
-            cards.setToolSelected(id, "package", it.packageName, selected && isPackageEnabled(it.packageName))
+            cards.setToolSelected(id, "package", it.packageName, selected && it.enabledByDefault)
         }
         return message
     }

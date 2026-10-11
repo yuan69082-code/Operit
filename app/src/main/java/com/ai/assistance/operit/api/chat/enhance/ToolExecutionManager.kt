@@ -693,7 +693,8 @@ object ToolExecutionManager {
         val toolName = invocation.tool.name
         val displayToolName = resolveDisplayToolName(invocation.tool)
 
-        return withContext(toolRuntimeContextThreadLocal.asContextElement(runtimeContext)) {
+        return withContext(toolRuntimeContextThreadLocal.asContextElement(runtimeContext) +
+            com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(runtimeContext.callerCardId)) {
             try {
                 val executor = toolHandler.getToolExecutorOrActivate(toolName)
                 if (executor == null) {

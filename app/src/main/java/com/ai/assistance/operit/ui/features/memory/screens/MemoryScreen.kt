@@ -153,7 +153,7 @@ fun MemoryScreen() {
         CircularProgressIndicator()
         return
     }
-    var selectedProfileId by remember { mutableStateOf(activeProfileId) }
+    var selectedProfileId by remember(activeProfileId) { mutableStateOf(activeProfileId) }
     var showFolderNavigator by remember { mutableStateOf(false) }
 
     LaunchedEffect(activeProfileId) { selectedProfileId = activeProfileId }

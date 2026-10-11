@@ -1271,8 +1271,8 @@ fun MCPConfigScreen(
                                 }
                             }
                             
-                            // 监听配置变化（isEnabled状态）
-                            LaunchedEffect(pluginId) {
+                            // Selection belongs to the current assistant, not the shared service.
+                            LaunchedEffect(pluginId, assistantAccess) {
                                 mcpLocalServer.mcpConfig.collect { _ ->
                                     pluginEnabledState.value = (pluginId in assistantAccess.allowedMcpServers)
                                 }

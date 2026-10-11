@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.*
 object AssistantScope {
     private val executingId = ThreadLocal<String?>()
     fun executionContext(id: String?) = executingId.asContextElement(id)
-    fun callerId(): String? = ToolExecutionManager.currentToolRuntimeContext()?.callerCardId
-        ?: executingId.get()
+    fun callerId(): String? = executingId.get()
+        ?: ToolExecutionManager.currentToolRuntimeContext()?.callerCardId
 
     fun idFlow(context: Context): Flow<String> = flow {
         val caller = callerId()
@@ -38,7 +38,7 @@ object AssistantScope {
 
     suspend fun memoryId(context: Context, requestedId: String? = null): String {
         val id = requestedId ?: currentId(context)
-        val prefs = UserPreferencesManager(context)
+        val prefs = UserPreferencesManager.getInstance(context)
         if (isGroup(id)) return prefs.ensureAssistantMemorySpace(id, "群聊记忆")
         val cards = CharacterCardManager.getInstance(context)
         cards.ensureIndependentSettings(id)

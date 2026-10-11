@@ -705,6 +705,26 @@ object AIMessageManager {
         summaryProgress: Boolean = true,
         batchLabel: String = "",
         cachedOnly: Boolean = false
+    ): ChatMessage? = kotlinx.coroutines.withContext(
+        com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)
+    ) {
+        summarizeMemoryInScope(enhancedAiService, messages, autoContinue, isGroupChat, summaryConfig,
+            chatId, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, summaryProgress, batchLabel, cachedOnly)
+    }
+
+    private suspend fun summarizeMemoryInScope(
+        enhancedAiService: EnhancedAIService,
+        messages: List<ChatMessage>,
+        autoContinue: Boolean = false,
+        isGroupChat: Boolean = false,
+        summaryConfig: ConversationSummaryConfig = ConversationSummaryConfig(),
+        chatId: String? = null,
+        roleCardId: String? = null,
+        chatModelConfigIdOverride: String? = null,
+        chatModelIndexOverride: Int? = null,
+        summaryProgress: Boolean = true,
+        batchLabel: String = "",
+        cachedOnly: Boolean = false
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null

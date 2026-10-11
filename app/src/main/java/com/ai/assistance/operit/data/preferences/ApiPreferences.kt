@@ -374,7 +374,7 @@ class ApiPreferences private constructor(private val context: Context) {
 
     // Save Thinking Mode setting
     suspend fun saveEnableThinkingMode(isEnabled: Boolean) {
-        context.apiDataStore.edit { preferences -> preferences[ENABLE_THINKING_MODE] = isEnabled }
+        saveScopedBoolean(ENABLE_THINKING_MODE, isEnabled)
     }
 
     suspend fun updateThinkingSettings(
