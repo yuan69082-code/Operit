@@ -35,6 +35,8 @@ import org.json.JSONObject
  */
 fun registerAllTools(handler: AIToolHandler, context: Context) {
     com.ai.assistance.operit.core.tools.assistants.AssistantAdminTools.register(handler, context)
+    com.ai.assistance.operit.core.group.GroupTools.register(handler, context)
+    com.ai.assistance.operit.core.group.RelationshipTools.register(handler, context)
     com.ai.assistance.operit.core.companion.CompanionTools.register(handler, context)
     com.ai.assistance.operit.core.tools.photos.PhonePhotoTools.register(handler, context)
     com.ai.assistance.operit.core.tools.stickers.StickerTools.register(handler, context)

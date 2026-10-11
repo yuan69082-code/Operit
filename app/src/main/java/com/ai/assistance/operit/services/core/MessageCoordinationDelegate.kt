@@ -40,6 +40,7 @@ import com.ai.assistance.operit.data.repository.MemoryAutoSaveCandidateRepositor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -110,7 +111,8 @@ class MessageCoordinationDelegate(
     private val characterGroupCardManager = CharacterGroupCardManager.getInstance(context)
     private val activePromptManager = ActivePromptManager.getInstance(context)
     private val displayPreferencesManager = DisplayPreferencesManager.getInstance(context)
-    private val plannerServiceManager = MultiServiceManager(context)
+    private val groupJobs = ConcurrentHashMap<String, Job>()
+    private val groupStore = com.ai.assistance.operit.core.group.GroupStore(context)
     private data class PendingAutoContinuationRequest(
         val chatId: String,
         val promptFunctionType: PromptFunctionType,
@@ -598,19 +600,8 @@ class MessageCoordinationDelegate(
                 chatIdOverride = chatIdOverride
             )
         ) {
-            coroutineScope.launch {
-                try {
-                    check(orchestrateGroupConversation(chatId, promptFunctionType, turnOptions)) {
-                        "群聊不存在或没有可用成员，请检查群聊设置。"
-                    }
-                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (failure: Exception) {
-                    AppLogger.e(TAG, "群聊发送失败", failure)
-                    val message = failure.message ?: "群聊发送失败"
-                    uiStateDelegate.showErrorMessage(message)
-                    messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Error(message))
-                }
-            }
+            launchGroup(chatId) { orchestrateGroupConversation(chatId, promptFunctionType, turnOptions) }
+
             return
         }
         val currentChat = chatHistoryDelegate.chatHistories.value.find { it.id == chatId }
@@ -948,291 +939,152 @@ class MessageCoordinationDelegate(
             memberCardsById = memberCardsById
         )
 
-        val plannedRounds = planResponseOrder(
-            userText = originalUserText,
-            members = orderedMembers,
-            memberCardsById = memberCardsById
-        ) ?: run {
-            AppLogger.w(TAG, "回答规划失败，终止本轮群组编排")
-            val message = context.getString(R.string.role_response_planner_failed)
-            uiStateDelegate.showErrorMessage(message)
-            messageProcessingDelegate.setInputProcessingStateForChat(
-                chatId,
-                InputProcessingState.Error(message)
-            )
-            attachmentDelegate.clearAttachments()
-            uiBridge.resetAttachmentPanelState()
-            uiBridge.clearReplyToMessage()
-            return true
-        }
-
-        if (plannedRounds.rounds.isEmpty() || plannedRounds.rounds.all { round -> round.all { !it.speak } }) {
-            AppLogger.d(TAG, "回答规划本轮全部跳过发言")
-            attachmentDelegate.clearAttachments()
-            uiBridge.resetAttachmentPanelState()
-            uiBridge.clearReplyToMessage()
-            messageProcessingDelegate.setInputProcessingStateForChat(
-                chatId,
-                InputProcessingState.Completed
-            )
-            return true
-        }
-
-        AppLogger.d(TAG, "回答规划完成: 共 ${plannedRounds.rounds.size} 轮对话")
-
-        // 执行多轮对话
-        plannedRounds.rounds.forEachIndexed { roundIndex, roundMembers ->
-            AppLogger.d(TAG, "开始执行第 ${roundIndex + 1} 轮，成员数: ${roundMembers.size}")
-
-            roundMembers.forEachIndexed { memberIndex, plannedMember ->
-                if (!plannedMember.speak) {
-                    AppLogger.d(TAG, "跳过成员: member=${plannedMember.id}")
-                    return@forEachIndexed
-                }
-
-                val member = orderedMembers.firstOrNull { it.characterCardId == plannedMember.id }
-                    ?: return@forEachIndexed
-                val memberCard = runCatching { characterCardManager.getCharacterCard(member.characterCardId) }.getOrNull()
-                    ?: return@forEachIndexed
-                val memberName = memberCard.name
-
-                messageProcessingDelegate.setInputProcessingStateForChat(
-                    chatId,
-                    InputProcessingState.Processing(
-                        context.getString(R.string.role_response_planner_member_replying, memberName)
-                    )
-                )
-
-                val beforeLastAiTimestamp =
-                    chatHistoryDelegate.getRuntimeChatHistory(chatId)
-                        .lastOrNull { it.sender == "ai" }
-                        ?.timestamp
-                        ?: Long.MIN_VALUE
-                val targetTurnCounter = messageProcessingDelegate.getTurnCompleteCounter(chatId) + 1L
-
-                // 第一轮第一个成员使用原始用户消息，其他使用空消息（不添加"继续"）
-                val isFirstMemberOfFirstRound = roundIndex == 0 && memberIndex == 0
-                val memberMessage = if (isFirstMemberOfFirstRound) {
-                    originalUserText
-                } else {
-                    ""
-                }
-
-                AppLogger.d(
-                    TAG,
-                    "回答规划成员发送: round=${roundIndex + 1}, member=$memberName, targetTurnCounter=$targetTurnCounter, suppressUserMessage=$userMessageInsertedForCurrentUserTurn"
-                )
-
-                sendMessageInternal(
-                    promptFunctionType = promptFunctionType,
-                    isContinuation = !isFirstMemberOfFirstRound,
-                    skipSummaryCheck = true,
-                    isAutoContinuation = false,
-                    roleCardIdOverride = member.characterCardId,
-                    chatIdOverride = chatId,
-                    messageTextOverride = memberMessage,
-                    // 首成员的输入就是编排器落库的那条用户消息，复用已构建内容，
-                    // 避免重建触发第二遍输入处理钩子，并让 sendUserMessage
-                    // 据此剥离历史末尾的同一条消息，防止模型收到两份
-                    prebuiltMessageContent = if (isFirstMemberOfFirstRound) finalUserMessageContent else null,
-                    proxySenderNameOverride = null,
-                    chatModelConfigIdOverride = null,
-                    chatModelIndexOverride = null,
-                    suppressUserMessageInHistory = userMessageInsertedForCurrentUserTurn,
-                    forceDisableSummary = true,
-                    enableGroupOrchestration = false,
-                    isGroupOrchestrationTurn = true,
-                    groupParticipantNamesText = groupParticipantNamesText,
-                    turnOptions = turnOptions
-                )
-                userMessageInsertedForCurrentUserTurn = true
-
-                val completed = awaitTurnComplete(chatId, targetTurnCounter)
-                if (!completed) {
-                    val currentCounter = messageProcessingDelegate.getTurnCompleteCounter(chatId)
-                    AppLogger.w(
-                        TAG,
-                        "回答规划成员等待超时: member=$memberName, targetTurnCounter=$targetTurnCounter, currentTurnCounter=$currentCounter"
-                    )
-                    return@forEachIndexed
-                }
-
-                val newAiMessage = chatHistoryDelegate.getRuntimeChatHistory(chatId)
-                    .asReversed()
-                    .firstOrNull { it.sender == "ai" && it.timestamp > beforeLastAiTimestamp }
-                if (newAiMessage != null && newAiMessage.content.isNotBlank()) {
-                    val rawContent = newAiMessage.content
-                    val effectiveSpeech = extractEffectiveSpeechContent(rawContent)
-                    if (effectiveSpeech.isNotBlank()) {
-                        timeline.add("AI($memberName)" to shrinkForMemberPrompt(effectiveSpeech))
-                    } else {
-                        AppLogger.w(TAG, "回答规划成员完成但消息为空: member=$memberName")
-                    }
-                } else {
-                    AppLogger.w(TAG, "回答规划成员完成但未捕获到新AI消息: member=$memberName")
-                }
-            }
-        }
-
-        AppLogger.d(TAG, "群组编排结束: chatId=$chatId, timelineSize=${timeline.size}")
-        maybeSummarizeAfterGroupRound(chatId, promptFunctionType)
+        val selected = com.ai.assistance.operit.core.group.GroupPolicy.targets(
+            orderedMembers.map { it.characterCardId }, groupStore.selected(chatId))
+        groupStore.update(chatId) { it.remove("mentions") }
         attachmentDelegate.clearAttachments()
         uiBridge.resetAttachmentPanelState()
         uiBridge.clearReplyToMessage()
+        runGroupQueue(chatId, selected, originalUserText, finalUserMessageContent, turnOptions)
         return true
     }
 
-    private data class PlannedMember(
-        val id: String,
-        val speak: Boolean
-    )
-
-    private data class PlannedRounds(
-        val rounds: List<List<PlannedMember>>
-    )
-
-    private suspend fun planResponseOrder(
-        userText: String,
-        members: List<com.ai.assistance.operit.data.model.GroupMemberConfig>,
-        memberCardsById: Map<String, CharacterCard>
-    ): PlannedRounds? {
-        val service = getEnhancedAiService() ?: return null
-        val plannerService = runCatching {
-            service.getAIServiceForFunction(FunctionType.ROLE_RESPONSE_PLANNER)
-        }.getOrNull() ?: return null
-
-        val modelParameters = runCatching {
-            plannerServiceManager.getModelParametersForFunction(FunctionType.ROLE_RESPONSE_PLANNER)
-        }.getOrElse { emptyList<ModelParameter<*>>() }
-
-        val memberLines = members.mapNotNull { member ->
-            val card = memberCardsById[member.characterCardId] ?: return@mapNotNull null
-            "- id: ${member.characterCardId}, name: ${card.name}"
-        }.joinToString("\n")
-
-        val prompt = FunctionalPrompts.buildGroupRoleResponsePlannerPrompt(
-            memberLines = memberLines,
-            userText = userText,
-            useEnglish = false
-        )
-
-        val contentBuilder = StringBuilder()
-        runCatching {
-            val stream = plannerService.sendMessage(
-                context = context,
-                chatHistory = listOf(PromptTurn(kind = PromptTurnKind.USER, content = prompt)),
-                modelParameters = modelParameters,
-                enableThinking = false,
-                stream = false,
-                preserveThinkInHistory = false,
-            )
-            stream.collect { chunk -> contentBuilder.append(chunk) }
-        }.onFailure {
-            AppLogger.e(TAG, "回答规划模型调用失败: ${it.message}", it)
-            return null
+    private fun launchGroup(chatId: String, action: suspend () -> Unit) {
+        val previous = groupJobs.remove(chatId)
+        previous?.cancel()
+        val barrier = if (previous != null) messageProcessingDelegate.cancelMessageAndWait(chatId) else null
+        val job = coroutineScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                previous?.join()
+                barrier?.join()
+                groupStore.update(chatId) { it.put("status", "running").remove("decision") }
+                action()
+                groupStore.update(chatId) {
+                    if (it.optString("status") == "running") it.put("status", "idle").remove("pending")
+                    it.remove("speaker")
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                messageProcessingDelegate.cancelMessageAndWait(chatId)?.join()
+                AppLogger.e(TAG, "群聊运行失败", failure)
+                val detail = failure.message ?: failure.javaClass.simpleName
+                groupStore.log(chatId, "失败", detail)
+                groupStore.update(chatId) { it.put("status", "error").remove("speaker") }
+                uiStateDelegate.showErrorMessage(detail)
+                messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Error(detail))
+            } finally {
+                groupJobs.remove(chatId, coroutineContext[Job])
+            }
         }
-
-        val rawContent = ChatUtils.removeThinkingContent(contentBuilder.toString()).trim()
-        return parsePlannedRounds(
-            rawContent = rawContent,
-            memberIds = members.map { it.characterCardId }.toSet(),
-            memberNameToId = memberCardsById.values.associate { it.name.trim() to it.id }
-        )
+        groupJobs[chatId] = job
+        job.start()
     }
 
-    private fun parsePlannedRounds(
-        rawContent: String,
-        memberIds: Set<String>,
-        memberNameToId: Map<String, String>
-    ): PlannedRounds? {
-        if (rawContent.isBlank()) return null
-        val trimmed = rawContent.trim()
-        val jsonText = when {
-            trimmed.startsWith("{") && trimmed.endsWith("}") -> trimmed
-            trimmed.contains("{") && trimmed.contains("}") -> {
-                val start = trimmed.indexOf("{")
-                val end = trimmed.lastIndexOf("}")
-                if (start >= 0 && end > start) trimmed.substring(start, end + 1) else trimmed
-            }
-            else -> trimmed
+    fun stopGroup(chatId: String, paused: Boolean = true) {
+        if (!isGroupChatSession(chatId) && !groupJobs.containsKey(chatId)) return
+        groupJobs.remove(chatId)?.cancel()
+        groupStore.update(chatId) {
+            it.put("status", if (paused) "paused" else "ended").remove("speaker").remove("decision")
+            if (!paused) it.remove("pending")
         }
+        groupStore.log(chatId, if (paused) "暂停" else "结束", "用户操作，取消后续排队")
+    }
 
-        fun resolveId(value: String?): String? {
-            val trimmedValue = value?.trim().orEmpty()
-            if (trimmedValue.isBlank()) return null
-            if (memberIds.contains(trimmedValue)) return trimmedValue
-            return memberNameToId[trimmedValue]
+    fun startGroupDiscussion(chatId: String, actor: String? = null, purpose: String? = null) {
+        if (groupJobs[chatId]?.isActive == true) return
+        launchGroup(chatId) {
+            val group = requireNotNull(resolveTargetGroupForChat(chatId)) { "群聊不存在" }
+            val ids = group.members.sortedBy { it.orderIndex }.map { it.characterCardId }
+            val pending = groupStore.strings(groupStore.read(chatId).optJSONArray("pending"))
+            val queue = if (actor != null) listOf(actor) else if (pending.isNotEmpty()) pending else ids
+            require(queue.isNotEmpty() && queue.all { it in ids }) { "待发言成员已经离群" }
+            if (purpose != null) groupStore.update(chatId) { it.put("purpose", purpose.take(500)) }
+            groupStore.log(chatId, if (actor == null) "继续" else "唤醒", purpose.orEmpty(), actor.orEmpty())
+            runGroupQueue(chatId, queue, "", null, ChatTurnOptions())
         }
+    }
 
-        fun parseMemberFromJson(item: Any): PlannedMember? {
-            return when (item) {
-                is String -> {
-                    val id = resolveId(item) ?: return null
-                    PlannedMember(id, true)
-                }
-                is JSONObject -> {
-                    val id = resolveId(
-                        item.optString("id")
-                            .ifBlank { item.optString("memberId") }
-                            .ifBlank { item.optString("roleId") }
-                            .ifBlank { item.optString("name") }
-                    ) ?: return null
-                    val skip = item.optBoolean("skip", false)
-                    val speak = item.optBoolean("speak", !skip)
-                    PlannedMember(id, speak)
-                }
-                else -> null
+    fun isGroupRunning(chatId: String) = groupJobs[chatId]?.isActive == true
+
+    private suspend fun runGroupQueue(
+        chatId: String, initial: List<String>, userText: String, prebuilt: String?, options: ChatTurnOptions
+    ) {
+        val games = com.ai.assistance.operit.core.group.GroupGames(context)
+        val initialGamePending = games.pending(chatId)
+        val queue = java.util.ArrayDeque(if (initialGamePending != null) initialGamePending.filter { it != "user" } else initial)
+        var first = true
+        var quiet = 0
+        var completedTurns = 0
+        val startedAt = System.currentTimeMillis()
+        groupStore.log(chatId, "开始", "本轮安排 ${initial.size} 位助手")
+        while (queue.isNotEmpty()) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val group = requireNotNull(resolveTargetGroupForChat(chatId)) { "群聊已删除" }
+            val members = group.members.sortedBy { it.orderIndex }
+            val ids = members.map { it.characterCardId }
+            val actor = queue.removeFirst()
+            if (games.pending(chatId)?.let { actor !in it } == true) continue
+            if (actor !in ids) { groupStore.log(chatId, "跳过", "待发言助手已离群", actor); continue }
+            val cards = members.associate { it.characterCardId to characterCardManager.getCharacterCard(it.characterCardId) }
+            val settings = groupStore.read(chatId)
+            val limit = settings.optInt("turn_limit", 0)
+            val minutes = settings.optInt("minute_limit", 0)
+            if ((limit > 0 && completedTurns >= limit) || (minutes > 0 && System.currentTimeMillis() - startedAt >= minutes * 60_000L)) {
+                groupStore.update(chatId) { it.put("status", "paused").put("pending", JSONArray(listOf(actor) + queue.toList())) }
+                groupStore.log(chatId, "限额", "达到用户设置的本次讨论上限，可继续")
+                return
             }
+            groupStore.update(chatId) { it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name).remove("decision") }
+            com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
+            val gameBefore = games.state(chatId)?.let { com.google.gson.Gson().toJson(it) }
+            val counter = messageProcessingDelegate.getTurnCompleteCounter(chatId) + 1
+            messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Processing("${cards.getValue(actor).name} 正在回应"))
+            groupStore.log(chatId, "发言", "开始回应", actor)
+            sendMessageInternal(promptFunctionType = PromptFunctionType.CHAT,
+                isContinuation = !(first && prebuilt != null), skipSummaryCheck = true,
+                roleCardIdOverride = actor, chatIdOverride = chatId,
+                messageTextOverride = if (first && prebuilt != null) userText else "",
+                prebuiltMessageContent = if (first) prebuilt else null,
+                suppressUserMessageInHistory = true, forceDisableSummary = true,
+                enableGroupOrchestration = false, isGroupOrchestrationTurn = true,
+                groupParticipantNamesText = buildGroupParticipantNamesText(members, cards), turnOptions = options)
+            check(awaitTurnComplete(chatId, counter)) { "${cards.getValue(actor).name} 回应超时，群聊已暂停" }
+            check(withTimeoutOrNull(60_000) {
+                messageProcessingDelegate.activeStreamingChatIds.first { chatId !in it }; true
+            } == true) { "上一位助手尚未释放会话，停止排队以免重复发送" }
+            // A failed member must not silently advance and trigger the rest of the queue.
+            val state = messageProcessingDelegate.inputProcessingStateByChatId.value[chatId]
+            if (state is InputProcessingState.Error) error(state.message)
+            first = false
+            completedTurns++
+            com.ai.assistance.operit.core.group.GroupContext.remember(context, chatId, actor)
+            val latest = chatHistoryDelegate.getRuntimeChatHistory(chatId).lastOrNull { it.sender == "ai" }
+            groupStore.log(chatId, "完成", "输入 ${latest?.inputTokens ?: 0} / 输出 ${latest?.outputTokens ?: 0} token", actor)
+            val decision = groupStore.takeDecision(chatId)
+            val action = decision?.optString("action")
+            quiet = if (action == "quiet") quiet + 1 else 0
+            if (action == "end") { groupStore.log(chatId, "达成结束", requireNotNull(decision).optString("reason"), actor); break }
+            val current = groupStore.read(chatId)
+            val gamePending = games.pending(chatId)
+            if (gamePending != null) {
+                if (games.state(chatId)?.let { com.google.gson.Gson().toJson(it) } == gameBefore) {
+                    groupStore.log(chatId, "等待", "助手未提交游戏行动，请查看工具结果后继续", actor)
+                    return
+                }
+                queue.clear()
+                gamePending.filter { it != "user" }.forEach { queue.addLast(it) }
+            }
+            if (gamePending == null && current.optBoolean("continuous") && action == "respond") {
+                groupStore.strings(requireNotNull(decision).optJSONArray("targets")).filter { it in ids && it != actor && it !in queue }.forEach { queue.addLast(it) }
+            }
+            if (gamePending == null && queue.isEmpty() && current.optBoolean("continuous") && quiet < ids.size) {
+                queue.addLast(ids[(ids.indexOf(actor) + 1) % ids.size])
+            }
+            groupStore.update(chatId) { it.put("pending", JSONArray(queue.toList())) }
+            if (gamePending == null) maybeSummarizeAfterGroupRound(chatId, PromptFunctionType.CHAT)
+            if (queue.isNotEmpty()) delay(500)
         }
-
-        return runCatching {
-            val obj = JSONObject(jsonText)
-
-            // 尝试解析新格式：{"rounds":[[...],[...]]}
-            val roundsArray = obj.optJSONArray("rounds")
-            if (roundsArray != null) {
-                val rounds = mutableListOf<List<PlannedMember>>()
-                for (i in 0 until roundsArray.length()) {
-                    val roundArray = roundsArray.optJSONArray(i) ?: continue
-                    val roundMembers = mutableListOf<PlannedMember>()
-                    val seen = mutableSetOf<String>()
-
-                    for (j in 0 until roundArray.length()) {
-                        val member = parseMemberFromJson(roundArray.get(j)) ?: continue
-                        if (seen.add(member.id)) {
-                            roundMembers.add(member)
-                        }
-                    }
-
-                    if (roundMembers.isNotEmpty()) {
-                        rounds.add(roundMembers)
-                    }
-                }
-
-                return@runCatching PlannedRounds(rounds)
-            }
-
-            // 兼容旧格式：{"order":[...]}
-            val orderArray = obj.optJSONArray("order")
-                ?: obj.optJSONArray("plan")
-                ?: obj.optJSONArray("members")
-
-            if (orderArray != null) {
-                val members = mutableListOf<PlannedMember>()
-                val seen = mutableSetOf<String>()
-
-                for (i in 0 until orderArray.length()) {
-                    val member = parseMemberFromJson(orderArray.get(i)) ?: continue
-                    if (seen.add(member.id)) {
-                        members.add(member)
-                    }
-                }
-
-                return@runCatching PlannedRounds(listOf(members))
-            }
-
-            null
-        }.getOrNull()
+        groupStore.log(chatId, "结束", if (quiet > 0) "成员选择暂时安静" else "本轮发言完成")
     }
 
     private suspend fun buildGroupParticipantNamesText(

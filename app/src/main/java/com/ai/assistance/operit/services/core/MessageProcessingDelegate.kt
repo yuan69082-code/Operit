@@ -1044,7 +1044,9 @@ class MessageProcessingDelegate(
                 }
 
                 val loadChatHistoryStartTime = messageTimingNow()
-                val chatHistory = getRuntimeChatHistory(activeChatId)
+                val chatHistory = if (isGroupOrchestrationTurn) {
+                    com.ai.assistance.operit.core.group.GroupProvenance.forRequest(context, activeChatId, effectiveRoleCardId, getRuntimeChatHistory(activeChatId))
+                } else getRuntimeChatHistory(activeChatId)
                 logMessageTiming(
                     stage = "delegate.loadChatHistory",
                     startTimeMs = loadChatHistoryStartTime,
@@ -1166,7 +1168,8 @@ class MessageProcessingDelegate(
                     workspacePath = workspacePath,
                     promptFunctionType = promptFunctionType,
                     enableThinking = enableThinking,
-                    enableMemoryAutoUpdate = enableMemoryAutoUpdate && !turnOptions.proactiveWake,
+                    enableMemoryAutoUpdate = enableMemoryAutoUpdate && !turnOptions.proactiveWake &&
+                        (activeChatId == null || com.ai.assistance.operit.core.group.GroupGames(context).state(activeChatId)?.phase.let { it == null || it == "ended" }),
                     maxTokens = effectiveMaxTokens,
                     tokenUsageThreshold = effectiveTokenUsageThreshold,
                     onNonFatalError = { error ->
@@ -1203,6 +1206,9 @@ class MessageProcessingDelegate(
                     modelName = modelName,
                     sentAt = requestSentAt
                 )
+                if (isGroupOrchestrationTurn && !effectiveRoleCardId.isNullOrBlank()) {
+                    com.ai.assistance.operit.core.group.GroupProvenance.record(context, activeChatId, aiMessage, effectiveRoleCardId)
+                }
                 if (effectivePersistTurn && chatId != null) {
                     chatRuntime.activeStreamingTurn =
                         ActiveStreamingTurn(
@@ -1237,6 +1243,9 @@ class MessageProcessingDelegate(
                             sentAt = requestSentAt
                         )
 
+                    if (isGroupOrchestrationTurn && !effectiveRoleCardId.isNullOrBlank()) {
+                        com.ai.assistance.operit.core.group.GroupProvenance.record(context, activeChatId, segmentMessage, effectiveRoleCardId)
+                    }
                     withContext(Dispatchers.Main) {
                         waifuEmittedMessages += segmentMessage
                         if (effectivePersistTurn && chatId != null) {

@@ -970,6 +970,7 @@ class AIForegroundService : Service() {
         serviceScope.launch {
             com.ai.assistance.operit.core.companion.CompanionRuntime.run(applicationContext)
         }
+        serviceScope.launch { com.ai.assistance.operit.core.group.GroupWakeRuntime.run(applicationContext) }
         startWakeMonitoring()
         startExternalHttpMonitoring()
         AppLogger.d(TAG, "AI 前台服务已启动。")

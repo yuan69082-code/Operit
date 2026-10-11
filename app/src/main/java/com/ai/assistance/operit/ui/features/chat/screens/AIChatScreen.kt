@@ -922,7 +922,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 .graphicsLayer { translationY = -chatViewportTranslationYPx }
                     ) {
                         ChatScreenContent(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.fillMaxSize().padding(top = if (currentChatId != null && !isFloatingMode) 44.dp else 0.dp),
                                 paddingValues =
                                         PaddingValues(), // Padding is already handled by the parent Box
                                 bottomInset = bottomBarHeightDp,
@@ -1123,6 +1123,15 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                         )
                     }
 
+                    if (!isFloatingMode && currentChatId != null && !currentChatView?.characterGroupId.isNullOrBlank()) {
+                        com.ai.assistance.operit.ui.features.chat.components.GroupControls(
+                            chatId = currentChatId!!, groupId = currentChatView!!.characterGroupId!!,
+                            viewModel = actualViewModel, modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().height(44.dp))
+                    } else if (!isFloatingMode && currentChatId != null) {
+                        com.ai.assistance.operit.ui.features.chat.components.PrivateSocialControls(
+                            chatId = currentChatId!!, actor = currentChatView?.characterCardId, viewModel = actualViewModel,
+                            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().height(44.dp))
+                    }
                     CharacterSelectorPanel(
                         isVisible = showCharacterSelector,
                         onDismiss = { showCharacterSelector = false },

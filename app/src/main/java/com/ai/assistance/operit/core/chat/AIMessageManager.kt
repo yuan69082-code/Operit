@@ -733,7 +733,7 @@ object AIMessageManager {
             lastSummaryIndex == -1 -> messages.filter { it.sender == "user" || it.sender == "ai" }
             else -> messages.subList(lastSummaryIndex + 1, messages.size)
                 .filter { it.sender == "user" || it.sender == "ai" }
-        }
+        }.let { if (isGroupChat && chatId != null) com.ai.assistance.operit.core.group.GroupProvenance.forSummary(context, chatId, it) else it }
 
         if (messagesToSummarize.isEmpty()) {
             AppLogger.d(TAG, "没有新消息需要总结")
@@ -1064,6 +1064,7 @@ object AIMessageManager {
         val conversationToSummarize = if (isGroupChat) {
             // 打包所有消息到一条用户消息
             val packedContent = buildString {
+                append(com.ai.assistance.operit.core.group.GroupProvenance.SUMMARY_RULE + "\n")
                 messagesToSummarize.forEach { message ->
                     // 清理消息内容：移除 memory 标签和 thinking 内容
                     val cleanedContent = if (message.sender == "user") {
@@ -1126,7 +1127,7 @@ object AIMessageManager {
 
         return try {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
-            val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride)
+            val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, isGroupChat)
             // Former pinned memory belongs in the library, not every subsequent summary.
             val protectedMemory = ""
             val cacheKey = ReviewedSummaryBatches.fingerprint(listOf(
