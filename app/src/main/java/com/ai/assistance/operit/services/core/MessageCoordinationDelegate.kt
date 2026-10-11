@@ -659,7 +659,9 @@ class MessageCoordinationDelegate(
                     resolvedMemorySpaceIdOverride
                 )
             } else {
-                Triple(null, null, resolveRoleCardMemoryProfileOverride(roleCardId))
+                // Voice changes the prompt format, not the assistant that owns this chat.
+                val (configId, modelIndex) = resolveRoleCardChatModelOverrides(roleCardId)
+                Triple(configId, modelIndex, resolveRoleCardMemoryProfileOverride(roleCardId))
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "解析角色卡对话模型绑定失败", e)
