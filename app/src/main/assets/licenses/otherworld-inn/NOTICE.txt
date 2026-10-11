@@ -1,0 +1,3 @@
+Source: wenwen-0617/roundtable, commit 147309bd7dbbe17222a9f4d6b5c7d4766507cc41
+Original file: src/otherworld-inn/server/lib/visibility.js
+Vio Life adapts assembleViewForPlayer to typed Kotlin in OtherworldVisibility.kt. Only ISC-covered subdirectory code is reused.

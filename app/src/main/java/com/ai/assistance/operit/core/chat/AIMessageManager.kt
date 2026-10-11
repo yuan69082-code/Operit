@@ -733,7 +733,7 @@ object AIMessageManager {
             lastSummaryIndex == -1 -> messages.filter { it.sender == "user" || it.sender == "ai" }
             else -> messages.subList(lastSummaryIndex + 1, messages.size)
                 .filter { it.sender == "user" || it.sender == "ai" }
-        }
+        }.let { if (isGroupChat && chatId != null) com.ai.assistance.operit.core.group.GroupProvenance.forSummary(context, chatId, it) else it }
 
         if (messagesToSummarize.isEmpty()) {
             AppLogger.d(TAG, "没有新消息需要总结")
@@ -1064,6 +1064,10 @@ object AIMessageManager {
         val conversationToSummarize = if (isGroupChat) {
             // 打包所有消息到一条用户消息
             val packedContent = buildString {
+                append(com.ai.assistance.operit.core.group.GroupProvenance.SUMMARY_RULE + "\n")
+                chatId?.let { com.ai.assistance.operit.core.group.GroupGames(context).state(it) }?.let {
+                    append("本群包含一起玩 ${it.kind} 的记录；当前阶段=${it.phase}。游戏事件保留参与者署名并标为游戏经历。\n")
+                }
                 messagesToSummarize.forEach { message ->
                     // 清理消息内容：移除 memory 标签和 thinking 内容
                     val cleanedContent = if (message.sender == "user") {
@@ -1126,7 +1130,7 @@ object AIMessageManager {
 
         return try {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
-            val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride)
+            val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, isGroupChat)
             // Former pinned memory belongs in the library, not every subsequent summary.
             val protectedMemory = ""
             val cacheKey = ReviewedSummaryBatches.fingerprint(listOf(
@@ -1148,7 +1152,8 @@ object AIMessageManager {
                     previousSummary,
                     summaryConfig,
                     awaitingReview = true,
-                    reportProgress = false
+                    reportProgress = false,
+                    groupSummary = isGroupChat
                 )
             AppLogger.d(TAG, "AI生成压缩草稿完成，等待审阅")
 
@@ -1451,7 +1456,7 @@ object AIMessageManager {
 
         // 角色隔离模式：判断是当前角色还是其他角色
         val messageRoleName = message.roleName.trim()
-        return if (messageRoleName == targetRoleName) {
+        return if (message.speakerIsCurrentAssistant ?: (messageRoleName == targetRoleName)) {
             // 当前角色的消息：作为 assistant 返回
             PromptTurn(
                 kind = PromptTurnKind.ASSISTANT,

@@ -50,6 +50,12 @@ object CompanionContext {
                 append("\n能力列出不表示操作已执行；权限、网络和服务仍可能限制实际调用。未接入的传感器数据不可推测。\n")
             }
             append(xc)
+            append(com.ai.assistance.operit.core.group.GroupContext.compose(context, chatId, roleId))
+            if (!roleId.isNullOrBlank()) {
+                if (recordSnapshot) com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, roleId)
+                append(com.ai.assistance.operit.core.group.RelationshipNetwork(context).prompt(roleId))
+                append("你读到其他助手的活动、私聊或关系网时，只是在查看他人的记录。保留助手ID、姓名、发言时间和来源；不得把他人的言论、观点、行为、经历或感情写成自己亲历。主助手管理权限不改变记录的归属。\n")
+            }
             append("资料可用 companion_library 自行分类、保存、检索；skill 是能力笔记，不会自动安装或执行代码。\n")
             append("待办用 companion_todo 区分紧急、长期与完成，完成后可沉淀到资料库或删除。\n")
             val open = store.todos(scope).filter { it.optString("status") == "open" }

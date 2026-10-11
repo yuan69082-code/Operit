@@ -129,7 +129,7 @@ object ToolExecutionManager {
         callerCardId: String?
     ): ToolInvocation {
         val resolvedTargetTool = resolveToolTarget(invocation.tool).tool
-        if (resolvedTargetTool.name in setOf("request_voice_call", "cancel_voice_call", "stickers") ||
+        if (resolvedTargetTool.name in setOf("request_voice_call", "cancel_voice_call", "stickers", "group_chat", "group_game", "assistant_relationship") ||
             resolvedTargetTool.name in com.ai.assistance.operit.core.companion.CompanionTools.names) {
             // Bind the request to the executing conversation, never an AI-supplied chat ID.
             val parameters = resolvedTargetTool.parameters.filterNot {

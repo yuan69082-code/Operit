@@ -33,6 +33,7 @@ data class OpenSourceLibrary(
 
 private fun getOpenSourceLibraries(): List<OpenSourceLibrary> {
     return listOf(
+        OpenSourceLibrary("Otherworld Inn — player visibility", "Kotlin adaptation; original source and ISC notice are bundled in assets/licenses/otherworld-inn.", "ISC", "https://github.com/wenwen-0617/roundtable/tree/147309bd7dbbe17222a9f4d6b5c7d4766507cc41/src/otherworld-inn"),
         // UI & Android Framework
         OpenSourceLibrary("android-gif-drawable", "GIF support for Android", "MIT", "https://github.com/koral--/android-gif-drawable"),
         OpenSourceLibrary("Android-Image-Cropper", "Image cropping library for Android", "Apache-2.0", "https://github.com/CanHub/Android-Image-Cropper"),

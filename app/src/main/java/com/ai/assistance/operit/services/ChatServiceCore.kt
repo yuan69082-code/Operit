@@ -235,7 +235,8 @@ class ChatServiceCore(
         )
 
         chatHistoryDelegate.setBeforeDestructiveHistoryMutation { chatId ->
-            messageCoordinationDelegate.cancelSummaryForDestructiveMutation(chatId)
+            messageCoordinationDelegate.stopGroup(chatId, paused = false)
+        messageCoordinationDelegate.cancelSummaryForDestructiveMutation(chatId)
             messageProcessingDelegate.cancelMessageForDestructiveMutation(chatId)
         }
         chatHistoryDelegate.setAfterDestructiveHistoryMutation { chatId ->
@@ -280,21 +281,25 @@ class ChatServiceCore(
         // 然后取消“当前聊天”的消息处理
         val chatId = chatHistoryDelegate.currentChatId.value
         if (chatId != null) {
+            messageCoordinationDelegate.stopGroup(chatId)
             messageProcessingDelegate.cancelMessage(chatId)
         }
     }
 
     fun cancelMessage(chatId: String) {
+        messageCoordinationDelegate.stopGroup(chatId)
         messageCoordinationDelegate.cancelSummaryForChat(chatId)
         messageProcessingDelegate.cancelMessage(chatId)
     }
 
     fun cancelMessageAndWait(chatId: String): kotlinx.coroutines.Job {
+        messageCoordinationDelegate.stopGroup(chatId)
         messageCoordinationDelegate.cancelSummaryForChat(chatId)
         return messageProcessingDelegate.cancelMessageAndWait(chatId)
     }
 
     suspend fun cancelMessageForDestructiveMutation(chatId: String) {
+        messageCoordinationDelegate.stopGroup(chatId, paused = false)
         messageCoordinationDelegate.cancelSummaryForDestructiveMutation(chatId)
         messageProcessingDelegate.cancelMessageForDestructiveMutation(chatId)
     }

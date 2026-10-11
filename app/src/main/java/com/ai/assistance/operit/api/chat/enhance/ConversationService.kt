@@ -120,6 +120,7 @@ class ConversationService(
             recordTokenUsage: Boolean = true,
             awaitingReview: Boolean = false,
             reportProgress: Boolean = true,
+            groupSummary: Boolean = false,
     ): String {
         try {
             val useEnglish = !LocaleUtils.usesChineseContent(context)
@@ -130,6 +131,7 @@ class ConversationService(
                     useEnglish = useEnglish,
                     summaryConfig = summaryConfig
                 )
+            if (groupSummary) systemPrompt = com.ai.assistance.operit.core.group.GroupProvenance.summaryInstructions(systemPrompt)
             val sanitizedMessages =
                 ChatUtils.stripOpenAiResponsesProtocolMarkupTurns(
                     ChatUtils.stripGeminiThoughtSignatureMetaTurns(messages)
