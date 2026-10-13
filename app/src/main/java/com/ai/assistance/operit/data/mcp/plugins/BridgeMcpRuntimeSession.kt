@@ -14,7 +14,10 @@ class BridgeMcpRuntimeSession(
 ) : McpRuntimeSession {
     private val bridgeClient = MCPBridgeClient(context, serviceName)
 
-    override suspend fun connect(): Boolean = bridgeClient.connect()
+    override suspend fun connect(): Boolean {
+        check(bridgeClient.connect()) { bridgeClient.getLastConnectionFailureDetail() ?: "MCP bridge connection failed" }
+        return true
+    }
 
     override fun isConnected(): Boolean = bridgeClient.isConnected()
 
@@ -37,7 +40,7 @@ class BridgeMcpRuntimeSession(
     ): McpRuntimeCallResult {
         val response = bridgeClient.callTool(name, arguments.toJsonObject())
         if (response == null) {
-            return McpRuntimeCallResult(false, null, "MCP bridge returned no response")
+            error("MCP bridge returned no response")
         }
 
         val success = response.optBoolean("success", false)

@@ -3406,7 +3406,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      * @return 如果是已注册的MCP服务器则返回true
      */
     private fun isRegisteredMCPServer(serverName: String): Boolean {
-        return mcpManager.isServerRegistered(serverName)
+        return getAvailableServerPackages().containsKey(serverName)
     }
 
     /**
@@ -3415,7 +3415,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      * @return MCP服务器列表
      */
     fun getAvailableServerPackages(): Map<String, MCPServerConfig> {
-        return mcpManager.getRegisteredServers()
+        return com.ai.assistance.operit.data.mcp.MCPRepository.getConfiguredServerPackages(context)
     }
 
     // Helper function to determine if a package is an MCP server
@@ -3881,15 +3881,18 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      * @return 成功或失败的消息
      */
     fun useMCPServer(serverName: String): String {
-        // 检查服务器是否已注册
-        if (!mcpManager.isServerRegistered(serverName)) {
-            return "MCP server '$serverName' does not exist or is not registered."
+        if (serverName !in runBlocking { com.ai.assistance.operit.data.mcp.McpSelection.selectedIds(context) }) {
+            return "MCP server '$serverName' is not selected for this assistant."
         }
-
-        // 获取服务器配置
-        val serverConfig =
-            mcpManager.getRegisteredServers()[serverName]
-                ?: return "Cannot get MCP server configuration: $serverName"
+        var startError = "MCP service could not start: $serverName"
+        val started = runBlocking {
+            com.ai.assistance.operit.data.mcp.plugins.MCPStarter(context).startPlugin(serverName) { status ->
+                if (status is com.ai.assistance.operit.data.mcp.plugins.MCPStarter.StartStatus.Error) startError = status.message
+            }
+        }
+        if (!started) return startError
+        val serverConfig = getAvailableServerPackages()[serverName]
+            ?: return "Cannot get MCP server configuration: $serverName"
 
         // 创建MCP包
         val mcpLoadResult = MCPPackage.loadFromServer(context, serverConfig)

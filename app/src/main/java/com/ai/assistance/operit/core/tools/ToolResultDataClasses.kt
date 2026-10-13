@@ -174,7 +174,11 @@ data class McpRestartWithLogsResultData(
         val extraLogs: Map<String, String>
 ) : ToolResultData() {
     override fun toString(): String {
-        return "MCP restart: success=$successCount, failed=$failedCount, timedOut=$timedOut"
+        return buildString {
+            appendLine("MCP restart: success=$successCount, failed=$failedCount, timedOut=$timedOut")
+            appendLine(message)
+            plugins.forEach { appendLine("${it.displayName} (${it.id}): ${it.status} - ${it.message}") }
+        }.trimEnd()
     }
 }
 

@@ -57,6 +57,20 @@ class MCPRepository(private val context: Context) {
         private const val READ_TIMEOUT = 15000
         private const val PLUGINS_DIR_NAME = "mcp_plugins"
         private const val OPERIT_DIR_NAME = "Operit"
+
+        /** Configuration catalog only: listing capabilities must not connect to unselected servers. */
+        fun getConfiguredServerPackages(context: Context): Map<String, MCPServerConfig> {
+            val mcpLocalServer = MCPLocalServer.getInstance(context)
+            return mcpLocalServer.getAllPluginMetadata().values
+                .filter { mcpLocalServer.isServerEnabled(it.id) }
+                .associate { metadata -> metadata.id to MCPServerConfig(
+                    name = metadata.id,
+                    endpoint = if (metadata.type == "remote") metadata.endpoint.orEmpty() else "mcp://plugin/${metadata.id}",
+                    description = metadata.description,
+                    capabilities = listOf("tools"),
+                    extraData = emptyMap()
+                ) }
+        }
     }
 
     // UI状态管理
@@ -1102,62 +1116,25 @@ class MCPRepository(private val context: Context) {
      * the Kotlin SDK session for tools, so a server added while the app is running can
      * be presented without involving the local stdio bridge.
      */
-    suspend fun getRemoteToolNames(pluginId: String): List<String> = withContext(Dispatchers.IO) {
-        val metadata = mcpLocalServer.getPluginMetadata(pluginId)
-        if (metadata?.type != "remote") {
-            return@withContext emptyList()
-        }
-
-        val toolNames = discoverRemoteToolNames(pluginId, metadata)
-
-        // Discovery is also the moment the server proves it is usable, so hand it to the AI
-        // runtime here. Otherwise the management screen lists tools that the AI never sees,
-        // because the only other registration trigger runs once during startup.
-        if (toolNames.isNotEmpty() && !metadata.disabled) {
-            registerToolsForPlugin(pluginId)
-        }
-
-        toolNames
+    suspend fun getRemoteToolNames(pluginId: String): List<String> {
+        if (pluginId !in McpSelection.selectedIds(context)) return emptyList()
+        return refreshToolsForPlugin(pluginId)
     }
 
-    private suspend fun discoverRemoteToolNames(
-        pluginId: String,
-        metadata: MCPLocalServer.PluginMetadata
-    ): List<String> {
-        val cachedToolNames = mcpLocalServer.getCachedTools(pluginId)
-            .orEmpty()
-            .map { cachedTool -> cachedTool.name.trim() }
-            .filter { toolName -> toolName.isNotEmpty() }
-            .distinct()
-        if (cachedToolNames.isNotEmpty()) {
-            return cachedToolNames
-        }
-
-        if (metadata.disabled) {
-            return emptyList()
-        }
-
-        val mcpManager = MCPManager.getInstance(context)
-        mcpManager.registerRuntime(pluginId, createRuntimeDescriptor(metadata))
-        val session = mcpManager.getOrCreateSession(pluginId)
-            ?: return emptyList()
-        val discoveredTools = session.listTools()
-            .mapNotNull { tool ->
-                val toolName = tool.name.trim()
-                toolName.takeIf { it.isNotEmpty() }?.let { name ->
-                    MCPLocalServer.CachedToolInfo(
-                        name = name,
-                        description = tool.description,
-                        inputSchema = tool.inputSchema
-                    )
-                }
-            }
-
-        if (discoveredTools.isNotEmpty()) {
-            mcpLocalServer.cacheServerTools(pluginId, discoveredTools)
-        }
-
-        return discoveredTools.map { tool -> tool.name }.distinct()
+    /** Read live tools, including a valid empty result, then publish the same list to the AI. */
+    suspend fun refreshToolsForPlugin(pluginId: String): List<String> = withContext(Dispatchers.IO) {
+        check(mcpLocalServer.isServerEnabled(pluginId)) { "MCP service is disabled: $pluginId" }
+        val metadata = requireNotNull(mcpLocalServer.getPluginMetadata(pluginId)) { "MCP service not found: $pluginId" }
+        val manager = MCPManager.getInstance(context)
+        manager.registerRuntime(pluginId, createRuntimeDescriptor(metadata))
+        val session = manager.getOrCreateSession(pluginId)
+            ?: error(manager.getLastConnectionFailureReason(pluginId) ?: "MCP connection failed: $pluginId")
+        val tools = session.listTools().filter { it.name.isNotBlank() }.distinctBy { it.name }
+        mcpLocalServer.cacheServerTools(pluginId, tools.map { tool ->
+            MCPLocalServer.CachedToolInfo(name = tool.name, description = tool.description, inputSchema = tool.inputSchema)
+        })
+        registerToolsForPlugin(pluginId)
+        tools.map { it.name }
     }
 
     /**
@@ -1192,11 +1169,11 @@ class MCPRepository(private val context: Context) {
     }
 
     /**
-     * 把单个插件接入 AI 运行时：在 MCPManager 中注册服务器（这是 AI 能看到该包的前提），
+     * 把单个插件接入 AI 运行时：在 MCPManager 中注册服务器，
      * 并把它的工具注册到 AIToolHandler。
      *
      * 注册由多个生命周期节点触发（启动校验、MCP 管理页的远程发现），所以这里必须幂等：
-     * 已注册的工具会被跳过，重复调用不会产生重复注册。
+     * 按工具名更新注册并移除服务不再提供的工具，重复调用不会产生重复条目。
      */
     fun registerToolsForPlugin(pluginId: String) {
         try {
@@ -1208,6 +1185,7 @@ class MCPRepository(private val context: Context) {
                 return
             }
 
+            if (!mcpLocalServer.isServerEnabled(pluginId)) return
             val mcpManager = MCPManager.getInstance(context)
             val runtimeDescriptor = createRuntimeDescriptor(pluginMetadata)
             val serverConfig = MCPServerConfig(
@@ -1226,21 +1204,14 @@ class MCPRepository(private val context: Context) {
             // 获取工具信息
             val toolsToRegister = getToolsForPlugin(pluginId)
 
-            if (toolsToRegister.isEmpty()) {
-                AppLogger.w(TAG, "插件 $pluginId 没有可注册的工具")
-                return
-            }
-
-            // 统一注册工具
+            // Replace the schema set after a successful discovery; removed tools must disappear too.
             val toolHandler = AIToolHandler.getInstance(context)
+            val currentNames = toolsToRegister.map { "$pluginId:${it.name}" }.toSet()
+            toolHandler.getAllToolNames().filter { it.startsWith("$pluginId:") && it !in currentNames }
+                .forEach { toolHandler.unregisterTool(it) }
             val mcpToolExecutor = MCPToolExecutor(context, mcpManager)
             toolsToRegister.forEach { toolInfo ->
                 val prefixedToolName = "$pluginId:${toolInfo.name}"
-
-                if (toolHandler.getToolExecutor(prefixedToolName) != null) {
-                    AppLogger.d(TAG, "工具 $prefixedToolName 已注册，跳过")
-                    return@forEach
-                }
 
                 toolHandler.registerTool(
                     name = prefixedToolName,
@@ -1293,7 +1264,7 @@ class MCPRepository(private val context: Context) {
     private fun getToolsForPlugin(pluginId: String): List<UnifiedToolInfo> {
         // 1. 检查缓存
         val cachedTools = mcpLocalServer.getCachedTools(pluginId)
-        if (cachedTools != null && cachedTools.isNotEmpty()) {
+        if (cachedTools != null) {
             AppLogger.d(TAG, "从缓存为插件 $pluginId 获取了 ${cachedTools.size} 个工具")
             return cachedTools.map {
                 UnifiedToolInfo(it.name, it.description, it.inputSchema)

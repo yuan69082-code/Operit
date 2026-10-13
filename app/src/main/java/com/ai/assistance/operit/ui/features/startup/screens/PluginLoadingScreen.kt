@@ -467,6 +467,8 @@ class PluginLoadingState {
     // 当前状态消息
     private val _message = MutableStateFlow("")
     val message: StateFlow<String> = _message
+    private val _initializationError = MutableStateFlow<String?>(null)
+    val initializationError: StateFlow<String?> = _initializationError
 
     // 已启动的插件数量
     private val _pluginsStarted = MutableStateFlow(0)
@@ -502,6 +504,7 @@ class PluginLoadingState {
     private var timeoutJob: kotlinx.coroutines.Job? = null
 
     private val mcpInitInProgress = AtomicBoolean(false)
+    private val mcpInitGeneration = java.util.concurrent.atomic.AtomicLong(0)
     private var mcpInitJob: Job? = null
 
     // 跳过加载事件回调
@@ -709,6 +712,8 @@ class PluginLoadingState {
 
     /** 重置所有状态 */
     fun reset() {
+        mcpInitGeneration.incrementAndGet()
+        _initializationError.value = null
         timeoutJob?.cancel()
         mcpInitJob?.cancel()
         mcpInitInProgress.set(false)
@@ -725,13 +730,21 @@ class PluginLoadingState {
         _isExpanded.value = false
     }
 
+    fun isInitializing(): Boolean = mcpInitInProgress.get()
+
     // 添加方法来初始化MCP服务器并启动插件
-    fun initializeMCPServer(context: Context, lifecycleScope: kotlinx.coroutines.CoroutineScope) {
+    fun initializeMCPServer(
+        context: Context,
+        lifecycleScope: kotlinx.coroutines.CoroutineScope,
+        selectedPluginIds: Set<String>? = null
+    ) {
         if (!mcpInitInProgress.compareAndSet(false, true)) {
             AppLogger.d("PluginLoadingState", "initializeMCPServer already running, skipping")
             return
         }
 
+        val generation = mcpInitGeneration.incrementAndGet()
+        _initializationError.value = null
         mcpInitJob = lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // 更新初始状态
@@ -770,9 +783,6 @@ class PluginLoadingState {
                     mcpRepository.refreshPluginList()
                     val installedPluginsSet = mcpRepository.installedPluginIds.first()
 
-                    // 显式转换为List<String>
-                    val installedPluginsList = installedPluginsSet.toList()
-
                     if (installedPluginsSet.isEmpty()) {
                         // 没有安装的插件，直接进入主界面
                         AppLogger.d("PluginLoadingState", "没有检测到已安装的插件，直接进入主界面")
@@ -785,19 +795,10 @@ class PluginLoadingState {
                     }
 
                     // 筛选出将要启动的插件（已启用且满足条件的插件）
-                    val pluginsToStart = installedPluginsList.filter { pluginId ->
-                        val isEnabled = mcpLocalServer.isServerEnabled(pluginId)
-                        if (!isEnabled) {
-                            false
-                        } else {
-                            val pluginInfo = mcpRepository.getInstalledPluginInfo(pluginId)
-                            when (pluginInfo?.type) {
-                                "remote" -> true // 远程插件只需启用
-                                else -> true // 本地插件现在会自动部署，所以也包含在内
-                            }
-                        }
-                    }
-
+                    val selectedIds = selectedPluginIds ?: com.ai.assistance.operit.data.mcp.McpSelection.selectedIds(context)
+                    val pluginsToStart = com.ai.assistance.operit.core.tools.mcp.McpSelectionPolicy.startupIds(
+                        installedPluginsSet, selectedIds, mcpLocalServer::isServerEnabled
+                    )
                     // 设置插件列表，只传入将要启动的插件
                     updateMessage(
                             context.getString(R.string.plugin_preparing, pluginsToStart.size)
@@ -824,23 +825,29 @@ class PluginLoadingState {
                             )
 
                     // 启动所有插件 - MCPStarter会处理各种检查逻辑
-                    mcpStarter.startAllDeployedPlugins(progressListener)
+                    mcpStarter.startAllDeployedPlugins(progressListener, pluginsToStart.toSet())
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     // 处理插件加载过程中的异常
                     AppLogger.e("PluginLoadingState", "加载插件过程中出错", e)
-                    updateMessage(e.message ?: context.getString(R.string.plugin_loading_failed))
+                    _initializationError.value = e.message ?: context.getString(R.string.plugin_loading_failed)
+                    updateMessage(_initializationError.value.orEmpty())
                     updateProgress(1.0f)
 
                     forceExpanded()
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 AppLogger.e("PluginLoadingState", "启动MCP服务器和插件时出错", e)
-                updateMessage(e.message ?: context.getString(R.string.plugin_other_error))
+                _initializationError.value = e.message ?: context.getString(R.string.plugin_other_error)
+                updateMessage(_initializationError.value.orEmpty())
                 updateProgress(1.0f)
 
                 forceExpanded()
             } finally {
-                mcpInitInProgress.set(false)
+                if (generation == mcpInitGeneration.get()) mcpInitInProgress.set(false)
             }
         }
     }
@@ -894,12 +901,13 @@ class PluginLoadingState {
                 if (success) {
                     setPluginSuccess(pluginId)
                 } else {
-                    setPluginFailed(pluginId, context.getString(R.string.plugin_verification_failed))
+                    val detail = _pluginLogs.value[pluginId]?.lineSequence()?.lastOrNull().orEmpty()
+                    setPluginFailed(pluginId, detail.ifBlank { context.getString(R.string.plugin_verification_failed) })
                     forceExpanded()
                 }
 
                 // 更新总体进度
-                updateProgress(0.5f + 0.5f * (index.toFloat() / total)) // 验证和处理占50% (0.5 -> 1.0)
+                updateProgress(0.5f + 0.45f * (index.toFloat() / total)) // 留到整批完成后才标记 100%
             }
 
             override fun onPluginLog(pluginId: String, message: String) {
@@ -953,6 +961,7 @@ class PluginLoadingState {
                     }
                 }
 
+                if (status != MCPStarter.PluginInitStatus.SUCCESS) _initializationError.value = _message.value
                 updateProgress(1.0f)
 
                 val hasFailures = successCount < totalCount && totalCount > 0

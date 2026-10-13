@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
@@ -94,6 +96,7 @@ class MCPLocalServer private constructor(private val context: Context) {
         .stateIn(coroutineScope, SharingStarted.Eagerly, emptyMap())
 
     // 服务器状态
+    private val statusWriteMutex = Mutex()
     private val _serverStatus = MutableStateFlow<Map<String, ServerStatus>>(emptyMap())
     val serverStatus: StateFlow<Map<String, ServerStatus>> = _serverStatus.asStateFlow()
 
@@ -512,7 +515,7 @@ class MCPLocalServer private constructor(private val context: Context) {
     /**
      * 保存服务器状态
      */
-    suspend fun saveServerStatus() {
+    suspend fun saveServerStatus() = statusWriteMutex.withLock {
         try {
             val statusJson = gson.toJson(_serverStatus.value)
             serverStatusFile.writeText(statusJson)
@@ -774,19 +777,18 @@ class MCPLocalServer private constructor(private val context: Context) {
         lastStartTime: Long? = null,
         lastStopTime: Long? = null
     ) {
-        val currentStatus = _serverStatus.value.toMutableMap()
-        val existingStatus = currentStatus[serverId] ?: ServerStatus(serverId)
-        
-        val updatedStatus = existingStatus.copy(
-            errorMessage = errorMessage ?: existingStatus.errorMessage,
-            cachedTools = cachedTools ?: existingStatus.cachedTools,
-            toolsCachedTime = if (cachedTools != null) System.currentTimeMillis() else existingStatus.toolsCachedTime,
-            lastStartTime = lastStartTime ?: existingStatus.lastStartTime,
-            lastStopTime = lastStopTime ?: existingStatus.lastStopTime
-        )
-        
-        currentStatus[serverId] = updatedStatus
-        _serverStatus.value = currentStatus
+        _serverStatus.update { currentStatus ->
+            val existingStatus = currentStatus[serverId] ?: ServerStatus(serverId)
+            val updatedStatus = existingStatus.copy(
+                errorMessage = errorMessage ?: existingStatus.errorMessage,
+                cachedTools = cachedTools ?: existingStatus.cachedTools,
+                toolsCachedTime = if (cachedTools != null) System.currentTimeMillis() else existingStatus.toolsCachedTime,
+                lastStartTime = lastStartTime ?: existingStatus.lastStartTime,
+                lastStopTime = lastStopTime ?: existingStatus.lastStopTime
+            )
+
+            currentStatus + (serverId to updatedStatus)
+        }
         saveServerStatus()
         AppLogger.d(TAG, "服务器状态已更新: $serverId")
     }

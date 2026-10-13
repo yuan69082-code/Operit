@@ -22,6 +22,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import io.modelcontextprotocol.kotlin.sdk.types.PaginatedRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -48,7 +49,7 @@ class RemoteMcpRuntimeSession(
     }
 
     private var client: Client? = null
-    private var connected = false
+    @Volatile private var connected = false
 
     override suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
         if (connected && client != null) return@withContext true
@@ -74,15 +75,15 @@ class RemoteMcpRuntimeSession(
                     version = "mcp-runtime"
                 )
             )
-            mcpClient.connect(transport)
             client = mcpClient
+            mcpClient.connect(transport)
             connected = true
             true
         } catch (e: Exception) {
             connected = false
-            client = null
+            if (e is CancellationException) throw e
             Log.e(TAG, "Failed to connect remote MCP plugin $pluginId: ${e.message}", e)
-            false
+            throw e
         }
     }
 
@@ -90,7 +91,7 @@ class RemoteMcpRuntimeSession(
 
     override suspend fun isActive(): Boolean = isConnected()
 
-    override suspend fun listTools(): List<McpRuntimeTool> {
+    override suspend fun listTools(): List<McpRuntimeTool> = try {
         val client = requireClient()
         val tools = mutableListOf<Tool>()
         var result = client.listTools()
@@ -103,7 +104,10 @@ class RemoteMcpRuntimeSession(
             tools += result.tools
         }
 
-        return tools.map(Tool::toRuntimeTool)
+        tools.map(Tool::toRuntimeTool)
+    } catch (e: Exception) {
+        if (e !is CancellationException) connected = false
+        throw e
     }
 
     override suspend fun callTool(
@@ -119,6 +123,7 @@ class RemoteMcpRuntimeSession(
                 errorMessage = responseJson.optString("content").takeIf { response.isError == true }
             )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             connected = false
             Log.e(TAG, "Failed to call MCP tool $pluginId:$name: ${e.message}", e)
             throw e

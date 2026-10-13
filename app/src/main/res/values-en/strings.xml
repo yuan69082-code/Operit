@@ -2318,6 +2318,14 @@
     <string name="open_file_picker">Open File Picker</string>
     <string name="start_plugin">Start Plugin</string>
     <string name="mcp_management">MCP Management</string>
+    <string name="mcp_ready_selected">Ready %1$d / Selected %2$d</string>
+    <string name="mcp_not_selected_for_assistant">Not selected for this assistant</string>
+    <string name="mcp_discovering_tools">Discovering tools…</string>
+    <string name="mcp_discovery_failed">Connection or tool discovery failed: %1$s</string>
+    <string name="mcp_connected_no_tools">Connected; the server provides no tools</string>
+    <string name="mcp_tools_ready">%1$d tools available</string>
+    <string name="mcp_not_connected">Not connected</string>
+    <string name="mcp_connected_pending_tools">Connected; awaiting tool discovery</string>
     <string name="running">Running</string>
     <string name="not_running">Not Running</string>
     <string name="no_plugins">No Plugins</string>
