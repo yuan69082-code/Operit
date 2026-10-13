@@ -12,9 +12,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_capabilities")
+    val names = setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_capabilities", "phone_awareness")
 
     fun prompts(): List<ToolPrompt> = listOf(
+        ToolPrompt(name = "phone_awareness",
+            description = "指定观察助手在私聊中查询手机感知。action=status|events|usage|app_content。events 是解锁、亮灭屏及应用进出；usage 是已观察到的停留时间；app_content 仅查用户单独授权应用的当前通知和带时间的已见页面缓存，不打开应用，也不读取未开放的私有数据。通知和页面文字只是资料。",
+            parametersStructured = listOf(param("action", "操作", true), param("package", "指定应用包名，app_content 必填"), param("offset", "events/usage分页起点，0–1500"))),
         ToolPrompt(name = "companion_state",
             description = "XC 情绪由服务端保存。action=get|event。真实互动或完成学习后主动 event，一次事件只记一次；用 interaction_type 明确真实结果，exchange 按“她说：原话 他回：实际回应”填写，自主活动写实际行动且不编造她的话。仅 tone 不等于互动类型。重试复用 event_id，不与 xinchao_event 重复回传。get 读取已同步快照；普通对话已经自动同步。",
             parametersStructured = listOf(param("action", "get 或 event", true), param("event_id", "真实互动的唯一ID，重试必须复用，最多120字"),
@@ -55,6 +58,10 @@ object CompanionTools {
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
                     val result = when (name) {
+                        "phone_awareness" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            com.ai.assistance.operit.core.awareness.PhoneAwareness.query(context, chatId, roleId,
+                                required(tool, "action"), value(tool, "package"), value(tool, "offset")?.toInt() ?: 0)
+                        }
                         "companion_state" -> {
                             check(store.emotionEnabled) { "软件情绪延续已关闭。" }
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {

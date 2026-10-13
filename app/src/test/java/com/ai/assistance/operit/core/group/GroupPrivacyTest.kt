@@ -18,7 +18,7 @@ class GroupPrivacyTest {
         assertFalse(public.contains("秘密")); assertTrue(public.contains("公开部分"))
     }
     @Test fun privateLookupResultsAreNotForwardedToTheNextGroupMember() {
-        for (tool in listOf("assistant_admin", "group_chat", "assistant_relationship", "companion_todo", "companion_library", "companion_state")) {
+        for (tool in listOf("assistant_admin", "group_chat", "assistant_relationship", "companion_todo", "companion_library", "companion_state", "phone_awareness")) {
             val text = GroupGamePrivacy.publicText("<tool_result name=\"$tool\" status=\"success\"><content>另一窗口的私事</content></tool_result>我已查看")
             assertFalse(text.contains("另一窗口的私事")); assertTrue(text.contains("我已查看"))
         }

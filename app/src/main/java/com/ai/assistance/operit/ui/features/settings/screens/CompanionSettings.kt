@@ -29,7 +29,7 @@ import org.json.JSONObject
 @Composable
 fun CompanionSettingsButton() {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }) { Text("状态延续、主动联系与资料库") }
+    OutlinedButton(onClick = { open = true }) { Text("状态延续、主动联系、手机感知与资料库") }
     if (open) CompanionSettingsDialog { open = false }
 }
 
@@ -129,7 +129,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志").forEachIndexed { index, label ->
+                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
                     }
                 }
@@ -154,7 +154,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                         proactive = it; store.preferences.edit().putBoolean("proactive_enabled", it).apply()
                         com.ai.assistance.operit.api.chat.AIForegroundService.refreshBackgroundKeepAlive(context)
                     }
-                    Text("主动联系可以发消息或来电，也可决定保持安静。运行时会观察空闲和设备事件，不需要另建定时工作流。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
+                    Text("主动联系可以发消息或来电，也可决定保持安静，由 AI 安排下次时间，不需要另建定时工作流。解锁和进入应用的事件唤醒在“手机感知”中单独开启。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
                     OutlinedTextField(minutes, { minutes = it }, label = { Text("首次唤醒等待，分钟（1–240）；之后由 AI 安排") }, singleLine = true)
                     Text(if (target == null) "尚未选择主动联系的会话" else "主动联系会话已设置")
                     TextButton(enabled = chatId != null && !busy, onClick = {
@@ -175,6 +175,8 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     }) { Text("保存间隔") }
                     Text("额外判断会使用配置的模型额度。没有接入心率数据源；不会依据沉默猜测健康状态。")
                     Text(store.preferences.getString("last_status", "尚无主动判断记录").orEmpty())
+                } else if (section == 5) {
+                    PhoneAwarenessPanel(chatId)
                 } else if (identity == null) {
                     Text("请先打开一个聊天会话，再管理对应角色的资料与记忆。")
                 } else if (section == 3) {

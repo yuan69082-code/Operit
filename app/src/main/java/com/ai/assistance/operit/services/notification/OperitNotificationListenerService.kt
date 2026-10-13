@@ -7,6 +7,11 @@ import android.service.notification.StatusBarNotification
 import com.ai.assistance.operit.core.tools.NotificationData
 
 object OperitNotificationStore {
+    @Volatile var connected: Boolean = false
+        private set
+    fun connectionChanged(value: Boolean) {
+        synchronized(lock) { connected = value; entries.clear() }
+    }
     private data class Entry(
         val key: String,
         val packageName: String,
@@ -107,6 +112,7 @@ object OperitNotificationStore {
 
 class OperitNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
+        OperitNotificationStore.connectionChanged(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
                 activeNotifications?.forEach { OperitNotificationStore.upsert(it) }
@@ -121,5 +127,15 @@ class OperitNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         OperitNotificationStore.remove(sbn)
+    }
+
+    override fun onListenerDisconnected() {
+        OperitNotificationStore.connectionChanged(false)
+        super.onListenerDisconnected()
+    }
+
+    override fun onDestroy() {
+        OperitNotificationStore.connectionChanged(false)
+        super.onDestroy()
     }
 }
