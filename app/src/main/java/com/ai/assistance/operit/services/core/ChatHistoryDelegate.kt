@@ -1551,14 +1551,6 @@ class ChatHistoryDelegate(
         historyUpdateMutex.withLock {
             val chatId = chatIdOverride ?: _currentChatId.value ?: return@withLock
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (expectedSource != null) {
-                val lastTimestamp = expectedSource.maxOfOrNull { it.timestamp }
-                    ?: error(context.getString(R.string.conversation_summary_source_changed))
-                val currentSource = chatHistoryManager.loadRuntimeChatMessagesUpTo(chatId, lastTimestamp)
-                check(com.ai.assistance.operit.core.chat.SummaryReview.sourceUnchanged(expectedSource, currentSource)) {
-                    context.getString(R.string.conversation_summary_source_changed)
-                }
-            }
             val isCurrentChat = chatId == _currentChatId.value
             val currentDisplayStartTimestamp = currentChatWindow.currentDisplayStartTimestamp()
             val currentDisplayEndTimestamp = currentChatWindow.currentDisplayEndTimestamp()
@@ -1569,14 +1561,11 @@ class ChatHistoryDelegate(
                     message = summaryMessage,
                     beforeTimestamp = beforeTimestamp,
                     afterTimestamp = afterTimestamp,
+                    expectedSource = expectedSource,
                 )
 
-            if (persistedSummaryMessage == null) {
-                AppLogger.w(
-                    TAG,
-                    "总结消息插入被跳过: chatId=$chatId, before=$beforeTimestamp, after=$afterTimestamp",
-                )
-                return@withLock
+            checkNotNull(persistedSummaryMessage) {
+                context.getString(R.string.conversation_summary_source_changed)
             }
 
             AppLogger.d(

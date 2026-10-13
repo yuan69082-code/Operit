@@ -1385,12 +1385,7 @@ object AIMessageManager {
     ): List<PromptTurn> {
         val totalStartTime = messageTimingNow()
         // 1. 找到最后一条总结消息，只处理总结之后的消息
-        val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
-        val relevantMessages = if (lastSummaryIndex != -1) {
-            messages.subList(lastSummaryIndex, messages.size)
-        } else {
-            messages
-        }
+        val relevantMessages = SummaryContextSlice.activeHistory(messages)
 
         // 2. 判断是否启用角色隔离模式
         val isRoleScopedMode = splitByRole && !targetRoleName.isNullOrBlank()

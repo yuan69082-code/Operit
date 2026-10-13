@@ -2320,12 +2320,8 @@ class EnhancedAIService private constructor(private val context: Context) {
             if (usageRatio >= tokenUsageThreshold) {
                 AppLogger.w(TAG, "Token usage ($usageRatio) exceeds threshold ($tokenUsageThreshold) after tool call. Triggering summary.")
                 onTokenLimitExceeded?.invoke()
-                context.isConversationActive.set(false)
-                if (!isSubTask) {
-                    stopAiService(characterName, avatarUri)
-                }
-                // 关键修复：在触发总结后，直接返回，因为后续流程将由回调处理
-                return
+                // The threshold queues compression. Keep feeding completed tool results back
+                // to the model until this turn finishes; the coordinator waits for persistence.
             }
         }
 
