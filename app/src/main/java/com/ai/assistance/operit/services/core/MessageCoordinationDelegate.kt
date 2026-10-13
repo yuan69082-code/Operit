@@ -1087,6 +1087,9 @@ class MessageCoordinationDelegate(
                     resolveRoleCardChatModelOverrides(actor)
                 }
                 require(!binding.first.isNullOrBlank()) { "请为 ${cards.getValue(actor).name} 选择自己的模型" }
+                // A manual compression can be waiting for the previous member's tool chain.
+                // Keep this member queued until that boundary is committed or cancelled.
+                messageProcessingDelegate.awaitSummaryForChat(chatId)
                 sendMessageInternal(promptFunctionType = PromptFunctionType.CHAT,
                 chatModelConfigIdOverride = binding.first, chatModelIndexOverride = binding.second,
                 isContinuation = !(first && prebuilt != null), skipSummaryCheck = true,

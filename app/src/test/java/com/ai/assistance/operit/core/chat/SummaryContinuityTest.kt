@@ -168,6 +168,24 @@ class SummaryContinuityTest {
         assertFalse(gate.isReserved("A"))
     }
 
+    @Test fun nextGroupMemberWaitsForCompressionWithoutBlockingAnotherChat() = runTest {
+        val gate = SummaryTurnGate()
+        val review = CompletableDeferred<Unit>()
+        val summary = async { gate.afterTurn("group", {}) { review.await() } }
+        runCurrent()
+        val nextMember = async {
+            gate.awaitAvailable("group")
+            gate.startTurnIfAllowed("group") { true }
+        }
+        val otherChat = async { gate.awaitAvailable("private"); true }
+        runCurrent()
+        assertFalse(nextMember.isCompleted)
+        assertTrue(otherChat.await())
+        review.complete(Unit)
+        summary.await()
+        assertTrue(nextMember.await())
+    }
+
     @Test fun repeatedTriggerCannotStartASecondCompressionButOtherChatsAreIndependent() = runTest {
         val gate = SummaryTurnGate()
         val turn = CompletableDeferred<Unit>()

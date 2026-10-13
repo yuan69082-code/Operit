@@ -224,6 +224,8 @@ class MessageProcessingDelegate(
     private val pendingAsyncSummaryUiByChatId = ConcurrentHashMap<String, Boolean>()
     private val summaryTurnGate = com.ai.assistance.operit.core.chat.SummaryTurnGate()
 
+    suspend fun awaitSummaryForChat(chatId: String) = summaryTurnGate.awaitAvailable(chatId)
+
     private fun claimTurn(chatId: String): Boolean = summaryTurnGate.startTurnIfAllowed(chatId) {
         val runtime = runtimeFor(chatId)
         if (runtime.isLoading.value) false else {
