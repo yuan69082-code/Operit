@@ -1,7 +1,7 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
 branch: fix/mcp-selection-status
-status: code-complete-awaiting-batch-validation
+status: validated-awaiting-release
 ---
 
 # MCP、群聊、待办、手机/软件感知与通话改进
@@ -21,4 +21,4 @@ status: code-complete-awaiting-batch-validation
 - [07-Exploration](07-Exploration.md)：按助手独立、默认关闭的自主探索开关与预约
 - [08-RoomAndRecall](08-RoomAndRecall.md)：助手房间、日记、阅读角、中文召回与上下文连续性
 
-用户于2026-10-14确认本批功能完成后统一测试、构建、推送和发布。当前进入整批验证；发布记录和实测限制在08文档继续补充。
+用户于2026-10-14确认本批功能完成后统一测试、构建、推送和发布。Android Build #71 已通过整批单元测试、APK 构建、签名与更新身份校验，待合并后发布到软件内更新源；验证记录和实测限制见08文档。
