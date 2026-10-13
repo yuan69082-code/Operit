@@ -59,49 +59,11 @@ internal fun CompanionActivityPanel(store: CompanionStore, chatId: String) {
 
 @Composable
 internal fun CompanionTodoPanel(store: CompanionStore, identity: String) {
-    var rows by remember(identity) { mutableStateOf(store.todos(identity)) }
-    var id by remember { mutableStateOf<String?>(null) }
-    var title by remember { mutableStateOf("") }
-    var detail by remember { mutableStateOf("") }
-    var urgent by remember { mutableStateOf(false) }
-    var longTerm by remember { mutableStateOf(false) }
-    var done by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-    var deleting by remember { mutableStateOf(false) }
-    fun perform(action: () -> Unit) {
-        try { action(); rows = store.todos(identity); error = "" } catch (e: Exception) { error = e.message.orEmpty() }
-    }
-    Text("AI 可创建、修改和完成待办，完成后可沉淀收获或删除。旧保留片段在资料库的“旧保留记忆”分类中。")
-    TextButton(onClick = { rows = store.todos(identity) }) { Text("刷新待办") }
-    rows.sortedWith(compareBy<JSONObject> { it.optString("status") == "done" }.thenByDescending { it.optString("urgency") == "urgent" }).forEach { row ->
-        OutlinedCard(onClick = {
-            id = row.getString("id"); title = row.getString("title"); detail = row.getString("detail")
-            urgent = row.getString("urgency") == "urgent"; longTerm = row.getString("horizon") == "long"; done = row.getString("status") == "done"
-        }, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
-                Text(row.getString("title"))
-                Text((if (row.getString("status") == "done") "已完成" else "未完成") +
-                    (if (row.getString("urgency") == "urgent") " · 紧急" else " · 普通") +
-                    (if (row.getString("horizon") == "long") " · 长期" else " · 近期"))
-            }
-        }
-    }
-    TextButton(onClick = { id = null; title = ""; detail = ""; urgent = false; longTerm = false; done = false }) { Text("新建待办") }
-    OutlinedTextField(title, { title = it }, label = { Text("标题") })
-    OutlinedTextField(detail, { detail = it }, label = { Text("说明；沉淀时填写实际收获") }, minLines = 3)
-    Row { Checkbox(urgent, { urgent = it }); Text("紧急"); Checkbox(longTerm, { longTerm = it }); Text("长期"); Checkbox(done, { done = it }); Text("完成") }
-    Row {
-        TextButton(onClick = { perform {
-            id = store.saveTodo(identity, id, title, detail, if (urgent) "urgent" else "normal",
-                if (longTerm) "long" else "short", if (done) "done" else "open").getString("id")
-        } }) { Text("保存") }
-        TextButton(enabled = id != null, onClick = { deleting = true }) { Text("删除") }
-        TextButton(enabled = id != null && done, onClick = { perform {
-            store.finishTodo(identity, checkNotNull(id), "distill", detail); id = null; title = ""; detail = ""
-        } }) { Text("沉淀到资料库") }
-    }
-    if (error.isNotBlank()) Text(error)
-    if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text("删除这项待办？") },
-        confirmButton = { TextButton(onClick = { deleting = false; perform { store.finishTodo(identity, checkNotNull(id), "delete"); id = null; title = ""; detail = "" } }) { Text("删除") } },
-        dismissButton = { TextButton(onClick = { deleting = false }) { Text("取消") } })
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val actor = identity.removePrefix("role:")
+    val board = remember(identity) { com.ai.assistance.operit.core.tasks.TaskBoard(context, identity, false) }
+    val card by com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context)
+        .getCharacterCardFlow(actor).collectAsState(initial = null)
+    com.ai.assistance.operit.ui.features.chat.components.TaskBoardPanel(board, mapOf(actor to (card?.name ?: actor)), actor,
+        onFinish = { id, action, learning -> store.finishTodo(identity, id, action, learning) })
 }

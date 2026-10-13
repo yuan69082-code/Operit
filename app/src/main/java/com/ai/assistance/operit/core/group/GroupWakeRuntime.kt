@@ -18,6 +18,7 @@ object GroupWakeRuntime {
         val store = GroupStore(context)
         try {
             store.ids().forEach { chat ->
+                com.ai.assistance.operit.core.tasks.TaskEvents.recover(com.ai.assistance.operit.core.tasks.TaskBoard(context, chat, true))
                 if (store.read(chat).optString("status") == "running") {
                     store.update(chat) { it.put("status", "paused").remove("speaker") }
                     store.log(chat, "恢复", "上次运行被中断，已保留进度，点击继续")
@@ -31,20 +32,34 @@ object GroupWakeRuntime {
                     val coordinator = core.getMessageCoordinationDelegate()
                     for (chatId in store.ids()) {
                         val state = store.read(chatId)
-                        if (!state.optBoolean("proactive")) continue
-                        val wakes = state.optJSONObject("wakes") ?: continue
-                        val due = wakes.keys().asSequence().filter {
+                        val outbound = state.optJSONArray("outbox")?.optJSONObject(0)
+                        val task = com.ai.assistance.operit.core.tasks.TaskBoard(context, chatId, true).pending()
+                        val wakes = state.optJSONObject("wakes") ?: org.json.JSONObject()
+                        val due = if (!state.optBoolean("proactive")) emptyList() else wakes.keys().asSequence().filter {
                             val wake = wakes.getJSONObject(it)
                             !wake.optBoolean("paused") && wake.optLong("at") <= System.currentTimeMillis()
                         }.toList()
-                        if (due.isEmpty()) continue
+                        if (due.isEmpty() && outbound == null && task == null) continue
                         if (holder.activeConversationCount.value > 0 || VoiceCallRuntime.controller != null ||
+                            com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.pending != null ||
+                            com.ai.assistance.operit.core.companion.CompanionRuntime.hasActiveWork() ||
                             store.ids().any { coordinator.isGroupRunning(it) }) {
                             if (System.currentTimeMillis() - state.optLong("last_deferred") > 60_000) {
                                 store.log(chatId, "延后", "正在对话或通话，等待空闲，避免重复回复")
                                 store.update(chatId) { it.put("last_deferred", System.currentTimeMillis()) }
                             }
                             continue
+                        }
+                        // Background plans and private-to-group messages must not take over a
+                        // live game's player queue. They remain pending until the game ends.
+                        if ((outbound != null || task != null) && GroupGames(context).pending(chatId) != null) continue
+                        if (outbound != null) {
+                            coordinator.deliverGroupMessage(chatId, outbound)
+                            break
+                        }
+                        if (task != null) {
+                            coordinator.processGroupTask(chatId, task)
+                            break
                         }
                         val groupId = ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.characterGroupId
                         val members = groupId?.let { CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }?.members.orEmpty()
@@ -53,6 +68,10 @@ object GroupWakeRuntime {
                         store.cancelWake(chatId, actor)
                         if (members.none { it.characterCardId == actor }) {
                             store.log(chatId, "取消", "助手已离群，取消其主动活动", actor)
+                            continue
+                        }
+                        if (!GroupModeration(context).mayPublish(chatId, actor)) {
+                            store.log(chatId, "取消", "禁言期间不主动唤醒", actor)
                             continue
                         }
                         coordinator.startGroupDiscussion(chatId, actor,

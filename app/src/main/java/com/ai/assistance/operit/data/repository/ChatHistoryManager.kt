@@ -170,7 +170,11 @@ class ChatHistoryManager private constructor(private val context: Context) {
         }
         val visibleTimestamps = messageEntities.map { it.timestamp }
         val variants = chatContentDao.getVariantsForMessages(chatId, visibleTimestamps)
-        return hydrateMessages(messageEntities, variants)
+        val messages = hydrateMessages(messageEntities, variants)
+        if (getChatMetadata(chatId)?.characterGroupId.isNullOrBlank()) return messages
+        // Non-destructive compatibility cleanup for the old generated source header.
+        return messages.map { if (it.sender == "ai") it.copy(content =
+            com.ai.assistance.operit.core.group.GroupTurnPolicy.cleanLegacyPrefix(it.content)) else it }
     }
 
     private suspend fun loadDisplayHistory(chatHistory: ChatHistory): ChatHistory {

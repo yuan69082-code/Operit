@@ -156,6 +156,8 @@ fun ClassicChatSettingsBar(
     val scope = rememberCoroutineScope()
     val characterCardManager = remember { CharacterCardManager.getInstance(context) }
     val activePromptManager = remember { ActivePromptManager.getInstance(context) }
+    val selectedPrompt by activePromptManager.activePromptFlow.collectAsState(initial = null)
+    val isGroupPage = selectedPrompt is ActivePrompt.CharacterGroup
     val functionalConfigManager = remember { FunctionalConfigManager(context) }
     val modelConfigManager = remember { ModelConfigManager(context) }
     val configMappingWithIndex by
@@ -494,7 +496,9 @@ fun ClassicChatSettingsBar(
                             )
                             }
 
-                            ClassicSettingsFoldSection(
+                            if (isGroupPage) {
+                                Text("各成员独立使用自己的模型，请在群设置中调整。", Modifier.padding(12.dp))
+                            } else ClassicSettingsFoldSection(
                                 title = stringResource(R.string.model),
                                 value = currentModelName,
                                 icon = Icons.Outlined.DataObject,

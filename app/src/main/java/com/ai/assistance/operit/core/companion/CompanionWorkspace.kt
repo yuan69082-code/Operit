@@ -54,22 +54,20 @@ fun CompanionStore.todos(scope: String): List<JSONObject> {
 }
 
 fun CompanionStore.saveTodo(scope: String, id: String?, title: String, detail: String,
-                            urgency: String, horizon: String, status: String): JSONObject {
-    require(title.isNotBlank() && title.length <= 160 && detail.length <= 4000) { "待办标题最多160字，说明最多4000字。" }
-    require(urgency in setOf("urgent", "normal") && horizon in setOf("short", "long") &&
-        status in setOf("open", "done")) { "无效待办状态。" }
-    val item = JSONObject().put("id", id ?: UUID.randomUUID().toString()).put("title", title)
-        .put("detail", detail).put("urgency", urgency).put("horizon", horizon).put("status", status)
-        .put("updated", System.currentTimeMillis())
+                            urgency: String, horizon: String, status: String,
+                            details: JSONObject = JSONObject()): JSONObject {
+    require(urgency in setOf("urgent", "normal"))
+    val actor = scope.removePrefix("role:")
+    val patch = JSONObject(details.toString()).put("title", title).put("detail", detail).put("horizon", horizon).put("status", status)
+    if (!patch.has("priority")) patch.put("priority", if (urgency == "urgent") "P1" else "P2")
+    lateinit var saved: JSONObject
     update(scope) { data ->
         val rows = data.optJSONArray("todos") ?: JSONArray()
-        val index = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id }
-        require(id == null || index != null) { "待办不存在。" }
-        require(index != null || rows.length() < 256) { "待办最多256项，请先整理。" }
-        if (index == null) rows.put(item) else rows.put(index, item)
+        saved = com.ai.assistance.operit.core.tasks.TaskRecords.save(rows, actor, id, patch, setOf(actor), System.currentTimeMillis())
         data.put("todos", rows)
     }
-    return item
+    com.ai.assistance.operit.core.tasks.TaskBoard.revision.value += 1
+    return saved
 }
 
 fun CompanionStore.finishTodo(scope: String, id: String, action: String, learning: String = "") {
@@ -79,6 +77,7 @@ fun CompanionStore.finishTodo(scope: String, id: String, action: String, learnin
         val index = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id }
             ?: error("待办不存在。")
         val todo = rows.getJSONObject(index)
+        check(todo.optJSONObject("dispatch")?.optString("state") != "running") { "此事项正在处理，请本轮结束后再删除或沉淀；现在可以更新进展和完成状态。" }
         if (action == "distill") {
             require(todo.getString("status") == "done") { "完成后才可沉淀。" }
             require(learning.isNotBlank() && learning.length <= 12000) { "请填写实际学到的内容，最多12000字。" }
@@ -93,8 +92,14 @@ fun CompanionStore.finishTodo(scope: String, id: String, action: String, learnin
             data.put("categories", categories)
         }
         rows.remove(index)
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val links = row.optJSONArray("linked_ids") ?: continue
+            row.put("linked_ids", JSONArray((0 until links.length()).map { links.getString(it) }.filter { it != id }))
+        }
         data.put("todos", rows)
     }
+    com.ai.assistance.operit.core.tasks.TaskBoard.revision.value += 1
 }
 
 object CompanionPolicy {

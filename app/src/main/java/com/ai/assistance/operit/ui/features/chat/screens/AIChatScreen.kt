@@ -701,10 +701,10 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     var isSavingInitialConfiguration by remember { mutableStateOf(false) }
     var initialConfigurationSaveFailed by
         rememberSaveable(activeChatConfigId) { mutableStateOf(false) }
-    val showConfig =
+    val showConfig = activePrompt !is ActivePrompt.CharacterGroup && (
         shouldShowConfigDialog ||
             isSavingInitialConfiguration ||
-            initialConfigurationSaveFailed
+            initialConfigurationSaveFailed)
 
     // 添加手势状态
     var chatScreenGestureConsumed by remember { mutableStateOf(false) }
