@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.settings.screens
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -119,7 +121,7 @@ fun GlobalDisplaySettingsScreen(
 
     // 自动化状态指示样式（使用与 FloatingChatService 相同的 SharedPreferences）
     val statusIndicatorPrefs = remember {
-        context.getSharedPreferences("floating_chat_prefs", android.content.Context.MODE_PRIVATE)
+        context.observedSharedPreferences("floating_chat_prefs", android.content.Context.MODE_PRIVATE)
     }
     var statusIndicatorStyle by remember {
         mutableStateOf(

@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.packages.screens.market.viewmodel
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import android.widget.Toast
@@ -50,7 +52,7 @@ class RepoMarketPublishViewModel(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private val sharedPrefs: SharedPreferences =
-        context.getSharedPreferences("${type.wireValue}_publish_draft", Context.MODE_PRIVATE)
+        context.observedSharedPreferences("${type.wireValue}_publish_draft", Context.MODE_PRIVATE)
 
     val publishDraft: RepoPublishDraft
         get() = RepoPublishDraft(

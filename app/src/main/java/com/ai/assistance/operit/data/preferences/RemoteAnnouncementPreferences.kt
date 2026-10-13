@@ -1,11 +1,13 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 
 class RemoteAnnouncementPreferences(context: Context) {
     private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.applicationContext.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getAcknowledgedVersion(): Int {
         return prefs.getInt(KEY_ACKNOWLEDGED_VERSION, 0)

@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 
@@ -12,7 +14,7 @@ import android.content.SharedPreferences
 class EnvPreferences private constructor(context: Context) {
 
     private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.applicationContext.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
      * Get effective environment value for the given key.

@@ -1,11 +1,13 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Separate from the chat model: text-only models receive the analysis as text. */
 class VoiceCallAnalysisPreferences(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("voice_call_analysis", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.observedSharedPreferences("voice_call_analysis", Context.MODE_PRIVATE)
     val savedEndpoint: String get() = prefs.getString("endpoint", DEFAULT_ENDPOINT)!!
     val endpoint: String get() = normalizeEndpoint(savedEndpoint)
     val model: String get() = prefs.getString("model", "qwen-omni-turbo")!!

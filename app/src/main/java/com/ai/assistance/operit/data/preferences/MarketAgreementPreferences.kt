@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 
@@ -9,7 +11,7 @@ class MarketAgreementPreferences(context: Context) {
     private val acceptedVersionKey = "accepted_market_agreement_version"
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        context.observedSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
     fun isAgreementAccepted(): Boolean {
         return prefs.getString(acceptedVersionKey, null) == CURRENT_MARKET_AGREEMENT_VERSION

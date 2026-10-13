@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.voice
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -32,7 +34,7 @@ object VoiceCallIncoming {
 
     fun restore(context: Context) {
         if (pending != null) return
-        val prefs = context.getSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE)
         val stored = prefs.getString("request", null) ?: return
         val data = JSONObject(stored)
         val request = Request(data.getString("id"), data.getString("chat"),
@@ -48,7 +50,7 @@ object VoiceCallIncoming {
         check(VoiceCallRuntime.controller == null && pending == null) { "已有通话或来电，请勿重复拨打" }
         val incoming = Request(java.util.UUID.randomUUID().toString(), chatId, roleCardId,
             reason.take(160), System.currentTimeMillis() + 60_000, callerName.take(80))
-        val prefs = context.getSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE)
         prefs.edit().putString("request", JSONObject().put("id", incoming.id).put("chat", chatId)
             .put("role", roleCardId.orEmpty()).put("reason", incoming.reason).put("expires", incoming.expiresAt).put("caller", incoming.callerName).toString()).apply()
         pending = incoming
@@ -97,7 +99,7 @@ object VoiceCallIncoming {
         timeout?.cancel()
         timeout = null
         pending = null
-        context.getSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE).edit().remove("request").apply()
+        context.observedSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE).edit().remove("request").apply()
         context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)
     }
 

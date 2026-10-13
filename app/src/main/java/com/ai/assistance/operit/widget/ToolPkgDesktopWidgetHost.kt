@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.widget
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
@@ -64,7 +66,7 @@ object ToolPkgDesktopWidgetHost {
     ): Boolean {
         val selectionKey = buildSelectionKey(widget.containerPackageName, widget.widgetId)
         return context
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(selectionPrefKey(appWidgetId), selectionKey)
             .putString(routePrefKey(appWidgetId), widget.routeId)
@@ -81,7 +83,7 @@ object ToolPkgDesktopWidgetHost {
 
     fun clearSelection(context: Context, appWidgetId: Int) {
         context
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .remove(selectionPrefKey(appWidgetId))
             .remove(routePrefKey(appWidgetId))
@@ -123,7 +125,7 @@ object ToolPkgDesktopWidgetHost {
 
     private fun loadSelectionKey(context: Context, appWidgetId: Int): String? {
         return context
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(selectionPrefKey(appWidgetId), null)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
@@ -133,7 +135,7 @@ object ToolPkgDesktopWidgetHost {
         context: Context,
         appWidgetId: Int
     ): WidgetSelection? {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val selectionKey = loadSelectionKey(context, appWidgetId) ?: return null
         val routeId = prefs.getString(routePrefKey(appWidgetId), null)?.trim().orEmpty()
         val renderRouteId =

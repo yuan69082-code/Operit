@@ -915,6 +915,12 @@ class MessageProcessingDelegate(
                 val addUserMessageStartTime = messageTimingNow()
                 addMessageToChat(chatId, userMessage)
                 userMessageAdded = true
+                if (!turnOptions.voiceCallEnded && !turnOptions.proactiveWake && !isAutoContinuation &&
+                    !turnOptions.voiceCallEvent && !turnOptions.voiceCallDecision && !turnOptions.voiceCallSilence &&
+                    !turnOptions.voiceCallObservation && !effectiveHideUserMessage) {
+                    com.ai.assistance.operit.core.awareness.SoftwareAwareness.userMessage(context, chatId, roleCardId,
+                        proxy = proxySenderNameOverride != null)
+                }
                 logMessageTiming(
                     stage = "delegate.addUserMessageToChat",
                     startTimeMs = addUserMessageStartTime,

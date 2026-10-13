@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.util
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 
 object CrashRecoveryState {
@@ -8,14 +10,14 @@ object CrashRecoveryState {
 
     fun markPendingCrashReportLaunch(context: Context) {
         context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_PRESERVE_LOGS_FOR_CRASH_REPORT, true)
             .commit()
     }
 
     fun consumePendingCrashReportLaunch(context: Context): Boolean {
-        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = context.applicationContext.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val shouldPreserveLogs = prefs.getBoolean(KEY_PRESERVE_LOGS_FOR_CRASH_REPORT, false)
         if (shouldPreserveLogs) {
             prefs.edit().remove(KEY_PRESERVE_LOGS_FOR_CRASH_REPORT).commit()

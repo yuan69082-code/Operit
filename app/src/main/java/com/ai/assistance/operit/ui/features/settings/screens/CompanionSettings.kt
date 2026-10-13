@@ -39,7 +39,6 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
     val store = remember { CompanionStore(context) }
     val scope = rememberCoroutineScope()
     var emotion by remember { mutableStateOf(store.emotionEnabled) }
-    var capabilities by remember { mutableStateOf(store.capabilitiesEnabled) }
     var proactive by remember { mutableStateOf(store.proactiveEnabled) }
     var silence by remember { mutableStateOf(store.silenceEnabled) }
     var seconds by remember { mutableStateOf(store.silenceSeconds.toString()) }
@@ -129,7 +128,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知").forEachIndexed { index, label ->
+                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
                     }
                 }
@@ -142,10 +141,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                         emotion = it; store.preferences.edit().putBoolean("emotion_enabled", it).apply()
                     }
                     TextButton(onClick = { section = 3 }) { Text("查看情绪与 XC 连接") }
-                    CompanionToggle("让 AI 感知软件能力和变化", capabilities) {
-                        capabilities = it; store.preferences.edit().putBoolean("capabilities_enabled", it).apply()
-                    }
-                    Text("开启后额外提供权限、模型和工具能力的当前快照及变化提示。关闭后停止此项快照和专用查询，原有工具功能仍按各自设置运行。")
+                    TextButton(onClick = { section = 6 }) { Text("软件感知：指定观察助手、开关与事件日志") }
                     CompanionToggle("通话沉默时允许 AI 主动接话", silence) {
                         silence = it; store.preferences.edit().putBoolean("silence_enabled", it).apply()
                     }
@@ -177,6 +173,8 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     Text(store.preferences.getString("last_status", "尚无主动判断记录").orEmpty())
                 } else if (section == 5) {
                     PhoneAwarenessPanel(chatId)
+                } else if (section == 6) {
+                    SoftwareAwarenessPanel(chatId)
                 } else if (identity == null) {
                     Text("请先打开一个聊天会话，再管理对应角色的资料与记忆。")
                 } else if (section == 3) {

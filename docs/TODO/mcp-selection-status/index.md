@@ -4,7 +4,7 @@ branch: fix/mcp-selection-status
 status: code-complete-awaiting-batch-validation
 ---
 
-# MCP、群聊、独立待办、手机感知与通话改进
+# MCP、群聊、待办、手机/软件感知与通话改进
 
 用户报告：未选择的 termux 仍参与启动并报错；已选择的四个远程服务在管理页显示灰色 4/0，工具发现和运行状态不一致。
 
@@ -17,5 +17,6 @@ status: code-complete-awaiting-batch-validation
 - [03-TaskBoard](03-TaskBoard.md)：独立助手和群聊的私人打算、共同事项、批注与处理事件
 - [04-PhoneAwareness](04-PhoneAwareness.md)：手机与应用观察、隐藏事件唤醒、逐应用内容授权
 - [05-CallOutcomes](05-CallOutcomes.md)：拒接、取消和挂断统一发送给通话所属助手
+- [06-SoftwareAwareness](06-SoftwareAwareness.md)：指定助手接收设置变化、软件访问及聊天停留记录
 
 按用户要求先逐项修改，本批问题全部处理完毕后再统一测试、构建、推送和发布。当前仅完成上述步骤的代码修改与静态差异检查，尚未运行本批测试、构建或手机验证；不单独发布。

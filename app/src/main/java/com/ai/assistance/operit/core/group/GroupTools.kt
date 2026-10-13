@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.core.group
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
 import com.ai.assistance.operit.core.tools.AIToolHandler
@@ -14,7 +16,7 @@ import org.json.JSONObject
 
 object GroupTools {
     suspend fun ensureEnabledOnce(context: Context, actor: String) {
-        val prefs = context.getSharedPreferences("vio_group_capability_migration", Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences("vio_group_capability_migration", Context.MODE_PRIVATE)
         if (prefs.getBoolean(actor, false)) return
         val cards = CharacterCardManager.getInstance(context)
         listOf("group_chat", "group_game", "assistant_relationship").forEach { cards.setToolSelected(actor, "builtin", it, true) }

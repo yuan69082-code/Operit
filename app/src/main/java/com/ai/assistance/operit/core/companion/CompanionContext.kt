@@ -22,7 +22,12 @@ object CompanionContext {
         val store = CompanionStore(context)
         val scope = store.scope(chatId, roleId)
         if (recordSnapshot) store.migrateMemory(chatId, scope)
-        val facts = if (store.capabilitiesEnabled) permissions(context)
+        val software = com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(context)
+        val softwareAllowed = software.enabled && roleId == software.role &&
+            com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.let {
+                it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId
+            } == true
+        val facts = if (softwareAllowed) permissions(context)
             .put("emotion_continuity", store.emotionEnabled)
             .put("proactive_contact", store.proactiveEnabled)
             .put("call_silence_callback", store.silenceEnabled)
@@ -50,6 +55,7 @@ object CompanionContext {
                 append("\n能力列出不表示操作已执行；权限、网络和服务仍可能限制实际调用。未接入的传感器数据不可推测。\n")
             }
             append(xc)
+            append(com.ai.assistance.operit.core.awareness.SoftwareAwareness.prompt(context, chatId, roleId, recordSnapshot))
             val phone = com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(context)
             if (phone.enabled && phone.role != null && phone.role == roleId &&
                 com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.let {

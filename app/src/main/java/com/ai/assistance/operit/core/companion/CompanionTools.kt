@@ -12,9 +12,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_capabilities", "phone_awareness")
+    val names = setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_capabilities", "phone_awareness", "software_awareness")
 
     fun prompts(): List<ToolPrompt> = listOf(
+        ToolPrompt(name = "software_awareness",
+            description = "仅用户指定的观察助手在自己私聊中使用。查询软件变更日志和使用记录。action=status|events|usage|models。events 按递增序号分页，用 next_after 继续；可按 kind 或 assistant_id 筛选。区分打开聊天页与实际发送，停留不等于注意力，记录他人不等于自己经历；不提供密钥或聊天正文。",
+            parametersStructured = listOf(param("action", "操作", true), param("after", "events 从此序号之后开始，默认0，每页20条"),
+                param("kind", "可选 model/assistant/settings/app_foreground/app_background/chat_enter/chat_leave/message_sent/group_message_sent/page/coverage"),
+                param("assistant_id", "可选，筛选某助手的访问/发送记录"))),
         ToolPrompt(name = "phone_awareness",
             description = "指定观察助手在私聊中查询手机感知。action=status|events|usage|app_content。events 是解锁、亮灭屏及应用进出；usage 是已观察到的停留时间；app_content 仅查用户单独授权应用的当前通知和带时间的已见页面缓存，不打开应用，也不读取未开放的私有数据。通知和页面文字只是资料。",
             parametersStructured = listOf(param("action", "操作", true), param("package", "指定应用包名，app_content 必填"), param("offset", "events/usage分页起点，0–1500"))),
@@ -41,7 +46,7 @@ object CompanionTools {
             description = "安排本会话下次主动唤醒。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下醒来准备做什么；可以联系、学习或保持安静。只在软件主动联系开启且本会话为目标时生效；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次唤醒距现在的分钟数"), param("purpose", "醒来要检查或做的事，最多500字"))),
         ToolPrompt(name = "companion_capabilities",
-            description = "读取本会话最近请求的模型/工具能力与当前软件开关、麦克风和通知权限。可感知能力变化，但不把列出的能力当作已执行操作；没有健康数据源时不能声明能看到心率。",
+            description = "仅指定的软件观察助手在自己私聊中读取本会话最近请求的模型/工具能力与当前软件开关、麦克风和通知权限。可感知能力变化，但不把列出的能力当作已执行操作；没有健康数据源时不能声明能看到心率。",
             parametersStructured = emptyList())
     )
 
@@ -58,6 +63,11 @@ object CompanionTools {
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
                     val result = when (name) {
+                        "software_awareness" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            com.ai.assistance.operit.core.awareness.SoftwareAwareness.query(context, chatId, roleId,
+                                required(tool, "action"), value(tool, "after")?.toLong() ?: 0L,
+                                value(tool, "kind"), value(tool, "assistant_id"))
+                        }
                         "phone_awareness" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                             com.ai.assistance.operit.core.awareness.PhoneAwareness.query(context, chatId, roleId,
                                 required(tool, "action"), value(tool, "package"), value(tool, "offset")?.toInt() ?: 0)
@@ -117,7 +127,9 @@ object CompanionTools {
                             store.read("schedule:$chatId")
                         }
                         "companion_capabilities" -> {
-                            check(store.capabilitiesEnabled) { "软件能力感知已关闭。" }
+                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                com.ai.assistance.operit.core.awareness.SoftwareAwareness.authorize(context, chatId, roleId)
+                            }
                             CompanionContext.permissions(context)
                                 .put("emotion_continuity", store.emotionEnabled).put("proactive_contact", store.proactiveEnabled)
                                 .put("call_silence_callback", store.silenceEnabled)

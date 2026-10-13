@@ -187,6 +187,7 @@ class SkillManager private constructor(private val context: Context) {
             val ok = skill.directory.deleteRecursively()
             if (ok) {
                 availableSkills.remove(skillName)
+                com.ai.assistance.operit.core.awareness.SoftwareAwareness.assetChanged(context, "skill", "删除Skill", skillName)
             }
             ok
         } catch (e: Exception) {
@@ -383,6 +384,7 @@ class SkillManager private constructor(private val context: Context) {
             refreshAvailableSkills()
 
             val desc = metaDesc.ifBlank { "" }
+            com.ai.assistance.operit.core.awareness.SoftwareAwareness.assetChanged(context, "skill", "导入Skill", finalDir.name)
             return SkillImportResult(if (desc.isNotBlank()) {
                 context.getString(R.string.skill_imported_with_desc, finalDir.name, desc)
             } else {

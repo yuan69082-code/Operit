@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.mcp
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import com.ai.assistance.operit.R
@@ -71,7 +73,7 @@ class MCPLocalServer private constructor(private val context: Context) {
 
     // 持久化配置
     private val prefs: SharedPreferences =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     // 配置目录路径
     private val configBaseDir by lazy {
@@ -505,7 +507,12 @@ class MCPLocalServer private constructor(private val context: Context) {
     suspend fun saveMCPConfig() {
         try {
             val configJson = gson.toJson(_mcpConfig.value)
+            // Audit reads must not prevent saving an otherwise writable configuration.
+            val previous = runCatching { if (mcpConfigFile.exists()) mcpConfigFile.readText() else null }.getOrNull()
             mcpConfigFile.writeText(configJson)
+            com.ai.assistance.operit.core.awareness.SoftwareAwareness.preferencesChanged(context, "mcp_configuration",
+                mapOf("configuration" to previous), mapOf("configuration" to configJson),
+                com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
             AppLogger.d(TAG, "MCP配置已保存")
         } catch (e: Exception) {
             AppLogger.e(TAG, "保存MCP配置时出错", e)

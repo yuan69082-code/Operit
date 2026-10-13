@@ -922,6 +922,8 @@ class MessageCoordinationDelegate(
                 }
         )
         chatHistoryDelegate.addMessageToChat(userMessage, chatId)
+        if (!turnOptions.hideUserMessage) com.ai.assistance.operit.core.awareness.SoftwareAwareness.userMessage(
+            context, chatId, null, "group_message_sent")
         com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
         titleFallback?.let { fallbackTitle ->
             launchConversationTitleGeneration(

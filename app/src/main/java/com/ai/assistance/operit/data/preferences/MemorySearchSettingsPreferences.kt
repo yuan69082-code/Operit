@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import com.ai.assistance.operit.data.model.CloudEmbeddingConfig
 import com.ai.assistance.operit.data.model.MemoryScoreMode
@@ -7,11 +9,11 @@ import com.ai.assistance.operit.data.model.MemorySearchConfig
 
 class MemorySearchSettingsPreferences(context: Context, profileId: String) {
     private val profileId = profileId
-    private val searchPrefs = context.applicationContext.getSharedPreferences(
+    private val searchPrefs = context.applicationContext.observedSharedPreferences(
         "memory_search_settings_$profileId",
         Context.MODE_PRIVATE
     )
-    private val cloudPrefs = context.applicationContext.getSharedPreferences(
+    private val cloudPrefs = context.applicationContext.observedSharedPreferences(
         "cloud_embedding_settings_$profileId",
         Context.MODE_PRIVATE
     )

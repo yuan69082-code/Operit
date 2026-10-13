@@ -149,6 +149,7 @@ object ActivityLifecycleManager : Application.ActivityLifecycleCallbacks {
         )
         if (!isAppInForeground && startedActivityCount > 0) {
             isAppInForeground = true
+            com.ai.assistance.operit.core.awareness.SoftwareAwareness.foreground(appContext, true)
             ExternalChatHttpAutoStarter.ensureRunningIfEnabled(
                 context = appContext,
                 reason = "application_foreground"
@@ -218,6 +219,7 @@ object ActivityLifecycleManager : Application.ActivityLifecycleCallbacks {
         )
         if (isAppInForeground && startedActivityCount == 0) {
             isAppInForeground = false
+            com.ai.assistance.operit.core.awareness.SoftwareAwareness.foreground(appContext, false)
             AppLifecycleHookPluginRegistry.dispatchAsync(
                 event = AppLifecycleEvent.APPLICATION_BACKGROUND,
                 params = AppLifecycleHookParams(context = appContext)

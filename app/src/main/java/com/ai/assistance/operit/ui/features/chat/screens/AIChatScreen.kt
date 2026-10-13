@@ -287,6 +287,15 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     val currentChatView = remember(chatHistories, currentChatId) {
         chatHistories.find { it.id == currentChatId }
     }
+    DisposableEffect(chatViewId, currentChatView?.id, currentChatView?.characterCardId, currentChatView?.characterGroupId, isCurrentScreen) {
+        if (!isFloatingMode) com.ai.assistance.operit.core.awareness.SoftwareAwareness.view(context,
+            chatViewId, currentChatView?.id?.takeIf { isCurrentScreen }, currentChatView?.characterCardId,
+            currentChatView?.characterCardName ?: currentChatView?.title, currentChatView?.characterGroupId)
+        onDispose {
+            if (!isFloatingMode) com.ai.assistance.operit.core.awareness.SoftwareAwareness.view(context,
+                chatViewId, null, null, null, null)
+        }
+    }
     val latestChatViewParams by rememberUpdatedState(
         ChatViewHookParams(
             context = context,

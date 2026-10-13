@@ -471,7 +471,7 @@ class AIForegroundService : Service() {
                 }
             }.getOrDefault(false)
             if (!keepAliveEnabled && !com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled &&
-                !com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled && !isRunning.get()) {
+                !com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled && !com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(appContext).wakeEnabled && !isRunning.get()) {
                 return
             }
             val intent = Intent(appContext, AIForegroundService::class.java).apply {
@@ -536,7 +536,8 @@ class AIForegroundService : Service() {
             }.getOrDefault(false)
             return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
                 com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled ||
-                com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled
+                com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled ||
+                com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(appContext).wakeEnabled
         }
     }
 
@@ -930,7 +931,7 @@ class AIForegroundService : Service() {
         val externalHttpEnabled = externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
         if (isAiBusy || alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
             com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled ||
-            com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(this).enabled) {
+            com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(this).enabled || com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(this).wakeEnabled) {
             return
         }
         if (!ignoreAppForeground && ActivityLifecycleManager.getCurrentActivity() != null) {

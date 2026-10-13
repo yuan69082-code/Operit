@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.services.floating
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
@@ -9,7 +11,7 @@ import com.ai.assistance.operit.ui.floating.FloatingMode
 
 class FloatingWindowState(context: Context) {
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
+        context.observedSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
     private val screenWidthDp: Dp
     private val screenHeightDp: Dp
     private val maxWindowWidth: Float

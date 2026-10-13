@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Environment
@@ -23,7 +25,7 @@ class FreeUsagePreferences(private val context: Context) {
     private val EXTERNAL_DIRECTORY = "Operit"
 
     private val prefs: SharedPreferences =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _nextAvailableDateFlow = MutableStateFlow(getNextAvailableDate())
     val nextAvailableDateFlow: StateFlow<LocalDate> = _nextAvailableDateFlow.asStateFlow()
