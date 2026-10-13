@@ -61,8 +61,11 @@ object VoiceCallIncoming {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val open = PendingIntent.getActivity(context, 304, launcher, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val reject = PendingIntent.getBroadcast(context, 305,
-                Intent(context, VoiceCallIncomingReceiver::class.java).putExtra("request_id", incoming.id),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                // PendingIntent identity excludes extras: each call needs its own action too.
+                Intent(context, VoiceCallIncomingReceiver::class.java)
+                    .setAction("${context.packageName}.voice_call.REJECT.${incoming.id}")
+                    .putExtra("request_id", incoming.id),
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE)
             manager.notify(NOTIFICATION, NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("${incoming.callerName} 来电")
                 .setContentText(incoming.reason).setCategory(NotificationCompat.CATEGORY_CALL)
@@ -98,7 +101,17 @@ object VoiceCallIncoming {
         context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)
     }
 
-    fun reject(context: Context) = finish(context, "user", "拒接来电，未接通")
+    fun reject(context: Context, requestId: String) {
+        val request = pending?.takeIf { it.id == requestId } ?: return
+        if (request.expiresAt <= System.currentTimeMillis()) {
+            finish(context, "ai", "无人接听，呼叫结束")
+            return
+        }
+        // Consume before dispatch: repeated UI/notification callbacks cannot send twice.
+        clear(context)
+        VoiceCallEvents.sendUserOutcome(context, request.chatId, request.roleCardId,
+            com.ai.assistance.operit.data.model.VoiceCallUserOutcome.DECLINED)
+    }
 
     fun cancel(context: Context, chatId: String, roleCardId: String?, reason: String): String {
         restore(context)
@@ -162,7 +175,8 @@ object VoiceCallIncoming {
 
 class VoiceCallIncomingReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val requestId = intent.getStringExtra("request_id") ?: return
         VoiceCallIncoming.restore(context)
-        if (VoiceCallIncoming.pending?.id == intent.getStringExtra("request_id")) VoiceCallIncoming.reject(context)
+        VoiceCallIncoming.reject(context, requestId)
     }
 }

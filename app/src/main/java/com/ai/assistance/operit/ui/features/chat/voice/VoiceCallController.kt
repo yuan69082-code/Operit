@@ -11,6 +11,7 @@ import com.ai.assistance.operit.api.speech.SpeechServiceFactory
 import com.ai.assistance.operit.api.voice.VoiceService
 import com.ai.assistance.operit.api.voice.QueuedVoiceService
 import com.ai.assistance.operit.api.voice.VoiceServiceFactory
+import com.ai.assistance.operit.data.model.VoiceCallUserOutcome
 import com.ai.assistance.operit.data.preferences.SpeechServiceProfilesPreferences
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import com.ai.assistance.operit.util.AppLogger
@@ -825,9 +826,10 @@ class VoiceCallController(
         val name = if (by == EndBy.AI) participantName else context.getString(R.string.message_role_user)
         val event = if (by == EndBy.SYSTEM) "通话因服务停止而结束"
             else if (isConnected) "通话结束" else "已取消拨号，未接通"
-        if (by == EndBy.USER && isConnected) {
+        if (by == EndBy.USER) {
             // Send once through the conversation pipeline; a history-only entry never wakes AI.
-            viewModel.sendVoiceCallEnded(chatId, roleCardId)
+            VoiceCallEvents.sendUserOutcome(context, chatId, roleCardId,
+                if (isConnected) VoiceCallUserOutcome.HUNG_UP else VoiceCallUserOutcome.CANCELLED)
             return null
         }
         return VoiceCallEvents.record(context, chatId, sender, name, event)

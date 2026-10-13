@@ -804,7 +804,7 @@ class MessageCoordinationDelegate(
         )
 
         // 只有在非续写（即用户主动发送）时才清空附件和UI状态
-        if (!isBackgroundSend && !isContinuation && !turnOptions.voiceCall) {
+        if (!isBackgroundSend && !isContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded) {
             if (currentAttachments.isNotEmpty()) {
                 attachmentDelegate.clearAttachments()
             }

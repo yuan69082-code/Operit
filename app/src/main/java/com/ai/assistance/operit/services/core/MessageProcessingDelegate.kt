@@ -1130,7 +1130,7 @@ class MessageProcessingDelegate(
                     enhancedAiService = service,
                     chatId = activeChatId,
                     messageContent = (if (turnOptions.voiceCallEnded) {
-                        "[客户端通话事件：用户已挂断，当前通话已结束，收音与摄像头已关闭。这是用户发出的通话结束消息，请在文字聊天中回应，不要继续假装正在通话，也不要复述内部状态。]\n$requestMessageContent"
+                        "${checkNotNull(turnOptions.voiceCallOutcome).modelInstruction}\n$requestMessageContent"
                     } else if (turnOptions.voiceCallDecision) {
                         "[运行状态：mode=voice_call，用户正在给你打电话，尚未接通，尚未收音或采集摄像头。是否接听、何时接听由你决定，不要求你接听。回复末尾输出恰好一个控制标记：接听 <voice_call_accept/>；拒接 <voice_call_reject/>；暂时等待 <voice_call_wait seconds=\"正整数秒数\"/>。拒接时可以在标记前简短说明原因，也可以只输出标记；等待后客户端会再次通知你决定，用户也可以取消。不要把等待或拒接当成已接通。确认接听后另一个接通事件会触发你说第一句话。这些控制标记仅供客户端处理，不复述给用户。]\n$requestMessageContent"
                     } else if (turnOptions.voiceCall) {
