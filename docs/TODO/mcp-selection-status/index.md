@@ -19,5 +19,6 @@ status: code-complete-awaiting-batch-validation
 - [05-CallOutcomes](05-CallOutcomes.md)：拒接、取消和挂断统一发送给通话所属助手
 - [06-SoftwareAwareness](06-SoftwareAwareness.md)：指定助手接收设置变化、软件访问及聊天停留记录
 - [07-Exploration](07-Exploration.md)：按助手独立、默认关闭的自主探索开关与预约
+- [08-RoomAndRecall](08-RoomAndRecall.md)：助手房间、日记、阅读角、中文召回与上下文连续性
 
-按用户要求先逐项修改，本批问题全部处理完毕后再统一测试、构建、推送和发布。当前仅完成上述步骤的代码修改与静态差异检查，尚未运行本批测试、构建或手机验证；不单独发布。
+用户于2026-10-14确认本批功能完成后统一测试、构建、推送和发布。当前进入整批验证；发布记录和实测限制在08文档继续补充。

@@ -20,7 +20,10 @@ class ExplorationStore(private val context: Context) {
 
     // This entry point is for user settings only. The AI tool cannot call configure.
     suspend fun configure(role: String, chat: String, enable: Boolean, activities: Set<String>, limit: Int) {
-        if (enable) authorize(role, chat)
+        if (enable) {
+            authorize(role, chat)
+            CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "companion_reading", true)
+        }
         synchronized(settingsLock) {
             // Index first: an interrupted configuration can leave an inert entry, never an
             // enabled assistant omitted from scheduler/keep-alive discovery.

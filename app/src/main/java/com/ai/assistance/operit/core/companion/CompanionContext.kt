@@ -71,6 +71,7 @@ object CompanionContext {
             }
             append("资料可用 companion_library 自行分类、保存、检索；skill 是能力笔记，不会自动安装或执行代码。\n")
             if (!roleId.isNullOrBlank()) {
+                append(AssistantRoom(context, roleId).prompt())
                 val exploration = ExplorationStore(context)
                 append(if (exploration.enabled(roleId)) "你的自主探索已由用户开启；可在指定私聊用 companion_explore status 查询安排和剩余轮次，用 schedule 安排继续或 pause 暂缓。\n"
                     else "你的自主探索默认关闭或已被用户关闭；不能自行开启或安排探索唤醒。手动聊天中的查阅和明确提交的待办仍照常进行。\n")

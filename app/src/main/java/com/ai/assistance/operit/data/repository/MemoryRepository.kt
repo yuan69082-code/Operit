@@ -96,6 +96,7 @@ class MemoryRepository(private val context: Context, profileId: String) {
     private val searchSettingsPreferences = MemorySearchSettingsPreferences(context, profileId)
     private val cloudEmbeddingService = CloudEmbeddingService(context)
     private val sanitizedProfileKey = sanitizeIndexKey(profileId)
+    private val aliasScope = "memory-alias:$profileId"
     @Volatile
     private var lastDanglingCleanupAtMs: Long = 0L
 
@@ -689,44 +690,9 @@ class MemoryRepository(private val context: Context, profileId: String) {
     ): List<TitleMatchCandidate> {
         if (fragments.isEmpty() || scopedMemories.isEmpty()) return emptyList()
 
-        val scopedMemoryIds = scopedMemories.map { it.id }.toHashSet()
-        val scopedMemoriesById = scopedMemories.associateBy { it.id }
-
-        val memoryById = mutableMapOf<Long, Memory>()
-        val hitTokensByMemoryId = mutableMapOf<Long, MutableSet<String>>()
-
-        fragments.forEach { fragment ->
-            val matches = if (fragment.contains('*') && fragment != "*") {
-                scopedMemories.filter { memory ->
-                    textMatchesLexicalToken(memory.title, fragment)
-                }
-            } else {
-                memoryBox.query()
-                    .contains(Memory_.title, fragment, QueryBuilder.StringOrder.CASE_INSENSITIVE)
-                    .build()
-                    .find()
-            }
-
-            matches.forEach { memory ->
-                if (!scopedMemoryIds.contains(memory.id)) return@forEach
-                val scopedMemory = scopedMemoriesById[memory.id] ?: memory
-                memoryById.putIfAbsent(memory.id, scopedMemory)
-                hitTokensByMemoryId.getOrPut(memory.id) { linkedSetOf() }.add(fragment)
-            }
-        }
-
-        return memoryById.values
-            .map { memory ->
-                TitleMatchCandidate(
-                    memory = memory,
-                    matchedTokenCount = hitTokensByMemoryId[memory.id]?.size ?: 0
-                )
-            }
-            .sortedWith(
-                compareByDescending<TitleMatchCandidate> { it.matchedTokenCount }
-                    .thenByDescending { it.memory.importance }
-                    .thenByDescending { it.memory.updatedAt.time }
-            )
+        val byId = scopedMemories.associateBy { it.id }
+        return ChineseRecall.rank(scopedMemories.map { ChineseRecall.Document(it.id, it.title, it.content) }, fragments)
+            .map { TitleMatchCandidate(byId.getValue(it.id), it.hits) }
     }
 
     private fun queryTagCandidatesByFragments(
@@ -1291,7 +1257,9 @@ class MemoryRepository(private val context: Context, profileId: String) {
                 debug = buildDebug(debugKeywords = emptyList())
             )
         }
-        val keywordTokensForLexicalMatch = buildLexicalQueryTokens(query, keywords)
+        val aliases = com.ai.assistance.operit.core.companion.CompanionStore(context).read(aliasScope)
+        val keywordTokensForLexicalMatch = ChineseRecall.terms(query, buildLexicalQueryTokens(query, keywords),
+            aliases.keys().asSequence().associateWith { aliases.getString(it) })
 
         val scores = mutableMapOf<Long, Double>()
         val scorePartsByMemoryId = mutableMapOf<Long, SearchScoreParts>()
@@ -1336,7 +1304,7 @@ class MemoryRepository(private val context: Context, profileId: String) {
         }
 
 
-        // 1. Keyword-based search (DB title contains any fragment from the query)
+        // 1. Keyword search across authorized titles and full text, including short Chinese names
         val keywordResults = queryTitleCandidatesByFragments(
             fragments = keywordTokensForLexicalMatch,
             scopedMemories = memoriesToSearch
@@ -1345,7 +1313,7 @@ class MemoryRepository(private val context: Context, profileId: String) {
         if (keywordResults.isNotEmpty()) {
             com.ai.assistance.operit.util.AppLogger.d(
                 "MemoryRepo",
-                "Keyword search (title fragments): ${keywordResults.size} matches"
+                "Keyword search (title and body): ${keywordResults.size} matches"
             )
         }
         if (effectiveKeywordWeight > 0.0) {
@@ -1484,7 +1452,7 @@ class MemoryRepository(private val context: Context, profileId: String) {
             // Propagate score through outgoing links
             sourceMemory.links.forEach { link ->
                 val targetMemory = link.target.target
-                if (targetMemory != null) {
+                if (targetMemory != null && memoriesToSearch.any { it.id == targetMemory.id }) {
                     // 边权重越高，传播的分数越多
                     val propagatedScore = (sourceScore * link.weight * graphPropagationWeight) + basePropagationScore
                     scores[targetMemory.id] = scores.getOrDefault(targetMemory.id, 0.0) + propagatedScore
@@ -1496,7 +1464,7 @@ class MemoryRepository(private val context: Context, profileId: String) {
             // Propagate score through incoming links (backlinks)
             sourceMemory.backlinks.forEach { link ->
                 val targetMemory = link.source.target
-                if (targetMemory != null) {
+                if (targetMemory != null && memoriesToSearch.any { it.id == targetMemory.id }) {
                     // 边权重越高，传播的分数越多
                     val propagatedScore = (sourceScore * link.weight * graphPropagationWeight) + basePropagationScore
                     scores[targetMemory.id] = scores.getOrDefault(targetMemory.id, 0.0) + propagatedScore
@@ -1681,7 +1649,9 @@ class MemoryRepository(private val context: Context, profileId: String) {
         val effectiveKeywordWeight = resolvedWeights.effectiveKeywordWeight
         val effectiveTagWeight = resolvedWeights.effectiveTagWeight
         val effectiveSemanticWeight = resolvedWeights.effectiveSemanticWeight
-        val keywordTokensForLexicalMatch = buildLexicalQueryTokens(query, keywords)
+        val aliases = com.ai.assistance.operit.core.companion.CompanionStore(context).read(aliasScope)
+        val keywordTokensForLexicalMatch = ChineseRecall.terms(query, buildLexicalQueryTokens(query, keywords),
+            aliases.keys().asSequence().associateWith { aliases.getString(it) })
         val scores = mutableMapOf<Long, Double>()
 
         com.ai.assistance.operit.util.AppLogger.d(

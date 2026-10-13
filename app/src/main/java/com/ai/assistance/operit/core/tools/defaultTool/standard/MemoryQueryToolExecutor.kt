@@ -318,7 +318,10 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
                 excludedBySnapshotCount = excludedBySnapshotCount
             )
             AppLogger.d(TAG, "Memory query result for '$query':\n$formattedResult")
-            ToolResult(toolName = tool.name, success = true, result = formattedResult)
+            ToolResult(toolName = tool.name, success = true, result = formattedResult.copy(memories = formattedResult.memories.map { item ->
+                item.copy(content = com.ai.assistance.operit.data.repository.ChineseRecall.excerpt(item.content,
+                    com.ai.assistance.operit.util.TextSegmenter.segment(query)), isExcerpt = item.content.length > 700)
+            }))
         } catch (e: Exception) {
             AppLogger.e(TAG, "Memory query failed", e)
             ToolResult(toolName = tool.name, success = false, result = StringResultData(""), error = "Failed to execute memory query: ${e.message}")
@@ -347,7 +350,11 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
         AppLogger.d(TAG, "Getting memory by title: $title, chunk_index: $chunkIndexParam, chunk_range: $chunkRangeParam, query: $queryParam, limit: $chunkLimitParam")
 
         return try {
-            val memory = memoryRepository.findMemoryByTitle(title)
+            val requestedId = tool.parameters.find { it.name == "memory_id" }?.value
+            val memory = if (requestedId == null) memoryRepository.findMemoryByTitle(title)
+                else memoryRepository.findMemoryById(requestedId.toLong())?.also {
+                    require(it.title == title) { "记忆ID与标题不一致，请重新检索" }
+                }
             if (memory == null) {
                 return ToolResult(
                     toolName = tool.name,
@@ -1347,7 +1354,8 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
                 tags = memory.tags.map { it.name },
                 createdAt = sdf.format(memory.createdAt),
                 chunkInfo = chunkInfo,
-                chunkIndices = chunkIndices
+                chunkIndices = chunkIndices,
+                memoryId = memory.id
             )
         }
         MemoryQueryResultData(

@@ -66,10 +66,13 @@ fun PrivateSocialControls(chatId: String, actor: String?, viewModel: ChatViewMod
     val links = remember(actor, revision) { if (actor == null) emptyList() else store.ids().mapNotNull { id ->
         store.read(id).optJSONObject("seen")?.optJSONObject(actor)?.let { id to it.optString("excerpt") }
     } }
+    var roomOpen by remember(chatId) { mutableStateOf(false) }
     Row(modifier) {
+        if (!actor.isNullOrBlank()) TextButton(onClick = { roomOpen = true }) { Text("房间") }
         TextButton(onClick = { tab = "关系网" }) { Text("关系网") }
         if (links.isNotEmpty()) TextButton(onClick = { tab = "参与过的群聊" }) { Text("群聊记忆 (${links.size})") }
     }
+    if (roomOpen && !actor.isNullOrBlank()) com.ai.assistance.operit.ui.features.settings.screens.AssistantRoomDialog(actor, chatId) { roomOpen = false }
     if (tab.isNotEmpty()) AlertDialog(onDismissRequest = { tab = "" }, title = { Text(tab) }, text = {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (tab == "关系网") RelationshipEditor(chatId)

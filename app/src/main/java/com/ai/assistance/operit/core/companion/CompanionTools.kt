@@ -12,9 +12,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
+    val names = RoomTools.names + setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
 
-    fun prompts(): List<ToolPrompt> = listOf(
+    fun prompts(): List<ToolPrompt> = RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_explore",
             description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，须在用户指定的自己私聊中使用；pause 只暂停后续探索预约。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
@@ -57,7 +57,8 @@ object CompanionTools {
         ToolParameterSchema(name = name, type = "string", description = description, required = required)
 
     fun register(handler: AIToolHandler, context: Context) {
-        names.forEach { name ->
+        RoomTools.register(handler, context)
+        names.filterNot { it in RoomTools.names }.forEach { name ->
             handler.registerTool(name = name, descriptionGenerator = { name }, executor = { tool ->
                 try {
                     val chatId = required(tool, "__operit_package_chat_id")
