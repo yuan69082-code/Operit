@@ -10,9 +10,9 @@ import org.mockito.kotlin.mock
 /**
  * Guards the registration surface remote MCP plugins depend on (issue #907).
  *
- * Bringing a remote plugin up only installs a runtime descriptor. The AI can reach it only once
- * the plugin is also registered as a server, because the "Available packages" prompt section and
- * the package auto-activation path both read [MCPManager.getRegisteredServers].
+ * Runtime descriptors and registered schemas are separate. The configuration catalog can now
+ * advertise an assistant's selected service before connection; these tests cover the runtime
+ * registration used by loaders, independently of that catalog.
  */
 class McpServerRegistrationTest {
 

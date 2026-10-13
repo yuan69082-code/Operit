@@ -120,6 +120,7 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         val startTime = System.currentTimeMillis()
         appStartupTimeMs = startTime
         instance = this
+        com.ai.assistance.operit.core.awareness.SoftwareAwareness.initialize(applicationContext)
 
         // Workers and receivers can cold-start the process without creating an Activity.
         // Initialize process-wide preference dependencies before those entry points can run.

@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.packages.screens.artifact.viewmodel
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import android.widget.Toast
@@ -726,7 +728,7 @@ class ArtifactMarketViewModel(
     )
 
     private fun publishDraftPrefs(publishContext: ArtifactPublishClusterContext?): SharedPreferences {
-        return context.getSharedPreferences(
+        return context.observedSharedPreferences(
             "artifact_publish_draft_${publishDraftScope(publishContext)}",
             Context.MODE_PRIVATE
         )

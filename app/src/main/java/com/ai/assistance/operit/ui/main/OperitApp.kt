@@ -117,6 +117,10 @@ fun OperitApp(
     val currentRouteEntry = routerState.currentEntry
     val currentScreen = AppRouteCatalog.resolveScreen(navigationModel, currentRouteEntry) ?: Screen.AiChat
     val selectedItem = currentScreen.navItem
+    LaunchedEffect(currentRouteEntry.routeId) {
+        com.ai.assistance.operit.core.awareness.SoftwareAwareness.record(appContext, "page", "打开软件页面",
+            "navigation", org.json.JSONObject().put("route", currentRouteEntry.routeId), wake = false)
+    }
     // 当前导航栈中仍存活的路由 screenKey（路由级 ViewModelStore 清理依据：
     // AppContent 在转场完成时只保留这些键的 owner）
     val aliveScreenKeys: Set<String> =

@@ -5,7 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import com.ai.assistance.operit.data.preferences.observedPreferencesDataStore as preferencesDataStore
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.ui.features.token.model.TabConfig
 import com.ai.assistance.operit.ui.features.token.model.UrlConfig

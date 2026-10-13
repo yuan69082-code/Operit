@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.core.group
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
@@ -7,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Additive storage: existing assistant and chat databases are not rewritten. */
 class GroupStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("vio_group_sessions_v1", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.observedSharedPreferences("vio_group_sessions_v1", Context.MODE_PRIVATE)
     companion object {
         private val lock = Any()
         val revision = MutableStateFlow(0L)

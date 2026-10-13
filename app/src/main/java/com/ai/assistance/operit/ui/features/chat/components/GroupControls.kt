@@ -83,6 +83,8 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
         }
         TextButton(onClick = { tab = "群设置" }) { Text("群设置") }
         TextButton(onClick = { tab = "成员" }) { Text("成员") }
+        TextButton(onClick = { tab = "禁言" }) { Text("禁言") }
+        TextButton(onClick = { tab = "群待办" }) { Text("群待办") }
         TextButton(onClick = { tab = "关系网" }) { Text("关系网") }
         TextButton(onClick = { tab = "游戏" }) { Text("游戏") }
         TextButton(onClick = { tab = "活动" }) { Text(if (settings.optString("status") == "running") settings.optString("speaker", "讨论中") else "活动记录") }
@@ -92,6 +94,8 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             when(tab) {
                 "关系网" -> RelationshipEditor(chatId)
+                "禁言" -> GroupMutePanel(chatId, members)
+                "群待办" -> GroupTasksPanel(chatId, members)
                 "成员" -> {
                     var available by remember { mutableStateOf(emptyList<CharacterCard>()) }
                     LaunchedEffect(revision) { available = CharacterCardManager.getInstance(context).getAllCharacterCards() }
@@ -135,6 +139,8 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
                     }) { Text("确定") }
                 }
                 "群设置" -> {
+                    GroupMemberModels(members)
+                    HorizontalDivider()
                     Text("成员沿用各自的个人记忆、模型和能力。关联私聊的近期内容自动带入，较早记录按需查看。")
                     members.forEach { member ->
                         Text(member.name, style = MaterialTheme.typography.titleSmall)

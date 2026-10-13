@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.toolbox.screens.shellexecutor
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.material.icons.Icons
@@ -21,7 +23,7 @@ class ShellCommandManager(private val context: Context) {
     private val MAX_HISTORY_SIZE = 100
     
     private val prefs: SharedPreferences by lazy {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
     
     /**

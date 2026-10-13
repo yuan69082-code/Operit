@@ -60,6 +60,7 @@ import java.util.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import com.ai.assistance.operit.data.mcp.InstallResult
 import com.ai.assistance.operit.data.mcp.InstallProgress
 import com.ai.assistance.operit.ui.features.startup.screens.LocalPluginLoadingState
@@ -95,6 +96,8 @@ fun MCPConfigScreen(
 
     // 状态收集
     val serverStatusMap = mcpLocalServer.serverStatus.collectAsState().value
+    val mcpManager = remember { com.ai.assistance.operit.core.tools.mcp.MCPManager.getInstance(context) }
+    val runtimeStates by mcpManager.runtimeStates.collectAsState()
     val installProgress by viewModel.installProgress.collectAsState()
     val installResult by viewModel.installResult.collectAsState()
     val currentInstallingPlugin by viewModel.currentServer.collectAsState()
@@ -255,22 +258,17 @@ fun MCPConfigScreen(
         wasPluginLoading.value = isPluginLoading
     }
     
-    // 存储每个插件的工具信息
-    var pluginToolsMap by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
-
-    // 计算插件启动统计 - 只统计已启用的插件
-    val totalEnabledPlugins = remember(visiblePluginIds) {
-        visiblePluginIds.count { pluginId -> (pluginId in assistantAccess.allowedMcpServers) }
-    }
-    val successfulToolRequests = remember { mutableStateOf(0) }
-    
-    // 更新成功请求工具的插件数量
-    LaunchedEffect(pluginToolsMap) {
-        successfulToolRequests.value = pluginToolsMap.filter { it.value.isNotEmpty() }.size
-    }
+    // The numerator and denominator refer to the same assistant selection, never cached schemas.
+    val selectedPluginIds = visiblePluginIds.intersect(assistantAccess.allowedMcpServers.toSet())
+    val totalEnabledPlugins = selectedPluginIds.size
+    val successfulToolRequests = com.ai.assistance.operit.core.tools.mcp.McpSelectionPolicy.readyCount(
+        selectedPluginIds, runtimeStates
+    )
+    val pluginToolsMap = runtimeStates.mapValues { (_, state) -> state.tools.orEmpty().map { it.name } }
 
     val computedSortedPluginIds = remember(
         visiblePluginIds,
+        assistantAccess,
         pluginToolsMap,
         serverStatusMap,
         mcpConfigSnapshot
@@ -335,81 +333,38 @@ fun MCPConfigScreen(
         }
     }
 
-    LaunchedEffect(toolRefreshTrigger, mcpConfigSnapshot) {
-        if (toolRefreshTrigger == 0) {
-            return@LaunchedEffect
-        }
-
+    LaunchedEffect(toolRefreshTrigger, mcpConfigSnapshot, selectedPluginIds) {
+        if (toolRefreshTrigger == 0) return@LaunchedEffect
         isToolsLoading = true
-        if (visiblePluginIds.isEmpty()) {
-            AppLogger.d("MCPConfigScreen", "No configured plugins, clearing tool list.")
-            pluginToolsMap = emptyMap()
-            isToolsLoading = false
-            return@LaunchedEffect
-        }
-
-        AppLogger.d("MCPConfigScreen", "Fetching tools for configured services...")
-
-        val toolsMap = mutableMapOf<String, List<String>>()
-        // Keep discovering tools after the page becomes interactive; only the full-screen mask is bounded.
         val fullscreenLoadingTimeout = launch {
             delay(2_000)
             isToolsLoading = false
         }
-
         try {
-            val hasLocalPlugins = visiblePluginIds.any { pluginId ->
-                mcpConfigSnapshot.pluginMetadata[pluginId]?.type != "remote"
-            }
-            val bridgeServiceTools = if (hasLocalPlugins) {
-                parseMCPServiceToolNames(MCPBridge.getInstance(context).listMcpServices())
-            } else {
-                emptyMap()
-            }
-
-            for (pluginId in visiblePluginIds) {
-                try {
-                    val metadata = mcpConfigSnapshot.pluginMetadata[pluginId]
-                    val isRemote = metadata?.type == "remote"
-                    val toolNames = if (isRemote) {
-                        mcpRepository.getRemoteToolNames(pluginId)
-                    } else {
-                        if (!mcpLocalServer.isPluginRuntimeReady(pluginId)) {
-                            AppLogger.d("MCPConfigScreen", "Plugin $pluginId runtime directory is not ready, skip tool fetch.")
-                            continue
+            // No request is sent to an unselected server, including servers without a cache.
+            withContext(Dispatchers.IO) {
+                val limit = kotlinx.coroutines.sync.Semaphore(4)
+                selectedPluginIds.map { pluginId ->
+                    async {
+                        limit.withPermit {
+                            try {
+                                if (mcpLocalServer.isServerEnabled(pluginId)) {
+                                    mcpRepository.refreshToolsForPlugin(pluginId)
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                AppLogger.e("MCPConfigScreen", "Tool discovery failed: $pluginId", e)
+                            }
                         }
-                        bridgeServiceTools[pluginId].orEmpty()
                     }
-
-                    if (toolNames.isNotEmpty()) {
-                        toolsMap[pluginId] = toolNames
-                        AppLogger.d("MCPConfigScreen", "Plugin $pluginId has ${toolNames.size} tools: ${toolNames.joinToString(", ")}")
-                    } else {
-                        AppLogger.d("MCPConfigScreen", "Plugin $pluginId: no tools found.")
-                    }
-                } catch (e: Exception) {
-                    AppLogger.e("MCPConfigScreen", "Error getting tools for plugin $pluginId: ${e.message}")
-                }
+                }.awaitAll()
             }
-
-            // 更新工具映射
-            pluginToolsMap = toolsMap
-
-            if (toolsMap.isNotEmpty()) {
-                val totalTools = toolsMap.values.sumOf { it.size }
-                AppLogger.i("MCPConfigScreen", "Loaded $totalTools tools from ${toolsMap.size} plugins")
-            } else {
-                AppLogger.i("MCPConfigScreen", "No tools found for any installed plugins.")
-            }
-        } catch (e: Exception) {
-            AppLogger.e("MCPConfigScreen", "Error fetching tools", e)
-            Toast.makeText(context, context.getString(R.string.tools_load_error, e.message), Toast.LENGTH_SHORT).show()
         } finally {
             fullscreenLoadingTimeout.cancel()
             isToolsLoading = false
         }
     }
-
 
     // 获取选中插件的配置
     LaunchedEffect(selectedPluginId) {
@@ -1212,15 +1167,15 @@ fun MCPConfigScreen(
                                             .background(
                                                 color = when {
                                                     totalEnabledPlugins == 0 -> Color.Gray
-                                                    successfulToolRequests.value == totalEnabledPlugins -> Color.Green
-                                                    successfulToolRequests.value > 0 -> Color(0xFFFFA500) // Orange
+                                                    successfulToolRequests == totalEnabledPlugins -> Color.Green
+                                                    successfulToolRequests > 0 -> Color(0xFFFFA500) // Orange
                                                     else -> Color.Red
                                                 },
                                                 shape = RoundedCornerShape(4.dp)
                                             )
                                     )
                                     Text(
-                                        text = "${successfulToolRequests.value}/$totalEnabledPlugins",
+                                        text = stringResource(R.string.mcp_ready_selected, successfulToolRequests, totalEnabledPlugins),
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1236,7 +1191,7 @@ fun MCPConfigScreen(
                         
                         // 插件列表
                         items(items = displayedPluginIds, key = { it }) { pluginId ->
-                            val pluginInfo = remember(pluginId) {
+                            val pluginInfo = remember(pluginId, mcpConfigSnapshot) {
                                 mcpRepository.getInstalledPluginInfo(pluginId)
                             }
                             val isRemote = pluginInfo?.type == "remote"
@@ -1252,29 +1207,11 @@ fun MCPConfigScreen(
                                 mutableStateOf((pluginId in assistantAccess.allowedMcpServers))
                             }
 
-                            // 获取插件运行状态
-                            val pluginRunningState = remember(pluginId) {
-                                mutableStateOf(mcpLocalServer.isServerLikelyRunning(pluginId))
-                            }
-                            
-                            // 检查运行目录就绪状态
-                            LaunchedEffect(pluginId) {
-                                deploySuccessState.value = mcpLocalServer.isPluginRuntimeReady(pluginId)
-                            }
-                            
-                            // 监听服务器状态变化
-                            LaunchedEffect(pluginId) {
-                                mcpLocalServer.serverStatus.collect { _ ->
-                                    pluginRunningState.value = mcpLocalServer.isServerLikelyRunning(pluginId)
-                                    // 重新检查运行目录就绪状态
-                                    deploySuccessState.value = mcpLocalServer.isPluginRuntimeReady(pluginId)
-                                }
-                            }
-                            
-                            // Selection belongs to the current assistant, not the shared service.
-                            LaunchedEffect(pluginId, assistantAccess) {
-                                mcpLocalServer.mcpConfig.collect { _ ->
-                                    pluginEnabledState.value = (pluginId in assistantAccess.allowedMcpServers)
+                            val pluginRunning = runtimeStates[pluginId]?.ready == true
+
+                            LaunchedEffect(pluginId, mcpConfigSnapshot) {
+                                deploySuccessState.value = withContext(Dispatchers.IO) {
+                                    mcpLocalServer.isPluginRuntimeReady(pluginId)
                                 }
                             }
 
@@ -1328,7 +1265,8 @@ fun MCPConfigScreen(
                                             mcpLocalServer.setServerSelected(pluginId, isChecked)
                                         }
                                     },
-                                    isRunning = pluginRunningState.value,
+                                    isRunning = pluginRunning,
+                                    runtimeState = runtimeStates[pluginId],
                                     isDeployed = deploySuccessState.value,
                                     isConfigValid = isRemote || deploySuccessState.value,
                                     invalidConfigReason = invalidConfigReason
@@ -1531,6 +1469,7 @@ private fun PluginListItem(
     isEnabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     isRunning: Boolean = false,
+    runtimeState: com.ai.assistance.operit.core.tools.mcp.McpRuntimeState? = null,
     isDeployed: Boolean = false,
     isConfigValid: Boolean = true,
     invalidConfigReason: String? = null
@@ -1694,6 +1633,24 @@ private fun PluginListItem(
                     )
                 )
             }
+
+            val status = runtimeState ?: com.ai.assistance.operit.core.tools.mcp.McpRuntimeState()
+            Text(
+                text = when {
+                    !isEnabled -> stringResource(R.string.mcp_not_selected_for_assistant)
+                    status.discovering -> stringResource(R.string.mcp_discovering_tools)
+                    status.error != null -> stringResource(R.string.mcp_discovery_failed, status.error)
+                    status.ready && toolNames.isEmpty() -> stringResource(R.string.mcp_connected_no_tools)
+                    status.ready -> stringResource(R.string.mcp_tools_ready, toolNames.size)
+                    status.connected -> stringResource(R.string.mcp_connected_pending_tools)
+                    else -> stringResource(R.string.mcp_not_connected)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isEnabled && status.error != null) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
 
             // 工具标签区域（如果有）
             if (toolNames.isNotEmpty()) {

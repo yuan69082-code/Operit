@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import java.security.MessageDigest
 
@@ -38,7 +40,7 @@ class SkillVisibilityPreferences private constructor(private val context: Contex
         }
     }
 
-    private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    private val prefs by lazy { context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
     fun isSkillVisibleToAi(skillName: String): Boolean {
         if (skillName.isBlank()) return true

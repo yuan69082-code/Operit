@@ -11,6 +11,10 @@ import com.ai.assistance.operit.core.tools.system.Terminal
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import com.ai.assistance.operit.data.mcp.McpSelection
+import com.ai.assistance.operit.core.tools.mcp.McpSelectionPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -166,6 +170,7 @@ class MCPStarter(private val context: Context) {
         initBridgeFirst: Boolean
     ): Boolean {
         try {
+            check(pluginId in McpSelection.selectedIds(context)) { "MCP is not selected for this assistant: $pluginId" }
             val mcpLocalServer = MCPLocalServer.getInstance(context)
             val mcpRepository = MCPRepository(context)
             AppLogger.d(TAG, "Refreshing MCP config before starting plugin: $pluginId")
@@ -359,6 +364,8 @@ class MCPStarter(private val context: Context) {
 
             statusCallback(StartStatus.Error("Service $pluginId started but is not active"))
             return false
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             AppLogger.e(TAG, "Error starting plugin", e)
             statusCallback(StartStatus.Error("Start error: ${e.message}"))
@@ -367,10 +374,11 @@ class MCPStarter(private val context: Context) {
     }
 
     /** Start all deployed plugins */
-    fun startAllDeployedPlugins(
-        progressListener: PluginStartProgressListener = object : PluginStartProgressListener {}
+    suspend fun startAllDeployedPlugins(
+        progressListener: PluginStartProgressListener = object : PluginStartProgressListener {},
+        selectedPluginIds: Set<String>? = null
     ) {
-        starterScope.launch {
+        coroutineScope {
             try {
                 val mcpRepository = MCPRepository(context)
                 val mcpLocalServer = MCPLocalServer.getInstance(context)
@@ -380,9 +388,11 @@ class MCPStarter(private val context: Context) {
 
                 // Get all installed plugins and partition into enabled and disabled
                 val allInstalledPlugins = mcpRepository.installedPluginIds.first()
-                val (pluginsToStart, disabledPlugins) = allInstalledPlugins.partition { pluginId ->
-                    mcpLocalServer.isServerEnabled(pluginId)
-                }
+                val pluginsToStart = McpSelectionPolicy.startupIds(
+                    allInstalledPlugins, selectedPluginIds ?: McpSelection.selectedIds(context), mcpLocalServer::isServerEnabled
+                )
+                // Only a global disable may stop a shared runtime. Another assistant can still use it.
+                val disabledPlugins = allInstalledPlugins.filterNot(mcpLocalServer::isServerEnabled)
 
                 mcpRepository.unregisterToolsForPlugins(disabledPlugins)
                 disabledPlugins.forEach { pluginId ->
@@ -402,7 +412,7 @@ class MCPStarter(private val context: Context) {
 
                 if (pluginsToStart.isEmpty()) {
                     progressListener.onAllPluginsStarted(0, 0, PluginInitStatus.SUCCESS)
-                    return@launch
+                    return@coroutineScope
                 }
 
                 val hasLocalPlugin = pluginsToStart.any { pluginId ->
@@ -498,6 +508,8 @@ class MCPStarter(private val context: Context) {
                     PluginInitStatus.SUCCESS
                 )
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Error starting plugins", e)
                 progressListener.onAllPluginsStarted(0, 0, PluginInitStatus.OTHER_ERROR)
@@ -524,14 +536,16 @@ class MCPStarter(private val context: Context) {
             return VerificationResult(pluginId, serviceName, false, 0, message)
         }
 
-        if (!mcpLocalServer.hasValidToolCache(pluginId)) {
-            cacheToolsFromService(pluginId)
+        try {
+            // A cached list cannot prove this session's tools/list works.
+            mcpRepository.refreshToolsForPlugin(pluginId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val message = e.message ?: e.javaClass.simpleName
+            progressListener.onPluginLog(pluginId, message)
+            return VerificationResult(pluginId, serviceName, false, 0, message)
         }
-
-        // Register while this plugin is known to be up. Registering the whole batch after the
-        // fan-out means a stalled or failing plugin keeps every other plugin, remote ones
-        // included, out of the AI tool list.
-        mcpRepository.registerToolsForPlugin(pluginId)
 
         return VerificationResult(
             pluginId = pluginId,
@@ -651,7 +665,10 @@ class MCPStarter(private val context: Context) {
 
                 else -> return null
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            progressListener?.onPluginLog(pluginId, e.message ?: e.javaClass.simpleName)
             AppLogger.e(TAG, "Failed to register plugin $pluginId", e)
             return null
         }
@@ -806,9 +823,9 @@ class MCPStarter(private val context: Context) {
             val mcpRepository = MCPRepository(context)
             val mcpLocalServer = MCPLocalServer.getInstance(context)
             val mcpManager = MCPManager.getInstance(context)
-            val enabledPlugins = mcpRepository.installedPluginIds.first().filter { pluginId ->
-                mcpLocalServer.isServerEnabled(pluginId)
-            }
+            val enabledPlugins = McpSelectionPolicy.startupIds(
+                mcpRepository.installedPluginIds.first(), McpSelection.selectedIds(context), mcpLocalServer::isServerEnabled
+            )
 
             for (pluginId in enabledPlugins) {
                 val pluginInfo = mcpRepository.getInstalledPluginInfo(pluginId) ?: continue

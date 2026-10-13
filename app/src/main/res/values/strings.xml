@@ -2431,6 +2431,14 @@
     <string name="open_file_picker">打开文件选择器</string>
     <string name="start_plugin">启动插件</string>
     <string name="mcp_management">MCP管理</string>
+    <string name="mcp_ready_selected">就绪 %1$d / 已选 %2$d</string>
+    <string name="mcp_not_selected_for_assistant">当前助手未选择</string>
+    <string name="mcp_discovering_tools">正在获取工具列表…</string>
+    <string name="mcp_discovery_failed">连接或工具发现失败：%1$s</string>
+    <string name="mcp_connected_no_tools">已连接，服务未提供工具</string>
+    <string name="mcp_tools_ready">%1$d 个工具可用</string>
+    <string name="mcp_not_connected">未连接</string>
+    <string name="mcp_connected_pending_tools">已连接，等待确认工具列表</string>
     <string name="running">运行中</string>
     <string name="not_running">未运行</string>
     <string name="no_plugins">暂无插件</string>

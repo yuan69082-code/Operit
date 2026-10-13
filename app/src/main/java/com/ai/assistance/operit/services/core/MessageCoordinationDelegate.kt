@@ -567,7 +567,7 @@ class MessageCoordinationDelegate(
         val isBackgroundSend =
             !chatIdOverride.isNullOrBlank() && chatIdOverride != chatHistoryDelegate.currentChatId.value
         // 自动续聊由总结消息中的续接指令驱动，不能消费用户尚未提交的编辑器状态。
-        val shouldReadComposerState = !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
+        val shouldReadComposerState = !isGroupOrchestrationTurn && !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
         val effectiveMessageTextOverride = if (isAutoContinuation) "" else messageTextOverride
         // 获取当前聊天ID和工作区路径
         val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
@@ -804,7 +804,7 @@ class MessageCoordinationDelegate(
         )
 
         // 只有在非续写（即用户主动发送）时才清空附件和UI状态
-        if (!isBackgroundSend && !isContinuation && !turnOptions.voiceCall) {
+        if (!isBackgroundSend && !isContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded) {
             if (currentAttachments.isNotEmpty()) {
                 attachmentDelegate.clearAttachments()
             }
@@ -853,6 +853,7 @@ class MessageCoordinationDelegate(
         if (orderedMembers.isEmpty()) {
             return false
         }
+        check(com.ai.assistance.operit.core.group.GroupModeration(context).mayPublish(chatId, "user")) { "你目前在本群被禁言，可以在禁言或游戏面板管理" }
         val availableCards = characterCardManager.getAllCharacterCards().map { it.id }.toSet()
         require(orderedMembers.all { it.characterCardId in availableCards }) { "群聊中有已删除的助手，请先调整群成员。" }
 
@@ -906,7 +907,8 @@ class MessageCoordinationDelegate(
                 workspacePath = workspacePath,
                 workspaceEnv = workspaceEnv,
                 replyToMessage = replyToMessage,
-                chatId = chatId
+                chatId = chatId,
+                memberId = orderedMembers.first().characterCardId
             )
         val userMessage = ChatMessage(
             sender = "user",
@@ -920,6 +922,8 @@ class MessageCoordinationDelegate(
                 }
         )
         chatHistoryDelegate.addMessageToChat(userMessage, chatId)
+        if (!turnOptions.hideUserMessage) com.ai.assistance.operit.core.awareness.SoftwareAwareness.userMessage(
+            context, chatId, null, "group_message_sent")
         com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
         titleFallback?.let { fallbackTitle ->
             launchConversationTitleGeneration(
@@ -980,6 +984,7 @@ class MessageCoordinationDelegate(
         groupStore.update(chatId) {
             it.put("status", if (paused) "paused" else "ended")
             it.remove("speaker")
+            it.remove("speaker_id")
             it.remove("decision")
             if (!paused) it.remove("pending")
         }
@@ -1002,6 +1007,67 @@ class MessageCoordinationDelegate(
 
     fun isGroupRunning(chatId: String) = groupJobs[chatId]?.isActive == true
 
+    fun deliverGroupMessage(chatId: String, item: JSONObject) {
+        if (isGroupRunning(chatId) || messageProcessingDelegate.isChatLoading(chatId)) return
+        launchGroup(chatId) {
+            val actor = item.getString("actor")
+            val group = resolveTargetGroupForChat(chatId)
+            if (group == null) {
+                com.ai.assistance.operit.core.group.GroupDelivery.remove(groupStore, chatId, item.getString("id"))
+                groupStore.log(chatId, "投递取消", "目标群聊已删除", actor)
+                return@launchGroup
+            }
+            val members = group.members.map { it.characterCardId }
+            if (actor !in members || !com.ai.assistance.operit.core.group.GroupModeration(context).mayPublish(chatId, actor)) {
+                com.ai.assistance.operit.core.group.GroupDelivery.remove(groupStore, chatId, item.getString("id"))
+                groupStore.log(chatId, "投递取消", "发信助手已离群或被禁言", actor)
+                return@launchGroup
+            }
+            val card = characterCardManager.getCharacterCard(actor)
+            val message = ChatMessage(sender = "ai", roleName = card.name, content = item.getString("text"),
+                timestamp = item.getLong("timestamp"), completedAt = System.currentTimeMillis())
+            // The allocated timestamp is persisted with the outbox item. Replaying after a crash
+            // updates this same message rather than appending a second copy.
+            com.ai.assistance.operit.core.group.GroupProvenance.record(context, chatId, message, actor)
+            chatHistoryDelegate.addMessageToChat(message, chatId)
+            com.ai.assistance.operit.core.group.GroupDelivery.remove(groupStore, chatId, item.getString("id"))
+            groupStore.log(chatId, "已发送", "私聊转群：${item.getString("id")}", actor)
+            com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
+            val requested = groupStore.strings(item.optJSONArray("targets"))
+            val targets = if (requested.isEmpty()) members.filter { it != actor } else requested.filter { it in members && it != actor }
+            runGroupQueue(chatId, targets, "", null, ChatTurnOptions())
+        }
+    }
+
+    fun processGroupTask(chatId: String, task: JSONObject) {
+        if (isGroupRunning(chatId) || messageProcessingDelegate.isChatLoading(chatId)) return
+        launchGroup(chatId) {
+            val board = com.ai.assistance.operit.core.tasks.TaskBoard(context, chatId, true)
+            val id = task.getString("id")
+            val dispatch = task.getJSONObject("dispatch")
+            val event = dispatch.getString("id")
+            val actor = dispatch.getString("recipient")
+            val claimed = board.claim(id, event) ?: return@launchGroup
+            try {
+                val group = requireNotNull(resolveTargetGroupForChat(chatId))
+                check(group.members.any { it.characterCardId == actor }) { "接手助手已离群" }
+                check(com.ai.assistance.operit.core.group.GroupModeration(context).mayPublish(chatId, actor)) { "接手助手被禁言" }
+                groupStore.update(chatId) { it.put("task_event", board.prompt(claimed)).put("task_actor", actor) }
+                runGroupQueue(chatId, listOf(actor), "", null, ChatTurnOptions())
+                check(groupStore.read(chatId).optString("last_member_error").isBlank()) { groupStore.read(chatId).optString("last_member_error") }
+                board.dispatchState(id, event, "handled", "本次处理结束，事项是否完成请看实际进展")
+            } catch (cancelled: CancellationException) {
+                board.dispatchState(id, event, "interrupted", "执行中断，已保留实际进展")
+                throw cancelled
+            } catch (failure: Exception) {
+                board.dispatchState(id, event, "failed", failure.message.orEmpty().take(600))
+                throw failure
+            } finally {
+                groupStore.update(chatId) { it.remove("task_event"); it.remove("task_actor") }
+            }
+        }
+    }
+
     private suspend fun runGroupQueue(
         chatId: String, initial: List<String>, userText: String, prebuilt: String?, options: ChatTurnOptions
     ) {
@@ -1012,6 +1078,7 @@ class MessageCoordinationDelegate(
         var quiet = 0
         var completedTurns = 0
         val startedAt = System.currentTimeMillis()
+        groupStore.update(chatId) { it.remove("last_member_error") }
         groupStore.log(chatId, "开始", "本轮安排 ${initial.size} 位助手")
         while (queue.isNotEmpty()) {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
@@ -1021,6 +1088,9 @@ class MessageCoordinationDelegate(
             val actor = queue.removeFirst()
             if (games.pending(chatId)?.let { actor !in it } == true) continue
             if (actor !in ids) { groupStore.log(chatId, "跳过", "待发言助手已离群", actor); continue }
+            if (com.ai.assistance.operit.core.group.GroupModeration(context).manuallyMuted(chatId, actor)) {
+                groupStore.log(chatId, "跳过", "助手被禁言", actor); continue
+            }
             val cards = members.associate { it.characterCardId to characterCardManager.getCharacterCard(it.characterCardId) }
             val settings = groupStore.read(chatId)
             val limit = settings.optInt("turn_limit", 0)
@@ -1030,13 +1100,20 @@ class MessageCoordinationDelegate(
                 groupStore.log(chatId, "限额", "达到用户设置的本次讨论上限，可继续")
                 return
             }
-            groupStore.update(chatId) { it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name).remove("decision") }
+            groupStore.update(chatId) { it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name).put("speaker_id", actor).remove("decision") }
             com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
             val gameBefore = games.state(chatId)?.let { com.google.gson.Gson().toJson(it) }
-            val counter = messageProcessingDelegate.getTurnCompleteCounter(chatId) + 1
             messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Processing("${cards.getValue(actor).name} 正在回应"))
             groupStore.log(chatId, "发言", "开始回应", actor)
-            sendMessageInternal(promptFunctionType = PromptFunctionType.CHAT,
+            try {
+                // Resolve before launching, in the member's scope, never the group page's model.
+                val binding = withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(actor)) {
+                    characterCardManager.ensureIndependentSettings(actor)
+                    resolveRoleCardChatModelOverrides(actor)
+                }
+                require(!binding.first.isNullOrBlank()) { "请为 ${cards.getValue(actor).name} 选择自己的模型" }
+                sendMessageInternal(promptFunctionType = PromptFunctionType.CHAT,
+                chatModelConfigIdOverride = binding.first, chatModelIndexOverride = binding.second,
                 isContinuation = !(first && prebuilt != null), skipSummaryCheck = true,
                 roleCardIdOverride = actor, chatIdOverride = chatId,
                 messageTextOverride = if (first && prebuilt != null) userText else "",
@@ -1044,22 +1121,37 @@ class MessageCoordinationDelegate(
                 suppressUserMessageInHistory = true, forceDisableSummary = true,
                 enableGroupOrchestration = false, isGroupOrchestrationTurn = true,
                 groupParticipantNamesText = buildGroupParticipantNamesText(members, cards), turnOptions = options)
-            check(awaitTurnComplete(chatId, counter)) { "${cards.getValue(actor).name} 回应超时，群聊已暂停" }
+            check(messageProcessingDelegate.isChatLoading(chatId)) { "${cards.getValue(actor).name} 未能启动回应，请检查其个人配置" }
+            check(withTimeoutOrNull(180_000) {
+                while (messageProcessingDelegate.isChatLoading(chatId)) delay(100)
+                true
+            } == true) { "${cards.getValue(actor).name} 回应超时" }
             check(withTimeoutOrNull(60_000) {
                 messageProcessingDelegate.activeStreamingChatIds.first { chatId !in it }; true
             } == true) { "上一位助手尚未释放会话，停止排队以免重复发送" }
-            // A failed member must not silently advance and trigger the rest of the queue.
+            // Report failures against this member; other independently configured members can still reply.
             val state = messageProcessingDelegate.inputProcessingStateByChatId.value[chatId]
             if (state is InputProcessingState.Error) error(state.message)
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (failure: Exception) {
+                messageProcessingDelegate.cancelMessageAndWait(chatId)?.join()
+                groupStore.update(chatId) { it.put("last_member_error", "${cards.getValue(actor).name}：${failure.message}") }
+                groupStore.log(chatId, "成员失败", "${cards.getValue(actor).name}：${failure.message}", actor)
+                uiStateDelegate.showErrorMessage("${cards.getValue(actor).name}：${failure.message}")
+                first = false
+                continue
+            }
             first = false
             completedTurns++
             com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
-            val latest = chatHistoryDelegate.getRuntimeChatHistory(chatId).lastOrNull { it.sender == "ai" }
-            groupStore.log(chatId, "完成", "输入 ${latest?.inputTokens ?: 0} / 输出 ${latest?.outputTokens ?: 0} token", actor)
+            groupStore.log(chatId, "完成", "本轮回应处理结束", actor)
             val decision = groupStore.takeDecision(chatId)
             val action = decision?.optString("action")
             quiet = if (action == "quiet") quiet + 1 else 0
-            if (action == "end") { groupStore.log(chatId, "达成结束", requireNotNull(decision).optString("reason"), actor); break }
+            if (action == "end" || action == "wait_user") {
+                groupStore.log(chatId, if (action == "end") "达成结束" else "等待用户", requireNotNull(decision).optString("reason"), actor)
+                break
+            }
             val current = groupStore.read(chatId)
             val gamePending = games.pending(chatId)
             if (gamePending != null) {
@@ -1070,11 +1162,12 @@ class MessageCoordinationDelegate(
                 queue.clear()
                 gamePending.filter { it != "user" }.forEach { queue.addLast(it) }
             }
-            if (gamePending == null && current.optBoolean("continuous") && action == "respond") {
-                groupStore.strings(requireNotNull(decision).optJSONArray("targets")).filter { it in ids && it != actor && it !in queue }.forEach { queue.addLast(it) }
-            }
-            if (gamePending == null && queue.isEmpty() && current.optBoolean("continuous") && quiet < ids.size) {
-                queue.addLast(ids[(ids.indexOf(actor) + 1) % ids.size])
+            if (gamePending == null) {
+                val next = com.ai.assistance.operit.core.group.GroupTurnPolicy.next(queue.toList(), action,
+                    groupStore.strings(decision?.optJSONArray("targets")), ids.toSet(), actor, current.optBoolean("continuous"))
+                queue.clear()
+                next.forEach { queue.addLast(it) }
+                if (action == "wait_user") groupStore.log(chatId, "等待用户", decision?.optString("reason").orEmpty(), actor)
             }
             groupStore.update(chatId) { it.put("pending", JSONArray(queue.toList())) }
             maybeSummarizeAfterGroupRound(chatId, PromptFunctionType.CHAT)

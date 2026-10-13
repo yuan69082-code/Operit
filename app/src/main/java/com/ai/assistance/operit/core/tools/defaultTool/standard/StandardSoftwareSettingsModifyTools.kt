@@ -1853,14 +1853,17 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
             )
         }
 
+        // Capture the executing assistant before launching in the UI lifecycle scope.
+        val selectedMcpIds = com.ai.assistance.operit.data.mcp.McpSelection.selectedIds(context)
         pluginLoadingState.reset()
         pluginLoadingState.show()
-        pluginLoadingState.initializeMCPServer(context, lifecycleScope)
+        pluginLoadingState.initializeMCPServer(context, lifecycleScope, selectedMcpIds)
 
         val startAt = System.currentTimeMillis()
         while (true) {
             val elapsed = System.currentTimeMillis() - startAt
             val finished =
+                !pluginLoadingState.isInitializing() &&
                 pluginLoadingState.progress.value >= 0.999f &&
                     pluginLoadingState.message.value.isNotBlank()
             if (finished || elapsed >= timeoutMs) {
@@ -1870,7 +1873,7 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
         }
 
         val elapsedMs = System.currentTimeMillis() - startAt
-        val timedOut = elapsedMs >= timeoutMs
+        val timedOut = pluginLoadingState.isInitializing() || pluginLoadingState.progress.value < 0.999f
         val plugins = pluginLoadingState.plugins.value
         val pluginLogs = pluginLoadingState.pluginLogs.value
         val failedCount = plugins.count { it.status == PluginStatus.FAILED }
@@ -1893,7 +1896,8 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
                 plugins.none { plugin -> plugin.id == pluginId }
             }
 
-        val hasFailures = failedCount > 0
+        val initializationError = pluginLoadingState.initializationError.value
+        val hasFailures = initializationError != null || failedCount > 0 || plugins.any { it.status != PluginStatus.SUCCESS }
         return ToolResult(
             toolName = tool.name,
             success = !timedOut && !hasFailures,
@@ -1914,7 +1918,9 @@ class StandardSoftwareSettingsModifyTools(private val context: Context) {
             error =
                 when {
                     timedOut -> "MCP restart timed out after ${elapsedMs}ms"
-                    hasFailures -> "Some MCP plugins failed to start"
+                    initializationError != null -> initializationError
+                    hasFailures -> plugins.filter { it.status != PluginStatus.SUCCESS }
+                        .joinToString("; ") { "${it.id}: ${it.message.ifBlank { it.status.name }}" }
                     else -> null
                 }
         )

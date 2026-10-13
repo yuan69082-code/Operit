@@ -695,6 +695,7 @@ object ToolExecutionManager {
 
         return withContext(toolRuntimeContextThreadLocal.asContextElement(runtimeContext) +
             com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(runtimeContext.callerCardId)) {
+            com.ai.assistance.operit.core.awareness.PhoneAwarenessRuntime.toolStarted()
             try {
                 val executor = toolHandler.getToolExecutorOrActivate(toolName)
                 if (executor == null) {
@@ -721,6 +722,7 @@ object ToolExecutionManager {
                 toolHandler.notifyToolExecutionResult(invocation.tool, finalResult)
                 return@withContext finalResult
             } finally {
+                com.ai.assistance.operit.core.awareness.PhoneAwarenessRuntime.toolFinished()
                 toolHandler.notifyToolExecutionFinished(invocation.tool)
             }
         }

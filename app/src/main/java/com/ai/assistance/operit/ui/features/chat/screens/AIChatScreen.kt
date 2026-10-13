@@ -287,6 +287,15 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     val currentChatView = remember(chatHistories, currentChatId) {
         chatHistories.find { it.id == currentChatId }
     }
+    DisposableEffect(chatViewId, currentChatView?.id, currentChatView?.characterCardId, currentChatView?.characterGroupId, isCurrentScreen) {
+        if (!isFloatingMode) com.ai.assistance.operit.core.awareness.SoftwareAwareness.view(context,
+            chatViewId, currentChatView?.id?.takeIf { isCurrentScreen }, currentChatView?.characterCardId,
+            currentChatView?.characterCardName ?: currentChatView?.title, currentChatView?.characterGroupId)
+        onDispose {
+            if (!isFloatingMode) com.ai.assistance.operit.core.awareness.SoftwareAwareness.view(context,
+                chatViewId, null, null, null, null)
+        }
+    }
     val latestChatViewParams by rememberUpdatedState(
         ChatViewHookParams(
             context = context,
@@ -701,10 +710,10 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     var isSavingInitialConfiguration by remember { mutableStateOf(false) }
     var initialConfigurationSaveFailed by
         rememberSaveable(activeChatConfigId) { mutableStateOf(false) }
-    val showConfig =
+    val showConfig = activePrompt !is ActivePrompt.CharacterGroup && (
         shouldShowConfigDialog ||
             isSavingInitialConfiguration ||
-            initialConfigurationSaveFailed
+            initialConfigurationSaveFailed)
 
     // 添加手势状态
     var chatScreenGestureConsumed by remember { mutableStateOf(false) }

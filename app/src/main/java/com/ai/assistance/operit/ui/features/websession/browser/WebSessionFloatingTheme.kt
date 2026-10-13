@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.websession.browser
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.material3.ColorScheme
@@ -35,7 +37,7 @@ internal fun WebSessionFloatingTheme(content: @Composable () -> Unit) {
     var snapshot by remember { mutableStateOf(loadFloatingThemeSnapshot(context, gson)) }
 
     DisposableEffect(context) {
-        val prefs = context.getSharedPreferences(FLOATING_PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(FLOATING_PREFS_NAME, Context.MODE_PRIVATE)
         val listener =
             SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                 if (key == PREF_KEY_COLOR_SCHEME || key == PREF_KEY_TYPOGRAPHY) {
@@ -61,7 +63,7 @@ private fun loadFloatingThemeSnapshot(
     context: Context,
     gson: Gson
 ): WebSessionFloatingThemeSnapshot {
-    val prefs = context.getSharedPreferences(FLOATING_PREFS_NAME, Context.MODE_PRIVATE)
+    val prefs = context.observedSharedPreferences(FLOATING_PREFS_NAME, Context.MODE_PRIVATE)
     val colorScheme =
         prefs
             .getString(PREF_KEY_COLOR_SCHEME, null)

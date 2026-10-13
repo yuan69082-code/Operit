@@ -312,17 +312,21 @@ class MessageProcessingDelegate(
         workspacePath: String?,
         workspaceEnv: String?,
         replyToMessage: ChatMessage?,
-        chatId: String? = null
-    ): String = withContext(Dispatchers.IO) {
+        chatId: String? = null,
+        memberId: String
+    ): String = withContext(Dispatchers.IO + com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(memberId)) {
         val totalStartTime = messageTimingNow()
-        val configId = functionalConfigManager.getConfigIdForFunction(FunctionType.CHAT)
-        val currentModelConfig = modelConfigManager.getModelConfigFlow(configId).first()
-        val enableDirectImageProcessing = currentModelConfig.enableDirectImageProcessing
-        val enableDirectFileProcessing =
-            currentModelConfig.apiProviderType == ApiProviderType.OPENAI_CODEX &&
-                enableDirectImageProcessing
-        val enableDirectAudioProcessing = currentModelConfig.enableDirectAudioProcessing
-        val enableDirectVideoProcessing = currentModelConfig.enableDirectVideoProcessing
+        characterCardManager.ensureIndependentSettings(memberId)
+        val mediaConfig = if (attachments.isEmpty()) null else {
+            val configId = requireNotNull(characterCardManager.getCharacterCard(memberId).chatModelConfigId) {
+                "发送附件前请为首位成员选择模型，以确定附件处理方式"
+            }
+            modelConfigManager.getModelConfigFlow(configId).first()
+        }
+        val enableDirectImageProcessing = mediaConfig?.enableDirectImageProcessing == true
+        val enableDirectFileProcessing = mediaConfig?.apiProviderType == ApiProviderType.OPENAI_CODEX && enableDirectImageProcessing
+        val enableDirectAudioProcessing = mediaConfig?.enableDirectAudioProcessing == true
+        val enableDirectVideoProcessing = mediaConfig?.enableDirectVideoProcessing == true
 
         val finalMessageContent = AIMessageManager.buildUserMessageContent(
             context = context,
@@ -348,7 +352,7 @@ class MessageProcessingDelegate(
         logMessageTiming(
             stage = "delegate.groupOrchestration.buildUserMessageContent",
             startTimeMs = totalStartTime,
-            details = "attachments=${attachments.size}, configId=$configId, finalLength=${finalMessageContent.length}"
+            details = "attachments=${attachments.size}, memberId=$memberId, finalLength=${finalMessageContent.length}"
         )
         finalMessageContent
     }
@@ -911,6 +915,12 @@ class MessageProcessingDelegate(
                 val addUserMessageStartTime = messageTimingNow()
                 addMessageToChat(chatId, userMessage)
                 userMessageAdded = true
+                if (!turnOptions.voiceCallEnded && !turnOptions.proactiveWake && !isAutoContinuation &&
+                    !turnOptions.voiceCallEvent && !turnOptions.voiceCallDecision && !turnOptions.voiceCallSilence &&
+                    !turnOptions.voiceCallObservation && !effectiveHideUserMessage) {
+                    com.ai.assistance.operit.core.awareness.SoftwareAwareness.userMessage(context, chatId, roleCardId,
+                        proxy = proxySenderNameOverride != null)
+                }
                 logMessageTiming(
                     stage = "delegate.addUserMessageToChat",
                     startTimeMs = addUserMessageStartTime,
@@ -1126,7 +1136,7 @@ class MessageProcessingDelegate(
                     enhancedAiService = service,
                     chatId = activeChatId,
                     messageContent = (if (turnOptions.voiceCallEnded) {
-                        "[客户端通话事件：用户已挂断，当前通话已结束，收音与摄像头已关闭。这是用户发出的通话结束消息，请在文字聊天中回应，不要继续假装正在通话，也不要复述内部状态。]\n$requestMessageContent"
+                        "${checkNotNull(turnOptions.voiceCallOutcome).modelInstruction}\n$requestMessageContent"
                     } else if (turnOptions.voiceCallDecision) {
                         "[运行状态：mode=voice_call，用户正在给你打电话，尚未接通，尚未收音或采集摄像头。是否接听、何时接听由你决定，不要求你接听。回复末尾输出恰好一个控制标记：接听 <voice_call_accept/>；拒接 <voice_call_reject/>；暂时等待 <voice_call_wait seconds=\"正整数秒数\"/>。拒接时可以在标记前简短说明原因，也可以只输出标记；等待后客户端会再次通知你决定，用户也可以取消。不要把等待或拒接当成已接通。确认接听后另一个接通事件会触发你说第一句话。这些控制标记仅供客户端处理，不复述给用户。]\n$requestMessageContent"
                     } else if (turnOptions.voiceCall) {
@@ -1187,16 +1197,15 @@ class MessageProcessingDelegate(
                     onToolInvocation = {
                         incrementCurrentTurnToolInvocationCount(chatId)
                     },
-                    notifyReplyOverride = turnOptions.notifyReply,
+                    notifyReplyOverride = if (isGroupOrchestrationTurn) false else turnOptions.notifyReply,
                     chatModelConfigIdOverride = chatModelConfigIdOverride,
                     chatModelIndexOverride = chatModelIndexOverride,
                     memorySpaceIdOverride = memorySpaceIdOverride,
                     disableWarning = turnOptions.disableWarning
                 )
                 // AIMessageManager 已返回可重放的共享流，这里直接复用，避免在 viewModelScope 上再包一层。
-                val sharedCharStream = if (isGroupOrchestrationTurn &&
-                    com.ai.assistance.operit.core.group.GroupGames(context).state(activeChatId)?.phase?.let { it != "ended" } == true) {
-                    com.ai.assistance.operit.core.group.GroupGamePrivacy.publicDisplay(responseStream, coroutineScope)
+                val sharedCharStream = if (isGroupOrchestrationTurn) {
+                    com.ai.assistance.operit.core.group.GroupReplyGate.display(context, requireNotNull(activeChatId), requireNotNull(effectiveRoleCardId), responseStream, coroutineScope)
                 } else responseStream
                 chatRuntime.responseStream = sharedCharStream
 
@@ -1290,8 +1299,9 @@ class MessageProcessingDelegate(
                     syncWaifuMessageMetrics(sourceMessage)
                 }
 
-                // 只有在非waifu模式下才添加初始的AI消息
-                if (!isWaifuModeEnabled) {
+                // Group replies are only persisted once publication is approved by the gate.
+                // An empty initial row would otherwise leave a bubble after a quiet decision.
+                if (!isWaifuModeEnabled && !isGroupOrchestrationTurn) {
                     withContext(Dispatchers.Main) {
                         if (effectivePersistTurn && chatId != null) {
                             addMessageToChat(chatId, aiMessage)
@@ -1486,6 +1496,11 @@ class MessageProcessingDelegate(
                                 }
                             }
 
+                            if (isGroupOrchestrationTurn && aiMessage.content.isNotBlank()) {
+                                com.ai.assistance.operit.api.chat.AIForegroundService.notifyReplyCompleted(
+                                    context, activeChatId, characterName, aiMessage.content, avatarUri,
+                                    notifyReplyOverride = turnOptions.notifyReply)
+                            }
                             autoReadJob?.join()
                             callReadJob?.join()
                             turnOptions.onVoiceCallComplete?.invoke(aiMessage.content)
@@ -1813,12 +1828,15 @@ class MessageProcessingDelegate(
                     groupOrchestrationMode = groupOrchestrationMode,
                     groupParticipantNamesText = groupParticipantNamesText,
                     onToolInvocation = { incrementCurrentTurnToolInvocationCount(chatId) },
+                    notifyReplyOverride = if (groupOrchestrationMode) false else null,
                     chatModelConfigIdOverride = chatModelConfigIdOverride,
                     chatModelIndexOverride = chatModelIndexOverride,
                     memorySpaceIdOverride = memorySpaceIdOverride,
                 )
 
-            val sharedResponseStream = responseStream
+            val sharedResponseStream = if (groupOrchestrationMode) {
+                com.ai.assistance.operit.core.group.GroupReplyGate.display(context, chatId, requireNotNull(roleCardId), responseStream, coroutineScope)
+            } else responseStream
             chatRuntime.responseStream = sharedResponseStream
 
             val aiMessage =
@@ -1993,6 +2011,8 @@ class MessageProcessingDelegate(
             // 优先使用共享流的全量重放缓存重建最终文本，避免完成信号早于收集协程处理尾部字符时丢字。
             val finalContent = resolveFinalContent(aiMessage)
             aiMessage.content = finalContent
+            if (finalContent.isBlank() && activeChatId != null &&
+                com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(activeChatId)?.characterGroupId != null) return false
             val completedAt = System.currentTimeMillis()
 
             withContext(Dispatchers.IO) {

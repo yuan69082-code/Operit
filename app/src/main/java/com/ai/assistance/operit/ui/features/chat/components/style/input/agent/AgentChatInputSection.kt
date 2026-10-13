@@ -245,6 +245,8 @@ fun AgentChatInputSection(
     val scope = rememberCoroutineScope()
     val characterCardManager = remember(context) { CharacterCardManager.getInstance(context) }
     val activePromptManager = remember(context) { ActivePromptManager.getInstance(context) }
+    val selectedPrompt by activePromptManager.activePromptFlow.collectAsState(initial = null)
+    val isGroupPage = selectedPrompt is ActivePrompt.CharacterGroup
     val functionalConfigManager = remember(context) { FunctionalConfigManager(context) }
     val modelConfigManager = remember(context) { ModelConfigManager(context) }
     val userPreferencesManager = remember(context) { UserPreferencesManager.getInstance(context) }
@@ -489,7 +491,7 @@ fun AgentChatInputSection(
             else -> MaterialTheme.colorScheme.surface
         }
     val modelLabel =
-        if (displayModelName.isBlank()) {
+        if (isGroupPage) "各成员独立模型" else if (displayModelName.isBlank()) {
             context.getString(R.string.model_config)
         } else {
             if (displayModelName.length > 26) {
@@ -509,7 +511,9 @@ fun AgentChatInputSection(
 
     val onModelSelectorClick = {
         showExtraSettingsPopup.value = false
-        showModelSelectorPopup.value = !showModelSelectorPopup.value
+        if (isGroupPage) {
+            android.widget.Toast.makeText(context, "在群设置中查看或切换每位成员的模型", android.widget.Toast.LENGTH_SHORT).show()
+        } else showModelSelectorPopup.value = !showModelSelectorPopup.value
     }
 
     val onSelectMemory: (String) -> Unit = { selectedId ->
@@ -1332,7 +1336,7 @@ fun AgentChatInputSection(
             }
 
             AgentModelSelectorPopup(
-                visible = showModelSelectorPopup.value,
+                visible = showModelSelectorPopup.value && !isGroupPage,
                 popupContainerColor = popupContainerColor,
                 configSummaries = configSummaries,
                 currentConfigMapping = effectiveConfigMapping,

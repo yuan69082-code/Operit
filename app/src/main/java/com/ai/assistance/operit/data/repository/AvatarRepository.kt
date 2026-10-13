@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.repository
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -522,7 +524,7 @@ class AvatarRepository(
         }
     }
 
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val gson = Gson()
 
     private val delegates: Map<AvatarType, AvatarPersistenceDelegate> = listOf(

@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,7 +14,7 @@ class AgreementPreferences(context: Context) {
     private val KEY_ACCEPTED_AGREEMENT_VERSION = "accepted_agreement_version"
 
     private val prefs: SharedPreferences =
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            context.observedSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _agreementAcceptedFlow = MutableStateFlow(isAgreementAccepted())
     val agreementAcceptedFlow: StateFlow<Boolean> = _agreementAcceptedFlow.asStateFlow()

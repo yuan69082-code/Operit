@@ -18,7 +18,7 @@ class GroupPrivacyTest {
         assertFalse(public.contains("秘密")); assertTrue(public.contains("公开部分"))
     }
     @Test fun privateLookupResultsAreNotForwardedToTheNextGroupMember() {
-        for (tool in listOf("assistant_admin", "group_chat", "assistant_relationship")) {
+        for (tool in listOf("assistant_admin", "group_chat", "assistant_relationship", "companion_todo", "companion_library", "companion_state", "phone_awareness", "companion_room", "companion_diary", "companion_reading")) {
             val text = GroupGamePrivacy.publicText("<tool_result name=\"$tool\" status=\"success\"><content>另一窗口的私事</content></tool_result>我已查看")
             assertFalse(text.contains("另一窗口的私事")); assertTrue(text.contains("我已查看"))
         }
@@ -44,5 +44,13 @@ class GroupPrivacyTest {
         assertFalse(GroupPolicy.ownsTurn("id-b", "id-a"))
         assertFalse(GroupPolicy.ownsTurn("id-a", null))
         assertFalse(GroupPolicy.ownsTurn(null, null))
+    }
+
+    @Test fun privateNotesWrittenInGroupDoNotLeakInToolArguments() {
+        for (name in listOf("companion_todo", "companion_library", "companion_state", "assistant_admin", "companion_room", "companion_diary", "companion_reading")) {
+            val public = GroupGamePrivacy.publicText("<tool_x1 name='$name'><param name='content'>我的私人打算</param></tool_x1>公开的话")
+            assertFalse(public.contains("私人打算"))
+            assertTrue(public.contains("公开的话"))
+        }
     }
 }

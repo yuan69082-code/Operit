@@ -6,7 +6,7 @@ import com.ai.assistance.operit.util.AppLogger
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import com.ai.assistance.operit.data.preferences.observedPreferencesDataStore as preferencesDataStore
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.backup.OperitBackupDirs
 import com.ai.assistance.operit.data.db.AppDatabase
@@ -170,7 +170,11 @@ class ChatHistoryManager private constructor(private val context: Context) {
         }
         val visibleTimestamps = messageEntities.map { it.timestamp }
         val variants = chatContentDao.getVariantsForMessages(chatId, visibleTimestamps)
-        return hydrateMessages(messageEntities, variants)
+        val messages = hydrateMessages(messageEntities, variants)
+        if (getChatMetadata(chatId)?.characterGroupId.isNullOrBlank()) return messages
+        // Non-destructive compatibility cleanup for the old generated source header.
+        return messages.map { if (it.sender == "ai") it.copy(content =
+            com.ai.assistance.operit.core.group.GroupTurnPolicy.cleanLegacyPrefix(it.content)) else it }
     }
 
     private suspend fun loadDisplayHistory(chatHistory: ChatHistory): ChatHistory {

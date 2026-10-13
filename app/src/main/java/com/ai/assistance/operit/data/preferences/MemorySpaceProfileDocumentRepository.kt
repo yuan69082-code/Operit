@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.data.preferences
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.util.AtomicFile
 import com.ai.assistance.operit.data.model.LegacyUserProfile
@@ -46,7 +48,7 @@ class MemorySpaceProfileDocumentRepository private constructor(private val conte
     private val publishedLegacyArchiveFile =
         File(context.filesDir, PUBLISHED_LEGACY_ARCHIVE_FILE_NAME)
     private val migrationPreferences =
-        context.getSharedPreferences(MIGRATION_PREFERENCES, Context.MODE_PRIVATE)
+        context.observedSharedPreferences(MIGRATION_PREFERENCES, Context.MODE_PRIVATE)
     private val initializationMutex = Mutex()
     private val writeMutex = Mutex()
     private var initialized = false

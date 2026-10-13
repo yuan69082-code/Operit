@@ -29,7 +29,7 @@ import org.json.JSONObject
 @Composable
 fun CompanionSettingsButton() {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }) { Text("状态延续、主动联系与资料库") }
+    OutlinedButton(onClick = { open = true }) { Text("状态延续、主动联系、手机感知与资料库") }
     if (open) CompanionSettingsDialog { open = false }
 }
 
@@ -39,7 +39,6 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
     val store = remember { CompanionStore(context) }
     val scope = rememberCoroutineScope()
     var emotion by remember { mutableStateOf(store.emotionEnabled) }
-    var capabilities by remember { mutableStateOf(store.capabilitiesEnabled) }
     var proactive by remember { mutableStateOf(store.proactiveEnabled) }
     var silence by remember { mutableStateOf(store.silenceEnabled) }
     var seconds by remember { mutableStateOf(store.silenceSeconds.toString()) }
@@ -129,7 +128,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志").forEachIndexed { index, label ->
+                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知", "自主探索").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
                     }
                 }
@@ -142,10 +141,8 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                         emotion = it; store.preferences.edit().putBoolean("emotion_enabled", it).apply()
                     }
                     TextButton(onClick = { section = 3 }) { Text("查看情绪与 XC 连接") }
-                    CompanionToggle("让 AI 感知软件能力和变化", capabilities) {
-                        capabilities = it; store.preferences.edit().putBoolean("capabilities_enabled", it).apply()
-                    }
-                    Text("开启后额外提供权限、模型和工具能力的当前快照及变化提示。关闭后停止此项快照和专用查询，原有工具功能仍按各自设置运行。")
+                    TextButton(onClick = { section = 6 }) { Text("软件感知：指定观察助手、开关与事件日志") }
+                    TextButton(onClick = { section = 7 }) { Text("自主探索：默认关闭，按助手分别开启") }
                     CompanionToggle("通话沉默时允许 AI 主动接话", silence) {
                         silence = it; store.preferences.edit().putBoolean("silence_enabled", it).apply()
                     }
@@ -154,7 +151,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                         proactive = it; store.preferences.edit().putBoolean("proactive_enabled", it).apply()
                         com.ai.assistance.operit.api.chat.AIForegroundService.refreshBackgroundKeepAlive(context)
                     }
-                    Text("主动联系可以发消息或来电，也可决定保持安静。运行时会观察空闲和设备事件，不需要另建定时工作流。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
+                    Text("主动联系可以发消息或来电，也可决定保持安静，由 AI 安排下次时间，不需要另建定时工作流。解锁和进入应用的事件唤醒在“手机感知”中单独开启。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
                     OutlinedTextField(minutes, { minutes = it }, label = { Text("首次唤醒等待，分钟（1–240）；之后由 AI 安排") }, singleLine = true)
                     Text(if (target == null) "尚未选择主动联系的会话" else "主动联系会话已设置")
                     TextButton(enabled = chatId != null && !busy, onClick = {
@@ -175,8 +172,14 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     }) { Text("保存间隔") }
                     Text("额外判断会使用配置的模型额度。没有接入心率数据源；不会依据沉默猜测健康状态。")
                     Text(store.preferences.getString("last_status", "尚无主动判断记录").orEmpty())
+                } else if (section == 5) {
+                    PhoneAwarenessPanel(chatId)
+                } else if (section == 6) {
+                    SoftwareAwarenessPanel(chatId)
                 } else if (identity == null) {
                     Text("请先打开一个聊天会话，再管理对应角色的资料与记忆。")
+                } else if (section == 7) {
+                    ExplorationPanel(checkNotNull(roleId), checkNotNull(chatId))
                 } else if (section == 3) {
                     XcEmotionDashboard(xcReceipt, emotion)
                     Text("连接设置", style = MaterialTheme.typography.titleMedium)

@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.viewmodel
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -147,7 +149,7 @@ class FloatingWindowDelegate(
     private fun clearFloatingCrashDisableFlag() {
         try {
             context
-                .getSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
+                .observedSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
                 .edit()
                 .remove("service_disabled_due_to_crashes")
                 .remove("crash_count")

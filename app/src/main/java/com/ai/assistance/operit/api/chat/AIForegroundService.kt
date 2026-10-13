@@ -470,7 +470,8 @@ class AIForegroundService : Service() {
                     DisplayPreferencesManager.getInstance(appContext).enableBackgroundKeepAlive.first()
                 }
             }.getOrDefault(false)
-            if (!keepAliveEnabled && !com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled && !isRunning.get()) {
+            if (!keepAliveEnabled && !com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled &&
+                !com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled && !com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(appContext).wakeEnabled && !com.ai.assistance.operit.core.companion.ExplorationStore(appContext).anyEnabled() && !isRunning.get()) {
                 return
             }
             val intent = Intent(appContext, AIForegroundService::class.java).apply {
@@ -534,7 +535,10 @@ class AIForegroundService : Service() {
                 }
             }.getOrDefault(false)
             return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
-                com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled
+                com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled ||
+                com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled ||
+                com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(appContext).wakeEnabled ||
+                com.ai.assistance.operit.core.companion.ExplorationStore(appContext).anyEnabled()
         }
     }
 
@@ -927,7 +931,9 @@ class AIForegroundService : Service() {
         val alwaysListeningEnabled = wakeListeningEnabled || isAlwaysListeningEnabledNow()
         val externalHttpEnabled = externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
         if (isAiBusy || alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
-            com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled) {
+            com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled ||
+            com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(this).enabled || com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(this).wakeEnabled ||
+            com.ai.assistance.operit.core.companion.ExplorationStore(this).anyEnabled()) {
             return
         }
         if (!ignoreAppForeground && ActivityLifecycleManager.getCurrentActivity() != null) {
@@ -971,6 +977,7 @@ class AIForegroundService : Service() {
             com.ai.assistance.operit.core.companion.CompanionRuntime.run(applicationContext)
         }
         serviceScope.launch { com.ai.assistance.operit.core.group.GroupWakeRuntime.run(applicationContext) }
+        serviceScope.launch { com.ai.assistance.operit.core.awareness.PhoneAwarenessRuntime.run(applicationContext) }
         startWakeMonitoring()
         startExternalHttpMonitoring()
         AppLogger.d(TAG, "AI 前台服务已启动。")
@@ -1293,7 +1300,10 @@ class AIForegroundService : Service() {
                     !alwaysListeningEnabled &&
                     !backgroundKeepAliveEnabled &&
                     !externalHttpEnabled &&
-                    !com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled
+                    !com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled &&
+                    !com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(this).enabled &&
+                    !com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(this).wakeEnabled &&
+                    !com.ai.assistance.operit.core.companion.ExplorationStore(this).anyEnabled()
                 ) {
                     AppLogger.d(TAG, "服务进入空闲且无持久后台职责，停止前台服务并移除通知")
                     stopSelfIfIdle(ignoreAppForeground = true)

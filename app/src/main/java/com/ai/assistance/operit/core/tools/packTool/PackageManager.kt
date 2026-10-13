@@ -1,5 +1,9 @@
 package com.ai.assistance.operit.core.tools.packTool
 
+import kotlinx.coroutines.runBlocking
+
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import kotlinx.coroutines.flow.first
 import android.content.Context
 import android.os.Looper
@@ -348,19 +352,19 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     }
 
     private fun persistEnabledPackageNamesToPrefs(enabledPackageNames: List<String>) {
-        val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
         val updatedJson = Json.encodeToString(enabledPackageNames)
         prefs.edit().putString(ENABLED_PACKAGES_KEY, updatedJson).apply()
     }
 
     private fun persistToolPkgSubpackageStatesToPrefs(states: Map<String, Boolean>) {
-        val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
         val updatedJson = Json.encodeToString(states)
         prefs.edit().putString(TOOLPKG_SUBPACKAGE_STATES_KEY, updatedJson).apply()
     }
 
     private fun decodeEnabledPackageNamesFromPrefs(): List<String> {
-        val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
         val packagesJson = prefs.getString(ENABLED_PACKAGES_KEY, "[]")
         return try {
             val jsonConfig = Json { ignoreUnknownKeys = true }
@@ -373,7 +377,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     }
 
     private fun decodeToolPkgSubpackageStatesFromPrefs(): Map<String, Boolean> {
-        val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
         val statesJson = prefs.getString(TOOLPKG_SUBPACKAGE_STATES_KEY, "{}")
         return try {
             val jsonConfig = Json { ignoreUnknownKeys = true }
@@ -1803,7 +1807,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         }
 
         if (packagesChanged) {
-            val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+            val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
             val updatedJson = Json.encodeToString(enabledPackageNames.toList())
             prefs.edit().putString(ENABLED_PACKAGES_KEY, updatedJson).apply()
             AppLogger.d(TAG, "Updated enabled package names with default packages.")
@@ -2420,6 +2424,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         }
 
         val targetFile = File(normalizedSourcePath)
+        val existed = targetFile.exists()
         val targetCanonicalPath =
             runCatching { targetFile.canonicalPath }.getOrElse { return false }
         if (!isExternalPackageSourcePath(targetCanonicalPath)) {
@@ -2438,6 +2443,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
                 !cachedCanonicalPath.equals(targetCanonicalPath, ignoreCase = true)
             }
         loadAvailablePackages(refreshExternalOnly = true)
+        if (existed) com.ai.assistance.operit.core.awareness.SoftwareAwareness.assetChanged(context, "package", "删除工具包文件", targetFile.name)
         return true
     }
 
@@ -2563,6 +2569,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
                     )
                 }
                 val marketOrigin = loadedFromDestination.containerRuntime.marketOrigin
+                com.ai.assistance.operit.core.awareness.SoftwareAwareness.assetChanged(context, "package", "导入工具包", containerName)
                 return ExternalPackageImportResult(
                     message = buildToolPkgImportSuccessMessage(
                         containerName = containerName,
@@ -2602,6 +2609,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
             }
 
             availablePackages[packageMetadata.name] = packageMetadata.copy(isBuiltIn = false)
+            com.ai.assistance.operit.core.awareness.SoftwareAwareness.assetChanged(context, "package", "导入工具包", packageMetadata.name)
 
             AppLogger.d(TAG, "Successfully imported external package to: ${destinationFile.absolutePath}")
             val marketOrigin =
@@ -3406,7 +3414,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      * @return 如果是已注册的MCP服务器则返回true
      */
     private fun isRegisteredMCPServer(serverName: String): Boolean {
-        return mcpManager.isServerRegistered(serverName)
+        return getAvailableServerPackages().containsKey(serverName)
     }
 
     /**
@@ -3415,7 +3423,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      * @return MCP服务器列表
      */
     fun getAvailableServerPackages(): Map<String, MCPServerConfig> {
-        return mcpManager.getRegisteredServers()
+        return com.ai.assistance.operit.data.mcp.MCPRepository.getConfiguredServerPackages(context)
     }
 
     // Helper function to determine if a package is an MCP server
@@ -3651,7 +3659,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     }
 
     private fun getDisabledPackagesInternal(): List<String> {
-        val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
         val packagesJson = prefs.getString(DISABLED_PACKAGES_KEY, "[]")
         return try {
             val jsonConfig = Json { ignoreUnknownKeys = true }
@@ -3664,7 +3672,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
 
     /** Helper to save disabled packages */
     private fun saveDisabledPackages(disabledPackages: List<String>) {
-        val prefs = context.getSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.observedSharedPreferences(PACKAGE_PREFS, Context.MODE_PRIVATE)
         val updatedJson = Json.encodeToString(disabledPackages)
         prefs.edit().putString(DISABLED_PACKAGES_KEY, updatedJson).apply()
     }
@@ -3881,15 +3889,18 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      * @return 成功或失败的消息
      */
     fun useMCPServer(serverName: String): String {
-        // 检查服务器是否已注册
-        if (!mcpManager.isServerRegistered(serverName)) {
-            return "MCP server '$serverName' does not exist or is not registered."
+        if (serverName !in runBlocking { com.ai.assistance.operit.data.mcp.McpSelection.selectedIds(context) }) {
+            return "MCP server '$serverName' is not selected for this assistant."
         }
-
-        // 获取服务器配置
-        val serverConfig =
-            mcpManager.getRegisteredServers()[serverName]
-                ?: return "Cannot get MCP server configuration: $serverName"
+        var startError = "MCP service could not start: $serverName"
+        val started = runBlocking {
+            com.ai.assistance.operit.data.mcp.plugins.MCPStarter(context).startPlugin(serverName) { status ->
+                if (status is com.ai.assistance.operit.data.mcp.plugins.MCPStarter.StartStatus.Error) startError = status.message
+            }
+        }
+        if (!started) return startError
+        val serverConfig = getAvailableServerPackages()[serverName]
+            ?: return "Cannot get MCP server configuration: $serverName"
 
         // 创建MCP包
         val mcpLoadResult = MCPPackage.loadFromServer(context, serverConfig)
@@ -3983,6 +3994,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
             disablePackage(normalizedPackageName)
             removeFromCachesAfterDelete(normalizedPackageName)
             AppLogger.d(TAG, "Package '$normalizedPackageName' fully deleted.")
+            com.ai.assistance.operit.core.awareness.SoftwareAwareness.assetChanged(context, "package", "删除工具包", normalizedPackageName)
             return true
         }
 

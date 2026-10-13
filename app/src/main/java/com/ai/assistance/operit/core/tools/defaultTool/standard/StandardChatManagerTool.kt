@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.core.tools.defaultTool.standard
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -1135,7 +1137,7 @@ class StandardChatManagerTool(private val context: Context) {
             return false
         }
 
-        val prefs = appContext.getSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
+        val prefs = appContext.observedSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("service_disabled_due_to_crashes", false)) {
             AppLogger.w(TAG, "FloatingChatService is disabled due to frequent crashes")
             if (!connectionDeferred.isCompleted) {

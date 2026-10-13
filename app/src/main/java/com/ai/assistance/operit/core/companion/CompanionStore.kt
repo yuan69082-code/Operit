@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.core.companion
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -14,7 +16,7 @@ import java.util.UUID
 class CompanionStore(context: Context) {
     private val context = context.applicationContext
     private val root = File(this.context.filesDir, "companion").apply { mkdirs() }
-    val preferences = this.context.getSharedPreferences("companion_options", Context.MODE_PRIVATE)
+    val preferences = this.context.observedSharedPreferences("companion_options", Context.MODE_PRIVATE)
 
     val emotionEnabled get() = preferences.getBoolean("emotion_enabled", false)
     val capabilitiesEnabled get() = preferences.getBoolean("capabilities_enabled", false)

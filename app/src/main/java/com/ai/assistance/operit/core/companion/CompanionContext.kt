@@ -22,7 +22,12 @@ object CompanionContext {
         val store = CompanionStore(context)
         val scope = store.scope(chatId, roleId)
         if (recordSnapshot) store.migrateMemory(chatId, scope)
-        val facts = if (store.capabilitiesEnabled) permissions(context)
+        val software = com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(context)
+        val softwareAllowed = software.enabled && roleId == software.role &&
+            com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.let {
+                it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId
+            } == true
+        val facts = if (softwareAllowed) permissions(context)
             .put("emotion_continuity", store.emotionEnabled)
             .put("proactive_contact", store.proactiveEnabled)
             .put("call_silence_callback", store.silenceEnabled)
@@ -50,6 +55,14 @@ object CompanionContext {
                 append("\n能力列出不表示操作已执行；权限、网络和服务仍可能限制实际调用。未接入的传感器数据不可推测。\n")
             }
             append(xc)
+            append(com.ai.assistance.operit.core.awareness.SoftwareAwareness.prompt(context, chatId, roleId, recordSnapshot))
+            val phone = com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(context)
+            if (phone.enabled && phone.role != null && phone.role == roleId &&
+                com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.let {
+                    it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId
+                } == true) {
+                append("你是用户指定的手机观察助手。phone_awareness 可按需查状态、应用使用记录，以及单独授权应用的通知/已见页面缓存。不会自动看见所有应用内容；旧页面须保留时间，不当作当前内容。手机事件是内部观察，不是用户新消息，可选择安静；干预仍使用正常已授权工具。\n")
+            }
             append(com.ai.assistance.operit.core.group.GroupContext.compose(context, chatId, roleId))
             if (!roleId.isNullOrBlank()) {
                 if (recordSnapshot) com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, roleId)
@@ -57,8 +70,14 @@ object CompanionContext {
                 append("你读到其他助手的活动、私聊或关系网时，只是在查看他人的记录。保留助手ID、姓名、发言时间和来源；不得把他人的言论、观点、行为、经历或感情写成自己亲历。主助手管理权限不改变记录的归属。\n")
             }
             append("资料可用 companion_library 自行分类、保存、检索；skill 是能力笔记，不会自动安装或执行代码。\n")
-            append("待办用 companion_todo 区分紧急、长期与完成，完成后可沉淀到资料库或删除。\n")
-            val open = store.todos(scope).filter { it.optString("status") == "open" }
+            if (!roleId.isNullOrBlank()) {
+                append(AssistantRoom(context, roleId).prompt())
+                val exploration = ExplorationStore(context)
+                append(if (exploration.enabled(roleId)) "你的自主探索已由用户开启；可在指定私聊用 companion_explore status 查询安排和剩余轮次，用 schedule 安排继续或 pause 暂缓。\n"
+                    else "你的自主探索默认关闭或已被用户关闭；不能自行开启或安排探索唤醒。手动聊天中的查阅和明确提交的待办仍照常进行。\n")
+            }
+            append("companion_todo 是你自己的待办与私人打算，可以自主创建、批注(comment)、安排继续(submit)、暂缓或完成，不必事事等用户审批。可保存优先级、结论、下一步、共同计划和参考；只有确实需要用户决定才填写 needs_decision。完成后可沉淀到资料库或归档。\n")
+            val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
             if (open.isNotEmpty()) append("待办共${open.size}项，优先关注：" +
                 open.sortedByDescending { it.optString("urgency") == "urgent" }.take(3).joinToString("；") { it.optString("title") } + "\n")
             if (store.proactiveEnabled && store.preferences.getString("target_chat", null) == chatId) {

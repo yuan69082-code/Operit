@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.services
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -225,7 +227,7 @@ class FloatingChatService : Service(), FloatingWindowCallback {
         } catch (_: Exception) {
         }
 
-        prefs = getSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
+        prefs = observedSharedPreferences("floating_chat_prefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("service_disabled_due_to_crashes", false)) {
             AppLogger.w(TAG, "Service was disabled due to frequent crashes")
             stopSelf()

@@ -174,7 +174,11 @@ data class McpRestartWithLogsResultData(
         val extraLogs: Map<String, String>
 ) : ToolResultData() {
     override fun toString(): String {
-        return "MCP restart: success=$successCount, failed=$failedCount, timedOut=$timedOut"
+        return buildString {
+            appendLine("MCP restart: success=$successCount, failed=$failedCount, timedOut=$timedOut")
+            appendLine(message)
+            plugins.forEach { appendLine("${it.displayName} (${it.id}): ${it.status} - ${it.message}") }
+        }.trimEnd()
     }
 }
 
@@ -1385,7 +1389,9 @@ data class MemoryQueryResultData(
         val tags: List<String>,
         val createdAt: String,
         val chunkInfo: String? = null,
-        val chunkIndices: List<Int>? = null
+        val chunkIndices: List<Int>? = null,
+        val memoryId: Long? = null,
+        val isExcerpt: Boolean = false
     )
 
     override fun toString(): String {
@@ -1410,7 +1416,9 @@ data class MemoryQueryResultData(
         }
         val memoryText = memories.joinToString("\n---\n") { memory ->
             """
+            Memory ID: ${memory.memoryId}
             Title: ${memory.title}
+            Reading: ${if (memory.isExcerpt) "检索片段，需用 get_memory_by_title 查原文；保留来源和时间，不将不同事件合并" else "本次返回的记录内容"}
             Content: ${memory.content}
             Source: ${memory.source}
             Tags: ${memory.tags.joinToString(", ")}

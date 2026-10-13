@@ -13,6 +13,10 @@ import com.ai.assistance.operit.util.OperitPaths
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 
 /**
@@ -482,6 +486,12 @@ class MCPManager(private val context: Context) {
     // 缓存服务器配置
     private val serverConfigCache = ConcurrentHashMap<String, MCPServerConfig>()
     private val connectionFailureReasons = ConcurrentHashMap<String, String>()
+    private val sessionLocks = ConcurrentHashMap<String, Any>()
+    private val sessionEpochs = ConcurrentHashMap<String, Any>()
+    private val _runtimeStates = MutableStateFlow<Map<String, McpRuntimeState>>(emptyMap())
+    val runtimeStates = _runtimeStates.asStateFlow()
+
+    private fun sessionLock(id: String) = sessionLocks.getOrPut(id) { Any() }
 
     /**
      * 检查服务器是否已注册
@@ -503,34 +513,27 @@ class MCPManager(private val context: Context) {
     }
 
     fun getLastConnectionFailureReason(serverName: String): String? {
-        return connectionFailureReasons[serverName]
+        return runtimeStates.value[serverName]?.error ?: connectionFailureReasons[serverName]
     }
 
-    fun registerRuntime(pluginId: String, descriptor: McpRuntimeDescriptor) {
+    fun registerRuntime(pluginId: String, descriptor: McpRuntimeDescriptor) = synchronized(sessionLock(pluginId)) {
         val previous = runtimeDescriptorCache.put(pluginId, descriptor)
-        connectionFailureReasons.remove(pluginId)
         if (previous != null && previous != descriptor) {
+            sessionEpochs.remove(pluginId)
+            _runtimeStates.update { it - pluginId }
+            connectionFailureReasons.remove(pluginId)
             sessionCache.remove(pluginId)?.let { oldSession ->
                 kotlinx.coroutines.runBlocking { oldSession.close() }
             }
         }
     }
 
-    fun getOrCreateSession(pluginId: String): McpRuntimeSession? {
+    fun getOrCreateSession(pluginId: String): McpRuntimeSession? = synchronized(sessionLock(pluginId)) {
         val cachedSession = sessionCache[pluginId]
         if (cachedSession != null) {
-            if (cachedSession.isConnected()) return cachedSession
-
-            try {
-                if (kotlinx.coroutines.runBlocking { cachedSession.connect() }) {
-                    connectionFailureReasons.remove(pluginId)
-                    return cachedSession
-                }
-            } catch (e: Exception) {
-                connectionFailureReasons[pluginId] =
-                        "Exception while reconnecting MCP runtime: ${e.message ?: e.javaClass.simpleName}"
-                AppLogger.e(TAG, "重连 MCP runtime 失败: $pluginId", e)
-            }
+            if (cachedSession.isConnected()) return@synchronized cachedSession
+            // A failed transport is disposed, never reused with stale client/SSE state.
+            sessionEpochs.remove(pluginId)
             sessionCache.remove(pluginId)
             kotlinx.coroutines.runBlocking { cachedSession.close() }
         }
@@ -539,32 +542,48 @@ class MCPManager(private val context: Context) {
                 ?: run {
                     connectionFailureReasons[pluginId] =
                             "MCP runtime is not registered for plugin $pluginId"
-                    return null
+                    return@synchronized null
                 }
 
-        val session = when (descriptor) {
+        val delegate = when (descriptor) {
             is McpRuntimeDescriptor.Local ->
                 com.ai.assistance.operit.data.mcp.plugins.BridgeMcpRuntimeSession(context, descriptor.serviceName)
             is McpRuntimeDescriptor.Remote ->
                 com.ai.assistance.operit.data.mcp.plugins.RemoteMcpRuntimeSession(pluginId, descriptor)
         }
+        val epoch = Any()
+        sessionEpochs[pluginId] = epoch
+        val session = TrackedMcpRuntimeSession(delegate) { state ->
+            _runtimeStates.update { states ->
+                if (sessionEpochs[pluginId] === epoch) states + (pluginId to state) else states
+            }
+        }
 
-        return try {
+        try {
             AppLogger.d(TAG, "连接 MCP runtime: $pluginId")
             if (!kotlinx.coroutines.runBlocking { session.connect() }) {
                 connectionFailureReasons[pluginId] = "MCP runtime connection failed"
+                sessionEpochs.remove(pluginId)
                 kotlinx.coroutines.runBlocking { session.close() }
+                _runtimeStates.update { it + (pluginId to McpRuntimeState(error = connectionFailureReasons[pluginId])) }
                 null
             } else {
                 sessionCache[pluginId] = session
                 connectionFailureReasons.remove(pluginId)
                 session
             }
+        } catch (e: CancellationException) {
+            sessionEpochs.remove(pluginId)
+            kotlinx.coroutines.runBlocking { session.close() }
+            _runtimeStates.update { it - pluginId }
+            throw e
         } catch (e: Exception) {
             connectionFailureReasons[pluginId] =
                     "Exception while creating MCP runtime: ${e.message ?: e.javaClass.simpleName}"
             AppLogger.e(TAG, "创建 MCP runtime 失败: $pluginId", e)
+            sessionEpochs.remove(pluginId)
             kotlinx.coroutines.runBlocking { session.close() }
+            _runtimeStates.update { it + (pluginId to McpRuntimeState(error = connectionFailureReasons[pluginId])) }
             null
         }
     }
@@ -589,10 +608,12 @@ class MCPManager(private val context: Context) {
      *
      * @param serverName 服务器名称
      */
-    fun unregisterServer(serverName: String) {
+    fun unregisterServer(serverName: String) = synchronized(sessionLock(serverName)) {
         serverConfigCache.remove(serverName)
         runtimeDescriptorCache.remove(serverName)
         connectionFailureReasons.remove(serverName)
+        sessionEpochs.remove(serverName)
+        _runtimeStates.update { it - serverName }
         sessionCache.remove(serverName)?.let { session ->
             kotlinx.coroutines.runBlocking { session.close() }
         }
@@ -600,11 +621,14 @@ class MCPManager(private val context: Context) {
 
     /** 关闭所有MCP客户端连接 */
     fun shutdown() {
+        sessionEpochs.clear()
         sessionCache.values.forEach { session ->
             kotlinx.coroutines.runBlocking { session.close() }
         }
         sessionCache.clear()
         runtimeDescriptorCache.clear()
         serverConfigCache.clear()
+        connectionFailureReasons.clear()
+        _runtimeStates.value = emptyMap()
     }
 }

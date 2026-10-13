@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.voice
 
+import com.ai.assistance.operit.data.preferences.observedSharedPreferences
+
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,6 +13,7 @@ import com.ai.assistance.operit.api.speech.SpeechServiceFactory
 import com.ai.assistance.operit.api.voice.VoiceService
 import com.ai.assistance.operit.api.voice.QueuedVoiceService
 import com.ai.assistance.operit.api.voice.VoiceServiceFactory
+import com.ai.assistance.operit.data.model.VoiceCallUserOutcome
 import com.ai.assistance.operit.data.preferences.SpeechServiceProfilesPreferences
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import com.ai.assistance.operit.util.AppLogger
@@ -58,7 +61,7 @@ class VoiceCallController(
     var soundDetected by mutableStateOf(false)
         private set
     private val submitRecording = java.util.concurrent.atomic.AtomicBoolean(false)
-    var manualMode by mutableStateOf(context.getSharedPreferences("voice_call_input", Context.MODE_PRIVATE).getBoolean("manual", false))
+    var manualMode by mutableStateOf(context.observedSharedPreferences("voice_call_input", Context.MODE_PRIVATE).getBoolean("manual", false))
         private set
     var manualRecording by mutableStateOf(false)
         private set
@@ -67,7 +70,7 @@ class VoiceCallController(
     fun setManualInput(enabled: Boolean) {
         if (manualMode == enabled || manualRecording || phase !in setOf(Phase.LISTENING, Phase.MUTED)) return
         manualMode = enabled
-        context.getSharedPreferences("voice_call_input", Context.MODE_PRIVATE).edit().putBoolean("manual", enabled).apply()
+        context.observedSharedPreferences("voice_call_input", Context.MODE_PRIVATE).edit().putBoolean("manual", enabled).apply()
         microphoneEpoch.incrementAndGet()
         if (phase == Phase.LISTENING || phase == Phase.RECOGNIZING) turnJob?.cancel()
         lastSoundAt = android.os.SystemClock.elapsedRealtime()
@@ -825,9 +828,10 @@ class VoiceCallController(
         val name = if (by == EndBy.AI) participantName else context.getString(R.string.message_role_user)
         val event = if (by == EndBy.SYSTEM) "通话因服务停止而结束"
             else if (isConnected) "通话结束" else "已取消拨号，未接通"
-        if (by == EndBy.USER && isConnected) {
+        if (by == EndBy.USER) {
             // Send once through the conversation pipeline; a history-only entry never wakes AI.
-            viewModel.sendVoiceCallEnded(chatId, roleCardId)
+            VoiceCallEvents.sendUserOutcome(context, chatId, roleCardId,
+                if (isConnected) VoiceCallUserOutcome.HUNG_UP else VoiceCallUserOutcome.CANCELLED)
             return null
         }
         return VoiceCallEvents.record(context, chatId, sender, name, event)

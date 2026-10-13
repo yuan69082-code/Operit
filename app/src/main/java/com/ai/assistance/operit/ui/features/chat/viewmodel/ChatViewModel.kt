@@ -1570,28 +1570,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             }
         }
 
-    /** A user hang-up is a real text turn, addressed to the call's bound role. */
-    fun sendVoiceCallEnded(chatId: String, roleCardId: String?) {
-        viewModelScope.launch {
-            try {
-                kotlinx.coroutines.withTimeout(30_000) {
-                    activeStreamingChatIds.first { !it.contains(chatId) }
-                }
-                messageCoordinationDelegate.sendUserMessage(
-                    roleCardIdOverride = roleCardId,
-                    chatIdOverride = chatId,
-                    messageTextOverride = "[语音通话]\n通话结束",
-                    turnOptions = com.ai.assistance.operit.data.model.ChatTurnOptions(voiceCallEnded = true),
-                )
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                AppLogger.e(TAG, "Could not send user hang-up", error)
-                showToast("通话结束通知未发送，请检查当前会话状态")
-            }
-        }
-    }
-
     fun sendTextMessage(
         text: String,
         chatId: String,

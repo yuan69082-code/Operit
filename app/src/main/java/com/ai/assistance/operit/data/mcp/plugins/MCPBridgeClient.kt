@@ -524,7 +524,7 @@ class MCPBridgeClient(private val context: Context, private val serviceName: Str
                         val connectSuccess = connect()
                         if (!connectSuccess) {
                             AppLogger.e(TAG, "无法连接到 $serviceName 服务")
-                            return@withContext emptyList()
+                            error(getLastConnectionFailureDetail() ?: "Cannot connect to MCP service: $serviceName")
                         }
                     }
 
@@ -533,7 +533,7 @@ class MCPBridgeClient(private val context: Context, private val serviceName: Str
                     if (response?.optBoolean("success", false) == true) {
                         val toolsArray =
                                 response.optJSONObject("result")?.optJSONArray("tools")
-                                        ?: return@withContext emptyList()
+                                        ?: error("Invalid MCP tools/list result: $serviceName")
 
                         val tools = mutableListOf<JSONObject>()
                         for (i in 0 until toolsArray.length()) {
@@ -566,13 +566,15 @@ class MCPBridgeClient(private val context: Context, private val serviceName: Str
                         }
 
                         AppLogger.e(TAG, "获取工具列表失败: $errorMsg")
-                        return@withContext emptyList()
+                        error(errorMsg)
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     AppLogger.e(TAG, "Error getting tools: ${e.message}")
                     // Mark as disconnected on exception
                     isConnected.set(false)
-                    return@withContext emptyList()
+                    throw e
                 }
             }
 

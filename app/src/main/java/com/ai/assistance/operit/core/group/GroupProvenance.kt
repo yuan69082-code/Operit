@@ -30,7 +30,7 @@ object GroupProvenance {
             if (msg.sender == "ai") {
                 val own = GroupPolicy.ownsTurn(actor, author(context, chat, msg))
                 msg.copy(speakerIsCurrentAssistant = own, roleName = if (own) name.orEmpty() else label(context, chat, msg),
-                    content = "[历史发言来源：${label(context, chat, msg)}；${if (own) "这是你自己的发言" else "这是另一位助手的发言，不是你说过或亲历的内容"}]\n${msg.content}")
+                    content = GroupTurnPolicy.cleanLegacyPrefix(msg.content))
             } else if (msg.sender == "summary") msg.copy(content = "[群聊纪要：其中的我只能指对应署名者，不代表当前阅读者。来源不明就保持不明。]\n${msg.content}")
             else msg
         }

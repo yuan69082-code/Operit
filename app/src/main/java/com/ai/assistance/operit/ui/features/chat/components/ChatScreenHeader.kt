@@ -117,7 +117,7 @@ fun ChatScreenHeader(
             } else incomingPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
         AlertDialog(
-            onDismissRequest = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.reject(context) },
+            onDismissRequest = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.reject(context, incomingCall.id) },
             title = { Text("${incomingCall.callerName} 来电") },
             text = {
                 androidx.compose.foundation.layout.Column {
@@ -130,7 +130,7 @@ fun ChatScreenHeader(
                 }
             },
             confirmButton = { TextButton(onClick = { acceptIncoming(true) }, enabled = !streamingCallChats.contains(incomingCall.chatId)) { Text("接听（音频分析）") } },
-            dismissButton = { TextButton(onClick = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.reject(context) }) { Text("拒接") } },
+            dismissButton = { TextButton(onClick = { com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming.reject(context, incomingCall.id) }) { Text("拒接") } },
         )
     }
     val runningCall = VoiceCallRuntime.controller

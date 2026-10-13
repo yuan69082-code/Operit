@@ -6,7 +6,7 @@ data class ChatTurnOptions(
     val hideUserMessage: Boolean = false,
     val disableWarning: Boolean = false,
     val voiceCall: Boolean = false,
-    val voiceCallEnded: Boolean = false,
+    val voiceCallOutcome: VoiceCallUserOutcome? = null,
     val voiceCallAudioPath: String? = null,
     val voiceCallVisualPath: String? = null,
     val voiceCallVisualIsVideo: Boolean = false,
@@ -24,4 +24,6 @@ data class ChatTurnOptions(
     val onVoiceCallComplete: ((String) -> Unit)? = null,
     val proactiveWake: Boolean = false,
     val onCompanionComplete: ((String) -> Unit)? = null
-)
+) {
+    val voiceCallEnded: Boolean get() = voiceCallOutcome != null
+}

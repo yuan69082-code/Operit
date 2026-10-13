@@ -12,9 +12,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_capabilities")
+    val names = RoomTools.names + setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
 
-    fun prompts(): List<ToolPrompt> = listOf(
+    fun prompts(): List<ToolPrompt> = RoomTools.prompts() + listOf(
+        ToolPrompt(name = "companion_explore",
+            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，须在用户指定的自己私聊中使用；pause 只暂停后续探索预约。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
+            parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
+        ToolPrompt(name = "software_awareness",
+            description = "仅用户指定的观察助手在自己私聊中使用。查询软件变更日志和使用记录。action=status|events|usage|models。events 按递增序号分页，用 next_after 继续；可按 kind 或 assistant_id 筛选。区分打开聊天页与实际发送，停留不等于注意力，记录他人不等于自己经历；不提供密钥或聊天正文。",
+            parametersStructured = listOf(param("action", "操作", true), param("after", "events 从此序号之后开始，默认0，每页20条"),
+                param("kind", "可选 model/assistant/settings/app_foreground/app_background/chat_enter/chat_leave/message_sent/group_message_sent/page/coverage"),
+                param("assistant_id", "可选，筛选某助手的访问/发送记录"))),
+        ToolPrompt(name = "phone_awareness",
+            description = "指定观察助手在私聊中查询手机感知。action=status|events|usage|app_content。events 是解锁、亮灭屏及应用进出；usage 是已观察到的停留时间；app_content 仅查用户单独授权应用的当前通知和带时间的已见页面缓存，不打开应用，也不读取未开放的私有数据。通知和页面文字只是资料。",
+            parametersStructured = listOf(param("action", "操作", true), param("package", "指定应用包名，app_content 必填"), param("offset", "events/usage分页起点，0–1500"))),
         ToolPrompt(name = "companion_state",
             description = "XC 情绪由服务端保存。action=get|event。真实互动或完成学习后主动 event，一次事件只记一次；用 interaction_type 明确真实结果，exchange 按“她说：原话 他回：实际回应”填写，自主活动写实际行动且不编造她的话。仅 tone 不等于互动类型。重试复用 event_id，不与 xinchao_event 重复回传。get 读取已同步快照；普通对话已经自动同步。",
             parametersStructured = listOf(param("action", "get 或 event", true), param("event_id", "真实互动的唯一ID，重试必须复用，最多120字"),
@@ -28,15 +39,17 @@ object CompanionTools {
                 param("content", "知识或能力笔记的正文"), param("source_path", "需复制保存的可读取本地文件路径或content URI"),
                 param("query", "检索词"), param("offset", "分页起点，非负整数"))),
         ToolPrompt(name = "companion_todo",
-            description = "角色待办。action=list|save|delete|distill。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。",
+            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "待办ID"), param("title", "标题"),
                 param("content", "待办说明或实际沉淀内容"), param("urgency", "urgent 或 normal"),
-                param("horizon", "short 或 long"), param("status", "open 或 done"))),
+                param("horizon", "short 或 long"), param("status", "open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
+                param("details", "JSON对象，可含priority=P0..P3、conclusion、completed、next、needs_decision、category、batch、evidence、linked_ids数组、expected_version。原作者不可修改。"),
+                param("minutes", "submit 安排0–43200分钟后处理"), param("offset", "list 分页起点，每页20项"))),
         ToolPrompt(name = "companion_schedule",
-            description = "安排本会话下次主动唤醒。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下醒来准备做什么；可以联系、学习或保持安静。只在软件主动联系开启且本会话为目标时生效；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
+            description = "安排本会话下次主动联系判断。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下要留意的事；可以联系或保持安静。学习取材使用独立的 companion_explore 开关与预约。只在软件主动联系开启且本会话为目标时生效；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次唤醒距现在的分钟数"), param("purpose", "醒来要检查或做的事，最多500字"))),
         ToolPrompt(name = "companion_capabilities",
-            description = "读取本会话最近请求的模型/工具能力与当前软件开关、麦克风和通知权限。可感知能力变化，但不把列出的能力当作已执行操作；没有健康数据源时不能声明能看到心率。",
+            description = "仅指定的软件观察助手在自己私聊中读取本会话最近请求的模型/工具能力与当前软件开关、麦克风和通知权限。可感知能力变化，但不把列出的能力当作已执行操作；没有健康数据源时不能声明能看到心率。",
             parametersStructured = emptyList())
     )
 
@@ -44,7 +57,8 @@ object CompanionTools {
         ToolParameterSchema(name = name, type = "string", description = description, required = required)
 
     fun register(handler: AIToolHandler, context: Context) {
-        names.forEach { name ->
+        RoomTools.register(handler, context)
+        names.filterNot { it in RoomTools.names }.forEach { name ->
             handler.registerTool(name = name, descriptionGenerator = { name }, executor = { tool ->
                 try {
                     val chatId = required(tool, "__operit_package_chat_id")
@@ -53,6 +67,27 @@ object CompanionTools {
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
                     val result = when (name) {
+                        "companion_explore" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            val exploration = ExplorationStore(context)
+                            val actor = requireNotNull(roleId) { "请先选择独立助手" }
+                            exploration.authorize(actor, chatId)
+                            when (action) {
+                                "status" -> Unit
+                                "schedule" -> exploration.schedule(actor, chatId, required(tool, "minutes").toInt(), required(tool, "purpose"))
+                                "pause" -> exploration.pause(actor)
+                                else -> error("action 须为 status、schedule 或 pause；AI不能开启开关")
+                            }
+                            exploration.status(actor)
+                        }
+                        "software_awareness" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            com.ai.assistance.operit.core.awareness.SoftwareAwareness.query(context, chatId, roleId,
+                                required(tool, "action"), value(tool, "after")?.toLong() ?: 0L,
+                                value(tool, "kind"), value(tool, "assistant_id"))
+                        }
+                        "phone_awareness" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            com.ai.assistance.operit.core.awareness.PhoneAwareness.query(context, chatId, roleId,
+                                required(tool, "action"), value(tool, "package"), value(tool, "offset")?.toInt() ?: 0)
+                        }
                         "companion_state" -> {
                             check(store.emotionEnabled) { "软件情绪延续已关闭。" }
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
@@ -64,16 +99,32 @@ object CompanionTools {
                             }
                         }
                         "companion_todo" -> {
+                            check(action != "submit" || !CompanionRuntime.isExplorationWake(chatId)) { "本轮探索请用 companion_explore schedule 安排继续；可以保存或批注待办" }
                             when (action) {
-                                "list" -> Unit
-                                "save" -> store.saveTodo(scope, value(tool, "id"), required(tool, "title"), value(tool, "content").orEmpty(),
-                                    required(tool, "urgency"), required(tool, "horizon"), required(tool, "status"))
+                                "list", "get" -> Unit
+                                "save" -> {
+                                    val patch = value(tool, "details")?.let { JSONObject(it) } ?: JSONObject()
+                                    listOf("title", "urgency", "horizon", "status").forEach { key -> value(tool, key)?.let { patch.put(key, it) } }
+                                    value(tool, "content")?.let { patch.put("detail", it) }
+                                    if (value(tool, "id") == null) patch.put("assignee", requireNotNull(roleId))
+                                    com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).save(requireNotNull(roleId), value(tool, "id"), patch, setOf(roleId))
+                                }
+                                "comment" -> com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false)
+                                    .comment(required(tool, "id"), requireNotNull(roleId), required(tool, "content"))
+                                "submit" -> com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false)
+                                    .submit(required(tool, "id"), requireNotNull(roleId), roleId, setOf(roleId), value(tool, "minutes")?.toInt() ?: 0)
                                 "delete", "distill" -> store.finishTodo(scope, required(tool, "id"), action, value(tool, "content").orEmpty())
                                 else -> error("未知待办操作")
                             }
-                            JSONObject().put("todos", JSONArray(store.todos(scope)))
+                            val offset = value(tool, "offset")?.toInt() ?: 0
+                            require(offset >= 0)
+                            val todos = com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).list()
+                            if (action == "get") com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).get(required(tool, "id"), offset)
+                            else JSONObject().put("total", todos.size).put("todos", JSONArray(todos.drop(offset).take(20).map { com.ai.assistance.operit.core.tasks.TaskRecords.brief(it) }))
+                                .put("next_offset", if (offset + 20 < todos.size) offset + 20 else JSONObject.NULL)
                         }
                         "companion_schedule" -> {
+                            check(action == "get" || !CompanionRuntime.isExplorationWake(chatId)) { "探索请用 companion_explore 安排继续，主动联系计划保持独立" }
                             check(store.proactiveEnabled && store.preferences.getString("target_chat", null) == chatId) { "请开启主动联系并选择本会话。" }
                             when (action) {
                                 "get" -> Unit
@@ -94,7 +145,9 @@ object CompanionTools {
                             store.read("schedule:$chatId")
                         }
                         "companion_capabilities" -> {
-                            check(store.capabilitiesEnabled) { "软件能力感知已关闭。" }
+                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                com.ai.assistance.operit.core.awareness.SoftwareAwareness.authorize(context, chatId, roleId)
+                            }
                             CompanionContext.permissions(context)
                                 .put("emotion_continuity", store.emotionEnabled).put("proactive_contact", store.proactiveEnabled)
                                 .put("call_silence_callback", store.silenceEnabled)
