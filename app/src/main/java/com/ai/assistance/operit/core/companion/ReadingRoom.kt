@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import okhttp3.OkHttpClient
+import okhttp3.Dns
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
@@ -182,9 +183,12 @@ class ReadingRoom(private val context: Context, private val role: String) {
     companion object {
         private val lock = Any()
         private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
-            .dns { host -> InetAddress.getAllByName(host).toList().also { addresses ->
-                require(addresses.none { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress || it.isSiteLocalAddress || it.isMulticastAddress }) { "阅读角仅连接公开来源" }
-            } }.callTimeout(15, TimeUnit.SECONDS).build()
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    InetAddress.getAllByName(hostname).toList().also { addresses ->
+                        require(addresses.none { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress || it.isSiteLocalAddress || it.isMulticastAddress }) { "阅读角仅连接公开来源" }
+                    }
+            }).callTimeout(15, TimeUnit.SECONDS).build()
     }
 }
 
