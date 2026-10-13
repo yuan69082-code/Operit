@@ -86,6 +86,25 @@ class SummaryContinuityTest {
         assertFalse(SummaryReview.canCommit(slice.source, history, slice.beforeTimestamp, slice.afterTimestamp))
     }
 
+    @Test fun autonomousGroupRequestsCanCompressWithoutAnotherUserMessage() {
+        val history = listOf(ChatMessage("user", "你们继续讨论", timestamp = 10)) +
+            (1..4).flatMap { i -> listOf(
+                ChatMessage("ai", "member $i tool call", timestamp = i * 100L, sentAt = i * 100L),
+                ChatMessage("ai", "member $i tool result and reply", timestamp = i * 100L + 10, sentAt = i * 100L)
+            ) }
+        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        assertEquals(history.take(5), slice.source)
+        assertEquals(history.takeLast(4), slice.retained)
+    }
+
+    @Test fun fragmentedPrivateReplySharesOneRequestAndCannotBeSplitByCompression() {
+        val latest = listOf(ChatMessage("user", "逗你", timestamp = 300)) + (1..4).map {
+            ChatMessage("ai", "fragment $it", timestamp = 300L + it * 10, sentAt = 300)
+        }
+        val slice = requireNotNull(SummaryContextSlice.plan(turn(1) + turn(2) + latest))
+        assertEquals(turn(2) + latest, slice.retained)
+    }
+
     @Test fun commitRejectsAMarkerThatWouldHideUnsummarizedMessages() {
         val slice = requireNotNull(SummaryContextSlice.plan((1..4).flatMap(::turn)))
         assertTrue(SummaryReview.canCommit(slice.source, slice.source + slice.retained, slice.beforeTimestamp, slice.afterTimestamp))

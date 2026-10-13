@@ -16,11 +16,28 @@ internal data class SummaryContextSlice(
 
         fun plan(messages: List<ChatMessage>): SummaryContextSlice? {
             val active = activeHistory(messages)
-            val userStarts = active.indices.filter { active[it].sender == "user" }
+            val turnStarts = mutableListOf<Int>()
+            var hasAssistant = false
+            var assistantSentAt = 0L
+            active.forEachIndexed { index, message ->
+                if (message.sender == "user") {
+                    turnStarts += index
+                    hasAssistant = false
+                } else if (message.sender == "ai") {
+                    // Group members can start a new request without another user message.
+                    // Fragments/tool results from one request share sentAt and stay together.
+                    if (turnStarts.isEmpty() || hasAssistant && assistantSentAt > 0L &&
+                        message.sentAt > 0L && message.sentAt != assistantSentAt) {
+                        turnStarts += index
+                    }
+                    hasAssistant = true
+                    assistantSentAt = message.sentAt
+                }
+            }
             // Never cut between a user's message and its assistant/tool response chain.
-            if (userStarts.size < 2) return null
-            val retainedTurns = minOf(2, userStarts.size - 1)
-            val boundary = userStarts[userStarts.size - retainedTurns]
+            if (turnStarts.size < 2) return null
+            val retainedTurns = minOf(2, turnStarts.size - 1)
+            val boundary = turnStarts[turnStarts.size - retainedTurns]
             val source = active.take(boundary)
             if (source.none { it.sender == "ai" }) return null
             return SummaryContextSlice(source.map { it.copy() }, active.drop(boundary).map { it.copy() })
