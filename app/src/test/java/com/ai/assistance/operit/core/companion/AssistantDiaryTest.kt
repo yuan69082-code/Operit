@@ -19,7 +19,7 @@ class AssistantDiaryTest {
         whenever(context.getSharedPreferences("companion_options", Context.MODE_PRIVATE)).thenReturn(prefs)
         return context
     }
-    @Test fun diaryOffByDefaultAndPrivateAcrossAssistants() = runBlocking {
+    @Test fun diaryOffByDefaultAndPrivateAcrossAssistants() = runBlocking<Unit> {
         val context = context(); val a = AssistantRoom(context, "a"); val b = AssistantRoom(context, "b")
         assertThrows(IllegalStateException::class.java) { runBlocking { a.saveDiary(null, "2026-10-14", "今天", "一个想法", "a-chat", true, null) } }
         CompanionStore(context).update("room:a") { it.put("ai_diary", true) }
