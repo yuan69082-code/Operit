@@ -14,7 +14,7 @@ on:
           - ':app:assembleClone'
           - ':app:bundleRelease'
   push:
-    branches: [main, feat/mobile-continuity-release, feat/assistant-workspaces, feat/group-continuity-games, fix/mcp-selection-status]
+    branches: [main, feat/mobile-continuity-release, feat/assistant-workspaces, feat/group-continuity-games, fix/mcp-selection-status, fix/context-compression-continuity]
     paths:
       - .github/workflows/android-build.yml
       - .gitmodules

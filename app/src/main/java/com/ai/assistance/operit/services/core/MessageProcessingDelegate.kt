@@ -222,6 +222,24 @@ class MessageProcessingDelegate(
     private val lastScrollEmitMsByChatKey = ConcurrentHashMap<String, AtomicLong>()
     private val suppressIdleCompletedStateByChatId = ConcurrentHashMap<String, Boolean>()
     private val pendingAsyncSummaryUiByChatId = ConcurrentHashMap<String, Boolean>()
+    private val summaryTurnGate = com.ai.assistance.operit.core.chat.SummaryTurnGate()
+
+    private fun claimTurn(chatId: String): Boolean = summaryTurnGate.startTurnIfAllowed(chatId) {
+        val runtime = runtimeFor(chatId)
+        if (runtime.isLoading.value) false else {
+            runtime.isLoading.value = true
+            true
+        }
+    }
+
+    suspend fun <T> withSummaryAfterTurn(chatId: String, block: suspend () -> T): T =
+        summaryTurnGate.afterTurn(chatId, awaitTurn = {
+            val runtime = runtimeFor(chatId)
+            // Join includes final text, tool results, metrics and persistence, not just stream end.
+            runtime.sendJob?.join()
+            runtime.isLoading.first { !it }
+        }, summarize = block)
+
 
     private fun chatKey(chatId: String?): String = chatId ?: "__DEFAULT_CHAT__"
 
@@ -724,7 +742,7 @@ class MessageProcessingDelegate(
             return
         }
         val chatRuntime = runtimeFor(chatId)
-        if (chatRuntime.isLoading.value) {
+        if (!claimTurn(chatId)) {
             AppLogger.w(
                 TAG,
                 "sendUserMessage忽略: chat正在处理中, chatId=$chatId, roleCardId=$roleCardId, override=${!messageTextOverride.isNullOrBlank()}, suppressUserMessageInHistory=$suppressUserMessageInHistory"
@@ -1737,7 +1755,7 @@ class MessageProcessingDelegate(
         onVariantReady: suspend (ChatMessage) -> Unit,
     ) {
         val chatRuntime = runtimeFor(chatId)
-        if (chatRuntime.isLoading.value) {
+        if (!claimTurn(chatId)) {
             throw IllegalStateException(context.getString(R.string.chat_regenerate_busy))
         }
         val turnId = chatRuntime.turnSequence.incrementAndGet()

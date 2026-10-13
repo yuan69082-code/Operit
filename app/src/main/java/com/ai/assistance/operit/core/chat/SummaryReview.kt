@@ -46,6 +46,13 @@ internal object SummaryReview {
         }
     }
 
+    fun canCommit(
+        expected: List<ChatMessage>, current: List<ChatMessage>,
+        beforeTimestamp: Long, afterTimestamp: Long?
+    ): Boolean = expected.lastOrNull()?.timestamp == beforeTimestamp &&
+        (afterTimestamp == null || afterTimestamp > beforeTimestamp) &&
+        sourceUnchanged(expected, current)
+
     // Changes outside the reviewed slice (such as a newly appended reply) do not invalidate it.
     // Edits, deletion, alternate replies and another summary inside the slice do.
     fun sourceUnchanged(expected: List<ChatMessage>, current: List<ChatMessage>): Boolean {

@@ -886,9 +886,19 @@ class ChatHistoryManager private constructor(private val context: Context) {
         message: ChatMessage,
         beforeTimestamp: Long?,
         afterTimestamp: Long?,
+        expectedSource: List<ChatMessage>? = null,
     ): ChatMessage? {
         chatMutex(chatId).withLock {
             try {
+                // Check and insert under the same chat write lock. A stale/edited prefix must
+                // never move the marker past content that was not actually summarized.
+                if (expectedSource != null) {
+                    val boundary = requireNotNull(beforeTimestamp)
+                    val currentSource = loadRuntimeChatMessagesUpTo(chatId, boundary)
+                    check(com.ai.assistance.operit.core.chat.SummaryReview.canCommit(
+                        expectedSource, currentSource, boundary, afterTimestamp
+                    )) { context.getString(R.string.conversation_summary_source_changed) }
+                }
                 val beforeMessage =
                     when {
                         beforeTimestamp != null -> chatContentDao.getMessageByTimestamp(chatId, beforeTimestamp)
@@ -2467,7 +2477,10 @@ class ChatHistoryManager private constructor(private val context: Context) {
                         beforeTimestampExclusive = beforeTimestampExclusive,
                         upToTimestampInclusive = upToTimestampInclusive,
                     )
-                hydrateMessages(chatId, messageEntities)
+                val previousSummary = latestSummaryTimestamp?.let {
+                    chatContentDao.getMessageByTimestamp(chatId, it)
+                }
+                hydrateMessages(chatId, listOfNotNull(previousSummary) + messageEntities)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "按总结窗口加载聊天消息失败", e)
                 emptyList()
