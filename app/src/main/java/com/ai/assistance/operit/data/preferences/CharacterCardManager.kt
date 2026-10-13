@@ -654,6 +654,7 @@ class CharacterCardManager private constructor(private val context: Context) {
 
     private suspend fun deleteCharacterCardLocked(id: String) {
         val deletedCardName = getCharacterCard(id).name
+        com.ai.assistance.operit.core.companion.ExplorationStore(context).disableRemovedRole(id)
         var deletedActiveCard = false
         dataStore.edit { preferences ->
             // 从列表中移除

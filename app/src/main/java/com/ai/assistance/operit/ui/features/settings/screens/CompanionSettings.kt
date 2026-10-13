@@ -128,7 +128,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知").forEachIndexed { index, label ->
+                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知", "自主探索").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
                     }
                 }
@@ -142,6 +142,7 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     }
                     TextButton(onClick = { section = 3 }) { Text("查看情绪与 XC 连接") }
                     TextButton(onClick = { section = 6 }) { Text("软件感知：指定观察助手、开关与事件日志") }
+                    TextButton(onClick = { section = 7 }) { Text("自主探索：默认关闭，按助手分别开启") }
                     CompanionToggle("通话沉默时允许 AI 主动接话", silence) {
                         silence = it; store.preferences.edit().putBoolean("silence_enabled", it).apply()
                     }
@@ -177,6 +178,8 @@ private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     SoftwareAwarenessPanel(chatId)
                 } else if (identity == null) {
                     Text("请先打开一个聊天会话，再管理对应角色的资料与记忆。")
+                } else if (section == 7) {
+                    ExplorationPanel(checkNotNull(roleId), checkNotNull(chatId))
                 } else if (section == 3) {
                     XcEmotionDashboard(xcReceipt, emotion)
                     Text("连接设置", style = MaterialTheme.typography.titleMedium)

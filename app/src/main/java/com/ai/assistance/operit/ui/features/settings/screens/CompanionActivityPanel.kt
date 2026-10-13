@@ -17,7 +17,6 @@ import java.util.Date
 internal fun CompanionActivityPanel(store: CompanionStore, chatId: String) {
     var logs by remember(chatId) { mutableStateOf(emptyList<JSONObject>()) }
     var schedule by remember(chatId) { mutableStateOf(JSONObject()) }
-    var choices by remember { mutableStateOf(store.preferences.getStringSet("learning_choices", emptySet()).orEmpty().toSet()) }
     LaunchedEffect(chatId) {
         while (true) {
             withContext(Dispatchers.IO) { store.logs(chatId) to store.read("schedule:$chatId") }
@@ -25,17 +24,7 @@ internal fun CompanionActivityPanel(store: CompanionStore, chatId: String) {
             delay(3000)
         }
     }
-    Text("主动学习", style = MaterialTheme.typography.titleMedium)
-    Text("可多选。AI 按兴趣和待办自行安排，使用当前角色已允许的工具；不开启的活动不会作为主动学习目标。学习结果可保存到资料库。")
-    listOf("mcp" to "已有 MCP（包括 hy）", "web" to "上网探索与学习", "reading" to "读书和复习资料库", "organize" to "整理软件资料与待办").forEach { (key, label) ->
-        Row {
-            Checkbox(checked = key in choices, onCheckedChange = { enabled ->
-                choices = if (enabled) choices + key else choices - key
-                store.preferences.edit().putStringSet("learning_choices", choices).apply()
-            })
-            Text(label, modifier = Modifier.padding(top = 12.dp))
-        }
-    }
+    Text("自主学习已移到“自主探索”：按助手独立开启，默认关闭，和这里的主动联系计划分别安排。")
     val at = schedule.optLong("at")
     Text(if (schedule.optBoolean("paused")) "下一次唤醒已暂停" else if (at > 0)
         "下次唤醒：" + DateFormat.getDateTimeInstance().format(Date(at)) else "下次时间尚未安排")

@@ -18,5 +18,6 @@ status: code-complete-awaiting-batch-validation
 - [04-PhoneAwareness](04-PhoneAwareness.md)：手机与应用观察、隐藏事件唤醒、逐应用内容授权
 - [05-CallOutcomes](05-CallOutcomes.md)：拒接、取消和挂断统一发送给通话所属助手
 - [06-SoftwareAwareness](06-SoftwareAwareness.md)：指定助手接收设置变化、软件访问及聊天停留记录
+- [07-Exploration](07-Exploration.md)：按助手独立、默认关闭的自主探索开关与预约
 
 按用户要求先逐项修改，本批问题全部处理完毕后再统一测试、构建、推送和发布。当前仅完成上述步骤的代码修改与静态差异检查，尚未运行本批测试、构建或手机验证；不单独发布。
