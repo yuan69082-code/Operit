@@ -205,6 +205,7 @@ private fun RoomOptions(room: AssistantRoom, data: JSONObject, work: (suspend ()
     val dates = data.optJSONArray("dates") ?: JSONArray()
     for (i in 0 until dates.length()) { val item = dates.getJSONObject(i)
         Row { Text("${item.getString("date")} · ${item.getString("title")}", Modifier.weight(1f)); TextButton(onClick = { work { val updated = JSONArray(dates.toString()); updated.remove(i); room.change(JSONObject().put("dates", updated), false) } }) { Text("移除") } }
+    }
     OutlinedTextField(dateTitle, { dateTitle = it }, label = { Text("纪念什么") })
     OutlinedTextField(date, { date = it }, label = { Text("日期 YYYY-MM-DD") })
     Button(onClick = { work { LocalDate.parse(date); room.change(JSONObject().put("dates", JSONArray(dates.toString()).put(JSONObject().put("title", dateTitle).put("date", date))), false) } }) { Text("添加纪念日") }
