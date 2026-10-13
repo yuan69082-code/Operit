@@ -76,30 +76,32 @@ class ReadingRoom(private val context: Context, private val role: String) {
         AssistantRoom.revision.updateValue()
     }
     fun entry(id: String): JSONObject = store.read("reading-entry:$role:$id").also { check(it.has("id")) { "资料不存在或不属于当前助手" } }
-    fun open(id: String, part: String, ai: Boolean): JSONObject {
+    fun open(id: String, part: String, ai: Boolean): JSONObject = synchronized(lock) {
         require(part in setOf("summary", "body"))
         val data = entry(id)
         check(data.has(part)) { "尚未取得正文，请先 fetch；当前只有来源摘要" }
         if (ai) {
             store.update("reading-entry:$role:$id") {
-                it.put("delivered", if (part == "summary") "summary" else it.getString("material"))
-                    .put("delivered_at", System.currentTimeMillis()).put("state", "read")
+                val level = if (part == "summary" && it.optString("delivered") == "partial") "partial"
+                    else if (part == "summary") "summary" else it.getString("material")
+                it.put("delivered", level).put("delivered_at", System.currentTimeMillis())
+                if (it.optString("state") != "saved") it.put("state", "read")
             }.also { index(it) }
         }
-        return JSONObject().put("id", id).put("owner", role).put("title", data.getString("title")).put("url", data.getString("url"))
+        JSONObject().put("id", id).put("owner", role).put("title", data.getString("title")).put("url", data.getString("url"))
             .put("level", if (part == "summary") "summary" else data.getString("material")).put("content", data.getString(part))
             .put("note", data.optString("note")).put("fetched_at", data.optLong("fetched"))
     }
-    fun note(id: String, text: String, ai: Boolean): JSONObject {
+    fun note(id: String, text: String, ai: Boolean): JSONObject = synchronized(lock) {
         require(text.length <= 6000)
         val data = entry(id)
         if (ai) check(data.has("delivered_at")) { "先打开实际材料，再记录自己的随记" }
-        return store.update("reading-entry:$role:$id") {
+        store.update("reading-entry:$role:$id") {
             // User annotations are separate from the assistant's own reading reflection.
             it.put(if (ai) "note" else "user_note", text).put("state", "saved").put("noted_at", System.currentTimeMillis())
         }.also { index(it) }
     }
-    fun skip(id: String) {
+    fun skip(id: String) = synchronized(lock) {
         check(entry(id).optString("state") == "queued") { "已读材料与随记保留在历史中，无需从待读移开" }
         store.update("reading-entry:$role:$id") { it.put("state", "skipped") }.also { index(it) }
     }
@@ -150,17 +152,18 @@ class ReadingRoom(private val context: Context, private val role: String) {
         document.select("script,style,nav,header,footer,aside").remove()
         val body = document.selectFirst("article,main")?.text() ?: document.body().text()
         check(body.isNotBlank()) { "网页未提供可读取的正文" }
-        store.update("reading-entry:$role:$id") {
-            // A parsed page may omit dynamic/paywalled content; never label the original work fully read.
-            it.put("body", body.take(16000)).put("material", "partial").put("fetched", System.currentTimeMillis()).put("resolved_url", url)
+        synchronized(lock) {
+            store.update("reading-entry:$role:$id") {
+                // A parsed page may omit dynamic/paywalled content; never label the original work fully read.
+                it.put("body", body.take(16000)).put("material", "partial").put("fetched", System.currentTimeMillis()).put("resolved_url", url)
+            }
+            open(id, "body", ai)
         }
-        open(id, "body", ai)
     }
     private fun download(address: String): Pair<String, String> {
         var url = address.toHttpUrl()
         repeat(5) {
             require(url.username.isEmpty() && url.password.isEmpty()) { "来源地址不能带账号密码" }
-            require(InetAddress.getAllByName(url.host).none { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress || it.isSiteLocalAddress }) { "阅读角仅连接公开来源" }
             client.newCall(Request.Builder().url(url).header("User-Agent", "VioLife/Reading").build()).execute().use { response ->
                 if (response.code in 300..399) {
                     url = url.resolve(requireNotNull(response.header("Location"))) ?: error("无效的跳转地址")
@@ -178,7 +181,10 @@ class ReadingRoom(private val context: Context, private val role: String) {
     }
     companion object {
         private val lock = Any()
-        private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).callTimeout(15, TimeUnit.SECONDS).build()
+        private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+            .dns { host -> InetAddress.getAllByName(host).toList().also { addresses ->
+                require(addresses.none { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress || it.isSiteLocalAddress || it.isMulticastAddress }) { "阅读角仅连接公开来源" }
+            } }.callTimeout(15, TimeUnit.SECONDS).build()
     }
 }
 

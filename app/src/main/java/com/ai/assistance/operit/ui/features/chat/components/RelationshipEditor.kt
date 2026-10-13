@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.components
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -67,7 +68,7 @@ fun PrivateSocialControls(chatId: String, actor: String?, viewModel: ChatViewMod
         store.read(id).optJSONObject("seen")?.optJSONObject(actor)?.let { id to it.optString("excerpt") }
     } }
     var roomOpen by remember(chatId) { mutableStateOf(false) }
-    Row(modifier) {
+    Row(modifier.horizontalScroll(rememberScrollState())) {
         if (!actor.isNullOrBlank()) TextButton(onClick = { roomOpen = true }) { Text("房间") }
         TextButton(onClick = { tab = "关系网" }) { Text("关系网") }
         if (links.isNotEmpty()) TextButton(onClick = { tab = "参与过的群聊" }) { Text("群聊记忆 (${links.size})") }

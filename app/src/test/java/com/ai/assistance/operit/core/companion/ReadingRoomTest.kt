@@ -57,4 +57,16 @@ class ReadingRoomTest {
         assertEquals(1, room.entries(true).size)
         assertThrows(IllegalStateException::class.java) { room.skip(id) }
     }
+    @Test fun rereadingSummaryPreservesPreviouslyReadBodyAndBothAnnotations() {
+        val context = context(); val room = ReadingRoom(context, "a")
+        val id = room.add("星空", "https://example.com/sky", "摘要").getString("id")
+        CompanionStore(context).update("reading-entry:a:$id") { it.put("body", "取得的部分正文").put("material", "partial") }
+        room.open(id, "body", true)
+        room.note(id, "助手的随记", true); room.note(id, "用户的批注", false)
+        assertEquals("summary", room.open(id, "summary", true).getString("level"))
+        val saved = room.entry(id)
+        assertEquals("partial", saved.getString("delivered")); assertEquals("saved", saved.getString("state"))
+        assertEquals("助手的随记", saved.getString("note")); assertEquals("用户的批注", saved.getString("user_note"))
+        assertEquals("partial", room.entries(true).single().getString("delivered"))
+    }
 }

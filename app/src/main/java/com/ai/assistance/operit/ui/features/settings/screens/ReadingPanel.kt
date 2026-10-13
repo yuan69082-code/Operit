@@ -85,13 +85,13 @@ internal fun ReadingPanel(role: String, chat: String, revision: Long, work: (sus
                 Text(if (item.has("body")) "可取得的部分正文" else "来源摘要", style = MaterialTheme.typography.titleMedium)
                 Text(if (item.has("body")) item.getString("body") else item.optString("summary"))
                 TextButton(onClick = { work { reading.fetch(item.getString("id"), false, chat); selected = reading.entry(item.getString("id")) } }) { Text("读取网页可用正文") }
-                TextButton(onClick = { work { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(item.getString("url"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("到来源继续阅读") }
+                TextButton(onClick = { work { withContext(Dispatchers.Main) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(item.getString("url"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } }) { Text("到来源继续阅读") }
                 HorizontalDivider()
                 Text("助手随记", style = MaterialTheme.typography.titleMedium)
                 Text(item.optString("note").ifBlank { "还没有留下随记" })
                 OutlinedTextField(note, { note = it }, label = { Text("你的批注") }, minLines = 3)
                 TextButton(onClick = { work { reading.note(item.getString("id"), note, false); selected = reading.entry(item.getString("id")) } }) { Text("保存批注") }
-                TextButton(onClick = { work { reading.skip(item.getString("id")); selected = null } }) { Text("从待读移开") }
+                if (item.optString("state") == "queued") TextButton(onClick = { work { reading.skip(item.getString("id")); selected = null } }) { Text("从待读移开") }
             }
         }, confirmButton = { TextButton(onClick = { selected = null }) { Text("关闭") } })
     } }

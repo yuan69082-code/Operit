@@ -5,6 +5,9 @@ import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.data.model.*
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
+import com.ai.assistance.operit.data.preferences.CharacterGroupCardManager
+import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -29,7 +32,14 @@ object RoomTools {
                     fun required(key: String) = arg(key) ?: error("缺少 $key")
                     val actor = required("__operit_package_caller_card_id")
                     val chat = required("__operit_package_chat_id")
-                    ExplorationStore(context).authorize(actor, chat)
+                    check(CharacterCardManager.getInstance(context).getAllCharacterCards().any { it.id == actor }) { "助手不存在" }
+                    val metadata = ChatHistoryManager.getInstance(context).getChatMetadata(chat) ?: error("会话不存在")
+                    if (metadata.characterGroupId.isNullOrBlank()) {
+                        check(metadata.characterCardId == actor) { "不能从其他助手的私聊操作" }
+                    } else {
+                        val group = CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(metadata.characterGroupId!!)
+                        check(group?.members?.any { it.characterCardId == actor } == true) { "你已不在本群内" }
+                    }
                     val room = AssistantRoom(context, actor)
                     val action = required("action")
                     val offset = arg("offset")?.toInt() ?: 0

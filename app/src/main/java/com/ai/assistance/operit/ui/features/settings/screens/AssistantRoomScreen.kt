@@ -94,6 +94,9 @@ fun AssistantRoomDialog(role: String, chat: String, onDismiss: () -> Unit) {
             ThemeSettingsScreen()
         } }
     }
+    if (error.isNotBlank()) AlertDialog(onDismissRequest = { error = "" },
+        title = { Text("未能完成") }, text = { Text(error) },
+        confirmButton = { TextButton(onClick = { error = "" }) { Text("知道了") } })
 }
 
 @Composable
