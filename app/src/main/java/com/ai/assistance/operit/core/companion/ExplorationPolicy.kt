@@ -76,7 +76,7 @@ object ExplorationPolicy {
         enabled(data) && data.optString("chat") == chat && revision(data) == expectedRevision &&
             data.optString("running") == ticket
 
-    fun finish(data: JSONObject, ticket: String, outcome: String) {
+    fun finish(data: JSONObject, ticket: String, outcome: String, now: Long = System.currentTimeMillis()) {
         if (data.optString("running") != ticket) return
         data.remove("running")
         data.put("last_outcome", outcome)
@@ -86,7 +86,7 @@ object ExplorationPolicy {
         // 忘了约就自动续上，不让一次遗漏把整个探索停掉；失败的多歇一会儿
         val minutes = if (outcome == "failed") AUTO_CONTINUE_MINUTES * 2 else AUTO_CONTINUE_MINUTES
         val last = data.optString("purpose").take(400)
-        data.put("at", System.currentTimeMillis() + minutes * 60_000L).put("paused", false).put("auto_continued", true)
+        data.put("at", now + minutes * 60_000L).put("paused", false).put("auto_continued", true)
             .put("purpose", "上一轮没给自己约下一次，软件按默认${minutes / 60}小时续上。上次的打算：$last".take(500))
     }
 

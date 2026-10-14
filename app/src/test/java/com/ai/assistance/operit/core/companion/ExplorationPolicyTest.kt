@@ -70,34 +70,37 @@ class ExplorationPolicyTest {
         assertTrue(a.getBoolean("paused"))
     }
 
-    @Test fun claimedWorkCannotBeClaimedAgainAndUnscheduledQuietTurnStops() {
+    @Test fun claimedWorkCannotBeClaimedAgainAndUnscheduledTurnAutoContinues() {
         val a = enabled()
         assertTrue(ExplorationPolicy.claim(a, now + 900_000, day, "one"))
         assertFalse(ExplorationPolicy.claim(a, now + 900_001, day, "two"))
-        ExplorationPolicy.finish(a, "one", "completed")
-        assertFalse(ExplorationPolicy.due(a, now + 10_000_000, day))
-        assertTrue(a.getBoolean("paused"))
+        ExplorationPolicy.finish(a, "one", "completed", now + 900_000)
+        assertFalse(a.getBoolean("paused"))
+        assertTrue(a.getBoolean("auto_continued"))
+        assertEquals(now + 900_000 + ExplorationPolicy.AUTO_CONTINUE_MINUTES * 60_000L, a.getLong("at"))
+        assertFalse(ExplorationPolicy.due(a, now + 900_001, day))
+        assertTrue(ExplorationPolicy.due(a, a.getLong("at"), day))
     }
 
-    @Test fun failuresConsumeBudgetAndNeverAutomaticallyRetry() {
+    @Test fun failuresConsumeBudgetAndBackOffLonger() {
         val a = enabled(1)
         ExplorationPolicy.claim(a, now + 900_000, day, "one")
-        ExplorationPolicy.schedule(a, 15, "继续", now + 900_000)
-        ExplorationPolicy.finish(a, "one", "failed")
+        ExplorationPolicy.finish(a, "one", "failed", now + 900_000)
         assertEquals(1, ExplorationPolicy.used(a, day))
-        assertFalse(a.has("at"))
+        assertEquals(now + 900_000 + ExplorationPolicy.AUTO_CONTINUE_MINUTES * 2 * 60_000L, a.getLong("at"))
         ExplorationPolicy.schedule(a, 15, "手动重新安排", now + 900_000)
         assertFalse(ExplorationPolicy.due(a, now + 1_800_000, day))
         assertTrue(ExplorationPolicy.due(a, now + 1_800_000, "2026-10-15"))
     }
 
-    @Test fun restartRequiresAnExplicitNewPlanAfterInterruptedWork() {
+    @Test fun interruptedWorkKeepsTheAssistantsOwnPlan() {
         val a = enabled()
         ExplorationPolicy.claim(a, now + 900_000, day, "one")
         ExplorationPolicy.schedule(a, 15, "未完成前预约", now + 900_000)
         assertTrue(ExplorationPolicy.recover(a))
         assertEquals("interrupted", a.getString("last_outcome"))
-        assertFalse(ExplorationPolicy.due(a, now + 10_000_000, day))
+        assertEquals(now + 1_800_000, a.getLong("at"))
+        assertFalse(a.optBoolean("auto_continued"))
         assertFalse(ExplorationPolicy.recover(a))
     }
 
@@ -105,7 +108,7 @@ class ExplorationPolicyTest {
         val a = enabled()
         val revision = ExplorationPolicy.revision(a)
         ExplorationPolicy.claim(a, now + 900_000, day, "one")
-        ExplorationPolicy.pause(a)
+        ExplorationPolicy.selfPause(a)
         assertTrue(ExplorationPolicy.valid(a, "private-a", revision, "one"))
         ExplorationPolicy.finish(a, "one", "completed")
         assertFalse(ExplorationPolicy.due(a, now + 10_000_000, day))
