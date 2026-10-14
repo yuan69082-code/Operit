@@ -43,7 +43,15 @@ object ExplorationPolicy {
         require(minutes in 15..10080) { "探索间隔须为15–10080分钟" }
         require(purpose.isNotBlank() && purpose.length <= 500) { "请填写1–500字的下次打算" }
         data.put("at", now + minutes * 60_000L).put("purpose", purpose).put("paused", false)
+        data.remove("self_paused")
+        data.remove("auto_continued")
     }
+    /** 助手自己明说要歇：本轮结束后不自动续约。 */
+    fun selfPause(data: JSONObject) {
+        pause(data)
+        data.put("self_paused", true)
+    }
+    const val AUTO_CONTINUE_MINUTES = 180
 
     fun pause(data: JSONObject) {
         data.put("paused", true)
@@ -60,6 +68,7 @@ object ExplorationPolicy {
         data.put("used", used(data, day) + 1).put("day", day).put("running", ticket)
             .put("started", now).put("paused", true)
         data.remove("at")
+        data.remove("self_paused")
         return true
     }
 
@@ -71,7 +80,14 @@ object ExplorationPolicy {
         if (data.optString("running") != ticket) return
         data.remove("running")
         data.put("last_outcome", outcome)
-        if (outcome != "completed") pause(data)
+        // 本轮里已自己约了下一次，或明说要歇：尊重它
+        if (data.has("at") || data.optBoolean("self_paused")) return
+        if (!enabled(data)) { pause(data); return }
+        // 忘了约就自动续上，不让一次遗漏把整个探索停掉；失败的多歇一会儿
+        val minutes = if (outcome == "failed") AUTO_CONTINUE_MINUTES * 2 else AUTO_CONTINUE_MINUTES
+        val last = data.optString("purpose").take(400)
+        data.put("at", System.currentTimeMillis() + minutes * 60_000L).put("paused", false).put("auto_continued", true)
+            .put("purpose", "上一轮没给自己约下一次，软件按默认${minutes / 60}小时续上。上次的打算：$last".take(500))
     }
 
     fun recover(data: JSONObject): Boolean {

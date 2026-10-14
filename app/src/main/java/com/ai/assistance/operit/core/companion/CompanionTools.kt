@@ -16,7 +16,7 @@ object CompanionTools {
 
     fun prompts(): List<ToolPrompt> = RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_explore",
-            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，须在用户指定的自己私聊中使用；pause 只暂停后续探索预约。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
+            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，须在用户指定的自己私聊中使用；pause 明说要歇、暂停后续预约；本轮没安排也没 pause 时，结束后按默认3小时自动续上。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
         ToolPrompt(name = "software_awareness",
             description = "仅用户指定的观察助手在自己私聊中使用。查询软件变更日志和使用记录。action=status|events|usage|models|gear。gear 查看或调整你的关注档位（与 phone_awareness 共用）：level=tight盯紧/normal平常/loose放松，hours可选（到点回平常），reason降档理由。events 按递增序号分页，用 next_after 继续；可按 kind 或 assistant_id 筛选。区分打开聊天页与实际发送，停留不等于注意力，记录他人不等于自己经历；不提供密钥或聊天正文。",

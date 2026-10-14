@@ -50,7 +50,7 @@ class ExplorationStore(private val context: Context) {
         }.also { store.log(chat, "探索安排", "${minutes}分钟后：$purpose") }
     }
 
-    fun pause(role: String): JSONObject = store.update(scope(role)) { ExplorationPolicy.pause(it) }.also {
+    fun pause(role: String): JSONObject = store.update(scope(role)) { ExplorationPolicy.selfPause(it) }.also {
         if (it.optString("chat").isNotBlank()) store.log(it.getString("chat"), "探索安排", "后续探索预约已暂停")
     }
 
@@ -97,9 +97,9 @@ class ExplorationStore(private val context: Context) {
     fun finish(work: Work, outcome: String) {
         store.update(scope(work.role)) { ExplorationPolicy.finish(it, work.ticket, outcome) }
         store.log(work.chat, "探索结束", when (outcome) {
-            "completed" -> "本轮结束；阅读、整理的实际结果见资料库和私人待办"
-            "interrupted" -> "探索已中断，未自动重试"
-            else -> "探索未完成，后续预约已暂停，未自动重试"
+            "completed" -> "本轮结束；阅读、整理的实际结果见资料库和私人待办；未自行安排的会按默认间隔续上"
+            "interrupted" -> "探索已中断；未自行安排的会按默认间隔续上"
+            else -> "探索未完成；未自行安排的会按默认间隔加倍后续上"
         })
     }
     fun recover() {
@@ -107,7 +107,7 @@ class ExplorationStore(private val context: Context) {
             if (!read(role).has("running")) continue
             var interrupted = false
             val data = store.update(scope(role)) { interrupted = ExplorationPolicy.recover(it) }
-            if (interrupted) store.log(data.optString("chat"), "探索中断", "上次运行未结束；已暂停预约，请核对进展后重新安排")
+            if (interrupted) store.log(data.optString("chat"), "探索中断", "上次运行未结束；未自行安排的已按默认间隔续上")
         }
     }
 
@@ -118,6 +118,7 @@ class ExplorationStore(private val context: Context) {
             .put("daily_limit", data.optInt("limit", 4)).put("used_today", ExplorationPolicy.used(data, ExplorationPolicy.day(System.currentTimeMillis())))
             .put("paused", data.optBoolean("paused", true)).put("at", data.optLong("at"))
             .put("purpose", data.optString("purpose")).put("running", data.has("running"))
+            .put("auto_continued", data.optBoolean("auto_continued")).put("last_outcome", data.optString("last_outcome"))
     }
 
     companion object { private val settingsLock = Any() }
