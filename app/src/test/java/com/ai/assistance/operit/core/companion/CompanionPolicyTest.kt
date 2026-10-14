@@ -16,6 +16,15 @@ class CompanionPolicyTest {
         assertTrue(CompanionPolicy.related(entries, "今天吃什么").isEmpty())
     }
 
+    @Test fun attachmentsDoNotCountAsWhatSheSaid() {
+        val entries = listOf(JSONObject().put("id", "1").put("title", "象山看日出").put("category", "日记")
+            .put("content", "海边日出礁石"))
+        val message = "那可以直接继续做下一个嘛 <attachment id=\"x\">【屏幕文本】象山日出 礁石 海边</attachment>"
+        assertTrue(CompanionPolicy.related(entries, message).isEmpty())
+        assertEquals(1, CompanionPolicy.related(entries, "想再去象山看日出 <attachment id=\"x\">屏幕</attachment>").size)
+        assertEquals("你好", CompanionPolicy.spoken("你好 <attachment id=\"a\">未闭合的附件"))
+    }
+
     @Test fun repeatedRepliesDoNotBecomeNewNotifications() {
         assertTrue(CompanionPolicy.duplicate("晚安！", listOf("晚安。")))
         assertTrue(CompanionPolicy.duplicate(" ", emptyList()))

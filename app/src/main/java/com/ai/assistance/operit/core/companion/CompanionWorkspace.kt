@@ -103,6 +103,16 @@ fun CompanionStore.finishTodo(scope: String, id: String, action: String, learnin
 }
 
 object CompanionPolicy {
+    /**
+     * 只留她真正说的话：自动附带的时间/屏幕/记忆附件和运行状态说明不算。
+     * 以前整段拿去匹配，屏幕上我自己的回复也会被当成关键词，于是总带出不相干的资料。
+     */
+    fun spoken(text: String): String = text
+        .replace(Regex("<attachment[\\s\\S]*?</attachment>"), " ")
+        .substringBefore("<attachment")
+        .replace(Regex("\\[运行状态：[\\s\\S]*?]\\n?"), " ")
+        .trim()
+
     // Chinese does not separate words with spaces. Match meaningful two-character units as
     // well as Latin words; require two matches to avoid random single-character retrieval.
     fun terms(text: String): Set<String> = buildSet {
@@ -113,7 +123,7 @@ object CompanionPolicy {
     }
 
     fun related(entries: List<JSONObject>, query: String, random: Random = Random.Default): List<JSONObject> {
-        val keys = terms(query)
+        val keys = terms(spoken(query))
         if (keys.isEmpty()) return emptyList()
         return entries.filter { item ->
             val title = item.optString("title")
