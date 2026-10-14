@@ -220,7 +220,7 @@ class MessageProcessingDelegate(
 
     private val chatRuntimes = ConcurrentHashMap<String, ChatRuntime>()
     private val lastScrollEmitMsByChatKey = ConcurrentHashMap<String, AtomicLong>()
-    private val suppressIdleCompletedStateByChatId = ConcurrentHashMap<String, Boolean>()
+    private val suppressIdleCompletedStateByChatId = ConcurrentHashMap<String, Long>()
     private val pendingAsyncSummaryUiByChatId = ConcurrentHashMap<String, Boolean>()
     private val summaryTurnGate = com.ai.assistance.operit.core.chat.SummaryTurnGate()
 
@@ -292,7 +292,13 @@ class MessageProcessingDelegate(
         }
         if (chatId != null && suppressIdleCompletedStateByChatId.containsKey(chatId)) {
             if (isTerminalInputState(state)) {
-                return
+                val suppressedAt = suppressIdleCompletedStateByChatId[chatId] ?: 0L
+                if (System.currentTimeMillis() - suppressedAt < 60_000L) {
+                    return
+                }
+                // Suppress expired (>60s); clear it and allow state transition
+                suppressIdleCompletedStateByChatId.remove(chatId)
+                AppLogger.w(TAG, "Suppress expired for chat $chatId, forcing Idle")
             }
         }
         if (state !is EnhancedInputProcessingState.ExecutingTool &&
@@ -308,7 +314,7 @@ class MessageProcessingDelegate(
 
     fun setSuppressIdleCompletedStateForChat(chatId: String, suppress: Boolean) {
         if (suppress) {
-            suppressIdleCompletedStateByChatId[chatId] = true
+            suppressIdleCompletedStateByChatId[chatId] = System.currentTimeMillis()
         } else {
             suppressIdleCompletedStateByChatId.remove(chatId)
         }
@@ -544,6 +550,8 @@ class MessageProcessingDelegate(
 
             try {
                 clearCurrentTurnToolInvocationCount(chatId)
+        // Safety: clear any lingering suppress flag when this turn's runtime is cleaned up.
+        suppressIdleCompletedStateByChatId.remove(chatId)
                 AIMessageManager.cancelOperation(chatId)
 
                 jobsToCancel.forEach { job -> job.cancel() }
