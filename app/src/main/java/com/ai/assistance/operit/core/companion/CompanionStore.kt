@@ -14,7 +14,7 @@ import java.util.UUID
 
 /** Role state belongs to the role, not a provider or the currently visible window. */
 class CompanionStore(context: Context) {
-    private val context = context.applicationContext
+    val context: Context = context.applicationContext
     private val root = File(this.context.filesDir, "companion").apply { mkdirs() }
     val preferences = this.context.observedSharedPreferences("companion_options", Context.MODE_PRIVATE)
 

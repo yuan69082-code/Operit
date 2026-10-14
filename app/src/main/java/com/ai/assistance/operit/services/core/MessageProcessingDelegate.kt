@@ -1160,6 +1160,8 @@ class MessageProcessingDelegate(
 
                 val prepareResponseStreamStartTime = messageTimingNow()
                 if (activeChatId != null) com.ai.assistance.operit.core.companion.XcEmotionBridge.beginTurn(activeChatId)
+                if (activeChatId != null && !turnOptions.proactiveWake && !turnOptions.voiceCallEvent && !turnOptions.voiceCallSilence)
+                    runCatching { com.ai.assistance.operit.core.companion.AttentionGear.noteUserText(context, activeChatId, requestMessageContent) }
                 val responseStream = AIMessageManager.sendMessage(
                     enhancedAiService = service,
                     chatId = activeChatId,

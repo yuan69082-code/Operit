@@ -351,6 +351,7 @@ object CompanionRuntime {
             }
             val open = ledger.optString("open").trim()
             append("\n上次醒来时我记下的、还没了结的事：").append(open.ifBlank { "没有" })
+            if (phoneRole != null || softwareRole != null) append("\n").append(AttentionGear.describe(context, chatId, roleId))
         }
         val activities = if (explorationWork != null) ExplorationPolicy.choices(ExplorationStore(context).read(roleId))
             .mapNotNull { ExplorationPolicy.activities[it] }.joinToString("、") else ""
@@ -367,7 +368,7 @@ object CompanionRuntime {
             通话可使用正常的 request_voice_call 工具，不重复拨打未被接听的同一轮来电。
             本轮最多12次工具调用、${if (phoneRole != null || softwareRole != null) 3 else 5}分钟。${when { explorationWork != null -> "可用 companion_explore schedule 安排15分钟至7天后的继续，或 pause 暂缓；预留一次工具调用用于安排。不能借其他调度工具绕过探索开关、间隔或每日上限。探索、继续和联系她是分开的决定，不要求每次有产出或消息。"; phoneRole != null || softwareRole != null -> "事件触发无需安排下一次唤醒，不要为了处理手机事件更改既有主动联系计划。保持安静也是完整决定。"; taskEvent -> "本次由待办提交触发，无需修改主动联系设置；可以更新事项、批注、完成或暂缓。需以后继续可用 companion_todo submit 安排至少1分钟后的处理；不能把计划当作结果。"; else -> "结束前用 companion_schedule 安排下次醒来的时间和目的，或主动 cancel 暂停。" }}
             先使用所需工具，最后若要发消息，用 <companion_message>这里仅写给她的新消息</companion_message>；若安静则只输出 <companion_quiet/>。
-            另用 <companion_open>…</companion_open> 更新"还没了结的事"：仍悬着就写清是什么、问到哪一步了；已经解决了就只写 无。不写这个标签则保持原样。
+            ${if (phoneRole != null || softwareRole != null) "关注档位由你自己定：觉得现在要更紧或可以松一点，就用 phone_awareness action=gear 调（level/hours/reason）；不想改就不用调用。底线在的时候往下降要写理由。\n            " else ""}另用 <companion_open>…</companion_open> 更新"还没了结的事"：仍悬着就写清是什么、问到哪一步了；已经解决了就只写 无。不写这个标签则保持原样。
             无论发不发消息，都另用 <companion_note>…</companion_note> 写给下次的自己：这次醒来看到了什么、此刻什么心情、为什么这样决定。它会藏在你们的聊天里，只有你能看到，她看不到；用你自己的话写，不写流水账。
             学习过程和内部状态写入资料或工具，不把计划、工具日志和控制标记直接发送给用户。确实发生互动或完成学习时主动回传 XC，不能编造她的回应。
         """.trimIndent()

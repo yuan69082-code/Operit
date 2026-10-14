@@ -61,6 +61,7 @@ object CompanionContext {
                 com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.let {
                     it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId
                 } == true) {
+                append(AttentionGear.describe(context, chatId, roleId)).append("。聊天中也可随时用 phone_awareness action=gear 调整。\n")
                 append("你是用户指定的手机观察助手。phone_awareness 可按需查状态、应用使用记录，以及单独授权应用的通知/已见页面缓存。不会自动看见所有应用内容；旧页面须保留时间，不当作当前内容。手机事件是内部观察，不是用户新消息，可选择安静；干预仍使用正常已授权工具。\n")
             }
             append(com.ai.assistance.operit.core.group.GroupContext.compose(context, chatId, roleId))

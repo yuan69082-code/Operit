@@ -6,13 +6,13 @@ import java.util.UUID
 
 /** Claim once before any model/tool work. Failed or interrupted batches are not replayed. */
 object PhoneEventQueue {
-    fun claim(data: JSONObject, now: Long, interval: Long): JSONObject? {
+    fun claim(data: JSONObject, now: Long, interval: Long, urgentWakes: Boolean = true): JSONObject? {
         val rows = data.optJSONArray("events") ?: return null
         val pending = (0 until rows.length()).map { rows.getJSONObject(it) }.filter { it.optString("dispatch") == "pending" }
         if (pending.isEmpty()) return null
-        val hasUrgent = pending.any { it.optBoolean("urgent") }
+        val hasUrgent = urgentWakes && pending.any { it.optBoolean("urgent") }
         if (!hasUrgent && data.has("last_wake") && now - data.optLong("last_wake") in 0L until interval) return null
-        pending.filter { now - it.optLong("at") !in 0..300_000 }.forEach { it.put("dispatch", "expired") }
+        pending.filter { now - it.optLong("at") !in 0..maxOf(300_000L, interval + 120_000L) }.forEach { it.put("dispatch", "expired") }
         val fresh = pending.filter { it.optString("dispatch") == "pending" }
         if (fresh.isEmpty()) return null
         val id = UUID.randomUUID().toString()
