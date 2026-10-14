@@ -424,6 +424,8 @@ fun ChatArea(
 
             val timestampKeyOccurrences = mutableMapOf<Long, Int>()
             chatHistory.forEachIndexed { actualIndex, message ->
+                // 隐藏的用户消息（自动触发/唤醒留痕）不在界面上画分隔线，只留给模型
+                if (isHiddenUserPlaceholder(message)) return@forEachIndexed
                 val isLastAiMessage = actualIndex == messagesCount - 1 && message.sender == "ai"
                 val shouldHide = shouldHideLastAiMessage && isLastAiMessage
                 val timestampKeyOccurrence = timestampKeyOccurrences[message.timestamp] ?: 0
