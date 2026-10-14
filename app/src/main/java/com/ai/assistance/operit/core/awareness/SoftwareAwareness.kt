@@ -116,7 +116,11 @@ object SoftwareAwareness {
     }
 
     private fun savePresence(context: Context, events: List<SoftwarePresence.Event>) {
+        val observer = SoftwareAwarenessStore(context).role
         events.forEach { event ->
+            // 她点开别的助手的私聊：不管档位，立刻叫醒观察助手
+            val otherAssistant = event.kind == "chat_enter" && !toolRelated() && !observer.isNullOrBlank() &&
+                event.view?.group.isNullOrBlank() && !event.view?.role.isNullOrBlank() && event.view?.role != observer
             val description = when (event.kind) {
                 "app_foreground" -> "软件进入前台"
                 "app_background" -> "软件离开前台"
@@ -124,7 +128,7 @@ object SoftwareAwareness {
                 else -> "离开聊天页面：${event.view?.name}"
             }
             record(context, event.kind, description, if (toolRelated()) "tool_or_user_uncertain" else "user_navigation",
-                presenceDetail(event), wake = !toolRelated())
+                presenceDetail(event), wake = !toolRelated(), urgent = otherAssistant)
         }
     }
 
