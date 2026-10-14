@@ -25,7 +25,7 @@ class PhoneAwarenessStore(context: Context) {
         if (data().optString("status") != message) store.update(key) { it.put("status", message).put("status_at", System.currentTimeMillis()) }
     }
 
-    fun record(event: PhonePresence.Event, name: String, wake: Boolean, duringAiWork: Boolean) {
+    fun record(event: PhonePresence.Event, name: String, wake: Boolean, duringAiWork: Boolean, urgent: Boolean = false) {
         if (!enabled || event.app in excluded) return
         store.update(key) { data ->
             if (!enabled || event.app in excluded) return@update
@@ -33,6 +33,7 @@ class PhoneAwarenessStore(context: Context) {
                 .put("at", event.at).put("package", event.app).put("app_name", name.take(100))
                 .put("during_ai_work", duringAiWork)
                 .put("dispatch", if (wakeEnabled && chat != null && role != null && wake) "pending" else "recorded")
+                .put("urgent", urgent && wakeEnabled && chat != null && role != null && wake)
             event.entered?.let { row.put("entered_at", it).put("duration_ms", event.durationMs) }
             data.put("events", JSONArray((data.optJSONArray("events").rows() + row)
                 .filter { it.optLong("at") >= cutoff() }.takeLast(1500)))

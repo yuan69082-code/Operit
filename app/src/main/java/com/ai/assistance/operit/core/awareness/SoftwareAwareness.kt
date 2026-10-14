@@ -53,8 +53,9 @@ object SoftwareAwareness {
 
     fun assetChanged(context: Context, kind: String, action: String, name: String) {
         val caller = AssistantScope.callerId()
+        val isUrgent = kind == "assistant" && action in setOf("新增助手", "删除助手")
         record(context, kind, "$action：${name.take(100)}", actor(caller),
-            JSONObject().put("name", name.take(100)).put("action", action), wake = caller == null && !toolRelated())
+            JSONObject().put("name", name.take(100)).put("action", action), wake = caller == null && !toolRelated(), urgent = isUrgent)
     }
 
     fun preferencesChanged(context: Context, source: String, before: Map<String, Any?>, after: Map<String, Any?>, role: String?) {
@@ -66,8 +67,10 @@ object SoftwareAwareness {
             if (!SoftwareAwarenessStore(context).enabled) return
             val origin = actor(role)
             SoftwareChangePolicy.changes(source, before, after).forEach {
+                val isUrgent = it.kind == "model" || (it.kind == "assistant" && it.detail.optString("action") in setOf("created", "deleted"))
                 record(context, it.kind, it.summary, origin, it.detail,
-                    wake = role == null && !toolRelated() && SoftwareChangePolicy.mayWake(source))
+                    wake = role == null && !toolRelated() && SoftwareChangePolicy.mayWake(source),
+                    urgent = isUrgent)
             }
         } catch (failure: Exception) {
             // A committed setting stays successful even if the observation sink is unavailable.
@@ -75,7 +78,7 @@ object SoftwareAwareness {
         }
     }
 
-    fun record(context: Context, kind: String, summary: String, actor: String, detail: JSONObject = JSONObject(), wake: Boolean = true) {
+    fun record(context: Context, kind: String, summary: String, actor: String, detail: JSONObject = JSONObject(), wake: Boolean = true, urgent: Boolean = false) {
         val app = context.applicationContext
         val store = SoftwareAwarenessStore(app)
         if (!store.enabled) return
@@ -84,7 +87,7 @@ object SoftwareAwareness {
         val at = System.currentTimeMillis()
         val copy = JSONObject(detail.toString())
         writes.trySend {
-            store.record(observer, revision, kind, summary, actor, copy, at, wake)
+            store.record(observer, revision, kind, summary, actor, copy, at, wake, urgent)
             if (wake) CompanionRuntime.signalSoftwareEvent()
         }
     }

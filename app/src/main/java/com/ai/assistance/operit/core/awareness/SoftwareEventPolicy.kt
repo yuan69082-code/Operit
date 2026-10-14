@@ -13,9 +13,10 @@ object SoftwareEventPolicy {
     }.orEmpty()
 
     fun claim(data: JSONObject, now: Long, interval: Long): JSONObject? {
-        if (data.has("last_wake") && now - data.optLong("last_wake") in 0 until interval) return null
         val pending = rows(data).filter { it.optString("dispatch") == "pending" }
         if (pending.isEmpty()) return null
+        val hasUrgent = pending.any { it.optBoolean("urgent") }
+        if (!hasUrgent && data.has("last_wake") && now - data.optLong("last_wake") in 0 until interval) return null
         val id = UUID.randomUUID().toString()
         pending.forEach { it.put("dispatch", "running").put("batch", id) }
         data.put("last_wake", now)

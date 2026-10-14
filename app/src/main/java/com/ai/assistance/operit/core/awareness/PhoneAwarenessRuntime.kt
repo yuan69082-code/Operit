@@ -52,7 +52,8 @@ object PhoneAwarenessRuntime {
             // Generation alone is not evidence of self-induced UI changes: retain those events
             // and let the dispatcher defer them until the existing conversation is idle.
             val wake = PhonePresence.shouldWake(event.kind, System.currentTimeMillis() - event.at in 0..15_000, toolActivity)
-            store.record(event, PhoneAwareness.appName(app, event.app), wake, aiBusy)
+            val isUrgent = event.kind in setOf("unlock", "app_enter")
+            store.record(event, PhoneAwareness.appName(app, event.app), wake, aiBusy, urgent = isUrgent)
             if (wake && store.wakeEnabled && event.app !in store.excluded) CompanionRuntime.signalPhoneEvent()
         }
         try {

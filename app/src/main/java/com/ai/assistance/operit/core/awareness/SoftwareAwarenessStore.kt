@@ -18,7 +18,7 @@ class SoftwareAwarenessStore(context: Context) {
     fun data() = store.read(key)
     fun rows() = SoftwareEventPolicy.rows(data()).filter { it.optLong("at") >= System.currentTimeMillis() - 14 * 86_400_000L }
 
-    fun record(observer: String, generation: Long, kind: String, summary: String, actor: String, detail: JSONObject, at: Long, wake: Boolean) {
+    fun record(observer: String, generation: Long, kind: String, summary: String, actor: String, detail: JSONObject, at: Long, wake: Boolean, urgent: Boolean = false) {
         if (!enabled || role != observer || revision != generation) return
         store.update(key) { data ->
             if (!enabled || role != observer || revision != generation) return@update
@@ -26,6 +26,7 @@ class SoftwareAwarenessStore(context: Context) {
             val row = JSONObject().put("sequence", sequence).put("at", at).put("kind", kind)
                 .put("summary", summary.take(240)).put("actor", actor).put("detail", detail)
                 .put("dispatch", if (wake && wakeEnabled) "pending" else "recorded")
+                .put("urgent", urgent && wake && wakeEnabled)
             data.put("sequence", sequence).put("events", JSONArray((SoftwareEventPolicy.rows(data) + row)
                 .filter { it.optLong("at") >= System.currentTimeMillis() - 14 * 86_400_000L }.takeLast(3000)))
         }
