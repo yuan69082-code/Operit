@@ -104,7 +104,7 @@ class CompanionStore(context: Context) {
     }
 
     fun saveEntry(scope: String, id: String?, title: String, category: String,
-                  kind: String, content: String, source: String?): JSONObject {
+                  kind: String, content: String, source: String?, tags: List<String>? = null): JSONObject {
         require(title.isNotBlank() && title.length <= 160) { "标题须为 1 到 160 字。" }
         require(category.isNotBlank() && category.length <= 120) { "请填写分类。" }
         require(kind in setOf("knowledge", "skill", "file")) { "资料类型必须是 knowledge、skill 或 file。" }
@@ -153,6 +153,11 @@ class CompanionStore(context: Context) {
                 saved = JSONObject().put("id", entryId).put("title", title).put("category", category)
                     .put("kind", kind).put("content", content).put("updated", System.currentTimeMillis())
                     .put("file", copied?.absolutePath ?: previousFile)
+                // 旧日回声的主题标签：不传就保留原来的
+                val cleanTags = tags?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct()
+                require(cleanTags == null || (cleanTags.size <= 20 && cleanTags.all { it.length <= 40 })) { "标签最多20个，每个不超过40字。" }
+                val keptTags = cleanTags?.let { JSONArray(it) } ?: old?.optJSONArray("tags")
+                if (keptTags != null && keptTags.length() > 0) saved.put("tags", keptTags)
                 if (index == null) entries.put(saved) else entries.put(index, saved)
                 data.put("library", entries)
                 val categories = data.optJSONArray("categories") ?: JSONArray()

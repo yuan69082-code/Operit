@@ -35,11 +35,12 @@ object CompanionTools {
                 param("interaction_type", "真实完成结果：companionship/affection/intimacy/sharing/discovery/task_progress/reflection/conflict/loss/reconciliation/slighted/empathy/helped/intrigued；不确定时省略交由XC判断"),
                 param("tone", "可选 neutral/calm/warm/guarded/conflicted/focused/playful/tired"))),
         ToolPrompt(name = "companion_library",
-            description = "角色资料库。action=categories|category|list|search|get|save|delete。category 创建分类；save 保存知识、能力笔记或文件副本，可提供 id 更新或移动到另一分类；get/delete 必须提供 id。search 提供 query。list/search 每页20项，可传 offset。分类由你决定，也可按用户要求整理。文件保留在本机，不自动执行。",
+            description = "角色资料库。action=categories|category|list|search|get|save|delete|themes|theme|delete_theme。category 创建分类；save 保存知识、能力笔记或文件副本，可提供 id 更新或移动到另一分类，tags 逗号分隔给资料打主题标签（不传保留原标签）；get/delete 必须提供 id。search 提供 query。list/search 每页20项，可传 offset。旧日回声：theme 用 query=主题名、tags=挂在下面的词（逗号分隔）新建或覆盖一个主题，例如 query=性 tags=做爱,dirty talk,高潮管理；聊天碰到主题名或这些词，资料库、学习角已读、日记里相关的旧东西会列出标题，打不打开你定。themes 查看全部主题，delete_theme 用 query 删除。分类由你决定，也可按用户要求整理。文件保留在本机，不自动执行。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "资料ID"),
                 param("title", "标题"), param("category", "自定义分类，可用/分级"), param("kind", "knowledge、skill 或 file"),
                 param("content", "知识或能力笔记的正文"), param("source_path", "需复制保存的可读取本地文件路径或content URI"),
-                param("query", "检索词"), param("offset", "分页起点，非负整数"))),
+                param("query", "检索词；theme/delete_theme 时为主题名"), param("offset", "分页起点，非负整数"),
+                param("tags", "逗号分隔的主题标签，或 theme 时挂在主题下的词"))),
         ToolPrompt(name = "companion_todo",
             description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "待办ID"), param("title", "标题"),
@@ -163,7 +164,7 @@ object CompanionTools {
                                 .put("call_silence_callback", store.silenceEnabled)
                                 .put("last_request", store.read("capabilities:$chatId").optJSONObject("snapshot"))
                         }
-                        else -> library(store, scope, tool, required(tool, "action"))
+                        else -> library(context, roleId, store, scope, tool, required(tool, "action"))
                     }
                     ToolResult(toolName = tool.name, success = true, result = StringResultData(result.toString()))
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -176,11 +177,17 @@ object CompanionTools {
         }
     }
 
-    private fun library(store: CompanionStore, scope: String, tool: AITool, action: String): JSONObject = when (action) {
+    private fun library(context: Context, role: String?, store: CompanionStore, scope: String, tool: AITool, action: String): JSONObject = when (action) {
         "categories" -> JSONObject().put("categories", JSONArray(store.categories(scope)))
         "category" -> { store.createCategory(scope, required(tool, "category")); JSONObject().put("categories", JSONArray(store.categories(scope))) }
         "save" -> store.saveEntry(scope, value(tool, "id"), required(tool, "title"), required(tool, "category"),
-            required(tool, "kind"), value(tool, "content").orEmpty(), value(tool, "source_path"))
+            required(tool, "kind"), value(tool, "content").orEmpty(), value(tool, "source_path"),
+            value(tool, "tags")?.split(',', '，')?.map { it.trim() }?.filter { it.isNotEmpty() })
+        "themes" -> JSONObject().put("themes", JSONArray(EchoThemes.themes(context, requireNotNull(role) { "请先选择独立助手" }).map {
+            JSONObject().put("name", it.name).put("words", JSONArray(it.words.toList())) }))
+        "theme" -> EchoThemes.saveTheme(context, requireNotNull(role) { "请先选择独立助手" }, required(tool, "query"),
+            required(tool, "tags").split(',', '，'))
+        "delete_theme" -> { EchoThemes.deleteTheme(context, requireNotNull(role) { "请先选择独立助手" }, required(tool, "query")); JSONObject().put("deleted", true) }
         "get" -> store.entries(scope).firstOrNull { it.getString("id") == required(tool, "id") } ?: error("资料不存在。")
         "delete" -> { store.deleteEntry(scope, required(tool, "id")); JSONObject().put("deleted", true) }
         "list", "search" -> {
