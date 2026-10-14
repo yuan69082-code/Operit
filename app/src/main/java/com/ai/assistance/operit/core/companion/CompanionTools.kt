@@ -42,12 +42,13 @@ object CompanionTools {
                 param("query", "检索词；theme/delete_theme 时为主题名"), param("offset", "分页起点，非负整数"),
                 param("tags", "逗号分隔的主题标签，或 theme 时挂在主题下的词"))),
         ToolPrompt(name = "companion_todo",
-            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。",
+            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill|thought|thoughts。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。念头池：thought 用 content 存一个念头，choice 自己选 now（现在讲，记一笔然后直接说）、sink（先沉着，minutes 可选，默认两天后浮上来）或 drop（扔掉）；带 id 改已有念头的去留。thoughts 查看浮上来的念头。返回里附心潮分享欲，只作参考。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "待办ID"), param("title", "标题"),
                 param("content", "待办说明或实际沉淀内容"), param("urgency", "urgent 或 normal"),
                 param("horizon", "short 或 long"), param("status", "open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
                 param("details", "JSON对象，可含priority=P0..P3、conclusion、completed、next、needs_decision、category、batch、evidence、linked_ids数组、expected_version。原作者不可修改。"),
-                param("minutes", "submit 安排0–43200分钟后处理"), param("offset", "list 分页起点，每页20项"))),
+                param("minutes", "submit 安排0–43200分钟后处理；thought 时为沉着多少分钟"), param("offset", "list 分页起点，每页20项"),
+                param("choice", "thought 时 now/sink/drop"))),
         ToolPrompt(name = "companion_schedule",
             description = "安排本会话下次主动联系判断。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下要留意的事；可以联系或保持安静。学习取材使用独立的 companion_explore 开关与预约。只在软件主动联系开启且本会话为目标时生效；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次唤醒距现在的分钟数"), param("purpose", "醒来要检查或做的事，最多500字"))),
@@ -109,7 +110,19 @@ object CompanionTools {
                                 }
                             }
                         }
-                        "companion_todo" -> {
+                        "companion_todo" -> if (action == "thought" || action == "thoughts") {
+                            // 念头池
+                            val actor = requireNotNull(roleId) { "请先选择独立助手" }
+                            val share = runCatching { kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { XcEmotionBridge.cached(context, chatId, roleId) } }.getOrNull()
+                            val result = JSONObject()
+                            if (action == "thought") result.put("saved", ThoughtPool.save(context, actor, value(tool, "id"), value(tool, "content"),
+                                required(tool, "choice"), value(tool, "minutes")?.let { it.toIntOrNull() ?: error("minutes 须为整数") }))
+                            val now = System.currentTimeMillis()
+                            val items = ThoughtPool.all(context, actor)
+                            result.put("surfaced", JSONArray(ThoughtPool.surfaced(items, now)))
+                                .put("sinking", items.count { it.optString("state") == "sink" })
+                                .put("xc", ThoughtPool.hint(ThoughtPool.shareDrive(share)))
+                        } else {
                             check(action != "submit" || !CompanionRuntime.isExplorationWake(chatId)) { "本轮探索请用 companion_explore schedule 安排继续；可以保存或批注待办" }
                             when (action) {
                                 "list", "get" -> Unit

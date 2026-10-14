@@ -81,6 +81,7 @@ object CompanionContext {
             val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
             if (open.isNotEmpty()) append("待办共${open.size}项，优先关注：" +
                 open.sortedByDescending { it.optString("urgency") == "urgent" }.take(3).joinToString("；") { it.optString("title") } + "\n")
+            if (!roleId.isNullOrBlank()) append(ThoughtPool.prompt(ThoughtPool.all(context, roleId), System.currentTimeMillis()))
             if (store.proactiveEnabled && store.preferences.getString("target_chat", null) == chatId) {
                 append("你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。当前安排：")
                 append(store.read("schedule:$chatId").toString())
