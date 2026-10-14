@@ -8,6 +8,7 @@ import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
 import com.ai.assistance.operit.data.model.ChatTurnOptions
 import com.ai.assistance.operit.data.model.InputProcessingState
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
@@ -344,6 +345,7 @@ object CompanionRuntime {
             通话可使用正常的 request_voice_call 工具，不重复拨打未被接听的同一轮来电。
             本轮最多12次工具调用、${if (phoneRole != null || softwareRole != null) 3 else 5}分钟。${when { explorationWork != null -> "可用 companion_explore schedule 安排15分钟至7天后的继续，或 pause 暂缓；预留一次工具调用用于安排。不能借其他调度工具绕过探索开关、间隔或每日上限。探索、继续和联系她是分开的决定，不要求每次有产出或消息。"; phoneRole != null || softwareRole != null -> "事件触发无需安排下一次唤醒，不要为了处理手机事件更改既有主动联系计划。保持安静也是完整决定。"; taskEvent -> "本次由待办提交触发，无需修改主动联系设置；可以更新事项、批注、完成或暂缓。需以后继续可用 companion_todo submit 安排至少1分钟后的处理；不能把计划当作结果。"; else -> "结束前用 companion_schedule 安排下次醒来的时间和目的，或主动 cancel 暂停。" }}
             先使用所需工具，最后若要发消息，用 <companion_message>这里仅写给她的新消息</companion_message>；若安静则只输出 <companion_quiet/>。
+            无论发不发消息，都另用 <companion_note>…</companion_note> 写给下次的自己：这次醒来看到了什么、此刻什么心情、为什么这样决定。它会藏在你们的聊天里，只有你能看到，她看不到；用你自己的话写，不写流水账。
             学习过程和内部状态写入资料或工具，不把计划、工具日志和控制标记直接发送给用户。确实发生互动或完成学习时主动回传 XC，不能编造她的回应。
         """.trimIndent()
         val result = CompletableDeferred<String>()
@@ -354,6 +356,22 @@ object CompanionRuntime {
             throw CancellationException("前台交互已开始，本轮探索停止")
         }
         store.log(chatId, "唤醒", event)
+        val keepWake = explorationWork == null && !taskEvent
+        suspend fun rememberWake(raw: String?, outcome: String) {
+            if (!keepWake) return
+            val note = raw?.let { Regex("<companion_note>([\\s\\S]*?)</companion_note>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }
+            val body = buildString {
+                append("[我刚才自己醒过一次，这条只有我能看到，不是她说的话]\n")
+                append("时间：").append(java.time.ZonedDateTime.now()).append("\n")
+                append("叫醒我的：").append(event.take(1500)).append("\n")
+                append("结果：").append(outcome)
+                if (!note.isNullOrBlank()) append("\n我当时的想法：").append(note.take(1500))
+            }
+            runCatching {
+                core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "user", content = body,
+                    displayMode = ChatMessageDisplayMode.HIDDEN_PLACEHOLDER), chatId)
+            }
+        }
         toolCount.set(0)
         val turn = OwnedTurn(core, chatId)
         owned.set(turn)
@@ -391,14 +409,17 @@ object CompanionRuntime {
             val current = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId)
             if (current.lastOrNull()?.timestamp != latest?.timestamp || current.lastOrNull()?.content != latest?.content) {
                 store.log(chatId, "跳过", "聊天已更新，本次不插入旧回复")
+                rememberWake(raw, "想好的话没发出去，因为她这时候已经在跟我说话了")
                 return@coroutineScope
             }
             val cleaned = ChatUtils.removeThinkingContent(raw)
                 .replace(Regex("<tool(?:_result)?\\b[\\s\\S]*?</tool(?:_result)?>"), "")
+                .replace(Regex("<companion_note>[\\s\\S]*?</companion_note>"), "")
             val messages = Regex("<companion_message>([\\s\\S]*?)</companion_message>").findAll(cleaned).toList()
             if (messages.isEmpty()) {
                 check(cleaned.contains("<companion_quiet/>")) { "没有明确的主动消息或安静决定" }
                 store.log(chatId, "安静", "本次未发送消息；使用工具${toolCount.get()}次")
+                rememberWake(raw, "我决定不吭声")
                 return@coroutineScope
             }
             check(messages.size == 1) { "主动消息格式不明确" }
@@ -406,8 +427,10 @@ object CompanionRuntime {
             require(text.isNotBlank() && text.length <= 4000) { "主动消息为空或过长" }
             if (CompanionPolicy.duplicate(text, current.filter { it.sender == "ai" }.takeLast(5).map { it.content })) {
                 store.log(chatId, "拦截重复", "内容与近期已发送消息重复，本次未发送")
+                rememberWake(raw, "想说的话跟刚说过的重复了，没发")
                 return@coroutineScope
             }
+            rememberWake(raw, "我决定开口，下面紧跟着的那条就是我说的")
             core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text), chatId)
             AIForegroundService.notifyReplyCompleted(context, chatId, card.name, text, null,
                 notifyReplyOverride = true, notifyWhileForeground = true)
