@@ -128,7 +128,7 @@ object SoftwareAwareness {
                 else -> "离开聊天页面：${event.view?.name}"
             }
             record(context, event.kind, description, if (toolRelated()) "tool_or_user_uncertain" else "user_navigation",
-                presenceDetail(event), wake = !toolRelated(), urgent = otherAssistant)
+                presenceDetail(event), wake = otherAssistant, urgent = otherAssistant)
         }
     }
 
@@ -139,7 +139,8 @@ object SoftwareAwareness {
     fun userMessage(context: Context, chat: String, role: String?, kind: String = "message_sent", proxy: Boolean = false) {
         record(context, kind, if (kind == "message_sent") "向助手发送了消息" else "向群聊发送了消息",
             if (proxy || toolRelated()) "proxy_or_tool_message" else "user_message",
-            JSONObject().put("chat_id", chat).put("assistant_id", role), wake = !proxy && !toolRelated())
+            JSONObject().put("chat_id", chat).put("assistant_id", role),
+            wake = !proxy && !toolRelated() && (kind != "message_sent" || role != SoftwareAwarenessStore(context).role))
     }
 
     suspend fun authorize(context: Context, chat: String, role: String?) {

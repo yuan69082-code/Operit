@@ -46,13 +46,19 @@ object PhoneAwarenessRuntime {
             }
         }
         var registered = false
+        val homePackage = runCatching {
+            app.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
+        }.getOrNull()
         fun record(event: PhonePresence.Event) {
             val toolActivity = duringToolActivity()
             val aiBusy = toolActivity || CompanionRuntime.hasActiveWork() || ChatRuntimeHolder.getInstance(app).activeConversationCount.value > 0
             // Generation alone is not evidence of self-induced UI changes: retain those events
             // and let the dispatcher defer them until the existing conversation is idle.
-            val wake = PhonePresence.shouldWake(event.kind, System.currentTimeMillis() - event.at in 0..15_000, toolActivity)
-            val isUrgent = event.kind in setOf("unlock", "app_enter")
+            // 回到桌面、切回本软件不算她去做了别的事：只记不叫
+            val passThrough = event.kind == "app_enter" && (event.app == app.packageName || event.app == homePackage)
+            val wake = !passThrough && PhonePresence.shouldWake(event.kind, System.currentTimeMillis() - event.at in 0..15_000, toolActivity)
+            // 只有亮屏解锁立刻叫；切应用攒一会儿打包，不再一切就叫
+            val isUrgent = event.kind == "unlock"
             store.record(event, PhoneAwareness.appName(app, event.app), wake, aiBusy, urgent = isUrgent)
             if (wake && store.wakeEnabled && event.app !in store.excluded) CompanionRuntime.signalPhoneEvent()
         }

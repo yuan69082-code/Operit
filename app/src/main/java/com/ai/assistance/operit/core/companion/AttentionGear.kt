@@ -15,6 +15,8 @@ object AttentionGear {
     private val order = listOf("loose", "normal", "tight")
     private val names = mapOf("loose" to "放松", "normal" to "平常", "tight" to "盯紧")
     private const val NORMAL_MS = 20 * 60_000L
+    // 盯紧时切应用也攒 3 分钟再打包，解锁仍立刻叫
+    private const val TIGHT_PHONE_MS = 3 * 60_000L
     private const val LOOSE_MS = 180 * 60_000L
     private const val GOODNIGHT_WINDOW_MS = 6 * 3_600_000L
     private val goodnight = Regex("晚安|睡了|睡觉|去睡|good\\s*night", RegexOption.IGNORE_CASE)
@@ -110,7 +112,7 @@ object AttentionGear {
     /** 手机事件：只有盯紧时才按原间隔、解锁/切应用立即叫醒；其他档只存不叫，到点打包。 */
     fun phonePolicy(context: Context, chatId: String, roleId: String, base: Long): Pair<Long, Boolean> =
         when (state(context, chatId, roleId).effective) {
-            "tight" -> base to true
+            "tight" -> maxOf(base, TIGHT_PHONE_MS) to true
             "normal" -> maxOf(base, NORMAL_MS) to false
             else -> maxOf(base, LOOSE_MS) to false
         }
