@@ -380,7 +380,7 @@ object CompanionRuntime {
         }
         store.log(chatId, "唤醒", event)
         val keepWake = explorationWork == null && !taskEvent
-        suspend fun rememberWake(raw: String?, outcome: String) {
+        suspend fun rememberWake(raw: String?, outcome: String, sent: String? = null) {
             if (!keepWake) return
             raw?.let { Regex("<companion_open>([\\s\\S]*?)</companion_open>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }?.let { open ->
                 store.update("ledger:$chatId") { it.put("open", if (open == "无") "" else open.take(500)) }
@@ -396,6 +396,20 @@ object CompanionRuntime {
             runCatching {
                 core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "user", content = body,
                     displayMode = ChatMessageDisplayMode.HIDDEN_PLACEHOLDER), chatId)
+            }
+            // 醒来这件事本身也会改变情绪：把实际发生的自主行动回传 XC，由 XC 判断类型
+            if (store.emotionEnabled) {
+                val unanswered = store.read("ledger:$chatId").optInt("unanswered") + if (sent != null) 1 else 0
+                val exchange = buildString {
+                    append("自主行动（不是她说的话）：我被").append(event.take(200)).append("叫醒。")
+                    append(outcome).append("。")
+                    if (sent != null) append("我对她说：").append(sent.take(400)).append("。")
+                    append("她上次回我之后，我已经主动找了她").append(unanswered).append("次她都没回。")
+                    if (!note.isNullOrBlank()) append("我当时的想法：").append(note.take(600))
+                }.take(1500)
+                runCatching {
+                    XcEmotionBridge.event(context, chatId, roleId, "wake-${System.currentTimeMillis()}", exchange, null, null)
+                }
             }
         }
         toolCount.set(0)
@@ -457,7 +471,7 @@ object CompanionRuntime {
                 rememberWake(raw, "想说的话跟刚说过的重复了，没发")
                 return@coroutineScope
             }
-            rememberWake(raw, "我决定开口，下面紧跟着的那条就是我说的")
+            rememberWake(raw, "我决定开口，下面紧跟着的那条就是我说的", text)
             store.update("ledger:$chatId") {
                 it.put("unanswered", it.optInt("unanswered") + 1)
                 it.put("last_contact_at", System.currentTimeMillis())
