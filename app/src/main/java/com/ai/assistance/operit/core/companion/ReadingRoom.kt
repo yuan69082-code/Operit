@@ -48,7 +48,13 @@ class ReadingRoom(private val context: Context, private val role: String) {
             if (previous != null && previous.optString("progress").isNotBlank()) result.put("progress", previous.optString("progress")).put("progress_at", previous.optLong("progress_at"))
             val origin = parent?.takeIf { it.isNotBlank() } ?: previous?.optString("parent")?.takeIf { it.isNotBlank() }
             if (origin != null) {
-                require(origin != sourceId && sources.any { it.getString("id") == origin }) { "延伸自的来源不存在" }
+                if (origin.startsWith("chat:")) {
+                    // 枝芽：从某天的聊天长出来的来源
+                    require(BranchSprout.validOrigin(origin)) { "聊天来源写成 chat:YYYY-MM-DD" }
+                    if (kind == "topic") BranchSprout.privacyProblem(address)?.let { throw IllegalArgumentException(it) }
+                } else {
+                    require(origin != sourceId && sources.any { it.getString("id") == origin }) { "延伸自的来源不存在" }
+                }
                 result.put("parent", origin)
             }
             if (index < 0) sources.add(result) else sources[index] = result
