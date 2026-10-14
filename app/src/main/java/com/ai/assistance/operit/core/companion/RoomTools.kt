@@ -21,7 +21,7 @@ object RoomTools {
             parametersStructured = listOf(p("action", "操作", true), p("details", "decorate 的JSON对象：title/subtitle/cover/widgets/dates/theme；先get读取可用格式"), p("alias", "已确认的别名"), p("name", "对应完整称呼"))),
         ToolPrompt(name = "companion_diary", description = "自己的日记。action=list|get|save；list 可按 date=YYYY-MM-DD 筛选；get 用id，可加version查看旧稿。save 需用户开启自主日记，使用date/title/text；更新还须id和expected_version。按真实记录写下经历和想法，也可以不写；转述保留他人姓名与来源，不能编造未发生的事情。用户编辑有独立署名，原稿保留。",
             parametersStructured = listOf(p("action", "操作", true), p("id", "日记ID"), p("date", "日期"), p("title", "标题"), p("text", "正文，最多12000字"), p("expected_version", "更新前读取到的版本"), p("version", "查看某个旧版本"), p("offset", "列表分页起点，每页10条"))),
-        ToolPrompt(name = "companion_reading", description = "自己的阅读角。action=sources|save_source|refresh|checked|progress|queue|history|add|get|fetch|note|skip。progress 用 id/text 覆盖写该来源的学习进度（学到哪、下一步）；读到别的方向感兴趣，可 save_source 新建来源并在 details 里写 parent=原来源id 表示由它延伸，方向不限；从聊天里长出来的方向写 parent=chat:YYYY-MM-DD（枝芽），这类话题题目不能含她的名字称呼或坐标。普通新内容去重入队，不等于已读或必须联系用户。sources 标记到期来源；RSS用refresh，topic用已授权搜索工具探索后checked。save_source用details设置title/kind=rss或topic/address/hours=1..168/enabled/可选parent，修改附id；公开搜索词不含私聊原文。add用title/url/text保存来源摘要；get用id并可指定part=summary或body；fetch取网页可读正文，保留部分正文标记；note用id/text写已读材料的随记，和来源分开。自主探索未允许上网时不可联网。",
+        ToolPrompt(name = "companion_reading", description = "自己的阅读角。action=sources|save_source|refresh|checked|progress|queue|history|add|get|fetch|note|skip。progress 用 id/text 覆盖写该来源的学习进度（学到哪、下一步）；读到别的方向感兴趣，可 save_source 新建来源并在 details 里写 parent=原来源id 表示由它延伸，方向不限；从聊天里长出来的方向写 parent=chat:YYYY-MM-DD（枝芽），这类话题题目不能含她的名字称呼或坐标。普通新内容去重入队，不等于已读或必须联系用户。sources 标记到期来源；RSS用refresh，topic用已授权搜索工具探索后checked。save_source用details设置title/kind=rss或topic/address/hours=1..168/enabled/可选parent，修改附id；公开搜索词不含私聊原文。add用title/url/text保存来源摘要，进待读后普通材料7天过期、论坛帖子2天，details可选forum=true或days=1..30；queue里expires_in_hours是还剩几小时；get用id并可指定part=summary或body；fetch取网页可读正文，保留部分正文标记；note用id/text写已读材料的随记，和来源分开。自主探索未允许上网时不可联网。",
             parametersStructured = listOf(p("action", "操作", true), p("id", "条目或来源ID"), p("details", "来源设置JSON"), p("title", "标题"), p("url", "原始来源链接"), p("text", "来源摘要或自己的随记"), p("part", "summary/body"), p("offset", "分页起点，每页10项")))
     )
     fun register(handler: AIToolHandler, context: Context) {
@@ -81,8 +81,15 @@ object RoomTools {
                                 "refresh" -> reading.refresh(required("id"), true, chat)
                                 "checked" -> { reading.checked(required("id")); JSONObject().put("recorded", true) }
                                 "progress" -> reading.progress(required("id"), required("text"))
-                                "queue", "history" -> page("entries", reading.entries(action == "history"), offset)
-                                "add" -> reading.add(required("title"), required("url"), required("text"))
+                                "queue", "history" -> page("entries", reading.entries(action == "history").map { item ->
+                                    ReadingRoom.hoursLeft(item)?.let { JSONObject(item.toString()).put("expires_in_hours", it) } ?: item }, offset)
+                                "add" -> {
+                                    // details 可选：forum=true 表示论坛帖子（默认2天过期），days=1..30 自己定
+                                    val extra = arg("details")?.let { JSONObject(it) } ?: JSONObject()
+                                    reading.add(required("title"), required("url"), required("text"),
+                                        if (extra.optBoolean("forum")) ReadingRoom.FORUM else "manual",
+                                        if (extra.has("days")) extra.getInt("days") else null)
+                                }
                                 "get" -> reading.open(required("id"), arg("part") ?: "summary", true)
                                 "fetch" -> reading.fetch(required("id"), true, chat)
                                 "note" -> reading.note(required("id"), required("text"), true)

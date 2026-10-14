@@ -69,4 +69,16 @@ class ReadingRoomTest {
         assertEquals("助手的随记", saved.getString("note")); assertEquals("用户的批注", saved.getString("user_note"))
         assertEquals("partial", room.entries(true).single().getString("delivered"))
     }
+    @Test fun forumPostsExpireInTwoDaysOthersInSeven() {
+        val room = ReadingRoom(context(), "a")
+        val normal = room.add("普通", "https://example.com/a", "摘要")
+        val forum = room.add("帖子", "https://example.com/b", "摘要", ReadingRoom.FORUM)
+        val custom = room.add("自定", "https://example.com/c", "摘要", days = 1)
+        fun span(o: org.json.JSONObject) = (o.getLong("expires") - o.getLong("added")) / 86_400_000L
+        assertEquals(7, span(normal)); assertEquals(2, span(forum)); assertEquals(1, span(custom))
+        assertThrows(IllegalArgumentException::class.java) { room.add("太久", "https://example.com/d", "摘要", days = 31) }
+        assertEquals(47L, ReadingRoom.hoursLeft(forum, forum.getLong("added") + 3_600_000L))
+        assertEquals(0L, ReadingRoom.hoursLeft(forum, forum.getLong("added") + 3 * 86_400_000L))
+        assertNull(ReadingRoom.hoursLeft(org.json.JSONObject().put("state", "read")))
+    }
 }
