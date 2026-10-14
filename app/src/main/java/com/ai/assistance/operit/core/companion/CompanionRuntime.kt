@@ -332,12 +332,34 @@ object CompanionRuntime {
         val card = CharacterCardManager.getInstance(context).getCharacterCard(roleId)
         val history = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId).map { it.copy() }
         val latest = history.lastOrNull()
+        // 硬账本：不靠上下文去数，压缩或换模型后也不会算错
+        val lastUserAt = history.lastOrNull { it.sender == "user" && it.displayMode != ChatMessageDisplayMode.HIDDEN_PLACEHOLDER }?.timestamp ?: 0L
+        val ledger = store.update("ledger:$chatId") { data ->
+            if (lastUserAt > data.optLong("last_user_at")) {
+                data.put("last_user_at", lastUserAt)
+                data.put("unanswered", 0)
+            }
+        }
+        val ledgerText = buildString {
+            val now = System.currentTimeMillis()
+            val userAt = ledger.optLong("last_user_at")
+            append("她上一次真正发消息：")
+            append(if (userAt > 0) "${java.time.Instant.ofEpochMilli(userAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().withNano(0)}（${(now - userAt) / 60000}分钟前）" else "没有记录")
+            append("\n那之后我主动找了她几次她都没回：").append(ledger.optInt("unanswered")).append("次")
+            ledger.optLong("last_contact_at").takeIf { it > 0 }?.let {
+                append("\n我上一次主动开口：${(now - it) / 60000}分钟前，说的是：").append(ledger.optString("last_contact_text").take(200))
+            }
+            val open = ledger.optString("open").trim()
+            append("\n上次醒来时我记下的、还没了结的事：").append(open.ifBlank { "没有" })
+        }
         val activities = if (explorationWork != null) ExplorationPolicy.choices(ExplorationStore(context).read(roleId))
             .mapNotNull { ExplorationPolicy.activities[it] }.joinToString("、") else ""
         val instruction = """
             [软件主动唤醒，不是用户新消息]
             当前时间：${java.time.ZonedDateTime.now()}。
             此次计划与事件：$event
+            【硬账本，由软件自动记，比你自己从聊天里数更准】
+            $ledgerText
             最近一条消息时间：${latest?.timestamp}；发送者：${latest?.sender}。完整可用聊天历史已随本轮提供。
             你拥有正常聊天中已授权的工具，可以查时间、当前应用、屏幕或其他内容，但必须实际调用工具后才知道结果。
             先检查聊天是否还在等她回复。不要重发上次的话，不把沉默当成危险；可选择安静或有新内容时跟进。
@@ -345,6 +367,7 @@ object CompanionRuntime {
             通话可使用正常的 request_voice_call 工具，不重复拨打未被接听的同一轮来电。
             本轮最多12次工具调用、${if (phoneRole != null || softwareRole != null) 3 else 5}分钟。${when { explorationWork != null -> "可用 companion_explore schedule 安排15分钟至7天后的继续，或 pause 暂缓；预留一次工具调用用于安排。不能借其他调度工具绕过探索开关、间隔或每日上限。探索、继续和联系她是分开的决定，不要求每次有产出或消息。"; phoneRole != null || softwareRole != null -> "事件触发无需安排下一次唤醒，不要为了处理手机事件更改既有主动联系计划。保持安静也是完整决定。"; taskEvent -> "本次由待办提交触发，无需修改主动联系设置；可以更新事项、批注、完成或暂缓。需以后继续可用 companion_todo submit 安排至少1分钟后的处理；不能把计划当作结果。"; else -> "结束前用 companion_schedule 安排下次醒来的时间和目的，或主动 cancel 暂停。" }}
             先使用所需工具，最后若要发消息，用 <companion_message>这里仅写给她的新消息</companion_message>；若安静则只输出 <companion_quiet/>。
+            另用 <companion_open>…</companion_open> 更新"还没了结的事"：仍悬着就写清是什么、问到哪一步了；已经解决了就只写 无。不写这个标签则保持原样。
             无论发不发消息，都另用 <companion_note>…</companion_note> 写给下次的自己：这次醒来看到了什么、此刻什么心情、为什么这样决定。它会藏在你们的聊天里，只有你能看到，她看不到；用你自己的话写，不写流水账。
             学习过程和内部状态写入资料或工具，不把计划、工具日志和控制标记直接发送给用户。确实发生互动或完成学习时主动回传 XC，不能编造她的回应。
         """.trimIndent()
@@ -359,6 +382,9 @@ object CompanionRuntime {
         val keepWake = explorationWork == null && !taskEvent
         suspend fun rememberWake(raw: String?, outcome: String) {
             if (!keepWake) return
+            raw?.let { Regex("<companion_open>([\\s\\S]*?)</companion_open>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }?.let { open ->
+                store.update("ledger:$chatId") { it.put("open", if (open == "无") "" else open.take(500)) }
+            }
             val note = raw?.let { Regex("<companion_note>([\\s\\S]*?)</companion_note>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }
             val body = buildString {
                 append("[我刚才自己醒过一次，这条只有我能看到，不是她说的话]\n")
@@ -415,6 +441,7 @@ object CompanionRuntime {
             val cleaned = ChatUtils.removeThinkingContent(raw)
                 .replace(Regex("<tool(?:_result)?\\b[\\s\\S]*?</tool(?:_result)?>"), "")
                 .replace(Regex("<companion_note>[\\s\\S]*?</companion_note>"), "")
+                .replace(Regex("<companion_open>[\\s\\S]*?</companion_open>"), "")
             val messages = Regex("<companion_message>([\\s\\S]*?)</companion_message>").findAll(cleaned).toList()
             if (messages.isEmpty()) {
                 check(cleaned.contains("<companion_quiet/>")) { "没有明确的主动消息或安静决定" }
@@ -431,6 +458,11 @@ object CompanionRuntime {
                 return@coroutineScope
             }
             rememberWake(raw, "我决定开口，下面紧跟着的那条就是我说的")
+            store.update("ledger:$chatId") {
+                it.put("unanswered", it.optInt("unanswered") + 1)
+                it.put("last_contact_at", System.currentTimeMillis())
+                it.put("last_contact_text", text.take(200))
+            }
             core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text), chatId)
             AIForegroundService.notifyReplyCompleted(context, chatId, card.name, text, null,
                 notifyReplyOverride = true, notifyWhileForeground = true)
