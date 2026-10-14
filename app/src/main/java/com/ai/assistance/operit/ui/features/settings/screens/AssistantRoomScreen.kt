@@ -36,14 +36,14 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 @Composable
-fun AssistantRoomDialog(role: String, chat: String, onDismiss: () -> Unit) {
+fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间", onDismiss: () -> Unit) {
     val context = LocalContext.current
     val room = remember(role) { AssistantRoom(context, role) }
     val scope = rememberCoroutineScope()
     val revision by AssistantRoom.revision.collectAsState()
     var data by remember(role) { mutableStateOf(JSONObject()) }
     var name by remember(role) { mutableStateOf("") }
-    var tab by remember(role) { mutableStateOf("房间") }
+    var tab by remember(role) { mutableStateOf(initialTab) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var advanced by remember { mutableStateOf(false) }

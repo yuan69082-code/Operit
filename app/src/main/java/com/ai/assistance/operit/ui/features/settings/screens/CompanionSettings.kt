@@ -34,7 +34,7 @@ fun CompanionSettingsButton() {
 }
 
 @Composable
-private fun CompanionSettingsDialog(onDismiss: () -> Unit) {
+internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val store = remember { CompanionStore(context) }
     val scope = rememberCoroutineScope()
