@@ -42,6 +42,8 @@ internal fun ReadingPanel(role: String, chat: String, revision: Long, work: (sus
             Text(item.getString("title"), style = MaterialTheme.typography.titleMedium)
             Text("${if (item.getString("kind") == "rss") "RSS" else "公开话题"} · 每${item.getInt("hours")}小时")
             Text(item.getString("address"), maxLines = 3)
+            item.optString("parent").takeIf { it.isNotBlank() }?.let { p -> sources.firstOrNull { it.getString("id") == p }?.let { Text("延伸自：${it.getString("title")}", style = MaterialTheme.typography.bodySmall) } }
+            item.optString("progress").takeIf { it.isNotBlank() }?.let { Text("进度：$it", style = MaterialTheme.typography.bodySmall, maxLines = 6) }
             RoomSwitch("关注", item.optBoolean("enabled")) { enabled -> work { reading.saveSource(item.getString("id"), item.getString("title"), item.getString("kind"), item.getString("address"), item.getInt("hours"), enabled) } }
             Row {
                 if (item.getString("kind") == "rss") TextButton(enabled = item.optBoolean("enabled"), onClick = { work { reading.refresh(item.getString("id"), false, chat) } }) { Text("现在刷新") }

@@ -30,7 +30,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
             if (history) it.optString("state") in setOf("read", "saved") else it.optString("state") == "queued" && it.optLong("expires") > now
         }.sortedByDescending { it.optLong("added") }
     }
-    fun saveSource(id: String?, title: String, kind: String, address: String, hours: Int, enabled: Boolean): JSONObject {
+    fun saveSource(id: String?, title: String, kind: String, address: String, hours: Int, enabled: Boolean, parent: String? = null): JSONObject {
         require(title.length in 1..160 && hours in 1..168 && kind in setOf("rss", "topic")) { "请填写来源名称、类型和1–168小时的间隔" }
         require(address.length in 2..1500)
         if (kind == "rss") address.toHttpUrl().also { require(it.scheme in setOf("http", "https") && it.username.isEmpty() && it.password.isEmpty()) }
@@ -43,6 +43,14 @@ class ReadingRoom(private val context: Context, private val role: String) {
             require(index >= 0 || sources.size < 60) { "来源最多60个" }
             result = JSONObject().put("id", sourceId).put("title", title).put("kind", kind).put("address", address)
                 .put("hours", hours).put("enabled", enabled).put("checked", if (index < 0) 0L else sources[index].optLong("checked"))
+            // 学习进度和延伸来源跟着来源走，编辑开关不丢
+            val previous = if (index < 0) null else sources[index]
+            if (previous != null && previous.optString("progress").isNotBlank()) result.put("progress", previous.optString("progress")).put("progress_at", previous.optLong("progress_at"))
+            val origin = parent?.takeIf { it.isNotBlank() } ?: previous?.optString("parent")?.takeIf { it.isNotBlank() }
+            if (origin != null) {
+                require(origin != sourceId && sources.any { it.getString("id") == origin }) { "延伸自的来源不存在" }
+                result.put("parent", origin)
+            }
             if (index < 0) sources.add(result) else sources[index] = result
             data.put("sources", JSONArray(sources))
         }
@@ -105,6 +113,19 @@ class ReadingRoom(private val context: Context, private val role: String) {
     fun skip(id: String) = synchronized(lock) {
         check(entry(id).optString("state") == "queued") { "已读材料与随记保留在历史中，无需从待读移开" }
         store.update("reading-entry:$role:$id") { it.put("state", "skipped") }.also { index(it) }
+    }
+    /** 自己写的学习进度：学到哪了、下一步想看什么。覆盖写，只保留最新一份。 */
+    fun progress(id: String, text: String): JSONObject {
+        require(text.isNotBlank() && text.length <= 2000) { "进度须为1–2000字" }
+        lateinit var result: JSONObject
+        store.update(scope) { data ->
+            val sources = data.optJSONArray("sources").objects()
+            val source = sources.firstOrNull { it.getString("id") == id } ?: error("来源不存在")
+            source.put("progress", text.trim()).put("progress_at", System.currentTimeMillis())
+            result = source
+            data.put("sources", JSONArray(sources))
+        }
+        AssistantRoom.revision.updateValue(); return result
     }
     fun checked(id: String) {
         store.update(scope) { data ->
