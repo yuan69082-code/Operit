@@ -223,7 +223,12 @@ fun PhoneLayout(
                     color = Color.Transparent,
                     shadowElevation = contentShadowElevation
                 ) {
-                    // 普通调用AppContent，但由于我们的优化，它不会在动画时重组
+                    // Vio Life：外面套一层小镇和底部导航，原页面整块放在里面
+                    VioShell(
+                        currentScreen = currentScreen,
+                        navItems = navItems,
+                        onOpenScreen = onDrawerItemSelected,
+                    ) {
                     AppContent(
                         currentRouteEntry = currentRouteEntry,
                         currentScreen = currentScreen,
@@ -247,6 +252,7 @@ fun PhoneLayout(
                         titleContent = topBarTitleContent,
                         aliveScreenKeys = aliveScreenKeys
                     )
+                    }
                 }
 
                 // // 添加一个小方块，填充圆角和工具栏之间的空隙

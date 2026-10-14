@@ -55,48 +55,61 @@ internal val townPlaces = listOf(
 )
 
 /**
+ * 小镇弹窗版：聊天页顶上的「小镇」按钮还在用它。
  * @param onOuterPlace 关系网、群聊这类由聊天页自己处理的地方，交回调用方打开。
  */
 @Composable
 fun VioTownDialog(role: String?, chat: String, onOuterPlace: (String) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        VioTownPage(role, chat, onGate = onDismiss, onOuterPlace = { onDismiss(); onOuterPlace(it) }, gateLabel = "回到聊天")
+    }
+}
+
+/**
+ * 小镇首页本体，不带弹窗外壳。底部导航的「小镇」直接放这一页。
+ * @param onGate 点镇口或右上角按钮时调用。
+ */
+@Composable
+fun VioTownPage(
+    role: String?, chat: String, onGate: () -> Unit, onOuterPlace: (String) -> Unit,
+    modifier: Modifier = Modifier, gateLabel: String? = null,
+) {
     var place by remember { mutableStateOf<String?>(null) }
     var showNames by remember { mutableStateOf(true) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = Color(0xFF1B1A2E)) {
-            Column(Modifier.safeDrawingPadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Vio Life", color = Color(0xFFFFE3B0), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showNames = !showNames }) { Text(if (showNames) "藏起牌子" else "挂上牌子", color = Color(0xFFFFE3B0)) }
-                    TextButton(onClick = onDismiss) { Text("回到聊天", color = Color(0xFFFFE3B0)) }
-                }
-                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    // 底图按 2:3 等比放进可用区域，热区跟着同一个框走
-                    val ratio = 2f / 3f
-                    val w = if (maxWidth / maxHeight > ratio) maxHeight * ratio else maxWidth
-                    val h = w / ratio
-                    Box(Modifier.size(w, h)) {
-                        Image(painterResource(R.drawable.vio_town), contentDescription = "Vio Life 小镇",
-                            contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
-                        townPlaces.forEach { p ->
-                            Box(
-                                Modifier
-                                    .offset(w * p.left, h * p.top)
-                                    .size(w * (p.right - p.left), h * (p.bottom - p.top))
-                                    .clickable(role = Role.Button) {
-                                        when (p.key) {
-                                            "gate" -> onDismiss()
-                                            "neighbors", "board", "games" -> { onDismiss(); onOuterPlace(p.key) }
-                                            else -> place = p.key
-                                        }
+    Surface(modifier.fillMaxSize(), color = Color(0xFF1B1A2E)) {
+        Column(Modifier.statusBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Vio Life", color = Color(0xFFFFE3B0), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = { showNames = !showNames }) { Text(if (showNames) "藏起牌子" else "挂上牌子", color = Color(0xFFFFE3B0)) }
+                if (gateLabel != null) TextButton(onClick = onGate) { Text(gateLabel, color = Color(0xFFFFE3B0)) }
+            }
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                // 底图按 2:3 等比放进可用区域，热区跟着同一个框走
+                val ratio = 2f / 3f
+                val w = if (maxWidth / maxHeight > ratio) maxHeight * ratio else maxWidth
+                val h = w / ratio
+                Box(Modifier.size(w, h)) {
+                    Image(painterResource(R.drawable.vio_town), contentDescription = "Vio Life 小镇",
+                        contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+                    townPlaces.forEach { p ->
+                        Box(
+                            Modifier
+                                .offset(w * p.left, h * p.top)
+                                .size(w * (p.right - p.left), h * (p.bottom - p.top))
+                                .clickable(role = Role.Button) {
+                                    when (p.key) {
+                                        "gate" -> onGate()
+                                        "neighbors", "board", "games" -> onOuterPlace(p.key)
+                                        else -> place = p.key
                                     }
-                                    .semantics { contentDescription = "${p.name}：${p.hint}" },
-                                contentAlignment = Alignment.BottomCenter,
-                            ) {
-                                if (showNames) Text(p.name, color = Color.White, fontSize = 11.sp,
-                                    modifier = Modifier.padding(bottom = 2.dp)
-                                        .background(Color(0xAA2A2140), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 6.dp, vertical = 1.dp))
-                            }
+                                }
+                                .semantics { contentDescription = "${p.name}：${p.hint}" },
+                            contentAlignment = Alignment.BottomCenter,
+                        ) {
+                            if (showNames) Text(p.name, color = Color.White, fontSize = 11.sp,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                                    .background(Color(0xAA2A2140), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp))
                         }
                     }
                 }
@@ -105,16 +118,15 @@ fun VioTownDialog(role: String?, chat: String, onOuterPlace: (String) -> Unit, o
     }
     when (val key = place) {
         null -> Unit
-        "home", "library" -> if (role.isNullOrBlank()) TownNote("这里还没人住", "先在单人私聊里打开小镇。") { place = null }
+        "home", "library" -> if (role.isNullOrBlank()) TownNote("这里还没人住", "先去聊天里和一位助手单独聊过，再回来进门。") { place = null }
             else AssistantRoomDialog(role, chat, initialTab = if (key == "library") "阅读角" else "房间") { place = null }
         "tower", "hall" -> CompanionSettingsDialog { place = null }
         "pond" -> TownPond(role) { place = null }
         "ledger" -> TownLedger(chat) { place = null }
         "well" -> TownWell(role) { place = null }
-        "workshop" -> TownNote("工坊", "还在装修。工具箱、插件和工作流暂时还在原来的设置页里。") { place = null }
+        "workshop" -> TownNote("工坊", "还在装修。工具箱、插件和工作流先在「我的」里找。") { place = null }
     }
 }
-
 private val clock = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 private fun at(ms: Long) = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(clock)
 
