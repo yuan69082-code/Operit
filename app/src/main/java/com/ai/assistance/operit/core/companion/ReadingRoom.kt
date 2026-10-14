@@ -66,15 +66,17 @@ class ReadingRoom(private val context: Context, private val role: String) {
     /** 待读有效期：论坛帖子两天就凉了，普通材料留七天；也可以自己定 1–30 天。 */
     fun add(title: String, url: String, summary: String, source: String = "manual", days: Int? = null): JSONObject = synchronized(lock) {
         require(title.length in 1..200 && summary.length <= 12000)
-        val keep = days ?: if (source == FORUM) FORUM_DAYS else NORMAL_DAYS
+        // hy 论坛走 MCP，没有网址，帖子只有编号：写成 hy:thread:编号，自动按论坛两天算
+        val hyThread = HY_THREAD.matchEntire(url.trim())
+        val keep = days ?: if (source == FORUM || hyThread != null) FORUM_DAYS else NORMAL_DAYS
         require(keep in 1..30) { "待读有效期须为1–30天" }
-        val normalized = url.toHttpUrl().newBuilder().fragment(null).build().toString()
+        val normalized = if (hyThread != null) "hy:thread:${hyThread.groupValues[1]}" else url.toHttpUrl().newBuilder().fragment(null).build().toString()
         val id = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray()).joinToString("") { "%02x".format(it) }
         val existing = store.read("reading-entry:$role:$id")
         if (existing.has("id")) return@synchronized existing
         val now = System.currentTimeMillis()
         val result = JSONObject().put("id", id).put("owner", role).put("title", title).put("url", normalized)
-            .put("summary", summary).put("source", source).put("added", now).put("expires", now + keep * 86_400_000L)
+            .put("summary", summary).put("source", if (hyThread != null) FORUM else source).put("added", now).put("expires", now + keep * 86_400_000L)
             .put("state", "queued").put("material", "summary").put("note", "")
         store.update("reading-entry:$role:$id") { data -> result.keys().forEach { data.put(it, result.get(it)) } }
         index(result)
@@ -176,6 +178,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
     suspend fun fetch(id: String, ai: Boolean, chat: String): JSONObject = withContext(Dispatchers.IO) {
         authorizeNetwork(ai, chat)
         val entry = entry(id)
+        check(!entry.getString("url").startsWith("hy:")) { "hy 帖子没有网页，用 hy:get_thread 读正文" }
         val (url, html) = download(entry.getString("url"))
         currentCoroutineContext().ensureActive()
         authorizeNetwork(ai, chat)
@@ -213,6 +216,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
     companion object {
         const val FORUM = "forum"
         const val FORUM_DAYS = 2
+        private val HY_THREAD = Regex("hy:thread:(\\d{1,12})")
         const val NORMAL_DAYS = 7
         /** 还剩几小时过期，给待读列表看；已读的不过期，返回 null。 */
         fun hoursLeft(entry: JSONObject, now: Long = System.currentTimeMillis()): Long? =

@@ -81,4 +81,11 @@ class ReadingRoomTest {
         assertEquals(0L, ReadingRoom.hoursLeft(forum, forum.getLong("added") + 3 * 86_400_000L))
         assertNull(ReadingRoom.hoursLeft(org.json.JSONObject().put("state", "read")))
     }
+    @Test fun hyThreadIdCountsAsForumWithoutUrl() {
+        val room = ReadingRoom(context(), "a")
+        val post = room.add("不想修掉的缺点", "hy:thread:12380", "岚的帖子")
+        assertEquals("hy:thread:12380", post.getString("url")); assertEquals(ReadingRoom.FORUM, post.getString("source"))
+        assertEquals(2, (post.getLong("expires") - post.getLong("added")) / 86_400_000L)
+        assertThrows(IllegalArgumentException::class.java) { room.add("坏", "hy:thread:abc", "摘要") }
+    }
 }
