@@ -228,7 +228,8 @@ fun PhoneLayout(
                         currentScreen = currentScreen,
                         navItems = navItems,
                         onOpenScreen = onDrawerItemSelected,
-                    ) {
+                        canGoBack = canGoBack,
+                    ) { mineBack ->
                     AppContent(
                         currentRouteEntry = currentRouteEntry,
                         currentScreen = currentScreen,
@@ -245,8 +246,8 @@ fun PhoneLayout(
                         onScreenChange = onScreenChange,
                         onToggleSidebar = { /* Not used in phone layout */},
                         navigateToTokenConfig = navigateToTokenConfig,
-                        canGoBack = canGoBack,
-                        onGoBack = onGoBack,
+                        canGoBack = canGoBack || mineBack != null,
+                        onGoBack = { if (canGoBack) onGoBack() else mineBack?.invoke() },
                         isNavigatingBack = isNavigatingBack,
                         actions = topBarActions,
                         titleContent = topBarTitleContent,

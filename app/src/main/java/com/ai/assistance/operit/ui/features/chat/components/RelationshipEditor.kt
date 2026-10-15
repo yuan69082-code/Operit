@@ -68,16 +68,11 @@ fun PrivateSocialControls(chatId: String, actor: String?, viewModel: ChatViewMod
         store.read(id).optJSONObject("seen")?.optJSONObject(actor)?.let { id to it.optString("excerpt") }
     } }
     var roomOpen by remember(chatId) { mutableStateOf(false) }
-    var townOpen by remember(chatId) { mutableStateOf(false) }
     Row(modifier.horizontalScroll(rememberScrollState())) {
-        TextButton(onClick = { townOpen = true }) { Text("小镇") }
         if (!actor.isNullOrBlank()) TextButton(onClick = { roomOpen = true }) { Text("房间") }
         TextButton(onClick = { tab = "关系网" }) { Text("关系网") }
         if (links.isNotEmpty()) TextButton(onClick = { tab = "参与过的群聊" }) { Text("群聊记忆 (${links.size})") }
     }
-    if (townOpen) com.ai.assistance.operit.ui.features.settings.screens.VioTownDialog(actor, chatId, onOuterPlace = { key ->
-        tab = if (key == "neighbors" || links.isEmpty()) "关系网" else "参与过的群聊"
-    }) { townOpen = false }
     if (roomOpen && !actor.isNullOrBlank()) com.ai.assistance.operit.ui.features.settings.screens.AssistantRoomDialog(actor, chatId) { roomOpen = false }
     if (tab.isNotEmpty()) AlertDialog(onDismissRequest = { tab = "" }, title = { Text(tab) }, text = {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -63,7 +63,8 @@ internal fun VioShell(
     currentScreen: Screen,
     navItems: List<NavItem>,
     onOpenScreen: (Screen) -> Unit,
-    content: @Composable () -> Unit,
+    canGoBack: Boolean,
+    content: @Composable (mineBack: (() -> Unit)?) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(VioTab.TOWN) }
     var neighborsOpen by remember { mutableStateOf(false) }
@@ -82,6 +83,9 @@ internal fun VioShell(
     // 打字时把底栏让出来，免得顶住输入框
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val onChatRoute = currentScreen is Screen.AiChat
+    // 从「我的」点进去的页面没有自己的返回栈，给它一个回「我的」的路
+    val mineBack: (() -> Unit)? = if (tab == VioTab.CONTENT && !onChatRoute) ({ tab = VioTab.MINE }) else null
+    BackHandler(enabled = mineBack != null && !canGoBack) { tab = VioTab.MINE }
     val selected = when {
         tab != VioTab.CONTENT -> tab
         onChatRoute -> VioTab.CONTENT
@@ -91,7 +95,7 @@ internal fun VioShell(
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             // 原内容一直挂着，切走也不重建聊天页
-            content()
+            content(mineBack)
             when (tab) {
                 VioTab.TOWN -> VioTownPage(
                     role = role, chat = chatId.orEmpty(),
@@ -104,13 +108,19 @@ internal fun VioShell(
                 VioTab.CONTENT -> Unit
             }
         }
-        if (!imeOpen || tab != VioTab.CONTENT) NavigationBar {
+        // 聊天页用窄的底栏，只留图标，把位置让给消息
+        val compact = tab == VioTab.CONTENT && onChatRoute
+        if (!imeOpen || tab != VioTab.CONTENT) NavigationBar(
+            modifier = if (compact) Modifier.windowInsetsPadding(WindowInsets.navigationBars).height(52.dp) else Modifier,
+            windowInsets = if (compact) WindowInsets(0) else NavigationBarDefaults.windowInsets,
+        ) {
             barItems.forEach { item ->
                 NavigationBarItem(
                     selected = selected == item.tab,
                     onClick = { if (item.tab == VioTab.CONTENT) openChat() else tab = item.tab },
-                    icon = { Icon(item.icon, contentDescription = null) },
-                    label = { Text(item.label) },
+                    icon = { Icon(item.icon, contentDescription = if (compact) item.label else null) },
+                    label = if (compact) null else ({ Text(item.label) }),
+                    alwaysShowLabel = !compact,
                 )
             }
         }
