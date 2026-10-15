@@ -180,6 +180,12 @@ class CustomXmlRenderer(
         }
         val resolvedTagName = tagName
 
+        // 工具结果里给模型看图的 <link type="image"> 是附在 tool_result 外面的，
+        // 聊天里不显示，否则会冒出一个个“XML内容”框
+        if (resolvedTagName == "link") {
+            return
+        }
+
         // 优先分发到已注册的 XML 渲染插件（例如 deepsearch 的 <plan>）
         val pluginHandled =
             XmlRenderPluginRegistry.RenderIfMatched(
