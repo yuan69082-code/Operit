@@ -75,44 +75,60 @@ private fun route(from: String, to: String): List<String> {
     return path.reversed().drop(1)
 }
 /**
+ * 走到哪儿记在进程里，切去聊天页再回来接着走，不再从镇口重来。
+ * 软件被系统杀掉才会从镇口重新开始。
+ */
+private object WalkerState {
+    val x = mutableFloatStateOf(0.5f)
+    val y = mutableFloatStateOf(0.83f)
+    val facing = mutableStateOf(Facing.UP)
+    val frame = mutableIntStateOf(0)
+    var started = false
+    var at = "gate"
+    var path: List<String> = emptyList()
+    var rest = 0
+}
+/**
  * 叠在小镇底图上的一层，不吃点击，点房子照旧进房子。
  * @param charHeightFrac 小人高度占底图高度的比例。
  */
 @Composable
 fun VioWalkers(modifier: Modifier = Modifier, charHeightFrac: Float = 0.062f) {
     val sheet: ImageBitmap = ImageBitmap.imageResource(R.drawable.vio_walk_pair)
-    var x by remember { mutableFloatStateOf(0.5f) }
-    var y by remember { mutableFloatStateOf(0.85f) }
-    var facing by remember { mutableStateOf(Facing.DOWN) }
-    var frame by remember { mutableIntStateOf(0) }
+    var x by WalkerState.x
+    var y by WalkerState.y
+    var facing by WalkerState.facing
+    var frame by WalkerState.frame
 
     LaunchedEffect(Unit) {
-        var at = "gate"
-        x = roadNodes.getValue(at).first; y = roadNodes.getValue(at).second
-        var path = route(at, stops.filter { it != at }.random())
-        var rest = Random.nextInt(40, 120)
+        if (!WalkerState.started) {
+            WalkerState.started = true
+            x = roadNodes.getValue(WalkerState.at).first; y = roadNodes.getValue(WalkerState.at).second
+            WalkerState.path = route(WalkerState.at, stops.filter { it != WalkerState.at }.random())
+            WalkerState.rest = Random.nextInt(40, 120)
+        }
         var tick = 0
         val speed = 0.0025f
         while (isActive) {
             delay(50)
             tick++
             var moving = false
-            if (rest > 0) {
-                rest--
+            if (WalkerState.rest > 0) {
+                WalkerState.rest--
             } else {
-                val next = path.first()
+                val next = WalkerState.path.first()
                 val target = roadNodes.getValue(next)
                 val dx = target.first - x
                 val dy = (target.second - y) * 1.5f // 底图 2:3，纵向在屏幕上更长
                 val d = hypot(dx, dy)
                 if (d < speed) {
                     x = target.first; y = target.second
-                    at = next
-                    path = path.drop(1)
-                    if (path.isEmpty()) {
-                        rest = Random.nextInt(40, 120) // 到了站一会儿，2～6 秒
-                        facing = Facing.DOWN
-                        path = route(at, stops.filter { it != at }.random())
+                    WalkerState.at = next
+                    WalkerState.path = WalkerState.path.drop(1)
+                    if (WalkerState.path.isEmpty()) {
+                        // 到了站一会儿，2～6 秒。不转过来看屏幕，保持刚才走的朝向
+                        WalkerState.rest = Random.nextInt(40, 120)
+                        WalkerState.path = route(WalkerState.at, stops.filter { it != WalkerState.at }.random())
                     }
                 } else {
                     x += dx / d * speed
