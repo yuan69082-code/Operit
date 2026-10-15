@@ -853,6 +853,34 @@ export function useChatViewModel(): ChatViewModel {
     });
   }, [selectedChatId, token]);
 
+  useEffect(() => {
+    if (!token || !boot?.capabilities.shared_service) return;
+    let disposed = false;
+    let pending = false;
+    const timer = window.setInterval(async () => {
+      if (pending || isStreaming || document.hidden) return;
+      pending = true;
+      try {
+        const nextChats = await listChats(token);
+        const nextPage = selectedChatId
+          ? await getMessages(token, selectedChatId, { limit: INITIAL_MESSAGES_PAGE_SIZE })
+          : null;
+        if (disposed) return;
+        setChats(nextChats);
+        if (nextPage) {
+          setMessages(current => mergeLatestConversationPage(current, nextPage.messages));
+          setHasMoreHistoryAfter(nextPage.has_more_after);
+        }
+      } catch (error) {
+        if (!disposed) {
+          console.error('刷新共享会话失败', error);
+          handleApiFailure(error);
+        }
+      } finally { pending = false; }
+    }, 2000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [token, selectedChatId, isStreaming, boot?.capabilities.shared_service]);
+
   async function loadOlderMessages() {
     if (!token || !selectedChatId || !hasMoreHistoryBefore || isLoadingHistoryBefore) {
       return;
@@ -1764,3 +1792,4 @@ export function useChatViewModel(): ChatViewModel {
     toggleMessageFavorite
   };
 }
+

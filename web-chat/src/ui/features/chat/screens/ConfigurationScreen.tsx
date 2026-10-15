@@ -19,9 +19,9 @@ export function ConfigurationScreen({
     <div className="chat-connection-overlay">
       <section className="configuration-screen" role="dialog">
         <div className="configuration-screen-header">
-          <span>局域网页面连接</span>
+          <span>连接聊天服务</span>
           <h1>输入 Bearer Token</h1>
-          <p>连接后会直接进入手机当前会话，历史、主题和流式回复都与手机保持同步。</p>
+          <p>连接提供此页面的聊天服务，读取该服务的会话与消息记录。</p>
         </div>
 
         <div className="configuration-screen-block">
@@ -45,7 +45,7 @@ export function ConfigurationScreen({
           <input
             id="web-chat-token"
             onChange={(event) => onTokenDraftChange(event.target.value)}
-            placeholder="输入设置页里显示的 Token"
+            placeholder="输入服务设置页里显示的 Token"
             type="password"
             value={tokenDraft}
           />
@@ -60,3 +60,4 @@ export function ConfigurationScreen({
     </div>
   );
 }
+
