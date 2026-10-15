@@ -11,7 +11,19 @@ object TaskRecords {
         "paused" to "暂缓", "done" to "已完成", "archived" to "已归档")
     val inactiveStatuses = setOf("paused", "done", "archived")
     val fields = setOf("title", "detail", "priority", "horizon", "status", "assignee", "conclusion",
-        "completed", "next", "needs_decision", "category", "batch", "evidence", "linked_ids", "urgency")
+        "completed", "next", "needs_decision", "category", "batch", "evidence", "linked_ids", "urgency",
+        "origin", "goal", "blocker", "plan", "materials")
+
+    /** Board tab a row belongs to; a written blocker always counts as stuck. */
+    fun tab(row: JSONObject): String = when (row.optString("status")) {
+        "archived" -> "archived"
+        "done" -> "done"
+        else -> when {
+            row.optString("blocker").isNotBlank() || row.optString("status") in setOf("waiting_evidence", "paused") -> "blocked"
+            row.optString("status") in setOf("doing", "review", "waiting_effect") -> "doing"
+            else -> "todo"
+        }
+    }
 
     fun normalize(row: JSONObject): JSONObject = JSONObject(row.toString()).apply {
         if (!has("priority")) put("priority", if (optString("urgency") == "urgent") "P1" else "P2")

@@ -36,6 +36,20 @@ class TaskRecordsTest {
         assertEquals("unknown", updated.getString("author"))
         assertEquals("P1", updated.getString("priority"))
     }
+    @Test fun boardFieldsSaveAndBlockerMeansStuck() {
+        val rows = JSONArray()
+        val row = create(rows)
+        assertEquals("todo", TaskRecords.tab(row))
+        val doing = TaskRecords.save(rows, "A", row.getString("id"), JSONObject().put("status", "doing")
+            .put("origin", "她 18:56 说：细节和原文必须存在").put("goal", "一眼看出卡在哪")
+            .put("plan", "之后接群待办").put("materials", "/sdcard/a.png 小人设定图\nob:490b87cf7db8 今晚约定"), members, 2000)
+        assertEquals("doing", TaskRecords.tab(doing))
+        assertEquals("她 18:56 说：细节和原文必须存在", doing.getString("origin"))
+        val stuck = TaskRecords.save(rows, "A", row.getString("id"), JSONObject().put("blocker", "等画图额度"), members, 3000)
+        assertEquals("blocked", TaskRecords.tab(stuck))
+        assertEquals("done", TaskRecords.tab(TaskRecords.save(rows, "A", row.getString("id"),
+            JSONObject().put("status", "done").put("blocker", ""), members, 4000)))
+    }
     @Test(expected = IllegalStateException::class) fun staleEditorCannotOverwriteNewNotes() {
         val rows = JSONArray()
         val row = create(rows)

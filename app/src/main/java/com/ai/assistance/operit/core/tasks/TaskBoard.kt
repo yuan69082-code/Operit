@@ -78,7 +78,7 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
         [待办事件，范围=${if (group) "本群共同事项" else "你自己的私人事项"}]
         以下记录包含个人意愿、批注和资料，按署名区分来源；不把其他助手的想法记成自己的。
         ${JSONObject().apply {
-            listOf("id", "author", "title", "priority", "status", "horizon", "assignee", "detail", "conclusion", "completed", "next", "needs_decision", "category", "batch", "evidence", "linked_ids", "version").forEach {
+            listOf("id", "author", "title", "priority", "status", "horizon", "assignee", "detail", "conclusion", "completed", "next", "needs_decision", "category", "batch", "evidence", "linked_ids", "version", "origin", "goal", "blocker", "plan", "materials").forEach {
                 if (row.has(it)) put(it, row.get(it).let { value -> if (value is String) value.take(1600) else value })
             }
             val history = row.optJSONArray("history") ?: JSONArray()

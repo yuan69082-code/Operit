@@ -35,7 +35,7 @@ object GroupTools {
             param("task_id", "save_task 修改时填写已有ID，新建省略"), param("title", "待办标题"),
             param("assignee", "接手助手ID、user 或空"), param("status", "open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
             param("completed", "已完成的工作"), param("next", "接下来要做什么"),
-            param("details", "save_task JSON对象：priority=P0..P3、detail、conclusion、needs_decision、category、batch、evidence、linked_ids数组、expected_version"),
+            param("details", "save_task JSON对象：priority=P0..P3、detail、origin(原话原文带时间)、goal(做完要什么效果)、conclusion(现在进展)、completed、blocker(卡在哪)、next、plan(后面规划)、materials(每行一条：本地路径/记忆ID/链接+说明)、needs_decision、category、batch、evidence、linked_ids数组、expected_version"),
             param("offset", "tasks 分页起点，每页20项"))),
         ToolPrompt(name = "group_game", description = "群内游戏。status 查看公开局面；自己的手牌/身份/私密结果由软件在下一轮的私有上下文注入；act 提交合法行动；start 建立狼人杀(werewolf)、斗地主(landlord)、情景(story)或自定义(custom)游戏，须有用户开始游戏的意图。template 保存自制小游戏规则；end 结束本局。游戏身份只对本局有效，不要写成日常身份或把普通聊天说成角色扮演。不要向其他玩家披露私密状态。", parametersStructured = listOf(
             param("action", "status/act/start/template/end", true), param("kind", "werewolf/landlord/story/custom"),

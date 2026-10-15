@@ -46,7 +46,7 @@ object CompanionTools {
             parametersStructured = listOf(param("action", "操作", true), param("id", "待办ID"), param("title", "标题"),
                 param("content", "待办说明或实际沉淀内容"), param("urgency", "urgent 或 normal"),
                 param("horizon", "short 或 long"), param("status", "open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
-                param("details", "JSON对象，可含priority=P0..P3、conclusion、completed、next、needs_decision、category、batch、evidence、linked_ids数组、expected_version。原作者不可修改。"),
+                param("details", "JSON对象，可含priority=P0..P3、origin(原话原文带时间)、goal(做完要什么效果)、conclusion(现在进展)、completed、blocker(卡在哪，没卡留空)、next、plan(后面规划)、materials(材料每行一条：本地路径/ob记忆ID/资料ID/链接+说明)、needs_decision、category、batch、evidence、linked_ids数组、expected_version。原作者不可修改。"),
                 param("minutes", "submit 安排0–43200分钟后处理；thought 时为沉着多少分钟"), param("offset", "list 分页起点，每页20项"),
                 param("choice", "thought 时 now/sink/drop"))),
         ToolPrompt(name = "companion_schedule",
