@@ -41,15 +41,15 @@ private val roadNodes: Map<String, Pair<Float, Float>> = mapOf(
     "south" to (0.50f to 0.74f),     // 念头池南
     "ledger" to (0.28f to 0.67f),    // 账房门口
     "west" to (0.31f to 0.60f),      // 账房和池子之间
-    "nw" to (0.33f to 0.535f),       // 我们家篱笆角
+    "nw" to (0.30f to 0.51f),       // 我们家篱笆角
     "neighbors" to (0.17f to 0.465f),// 邻居门口
-    "north" to (0.50f to 0.535f),    // 念头池北
-    "home" to (0.45f to 0.49f),      // 我们家门口
-    "ne" to (0.66f to 0.535f),
-    "library" to (0.68f to 0.475f),  // 图书馆门口
+    "north" to (0.50f to 0.51f),    // 念头池北
+    "home" to (0.50f to 0.48f),      // 我们家门口
+    "ne" to (0.66f to 0.505f),
+    "library" to (0.70f to 0.465f),  // 图书馆门口
     "board" to (0.76f to 0.56f),     // 公告栏前
-    "east" to (0.69f to 0.62f),      // 念头池东
-    "games" to (0.76f to 0.64f),     // 桌游馆门口
+    "east" to (0.72f to 0.64f),      // 念头池东
+    "games" to (0.84f to 0.70f),     // 桌游馆门口
     "well" to (0.55f to 0.75f),      // 回音井前
 )
 private val roadEdges: List<Pair<String, String>> = listOf(
