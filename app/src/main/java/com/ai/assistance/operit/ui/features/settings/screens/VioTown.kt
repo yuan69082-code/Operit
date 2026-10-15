@@ -112,6 +112,8 @@ fun VioTownPage(
                                     .padding(horizontal = 6.dp, vertical = 1.dp))
                         }
                     }
+                    // 两个小人在最上层走，不拦点击
+                    VioWalkers()
                 }
             }
         }
