@@ -572,6 +572,37 @@ class GitHubApiService(private val context: Context) {
         }
     }
 
+    /**
+     * GET /releases/latest. Unlike the list endpoint, this is updated as soon as a
+     * release is marked latest, so it does not lag behind newly published builds.
+     */
+    suspend fun getLatestRelease(
+        owner: String,
+        repo: String
+    ): Result<GitHubRelease> = withContext(Dispatchers.IO) {
+        try {
+            val requestBuilder =
+                Request.Builder()
+                    .url("$GITHUB_API_BASE/repos/$owner/$repo/releases/latest")
+                    .addHeader("Accept", "application/vnd.github+json")
+
+            authPreferences.getAuthorizationHeader()?.let { authHeader ->
+                requestBuilder.addHeader("Authorization", authHeader)
+            }
+
+            val response = client.newCall(requestBuilder.build()).execute()
+            val responseBody = response.body?.string()
+
+            if (response.isSuccessful && responseBody != null) {
+                Result.success(json.decodeFromString(GitHubRelease.serializer(), responseBody))
+            } else {
+                Result.failure(buildHttpException(response.code, response.message, responseBody))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun findReleaseByTag(
         owner: String,
         repo: String,

@@ -181,6 +181,22 @@ class GithubReleaseUtil(private val context: Context) {
         requiredApkName: String? = null
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
+            // The list endpoint can lag minutes to hours behind a fresh release, while
+            // /releases/latest updates immediately. Prefer it when an APK name is required.
+            if (requiredApkName != null) {
+                val latest = githubApiService.getLatestRelease(repoOwner, repoName).getOrNull()
+                val asset = latest?.assets?.find { it.name == requiredApkName }
+                if (latest != null && !latest.draft && !latest.prerelease && asset != null) {
+                    return@withContext ReleaseInfo(
+                        version = latest.tag_name.removePrefix("v"),
+                        downloadUrl = asset.browser_download_url,
+                        releaseNotes = latest.body ?: "",
+                        releasePageUrl = latest.html_url
+                    )
+                }
+                AppLogger.w(TAG, "releases/latest unusable for $repoOwner/$repoName, falling back to list")
+            }
+
             val result = githubApiService.getRepositoryReleases(
                 owner = repoOwner,
                 repo = repoName,
