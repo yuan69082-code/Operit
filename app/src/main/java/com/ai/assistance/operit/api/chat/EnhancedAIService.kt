@@ -763,6 +763,12 @@ class EnhancedAIService private constructor(private val context: Context) {
                 lastTurn.content == originalCurrentMessage -> {
                 preparedHistory.dropLast(1) + lastTurn.copy(content = finalizedCurrentMessage)
             }
+            // 历史里已落库的本条消息，加上发送前追加的上下文（如旧日回声）后成了当前输入：
+            // 替换掉而不是再追加一份，否则相邻 USER 合并后同一句话会出现两遍
+            lastTurn?.kind == PromptTurnKind.USER && lastTurn.content.isNotBlank() &&
+                finalizedCurrentMessage.startsWith(lastTurn.content) -> {
+                preparedHistory.dropLast(1) + lastTurn.copy(content = finalizedCurrentMessage)
+            }
             else -> {
                 preparedHistory.appendUserTurnIfMissing(finalizedCurrentMessage)
             }
