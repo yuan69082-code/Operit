@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SegmentedSummaryTest {
-    private val msgs = (1..6).map { ChatMessage(if (it % 2 == 1) "user" else "ai", "第$it条", timestamp = 1_000L * it) }
+    private val msgs = (1..6).map { ChatMessage(if (it % 2 == 1) "user" else "ai", "第${it}条", timestamp = 1_000L * it) }
 
     @Test fun modelNumbersBecomeTimestampIndexes() {
         val out = """
