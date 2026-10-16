@@ -740,7 +740,10 @@ object AIMessageManager {
             return null
         }
 
-        val batches = ReviewedSummaryBatches.plan(messagesToSummarize)
+        // 私聊走分段累积：一次调用、不审阅、不分批重写旧摘要
+        val segmented = !isGroupChat && !chatId.isNullOrBlank()
+        if (segmented && (cachedOnly || !summaryProgress)) return null // 后台预跑只为填审阅缓存，分段模式用不上
+        val batches = if (segmented) listOf(messagesToSummarize) else ReviewedSummaryBatches.plan(messagesToSummarize)
         if (batches.size > 1 && batchLabel.isEmpty()) {
             var approved = previousSummary?.let { ChatMessage(sender = "summary", content = it) }
             if (summaryProgress) {
@@ -1126,6 +1129,18 @@ object AIMessageManager {
                 }
                 Pair(role, "#${index + 1}: $cleanedContent")
             }
+        }
+
+        if (segmented) {
+            if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME, 0.2f, "正在分段记录")
+            val text = SegmentedSummary.draft(enhancedAiService, chatId!!, messagesToSummarize, conversationToSummarize, previousSummary)
+            return ChatMessage(
+                sender = "summary",
+                content = if (autoContinue) context.getString(R.string.ai_message_continue_task_if_complete, text) else text,
+                timestamp = ChatMessageTimestampAllocator.next(),
+                roleName = "system"
+            )
         }
 
         return try {

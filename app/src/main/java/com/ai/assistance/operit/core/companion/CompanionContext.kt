@@ -70,6 +70,27 @@ object CompanionContext {
                 append(com.ai.assistance.operit.core.group.RelationshipNetwork(context).prompt(roleId))
                 append("你读到其他助手的活动、私聊或关系网时，只是在查看他人的记录。保留助手ID、姓名、发言时间和来源；不得把他人的言论、观点、行为、经历或感情写成自己亲历。主助手管理权限不改变记录的归属。\n")
             }
+            if (recordSnapshot && !roleId.isNullOrBlank()) {
+                val repo = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+                val here = repo.getChatMetadata(chatId)
+                if (here?.characterGroupId.isNullOrBlank()) {
+                    val others = repo.getAllChatMetadata()
+                        .filter { it.id != chatId && it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId }
+                        .sortedByDescending { it.updatedAt }
+                        .take(6)
+                    if (others.isNotEmpty()) {
+                        append("\n[跨窗口目录：你和她在别的窗口聊过的事，只列标题、时间和索引。换了窗口不等于那些事没发生。要看原话：group_chat action=history，chat_id 填那个窗口的，after 填段落的 from，就从那条开始往后读原文；没有段落的窗口用 before 从最新往回翻。]\n")
+                        val fmt = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
+                        others.forEach { other ->
+                            append("- 窗口「${other.title.take(40)}」最后 ${fmt.format(other.updatedAt)} chat_id=${other.id}\n")
+                            val latest = repo.getLatestSummaryTimestamp(other.id)
+                            val summary = latest?.let { repo.loadChatMessagesWindow(other.id, it, it).firstOrNull()?.content }
+                            summary?.let { com.ai.assistance.operit.core.chat.SegmentedSummary.directory(it) }
+                                ?.takeLast(8)?.forEach { line -> append("  ").append(line.take(160)).append("\n") }
+                        }
+                    }
+                }
+            }
             append("资料可用 companion_library 自行分类、保存、检索；skill 是能力笔记，不会自动安装或执行代码。\n")
             if (!roleId.isNullOrBlank()) {
                 append(AssistantRoom(context, roleId).prompt())
