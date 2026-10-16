@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChatScreenContent } from '../components/ChatScreenContent';
 import { ConfigurationScreen } from './ConfigurationScreen';
 import { buildChatFontFaceCss, buildChatThemeStyle } from '../util/chatTheme';
@@ -6,6 +6,27 @@ import { useChatViewModel } from '../viewmodel/ChatViewModel';
 
 export function AIChatScreen() {
   const viewModel = useChatViewModel();
+  const [updatePage, setUpdatePage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!viewModel.token || !viewModel.boot?.capabilities.shared_service) return;
+    const controller = new AbortController();
+    async function checkUpdate() {
+      try {
+        const response = await fetch('/api/shared/updates', {
+          headers: { Authorization: `Bearer ${viewModel.token}` }, signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`更新检查失败：HTTP ${response.status}`);
+        const update = await response.json() as { update_available: boolean; page?: string };
+        if (!controller.signal.aborted && update.update_available && typeof update.page === 'string') {
+          setUpdatePage(update.page);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('shared.update', error);
+      }
+    }
+    void checkUpdate();
+    return () => controller.abort();
+  }, [viewModel.token, viewModel.boot?.capabilities.shared_service]);
   const fontFaceCss = buildChatFontFaceCss(viewModel.theme);
   const chatThemeStyle = useMemo(() => buildChatThemeStyle(viewModel.theme), [viewModel.theme]);
   const backdropBaseStyle = useMemo(
@@ -57,6 +78,19 @@ export function AIChatScreen() {
       </div>
 
       <ChatScreenContent viewModel={viewModel} />
+      {updatePage ? (
+        <a href={updatePage} target="_blank" rel="noreferrer"
+          style={{ position: 'fixed', top: 40, right: 12, zIndex: 600,
+            fontSize: 12, color: '#825268', background: '#fffdf9', borderRadius: 8, padding: '4px 8px' }}>
+          双端新版本已就绪，查看更新
+        </a>
+      ) : null}
+      {viewModel.boot?.capabilities.shared_service ? (
+        <a href="/setup" style={{ position: 'fixed', top: 8, right: 12, zIndex: 600,
+          fontSize: 12, color: '#825268', background: '#fffdf9', borderRadius: 8, padding: '4px 8px' }}>
+          共享服务设置
+        </a>
+      ) : null}
 
       {viewModel.showConnectionOverlay ? (
         <ConfigurationScreen
@@ -75,3 +109,4 @@ export function AIChatScreen() {
     </div>
   );
 }
+

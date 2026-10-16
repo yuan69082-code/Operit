@@ -1,6 +1,12 @@
 name: Android Build
 
 on:
+  workflow_call:
+    inputs:
+      gradle_task:
+        required: false
+        default: assembleDebug
+        type: string
   workflow_dispatch:
     inputs:
       gradle_task:
@@ -46,7 +52,7 @@ on:
       - web-chat/**
 
 concurrency:
-  group: android-build-${{ github.event_name }}-${{ github.ref }}
+  group: android-build-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -64,6 +70,8 @@ env:
 jobs:
   build:
     name: Build Android artifacts
+    # Shared releases own push builds after the desktop rollout; manual builds remain available.
+    if: github.event_name != 'push' || github.workflow != 'Android Build'
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
@@ -234,7 +242,7 @@ jobs:
           set -euo pipefail
           case "$EVENT_NAME" in
             push) gradle_task=assembleDebug ;;
-            workflow_dispatch) gradle_task="$DISPATCH_GRADLE_TASK" ;;
+            workflow_dispatch|workflow_call) gradle_task="$DISPATCH_GRADLE_TASK" ;;
             *) echo "Unsupported workflow event: $EVENT_NAME" >&2; exit 2 ;;
           esac
           if [ "$gradle_task" = assembleDebug ]; then
@@ -280,6 +288,21 @@ jobs:
           PY
           fi
 
+      - name: Verify shared release version
+        if: success() && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
+        shell: bash
+        run: |
+          if [ -f desktop/release.json ]; then
+            python3 - <<'PY'
+          import json, os
+          release = json.load(open("desktop/release.json"))
+          metadata = json.load(open("app/build/outputs/apk/debug/output-metadata.json"))
+          number = int(os.environ["GITHUB_RUN_NUMBER"])
+          assert metadata["elements"][0]["versionName"] == release["version"] + "+" + str(number)
+          assert metadata["elements"][0]["versionCode"] == release["android_version_base"] * 100000 + number
+          PY
+          fi
+
       - name: Upload Android reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -303,7 +326,9 @@ jobs:
           retention-days: 14
 
       - name: Publish personal in-app update
-        if: success() && github.ref == 'refs/heads/main' && env.OPERIT_PERSONAL_BUILD_NUMBER != ''
+        # Only the standalone Android Build run publishes; the shared-desktop caller
+        # reuses this workflow with its own run number and publishes its paired preview.
+        if: success() && github.ref == 'refs/heads/main' && env.OPERIT_PERSONAL_BUILD_NUMBER != '' && github.workflow == 'Android Build'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -312,7 +337,8 @@ jobs:
           apk=app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
           version=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/debug/output-metadata.json"))["elements"][0]["versionName"])')
-          test "$version" = "1.12.2+$OPERIT_PERSONAL_BUILD_NUMBER"
+          base=$(python3 -c 'import json,os; print(json.load(open("desktop/release.json"))["version"] if os.path.isfile("desktop/release.json") else "1.12.2")')
+          test "$version" = "$base+$OPERIT_PERSONAL_BUILD_NUMBER"
           tag="v$version"
           notes="$RUNNER_TEMP/personal-update-notes.md"
           printf 'Vio Life 更新 %s\n\n沿用固定个人签名，可覆盖第 12 版及后续个人版，保留应用数据。\n请下载 app-debug.apk，或在已接入个人更新源的应用内更新。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
@@ -323,3 +349,4 @@ jobs:
             --title "Vio Life $version" \
             --notes-file "$notes" \
             --latest
+

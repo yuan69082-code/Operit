@@ -4,6 +4,7 @@ export type InputStyle = 'classic' | 'agent';
 export type InputProcessingStage = 'idle' | 'connecting' | 'uploading' | 'streaming';
 
 export interface WebCapabilities {
+  shared_service?: boolean;
   attachments: boolean;
   per_chat_theme: boolean;
   structured_render: boolean;
@@ -358,3 +359,4 @@ export interface WebChatReorderItem {
   display_order: number;
   group?: string | null;
 }
+

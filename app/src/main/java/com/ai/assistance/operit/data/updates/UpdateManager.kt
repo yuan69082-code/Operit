@@ -77,10 +77,14 @@ class UpdateManager private constructor(private val context: Context) {
             val patchIndex =
                 if (plusIdx >= 0) s.substring(plusIdx + 1).toIntOrNull() ?: 0 else 0
 
+            // Shared releases use a suffix such as "1.12.2-pc.1"; read the leading
+            // digits of each part so the suffix does not collapse patch to 0.
             val parts = base.split(".")
-            val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
-            val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
-            val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+            fun leadingInt(part: String?): Int =
+                part?.takeWhile { it.isDigit() }?.toIntOrNull() ?: 0
+            val major = leadingInt(parts.getOrNull(0))
+            val minor = leadingInt(parts.getOrNull(1))
+            val patch = leadingInt(parts.getOrNull(2))
 
             return ParsedVersion(major = major, minor = minor, patch = patch, patchIndex = patchIndex)
         }

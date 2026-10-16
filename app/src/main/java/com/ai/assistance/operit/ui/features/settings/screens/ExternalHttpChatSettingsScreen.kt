@@ -225,6 +225,8 @@ adb shell am broadcast \
                 }
             }
 
+            SharedChatConnectionCard()
+
             SettingsCard(
                 title = stringResource(R.string.external_http_chat_port),
                 subtitle = stringResource(R.string.external_http_chat_port_desc),
@@ -604,3 +606,4 @@ private fun ExampleBlock(
         }
     }
 }
+
