@@ -708,8 +708,30 @@ object AIMessageManager {
     ): ChatMessage? = kotlinx.coroutines.withContext(
         com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)
     ) {
-        summarizeMemoryInScope(enhancedAiService, messages, autoContinue, isGroupChat, summaryConfig,
+        val base = summarizeMemoryInScope(enhancedAiService, messages, autoContinue, isGroupChat, summaryConfig,
             chatId, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, summaryProgress, batchLabel, cachedOnly)
+        // 原有摘要不变，额外附上分段格式；只在私聊、顶层、真正提交的那次做，失败不影响原摘要
+        if (base == null || isGroupChat || chatId.isNullOrBlank() || batchLabel.isNotEmpty() || cachedOnly || !summaryProgress ||
+            !FeelingLog.segmentsEnabled(context)) return@withContext base
+        val lastSummary = messages.indexOfLast { it.sender == "summary" }
+        val previous = messages.getOrNull(lastSummary)?.content
+        val fresh = messages.drop(lastSummary + 1).filter { it.sender == "user" || it.sender == "ai" }
+        if (fresh.isEmpty()) return@withContext base
+        val block = try {
+            com.ai.assistance.operit.core.tools.ToolProgressBus.update(
+                com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME, 0.99f, "正在整理窗口段落")
+            val open = SegmentedSummary.parse(previous).open
+            val from = open.firstNotNullOfOrNull { Regex("""from=(\d+)""").find(it)?.groupValues?.get(1)?.toLongOrNull() }
+                ?: fresh.first().timestamp
+            SegmentedSummary.build(enhancedAiService, chatId, fresh, previous, FeelingLog.since(context, chatId, from))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+        } catch (failure: Exception) {
+            AppLogger.e(TAG, "窗口段落生成失败，只保留原摘要", failure); null
+        } ?: previous?.takeIf { SegmentedSummary.hasBlock(it) }?.let {
+            // 这次没生成出来，至少把旧段落带上，不让它们丢
+            it.substring(it.indexOf(SegmentedSummary.HEADER), it.indexOf(SegmentedSummary.END) + SegmentedSummary.END.length)
+        }
+        if (block == null) base else base.copy(content = base.content.trimEnd() + "\n\n" + block)
     }
 
     private suspend fun summarizeMemoryInScope(
@@ -727,7 +749,7 @@ object AIMessageManager {
         cachedOnly: Boolean = false
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
-        val previousSummary = if (lastSummaryIndex != -1) messages[lastSummaryIndex].content.trim() else null
+        val previousSummary = if (lastSummaryIndex != -1) SegmentedSummary.stripBlock(messages[lastSummaryIndex].content).trim() else null
 
         val messagesToSummarize = when {
             lastSummaryIndex == -1 -> messages.filter { it.sender == "user" || it.sender == "ai" }
@@ -740,10 +762,7 @@ object AIMessageManager {
             return null
         }
 
-        // 私聊走分段累积：一次调用、不审阅、不分批重写旧摘要
-        val segmented = !isGroupChat && !chatId.isNullOrBlank()
-        if (segmented && (cachedOnly || !summaryProgress)) return null // 后台预跑只为填审阅缓存，分段模式用不上
-        val batches = if (segmented) listOf(messagesToSummarize) else ReviewedSummaryBatches.plan(messagesToSummarize)
+        val batches = ReviewedSummaryBatches.plan(messagesToSummarize)
         if (batches.size > 1 && batchLabel.isEmpty()) {
             var approved = previousSummary?.let { ChatMessage(sender = "summary", content = it) }
             if (summaryProgress) {
@@ -1129,18 +1148,6 @@ object AIMessageManager {
                 }
                 Pair(role, "#${index + 1}: $cleanedContent")
             }
-        }
-
-        if (segmented) {
-            if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
-                com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME, 0.2f, "正在分段记录")
-            val text = SegmentedSummary.draft(enhancedAiService, chatId!!, messagesToSummarize, conversationToSummarize, previousSummary)
-            return ChatMessage(
-                sender = "summary",
-                content = if (autoContinue) context.getString(R.string.ai_message_continue_task_if_complete, text) else text,
-                timestamp = ChatMessageTimestampAllocator.next(),
-                roleName = "system"
-            )
         }
 
         return try {
