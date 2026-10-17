@@ -81,7 +81,7 @@ object GroupContext {
             prefix + messages.joinToString("\n") { "${it.timestamp} ${GroupProvenance.label(context, chat, it)}：${visible(it)}" })
     }
 
-    suspend fun history(context: Context, actor: String, chatId: String, before: Long?): JSONObject {
+    suspend fun history(context: Context, actor: String, chatId: String, before: Long?, after: Long? = null): JSONObject {
         val repo = ChatHistoryManager.getInstance(context)
         val chat = requireNotNull(repo.getChatMetadata(chatId)) { "会话不存在" }
         val isGroup = !chat.characterGroupId.isNullOrBlank()
@@ -90,12 +90,19 @@ object GroupContext {
             ?.members?.any { it.characterCardId == actor } == true
         check(if (isGroup) member || seen != null else chat.characterCardId == actor) { "不能读取其他助手的私聊或未参加的群" }
         val ceiling = if (isGroup && !member) seen!!.getLong("through") + 1 else Long.MAX_VALUE
-        val messages = repo.loadChatMessagesDesc(chatId, 20, minOf(before ?: ceiling, ceiling))
+        // after：从某条之后正序往下读，用来顺着段落索引回到原话；私聊原文不截断，只把附带的设备快照去掉
+        val raw = if (after != null) repo.loadChatMessagesAscAfter(chatId, after - 1, 20).filter { it.timestamp < ceiling }.asReversed()
+            else repo.loadChatMessagesDesc(chatId, 20, minOf(before ?: ceiling, ceiling))
+        val messages = raw
             .filter { GroupPolicy.canRead(chat.characterCardId, actor, isGroup,
                 if (member) 1 else seen?.optLong("first") ?: 0,
                 if (member) Long.MAX_VALUE else seen?.optLong("through") ?: 0, it.timestamp) }
+            .filter { it.sender != "summary" || after == null }
+        fun text(m: com.ai.assistance.operit.data.model.ChatMessage) = if (isGroup) visible(m) else
+            GroupGamePrivacy.publicText(m.content).replace(com.ai.assistance.operit.util.ChatMarkupRegex.attachmentTag, "")
+                .replace(com.ai.assistance.operit.util.ChatMarkupRegex.toolOrToolResultBlock, "[工具记录]").trim().take(6000)
         return JSONObject().put("chat_id", chatId).put("messages", JSONArray(messages.asReversed().map {
-            JSONObject().put("at", it.timestamp).put("speaker", if (isGroup) GroupProvenance.label(context, chatId, it) else it.roleName.ifBlank { it.sender }).put("text", visible(it))
-        })).put("before", messages.lastOrNull()?.timestamp)
+            JSONObject().put("at", it.timestamp).put("speaker", if (isGroup) GroupProvenance.label(context, chatId, it) else it.roleName.ifBlank { it.sender }).put("text", text(it))
+        })).put("before", messages.lastOrNull()?.timestamp).put("after", if (after != null) messages.firstOrNull()?.timestamp?.plus(1) else JSONObject.NULL)
     }
 }

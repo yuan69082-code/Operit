@@ -140,17 +140,34 @@ class UpdateManager private constructor(private val context: Context) {
             try {
                 // Personal Debug builds must never install upstream APKs or nightly patches.
                 if (BuildConfig.APPLICATION_ID == "com.ai.assistance.operit.debug") {
-                    val release = GithubReleaseUtil(context).fetchLatestReleaseInfo(
-                        "yuan69082-code", "Operit", requiredApkName = "app-debug.apk"
-                    ) ?: return@withContext UpdateStatus.Error(
+                    val api = GitHubApiService(context)
+                    val releases = api.getRepositoryReleases(
+                        owner = "yuan69082-code", repo = "Operit", perPage = 20
+                    ).getOrThrow()
+                    // Personal updates follow the paired preview channel, including prereleases.
+                    // /releases/latest excludes it and used to offer the old standalone +114 APK.
+                    val release = releases.firstOrNull { candidate ->
+                        !candidate.draft && candidate.tag_name.startsWith("shared-v") &&
+                            candidate.assets.any { it.name == "shared-release.json" } &&
+                            candidate.assets.any { it.name == "app-debug.apk" }
+                    } ?: return@withContext UpdateStatus.Error(
                         context.getString(R.string.update_cannot_fetch_info)
                     )
-                    return@withContext if (compareVersions(release.version, currentVersion) > 0) {
+                    val metadataAsset = release.assets.first { it.name == "shared-release.json" }
+                    val apkAsset = release.assets.first { it.name == "app-debug.apk" }
+                    val manifest = PersonalUpdateManifest.parse(
+                        api.downloadReleaseAsset(metadataAsset.browser_download_url)
+                            .getOrThrow().toString(Charsets.UTF_8)
+                    )
+                    require(manifest.version == release.tag_name.removePrefix("shared-v")) {
+                        "Personal update manifest version does not match its release"
+                    }
+                    return@withContext if (manifest.isNewerThan(BuildConfig.VERSION_CODE)) {
                         UpdateStatus.Available(
-                            newVersion = release.version,
-                            updateUrl = release.releasePageUrl,
-                            releaseNotes = release.releaseNotes,
-                            downloadUrl = release.downloadUrl
+                            newVersion = manifest.version,
+                            updateUrl = release.html_url,
+                            releaseNotes = release.body.orEmpty(),
+                            downloadUrl = apkAsset.browser_download_url
                         )
                     } else {
                         UpdateStatus.UpToDate

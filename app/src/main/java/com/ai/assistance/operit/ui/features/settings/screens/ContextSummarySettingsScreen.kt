@@ -787,6 +787,22 @@ private fun RenderContextSummaryConfigSections(
         backgroundColor = componentBackgroundColor,
         enabled = enableSummary && enableSummaryByMessageCount
     )
+    run {
+        // 窗口段落：在原摘要后额外附分段（起止时间/内容/值不值得回顾/我的感受），多一次总结模型调用
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        var segments by remember { mutableStateOf(com.ai.assistance.operit.core.chat.FeelingLog.segmentsEnabled(ctx)) }
+        SettingsSwitchRow(
+            title = "附加窗口段落",
+            subtitle = "压缩时在原摘要后面另记每件事的起止时间、内容和我的感受，并带回原文的索引",
+            checked = segments,
+            onCheckedChange = {
+                segments = it
+                com.ai.assistance.operit.core.chat.FeelingLog.setSegmentsEnabled(ctx, it)
+            },
+            backgroundColor = componentBackgroundColor,
+            enabled = enableSummary
+        )
+    }
     summaryError?.let {
         Text(
             text = it,

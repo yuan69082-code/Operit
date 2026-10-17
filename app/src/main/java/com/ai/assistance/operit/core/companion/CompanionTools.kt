@@ -42,7 +42,7 @@ object CompanionTools {
                 param("query", "检索词；theme/delete_theme 时为主题名"), param("offset", "分页起点，非负整数"),
                 param("tags", "逗号分隔的主题标签，或 theme 时挂在主题下的词"))),
         ToolPrompt(name = "companion_todo",
-            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill|thought|thoughts。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。念头池：thought 用 content 存一个念头，choice 自己选 now（现在讲，记一笔然后直接说）、sink（先沉着，minutes 可选，默认两天后浮上来）或 drop（扔掉）；带 id 改已有念头的去留。thoughts 查看浮上来的念头。返回里附心潮分享欲，只作参考。",
+            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill|thought|thoughts|feel。feel 用 content 记下我此刻的真实感受或心情（一两句原话），压缩时原样放进这段对话的“我的感受”，不交给模型代写；没记的段就空着。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。念头池：thought 用 content 存一个念头，choice 自己选 now（现在讲，记一笔然后直接说）、sink（先沉着，minutes 可选，默认两天后浮上来）或 drop（扔掉）；带 id 改已有念头的去留。thoughts 查看浮上来的念头。返回里附心潮分享欲，只作参考。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "待办ID"), param("title", "标题"),
                 param("content", "待办说明或实际沉淀内容"), param("urgency", "urgent 或 normal"),
                 param("horizon", "short 或 long"), param("status", "open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
@@ -110,7 +110,10 @@ object CompanionTools {
                                 }
                             }
                         }
-                        "companion_todo" -> if (action == "thought" || action == "thoughts") {
+                        "companion_todo" -> if (action == "feel") {
+                            // 我此刻的感受，原样存着，压缩时归进对应段落
+                            com.ai.assistance.operit.core.chat.FeelingLog.add(context, chatId, required(tool, "content"))
+                        } else if (action == "thought" || action == "thoughts") {
                             // 念头池
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
                             val share = runCatching { kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { XcEmotionBridge.cached(context, chatId, roleId) } }.getOrNull()

@@ -28,6 +28,7 @@ object GroupTools {
         ToolPrompt(name = "group_chat", description = "群聊与连续记忆。history 分页读取自己的私聊或参加过的群原文，不能读取别人的私聊。status 查看本群成员与讨论状态；respond 提议其他助手接话（targets 为助手ID的JSON数组，只在持续讨论开启时生效）；quiet 表示本轮无新内容，不必重复上句话；end 在目的达成时结束讨论并给 reason；schedule 自定下一次在本群醒来的分钟数和目的；cancel_schedule 取消自己的唤醒。groups 列出你已加入的群；send 可从私聊向已有群发送公开消息，指定 chat_id 和 text，targets 可选。无需用户先在群内开口。mute 仅主助手可用，targets 可为多人，all=true 为全员。tasks 返回群待办简表；get_task 用 task_id 读取详情，offset 为历史分页起点；save_task 创建或更新共同计划及自己想做的事。comment_task 用 task_id/text 写署名批注；submit_task 用 task_id/assignee/minutes 自主安排接手助手继续，不必等用户审批；只有确需用户决定时填 needs_decision。wait_user 把话交给用户并停止排队，可保留本轮给用户的正文。quiet 会丢弃本轮全部公开正文，禁止把‘我只需要等待’当聊天发出。respond 必须明确接话对象；没有接话指令就不会自动轮转。不要复述来源标签。", parametersStructured = listOf(
             param("action", "history/groups/send/status/respond/quiet/wait_user/end/schedule/cancel_schedule/mute/tasks/get_task/save_task/comment_task/submit_task", true),
             param("chat_id", "已有目标群会话ID，私聊向群发送时必填；history 可指自己的私聊"), param("before", "history 下一页游标"),
+            param("after", "history 正序读：从这个时间戳开始往后读20条，用段落索引里的 from；继续读传返回的 after"),
             param("targets", "respond 的助手ID JSON数组"), param("reason", "安静或结束的原因"),
             param("minutes", "schedule 为1–43200分钟；submit_task 可为0，表示尽快"), param("purpose", "下次活动目的"),
             param("text", "send 的公开消息，仅发送这段文字，不转发私聊历史"),
@@ -53,7 +54,7 @@ object GroupTools {
                     val store = GroupStore(context)
                     val result: Any
                     if (name == "group_chat" && action == "history") {
-                        result = GroupContext.history(context, actor, arg("chat_id") ?: chat, arg("before")?.toLong())
+                        result = GroupContext.history(context, actor, arg("chat_id") ?: chat, arg("before")?.toLong(), arg("after")?.toLong())
                     } else if (name == "group_chat" && action == "groups") {
                         result = GroupDelivery.groups(context, actor)
                     } else if (name == "group_chat" && action == "send") {
