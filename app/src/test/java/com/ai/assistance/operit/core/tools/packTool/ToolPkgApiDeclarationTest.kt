@@ -24,6 +24,45 @@ class ToolPkgApiCompatibilityTest {
         }
     }
 
+    @Test
+    fun `shared release version supports tool package APIs without startup failure`() {
+        assertEquals(
+            "1.0.0, 1.0.1",
+            ToolPkgApiCompatibility.supportedApiVersionText("1.12.2-pc.1+118")
+        )
+        assertEquals(
+            ToolPkgApiVersion.parse("1.0.1"),
+            ToolPkgApiCompatibility.requireSupported("1.0.1", "1.12.2-pc.1+118")
+        )
+    }
+
+    @Test
+    fun `channel suffix preserves build compatibility threshold`() {
+        for (suffix in listOf("", "-pc.1", "-nightly")) {
+            assertEquals(
+                "1.0.0",
+                ToolPkgApiCompatibility.supportedApiVersionText("1.12.1${suffix}+3")
+            )
+            assertEquals(
+                "1.0.0, 1.0.1",
+                ToolPkgApiCompatibility.supportedApiVersionText("1.12.1${suffix}+4")
+            )
+            assertEquals(
+                "1.0.0",
+                ToolPkgApiCompatibility.supportedApiVersionText("1.12.1${suffix}")
+            )
+        }
+    }
+
+    @Test
+    fun `invalid host version is still rejected`() {
+        for (version in listOf("1.12", "1.12.2-", "1.12.2-pc..1+118", "1.12.2-pc.1+oops")) {
+            expectIllegalArgument("Operit version is not supported") {
+                ToolPkgApiCompatibility.supportedApiVersionText(version)
+            }
+        }
+    }
+
     private fun expectIllegalArgument(
         messageFragment: String,
         block: () -> Unit

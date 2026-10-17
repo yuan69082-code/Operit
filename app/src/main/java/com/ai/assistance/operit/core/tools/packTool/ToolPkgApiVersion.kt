@@ -55,7 +55,10 @@ private data class OperitVersion(
     }
 
     companion object {
-        private val VERSION_PATTERN = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:\\+(\\d+))?$")
+        // Shared desktop releases add a channel suffix (for example -pc.1).
+        // Accept it without shifting the numeric build capture used by API compatibility.
+        private val VERSION_PATTERN =
+            Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+(\\d+))?$")
 
         fun parse(value: String): OperitVersion {
             val normalized = value.trim()
