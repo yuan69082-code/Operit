@@ -98,8 +98,7 @@ object CompanionContext {
                 append(if (exploration.enabled(roleId)) "你的自主探索已由用户开启；可在指定私聊用 companion_explore status 查询安排和剩余轮次，用 schedule 安排继续或 pause 暂缓。\n"
                     else "你的自主探索默认关闭或已被用户关闭；不能自行开启或安排探索唤醒。手动聊天中的查阅和明确提交的待办仍照常进行。\n")
             }
-            append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；压缩时会原样放进那段的“我的感受”，没记就空着。
-")
+            append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；压缩时会原样放进那段的“我的感受”，没记就空着。\n")
             append("companion_todo 是你自己的待办与私人打算，可以自主创建、批注(comment)、安排继续(submit)、暂缓或完成，不必事事等用户审批。可保存优先级、结论、下一步、共同计划和参考；只有确实需要用户决定才填写 needs_decision。完成后可沉淀到资料库或归档。\n")
             val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
             if (open.isNotEmpty()) append("待办共${open.size}项，优先关注：" +
