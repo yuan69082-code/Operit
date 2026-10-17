@@ -1234,6 +1234,54 @@ class MessageCoordinationDelegate(
         }
     }
 
+    /** Refresh stable chat occupancy and summarize completed autonomous experiences when needed. */
+    fun maintainBackgroundContext(chatId: String, roleCardId: String) {
+        if (summaryJob?.isActive == true || sendTriggeredSummaryJob?.isActive == true ||
+            _isSummarizing.value || messageProcessingDelegate.isChatLoading(chatId) ||
+            android.os.SystemClock.elapsedRealtime() < (summaryRetryAfter[chatId] ?: 0L)) return
+        summaryJob = coroutineScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                val owner = resolveRoleCardId(chatId, roleCardId)
+                withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(owner)) {
+                    val model = resolveRoleCardChatModelOverrides(owner)
+                    val memory = resolveRoleCardMemoryProfileOverride(owner)
+                    val settings = resolveChatContextSettingsForRequest(model.first)
+                    // The transient learning/wake request can be much larger than the persisted
+                    // conversation. Refresh from saved history before checking its threshold.
+                    val window = refreshStableContextWindow(
+                        chatId = chatId, roleCardId = owner, promptFunctionType = PromptFunctionType.CHAT,
+                        chatModelConfigIdOverride = model.first, chatModelIndexOverride = model.second,
+                        memorySpaceIdOverride = memory
+                    ) ?: return@withContext
+                    if (!settings.enableSummary) return@withContext
+                    val messages = chatHistoryDelegate.getRuntimeChatHistory(chatId)
+                    if (com.ai.assistance.operit.core.chat.SummaryContextSlice.plan(messages) == null)
+                        return@withContext
+                    val maxTokens = (settings.effectiveContextLength * 1024).toLong()
+                        .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                    if (!AIMessageManager.shouldGenerateSummary(
+                            messages, window, maxTokens, settings.summaryTokenThreshold.toDouble(),
+                            settings.enableSummary, settings.enableSummaryByMessageCount,
+                            settings.summaryMessageCountThreshold
+                        )) return@withContext
+                    val success = summarizeHistory(
+                        chatIdOverride = chatId, roleCardIdOverride = owner,
+                        chatModelConfigIdOverride = model.first, chatModelIndexOverride = model.second,
+                        memorySpaceIdOverride = memory
+                    )
+                    if (!success) summaryRetryAfter[chatId] = android.os.SystemClock.elapsedRealtime() + 300_000
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                summaryRetryAfter[chatId] = android.os.SystemClock.elapsedRealtime() + 300_000
+                AppLogger.e(TAG, "后台经历压缩失败", error)
+            } finally {
+                summaryJob = null
+            }
+        }.also { it.start() }
+    }
+
     private suspend fun maybeSummarizeAfterGroupRound(
         chatId: String,
         promptFunctionType: PromptFunctionType

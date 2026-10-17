@@ -390,10 +390,12 @@ object CompanionRuntime {
             throw CancellationException("前台交互已开始，本轮探索停止")
         }
         store.log(chatId, "唤醒", event)
-        val keepWake = explorationWork == null && !taskEvent
+        val contactWake = explorationWork == null && !taskEvent
+        var recordedExperience = false
         suspend fun rememberWake(raw: String?, outcome: String, sent: String? = null) {
-            if (!keepWake) return
-            raw?.let { Regex("<companion_open>([\\s\\S]*?)</companion_open>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }?.let { open ->
+            // Keep the model's own note for exploration and submitted work too. The actual
+            // learning/tool results stay in their existing stores; no new narrator is added.
+            if (contactWake) raw?.let { Regex("<companion_open>([\\s\\S]*?)</companion_open>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }?.let { open ->
                 store.update("ledger:$chatId") { it.put("open", if (open == "无") "" else open.take(500)) }
             }
             val note = raw?.let { Regex("<companion_note>([\\s\\S]*?)</companion_note>").find(ChatUtils.removeThinkingContent(it))?.groupValues?.get(1)?.trim() }
@@ -404,12 +406,13 @@ object CompanionRuntime {
                 append("结果：").append(outcome)
                 if (!note.isNullOrBlank()) append("\n我当时的想法：").append(note.take(1500))
             }
-            runCatching {
+            val recording = runCatching {
                 core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "user", content = body,
                     displayMode = ChatMessageDisplayMode.HIDDEN_PLACEHOLDER), chatId)
             }
+            recordedExperience = recordedExperience || recording.isSuccess
             // 醒来这件事本身也会改变情绪：把实际发生的自主行动回传 XC，由 XC 判断类型
-            if (store.emotionEnabled) {
+            if (contactWake && store.emotionEnabled) {
                 val unanswered = store.read("ledger:$chatId").optInt("unanswered") + if (sent != null) 1 else 0
                 val exchange = buildString {
                     append("自主行动（不是她说的话）：我被").append(event.take(200)).append("叫醒。")
@@ -494,6 +497,13 @@ object CompanionRuntime {
             AIForegroundService.notifyReplyCompleted(context, chatId, card.name, text, null,
                 notifyReplyOverride = true, notifyWhileForeground = true)
             store.log(chatId, "主动消息", text.take(240))
-        } finally { started.cancel() }
+        } finally {
+            started.cancel()
+            // Compression has its own service-owned job. It starts after the experience is
+            // recorded, rather than waiting for another user message or extending this wake.
+            if (recordedExperience && currentCoroutineContext().isActive && epoch == generation.get()) {
+                core.getMessageCoordinationDelegate().maintainBackgroundContext(chatId, roleId)
+            }
+        }
     }
 }

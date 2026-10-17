@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.core.chat
 
 import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
 
 /** The marker replaces only source; retained turns remain verbatim after that marker. */
 internal data class SummaryContextSlice(
@@ -39,7 +40,13 @@ internal data class SummaryContextSlice(
             val retainedTurns = minOf(2, turnStarts.size - 1)
             val boundary = turnStarts[turnStarts.size - retainedTurns]
             val source = active.take(boundary)
-            if (source.none { it.sender == "ai" }) return null
+            // A quiet wake can leave only the assistant's hidden note, with no visible reply.
+            // Such completed experiences are compressible even while the user remains silent;
+            // an ordinary unanswered user message alone must still never be compressed.
+            if (source.none {
+                it.sender == "ai" ||
+                    it.sender == "user" && it.displayMode == ChatMessageDisplayMode.HIDDEN_PLACEHOLDER
+            }) return null
             return SummaryContextSlice(source.map { it.copy() }, active.drop(boundary).map { it.copy() })
         }
     }

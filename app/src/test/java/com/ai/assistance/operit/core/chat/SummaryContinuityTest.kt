@@ -198,4 +198,42 @@ class SummaryContinuityTest {
         turn.complete(Unit)
         assertEquals("A", first.await())
     }
+
+    private fun quietWake(index: Int) = ChatMessage(
+        sender = "user",
+        content = "我决定继续读这篇材料，因为还有一个问题没弄明白。第 $index 次。",
+        timestamp = index * 100L,
+        displayMode = com.ai.assistance.operit.data.model.ChatMessageDisplayMode.HIDDEN_PLACEHOLDER
+    )
+
+    @Test fun quietWakesCanCompressWithoutAnyNewHumanOrVisibleAssistantMessage() {
+        val wakes = (1..6).map(::quietWake)
+        val slice = requireNotNull(SummaryContextSlice.plan(wakes))
+        assertEquals(wakes.take(4), slice.source)
+        assertEquals(wakes.takeLast(2), slice.retained)
+        assertEquals(wakes, slice.source + slice.retained)
+    }
+
+    @Test fun repeatedQuietWakeCompressionKeepsPriorSummaryAndRecentChoices() {
+        val summary = ChatMessage("summary", "我选择了先研究这个问题，因为资料中仍有矛盾。", timestamp = 50)
+        val wakes = (1..5).map(::quietWake)
+        val slice = requireNotNull(SummaryContextSlice.plan(listOf(summary) + wakes))
+        assertEquals(summary, slice.source.first())
+        assertEquals(listOf(summary) + wakes.take(3), slice.source)
+        assertEquals(wakes.takeLast(2), slice.retained)
+        assertTrue(slice.retained.all { it.content.contains("因为还有一个问题没弄明白") })
+    }
+
+    @Test fun ordinaryUnansweredHumanMessagesStillCannotBeCompressed() {
+        val unanswered = (1..5).map { ChatMessage("user", "human $it", timestamp = it * 100L) }
+        assertNull(SummaryContextSlice.plan(unanswered))
+    }
+
+    @Test fun quietWakeFollowedBySpokenReplyStaysInTheSameRetainedTurn() {
+        val wakes = (1..5).map(::quietWake)
+        val reply = ChatMessage("ai", "我找到了一条线索，想和你说说。", timestamp = 510)
+        val slice = requireNotNull(SummaryContextSlice.plan(wakes + reply))
+        assertEquals(wakes.take(3), slice.source)
+        assertEquals(wakes.takeLast(2) + reply, slice.retained)
+    }
 }
