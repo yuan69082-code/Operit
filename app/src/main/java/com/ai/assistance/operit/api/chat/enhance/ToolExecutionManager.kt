@@ -588,9 +588,20 @@ object ToolExecutionManager {
         // 3. Hook 拦截与权限检查
         val permittedInvocations = mutableListOf<IndexedValue<ToolInvocation>>()
         for ((index, invocation) in roleCardPermittedInvocations) {
-            com.ai.assistance.operit.core.companion.CompanionRuntime.beforeTool(context, callerChatId, resolveDisplayToolName(invocation.tool))
+            val target = resolveToolTarget(invocation.tool).tool
+            val wakeDenial = com.ai.assistance.operit.core.companion.CompanionRuntime.beforeTool(
+                context, callerChatId, target.name, target.parameters.firstOrNull { it.name == "action" }?.value?.trim()
+            )
+            if (wakeDenial != null) {
+                val deniedResult = ToolResult(toolName = resolveDisplayToolName(invocation.tool),
+                    success = false, result = StringResultData(""), error = wakeDenial)
+                toolHandler.notifyToolExecutionResult(invocation.tool, deniedResult)
+                toolHandler.notifyToolExecutionFinished(invocation.tool)
+                orderedResults.complete(index, deniedResult)
+                continue
+            }
             toolHandler.notifyToolCallRequested(invocation.tool)
-            val interceptionTool = resolveToolTarget(invocation.tool).tool
+            val interceptionTool = target
             when (val interception = toolHandler.checkToolInterception(interceptionTool)) {
                 AIToolHookDecision.Allow -> {
                     val (hasPermission, errorResult) =
@@ -813,3 +824,4 @@ object ToolExecutionManager {
     }
 
 }
+

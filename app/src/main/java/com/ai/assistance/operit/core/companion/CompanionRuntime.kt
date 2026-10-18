@@ -19,7 +19,6 @@ import com.ai.assistance.operit.util.ChatUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /** Service-owned, one-shot AI schedules; use the normal permission/tool pipeline. */
@@ -30,7 +29,7 @@ object CompanionRuntime {
     @Volatile private var cancellationBarrier: Job? = null
     private data class OwnedTurn(val core: ChatServiceCore, val chatId: String)
     private val owned = AtomicReference<OwnedTurn?>()
-    private val toolCount = AtomicInteger()
+    private val toolBudget = CompanionToolBudget()
     private val events = Channel<String>(Channel.CONFLATED)
     @Volatile private var running = false
     @Volatile private var phoneDecision = false
@@ -63,13 +62,20 @@ object CompanionRuntime {
         return cancellationBarrier?.takeIf { it.isActive }
     }
 
-    fun beforeTool(context: Context, chatId: String?, tool: String) {
-        if (chatId == null || owned.get()?.chatId != chatId) return
+    fun beforeTool(context: Context, chatId: String?, tool: String, action: String? = null): String? {
+        if (chatId == null || owned.get()?.chatId != chatId) return null
         explorationDecision?.let { work ->
-            check(ExplorationStore(context).valid(work)) { "自主探索开关或目标已改变，本轮已撤销" }
+            if (!ExplorationStore(context).valid(work)) return "自主探索开关或目标已改变，本轮已撤销。停止调用工具并结束本轮。"
         }
-        check(tool == "companion_schedule" || toolCount.incrementAndGet() <= 12) { "本次主动活动已达到12次工具调用，请安排下次唤醒后结束。" }
+        // Return an ordinary tool denial. Throwing here escapes the execution coroutine
+        // before its tool error handling and reaches Android's application crash handler.
+        if (!toolBudget.admit(tool, action)) return "本次主动活动已用完12次普通工具调用，此工具未执行。不要重试普通工具，请用最后的正文结束本轮。" + when {
+            explorationDecision != null -> "如需继续，可用 companion_explore schedule 安排下次探索，或用 pause 暂缓。"
+            phoneDecision || softwareDecision -> "本次是事件唤醒，无需修改下一次主动联系安排。"
+            else -> "遵循本轮原有的安排要求；companion_schedule 的收尾入口仍可用，不要为绕过额度新建任务。"
+        }
         CompanionStore(context).log(chatId, "工具", tool)
+        return null
     }
 
     fun afterTool(context: Context, chatId: String?, tool: String, success: Boolean) {
@@ -426,7 +432,7 @@ object CompanionRuntime {
                 }
             }
         }
-        toolCount.set(0)
+        toolBudget.reset()
         val turn = OwnedTurn(core, chatId)
         owned.set(turn)
         if (explorationWork != null) check(ExplorationStore(context).valid(explorationWork) && epoch == generation.get()) { "自主探索已撤销" }
@@ -473,7 +479,7 @@ object CompanionRuntime {
             val messages = Regex("<companion_message>([\\s\\S]*?)</companion_message>").findAll(cleaned).toList()
             if (messages.isEmpty()) {
                 check(cleaned.contains("<companion_quiet/>")) { "没有明确的主动消息或安静决定" }
-                store.log(chatId, "安静", "本次未发送消息；使用工具${toolCount.get()}次")
+                store.log(chatId, "安静", "本次未发送消息；使用工具${toolBudget.used}次")
                 store.update("ledger:$chatId") { it.put("quiet_streak", it.optInt("quiet_streak") + 1) }
                 rememberWake(raw, "我决定不吭声")
                 return@coroutineScope
@@ -507,3 +513,4 @@ object CompanionRuntime {
         }
     }
 }
+
