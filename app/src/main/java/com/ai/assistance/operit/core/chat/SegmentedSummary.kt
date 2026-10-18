@@ -15,18 +15,25 @@ import java.time.format.DateTimeFormatter
 /**
  * 附加在原有压缩摘要后面的"窗口段落"。原摘要照旧生成；这里只额外记：
  * 每件事几点开始几点结束（没结束写悬着）、内容、值不值得回顾，以及 AI 聊天时自己记下的感受。
- * 已结束的段落原样保留不再重写；每段带 chat_id 与起止消息时间戳，可回原窗口读原文。
+ * 已结束的事件保留精华；每段带 chat_id 与起止消息时间戳，可回原窗口读原文。
  */
 internal object SegmentedSummary {
     const val HEADER = "【窗口段落】"
     const val END = "──段落完──"
     private const val KEEP_FULL = 12
     private val fmt = DateTimeFormatter.ofPattern("MM-dd HH:mm")
-    private val rangeHeader = Regex("""^§\s*起#(\d+)\s*止#(\d+)\s*[｜|]\s*(.*)$""")
+    private val rangeHeader = Regex("""^§\s*起#(\d+)\s*止#(\d+)(?:\s+续接=(\d+))?\s*[｜|]\s*(.*)$""")
     private val indexLine = Regex("""^索引：chat_id=(\S+)\s+from=(\d+)\s+to=(\d+)""")
 
     data class Parsed(val closed: List<String>, val open: List<String>)
     data class Feeling(val at: Long, val text: String)
+    data class Index(val chatId: String, val from: Long, val to: Long)
+
+    fun index(block: String): Index? = block.lineSequence().firstNotNullOfOrNull { line ->
+        indexLine.find(line.trim())?.let { match ->
+            Index(match.groupValues[1], match.groupValues[2].toLong(), match.groupValues[3].toLong())
+        }
+    }
 
     fun time(ts: Long): String = fmt.format(Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()))
 
@@ -76,13 +83,13 @@ internal object SegmentedSummary {
         把新消息按"一件事"切成段，每段格式严格如下（不加代码围栏，不写别的）：
         § 起#a 止#b｜已结束 或 悬着｜标题（20字内，直接说是什么事，比如"你和我文字做爱""改压缩方案"）
         时间：MM月dd日 HH:mm 到 HH:mm（还没结束就写"MM月dd日 HH:mm 开始，悬着未结束"）
-        内容：大概什么内容、谁说了什么、关键原话（加引号）、约定、没做完的事。
-        值不值得回顾：值得/一般/不必，加半句理由。
+        内容：只写事件精华，发生了什么、结果或未决点，最多80字、一两句。不要复述对话来回、堆原话或写详细分析；细节按索引回原文。
+        值不值得回顾：值得/一般/不必，加半句理由，总共不超过25字。
         规则：
         - #a #b 是消息编号，时间照编号旁边标的写。不相干的事不要硬凑一段，一段可以很短。
-        - 最后一段如果话题还在进行就标"悬着"，其余标"已结束"。
+        - 是否结束以实际进展为准；暂停或换话题不等于解决，标题状态与时间栏必须一致。
         - 不写我的感受，那一栏由软件填我自己记下的原话。
-        - ${if (open.isEmpty()) "没有上次悬着的段。" else "下面是上次悬着的段。新消息里它继续了：和新内容合成一段重写，起写 #0；它已经停了：照抄内容改成已结束，起止都写 #0，结束时间补上。"}
+        - ${if (open.isEmpty()) "没有上次悬着的段。" else "下面是上次悬着的段。只有新消息推进了它，才更新该事件：起写 #0，止写本次消息编号，并在止#b后写 续接=该事件索引的from。没有进展就不要重复输出，软件会保留。只有原文确认解决或结束才改已结束；暂停不算结束。多个悬着事件分别续接，禁止合成一件。"}
         - 已结束的旧段落软件会保留，不要重复。
         ${open.takeIf { it.isNotEmpty() }?.joinToString("\n\n", prefix = "上次悬着的段：\n") ?: ""}
     """.trimIndent() + "\n\n" + SummaryFidelityPrompts.ZH.trimIndent()
@@ -107,19 +114,21 @@ internal object SegmentedSummary {
         val raw = ChatUtils.removeThinkingContent(output).trim()
         val fresh = segments(raw, chatId, messages, parsed.open)
         if (fresh.isEmpty()) return null
-        // 模型没接上悬着的段，就原样保住，标成已结束
-        val carried = if (parsed.open.isNotEmpty() && !Regex("""起#0\b""").containsMatchIn(raw))
-            parsed.open.map { it.replaceFirst("悬着", "已结束") } else emptyList()
-        return render(parsed.closed + carried, withFeelings(fresh, feelings))
+        // 未被新消息接上的未决事件仍未解决，不能因沉默自动结束。
+        val updated = fresh.mapNotNull { index(it)?.from }.toSet()
+        val carried = parsed.open.filter { index(it)?.from !in updated }
+        val through = messages.maxOf { maxOf(it.timestamp, it.completedAt) }
+        val withCurrentFeelings = withFeelings(fresh, feelings.filter { it.at <= through }).map { block ->
+            val old = parsed.open.firstOrNull { index(it)?.from == index(block)?.from }
+            val previousFeeling = old?.lineSequence()?.firstOrNull { it.startsWith("我的感受：") }
+            if (block.endsWith("我的感受：（我没记）") && previousFeeling != null)
+                block.substringBeforeLast("我的感受：") + previousFeeling else block
+        }
+        return render(parsed.closed + carried, withCurrentFeelings)
     }
 
     /** 把模型写的"起#a 止#b"换成真正的时间戳索引。 */
     fun segments(text: String, chatId: String, messages: List<ChatMessage>, open: List<String>): List<String> {
-        fun idx(block: String?, group: Int) = block?.lines()?.firstNotNullOfOrNull { indexLine.find(it.trim())?.groupValues?.get(group)?.toLongOrNull() }
-        val openFrom = idx(open.firstOrNull(), 2)
-        val openTo = idx(open.lastOrNull(), 3)
-        fun ts(n: Int, start: Boolean): Long? = if (n <= 0) (if (start) openFrom else openTo)
-            else messages.getOrNull((n - 1).coerceAtMost(messages.lastIndex))?.timestamp
         val blocks = mutableListOf<String>()
         var current: StringBuilder? = null
         text.lines().forEach { raw ->
@@ -127,9 +136,16 @@ internal object SegmentedSummary {
             val match = rangeHeader.find(line)
             if (match != null) {
                 current?.let { blocks += it.toString().trim() }
-                val (a, b, rest) = match.destructured
-                val from = ts(a.toInt(), true) ?: messages.first().timestamp
-                val to = (ts(b.toInt(), false) ?: messages.last().timestamp).coerceAtLeast(from)
+                val (a, b, continuation, rest) = match.destructured
+                val previous = if (a == "0") {
+                    val selected = if (continuation.isNotBlank()) open.singleOrNull { index(it)?.from == continuation.toLong() }
+                        else open.singleOrNull()
+                    requireNotNull(selected?.let(::index)) { "续接必须指向一个明确的悬着事件" }
+                } else null
+                val from = previous?.from ?: requireNotNull(messages.getOrNull(a.toInt() - 1)?.timestamp) { "事件起点编号越界" }
+                val to = if (b == "0") requireNotNull(previous?.to) { "事件终点缺失" }
+                    else requireNotNull(messages.getOrNull(b.toInt() - 1)?.timestamp) { "事件终点编号越界" }
+                require(to >= from) { "事件终点早于起点" }
                 current = StringBuilder().appendLine("§ $rest").appendLine("索引：chat_id=$chatId from=$from to=$to")
             } else if (current != null && line.isNotBlank() && !line.startsWith("索引：") && !line.startsWith("我的感受")) {
                 current!!.appendLine(line)
@@ -152,15 +168,65 @@ internal object SegmentedSummary {
     }
 
     fun render(kept: List<String>, fresh: List<String>): String {
-        val all = kept + fresh
-        val cut = (all.size - KEEP_FULL).coerceAtLeast(0)
-        // 太老的段只留标题、时间、索引；原文还在，按索引能找回去
-        val shown = all.mapIndexed { i, block -> if (i >= cut) block else brief(block).joinToString("\n") }
+        // 数据库存全部事件精华；发送时另作投影，不能把旧事件从存档丢掉。
+        val shown = (kept + fresh).associateBy { block ->
+            index(block)?.let { "${it.chatId}:${it.from}" } ?: block
+        }.values.sortedBy { index(it)?.from ?: 0L }.map(::compact)
         return buildString {
-            appendLine("$HEADER 这个窗口按事分好的段落。要看某段原话：group_chat action=history，chat_id 填索引里的，after 填 from，就从那条开始往后读原文。")
+            appendLine("$HEADER 事件精华。group_chat events 检索本窗口或跨窗口事件；history 用 chat_id、after=from、end=to 读原文，长消息用 history_message 续读。")
             shown.forEach { appendLine(it).appendLine() }
             append(END)
         }.trim()
+    }
+
+    private fun excerpt(text: String, limit: Int): String {
+        val marker = "…〔节选，完整记录可回查〕"
+        val clean = text.removeSuffix(marker)
+        if (clean.length <= limit) return text
+        val prefix = clean.take(limit)
+        val stop = prefix.indexOfLast { it in "。！？；" }
+        return (if (stop >= limit / 2) prefix.take(stop + 1) else prefix) + marker
+    }
+
+    fun compact(block: String): String {
+        val lines = block.lines()
+        val first = lines.first()
+        val open = first.contains("悬着")
+        return lines.mapNotNull { line -> when {
+            line.startsWith("§") -> line
+            line.startsWith("索引：") -> line
+            line.startsWith("时间：") -> if (!open && line.contains("悬着")) {
+                // 已结束事件的终点取实际索引，避免旧模板残留的“悬着”自相矛盾。
+                val end = lines.firstNotNullOfOrNull { indexLine.find(it)?.groupValues?.get(3)?.toLongOrNull() }
+                if (end != null) "时间：${line.substringAfter("时间：").substringBefore(" 开始")} 至 ${time(end)}" else line
+            } else line
+            line.startsWith("内容：") -> "内容：" + excerpt(line.substringAfter("内容："), 100)
+            line.startsWith("值不值得回顾：") -> "值不值得回顾：" + excerpt(line.substringAfter("值不值得回顾："), 30)
+            line.startsWith("我的感受：") -> "我的感受：" + excerpt(line.substringAfter("我的感受："), 80)
+            else -> null
+        } }.joinToString("\n")
+    }
+
+    /** 只收短实际模型输入，不修改数据库摘要或原聊天。 */
+    fun forPrompt(summary: String): String {
+        if (!hasBlock(summary)) return summary
+        val parsed = parse(summary)
+        val all = (parsed.closed + parsed.open).sortedBy { block ->
+            block.lines().firstNotNullOfOrNull { indexLine.find(it)?.groupValues?.get(2)?.toLongOrNull() } ?: 0L
+        }
+        val recent = all.takeLast(KEEP_FULL).toSet()
+        val selected = all.filter { it in recent || it.lineSequence().first().contains("悬着") }
+        val oldHeader = summary.substringAfter(HEADER).substringBefore('\n')
+        val total = Regex("存档事件共(\\d+)件").find(oldHeader)?.groupValues?.get(1)?.toInt() ?: all.size
+        val replacement = render(emptyList(), selected).replaceFirst(HEADER,
+            "$HEADER 存档事件共${total}件，本次显示${selected.size}件；其余用 group_chat events 查询。")
+        val start = summary.indexOf(HEADER)
+        val end = summary.indexOf(END, start) + END.length
+        return summary.substring(0, start) + replacement + summary.substring(end)
+    }
+
+    fun promptTurns(turns: List<PromptTurn>): List<PromptTurn> = turns.map { turn ->
+        if (turn.kind == PromptTurnKind.SUMMARY && hasBlock(turn.content)) turn.copy(content = forPrompt(turn.content)) else turn
     }
 
     private fun brief(block: String) = block.lines().filter { it.startsWith("§") || it.startsWith("时间：") || it.startsWith("索引：") }

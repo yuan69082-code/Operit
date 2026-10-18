@@ -46,4 +46,50 @@ class SegmentedSummaryTest {
         assertFalse(second.contains("乙进行中"))
         assertEquals(2, SegmentedSummary.directory(second).size)
     }
+
+    @Test fun archivedEventsOutliveThePromptWindowAndUnresolvedEventsStayVisible() {
+        val blocks = (1..30).map { i ->
+            "§ ${if (i == 1) "悬着" else "已结束"}｜事件$i\n索引：chat_id=c from=${i * 1000L} to=${i * 1000L + 100}\n内容：第${i}件的精华\n我的感受：平静"
+        }
+        val archive = SegmentedSummary.render(emptyList(), blocks)
+        val prompt = SegmentedSummary.forPrompt(archive)
+        val saved = SegmentedSummary.parse(archive)
+        val shown = SegmentedSummary.parse(prompt)
+        assertEquals(30, saved.closed.size + saved.open.size)
+        assertEquals(13, shown.closed.size + shown.open.size)
+        assertTrue(prompt.contains("第1件的精华"))
+        assertFalse(prompt.contains("第2件的精华"))
+        assertTrue(archive.contains("第2件的精华"))
+        assertEquals(archive, SegmentedSummary.render(emptyList(), blocks))
+        assertEquals(prompt, SegmentedSummary.forPrompt(prompt))
+        assertEquals("", SegmentedSummary.stripBlock(prompt))
+    }
+
+    @Test fun longLegacyEventIsBoundedAndCompactionIsStable() {
+        val block = "§ 已结束｜旧事件\n索引：chat_id=c from=1000 to=2000\n内容：" + "经过".repeat(1000) +
+            "\n我的感受：" + "我当时很难过。".repeat(100)
+        val once = SegmentedSummary.compact(block)
+        assertTrue(once.length < 400)
+        assertTrue(once.contains("节选"))
+        assertEquals(once, SegmentedSummary.compact(once))
+        assertEquals(1000L, SegmentedSummary.index(once)!!.from)
+        assertEquals(2000L, SegmentedSummary.index(once)!!.to)
+    }
+
+    @Test fun multipleOpenEventsUseTheirOwnContinuationIndex() {
+        val open = listOf(
+            "§ 悬着｜甲\n索引：chat_id=c from=1000 to=2000\n内容：甲未完成",
+            "§ 悬着｜乙\n索引：chat_id=c from=3000 to=4000\n内容：乙未完成"
+        )
+        val fresh = SegmentedSummary.segments("§ 起#0 止#2 续接=3000｜已结束｜乙\n内容：乙解决了", "c", msgs.drop(4), open)
+        assertEquals(3000L, SegmentedSummary.index(fresh.single())!!.from)
+        assertEquals(6000L, SegmentedSummary.index(fresh.single())!!.to)
+    }
+
+    @Test fun recallResultsAreNeverCompactedAsIfTheyWereTheCurrentSummary() {
+        val original = SegmentedSummary.render(emptyList(), listOf("§ 已结束｜工具里的摘要\n内容：完整原文"))
+        val turn = com.ai.assistance.operit.core.chat.hooks.PromptTurn(
+            com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.TOOL_RESULT, original)
+        assertEquals(turn, SegmentedSummary.promptTurns(listOf(turn)).single())
+    }
 }

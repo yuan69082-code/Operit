@@ -81,28 +81,79 @@ object GroupContext {
             prefix + messages.joinToString("\n") { "${it.timestamp} ${GroupProvenance.label(context, chat, it)}：${visible(it)}" })
     }
 
-    suspend fun history(context: Context, actor: String, chatId: String, before: Long?, after: Long? = null): JSONObject {
-        val repo = ChatHistoryManager.getInstance(context)
-        val chat = requireNotNull(repo.getChatMetadata(chatId)) { "会话不存在" }
+    private suspend fun readable(context: Context, actor: String, chatId: String): Pair<Boolean, LongRange> {
+        val chat = requireNotNull(ChatHistoryManager.getInstance(context).getChatMetadata(chatId)) { "会话不存在" }
         val isGroup = !chat.characterGroupId.isNullOrBlank()
+        if (!isGroup) {
+            check(chat.characterCardId == actor) { "不能读取其他助手的私聊" }
+            return false to (1L..Long.MAX_VALUE)
+        }
         val seen = GroupStore(context).read(chatId).optJSONObject("seen")?.optJSONObject(actor)
         val member = chat.characterGroupId?.let { CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }
             ?.members?.any { it.characterCardId == actor } == true
-        check(if (isGroup) member || seen != null else chat.characterCardId == actor) { "不能读取其他助手的私聊或未参加的群" }
-        val ceiling = if (isGroup && !member) seen!!.getLong("through") + 1 else Long.MAX_VALUE
-        // after：从某条之后正序往下读，用来顺着段落索引回到原话；私聊原文不截断，只把附带的设备快照去掉
-        val raw = if (after != null) repo.loadChatMessagesAscAfter(chatId, after - 1, 20).filter { it.timestamp < ceiling }.asReversed()
-            else repo.loadChatMessagesDesc(chatId, 20, minOf(before ?: ceiling, ceiling))
-        val messages = raw
-            .filter { GroupPolicy.canRead(chat.characterCardId, actor, isGroup,
-                if (member) 1 else seen?.optLong("first") ?: 0,
-                if (member) Long.MAX_VALUE else seen?.optLong("through") ?: 0, it.timestamp) }
-            .filter { it.sender != "summary" || after == null }
-        fun text(m: com.ai.assistance.operit.data.model.ChatMessage) = if (isGroup) visible(m) else
-            GroupGamePrivacy.publicText(m.content).replace(com.ai.assistance.operit.util.ChatMarkupRegex.attachmentTag, "")
-                .replace(com.ai.assistance.operit.util.ChatMarkupRegex.toolOrToolResultBlock, "[工具记录]").trim().take(6000)
-        return JSONObject().put("chat_id", chatId).put("messages", JSONArray(messages.asReversed().map {
-            JSONObject().put("at", it.timestamp).put("speaker", if (isGroup) GroupProvenance.label(context, chatId, it) else it.roleName.ifBlank { it.sender }).put("text", text(it))
-        })).put("before", messages.lastOrNull()?.timestamp).put("after", if (after != null) messages.firstOrNull()?.timestamp?.plus(1) else JSONObject.NULL)
+        check(member || seen != null) { "不能读取未参加的群" }
+        return true to if (member) (1L..Long.MAX_VALUE) else (seen!!.getLong("first")..seen.getLong("through"))
+    }
+
+    private fun historyText(message: ChatMessage, isGroup: Boolean, part: String): String {
+        require(part in setOf("body", "raw", "tools", "attachments")) { "part 须为 body/raw/tools/attachments" }
+        // Group secret tool arguments remain private even when a long message is expanded.
+        require(!isGroup || part == "body") { "群记录只能读取公开正文" }
+        val text = if (isGroup) GroupGamePrivacy.publicText(message.content) else message.content
+        val markup = com.ai.assistance.operit.util.ChatMarkupRegex
+        return when (part) {
+            "raw" -> text
+            "tools" -> markup.toolOrToolResultBlock.findAll(text).joinToString("\n") { it.value }
+            "attachments" -> markup.attachmentTag.findAll(text).joinToString("\n") { it.value }
+            else -> text.replace(markup.attachmentTag, "")
+                .replace(markup.toolOrToolResultBlock, "[工具记录]").trim()
+        }
+    }
+
+    suspend fun history(
+        context: Context, actor: String, chatId: String, before: Long?, after: Long? = null, end: Long? = null
+    ): JSONObject {
+        val (isGroup, allowed) = readable(context, actor, chatId)
+        require(after == null || after > 0) { "after 须为正时间戳" }
+        require(end == null || end > 0 && (after == null || end >= after)) { "end 须不早于 after" }
+        val repo = ChatHistoryManager.getInstance(context)
+        val upper = minOf(end ?: Long.MAX_VALUE, allowed.last)
+        val raw = if (after != null) {
+            repo.loadChatMessagesAscAfter(chatId, maxOf(after, allowed.first) - 1, 21)
+        } else {
+            repo.loadChatMessagesDesc(chatId, 21, minOf(before ?: Long.MAX_VALUE, if (upper == Long.MAX_VALUE) upper else upper + 1))
+        }
+        val eligible = raw.filter { it.timestamp in allowed && it.timestamp <= upper }
+        val page = eligible.take(20)
+        val hasMore = eligible.size > page.size
+        val visible = page.filter { after == null || it.sender != "summary" }
+        val chronological = if (after != null) visible else visible.asReversed()
+        return JSONObject().put("chat_id", chatId).put("messages", JSONArray(chronological.map { message ->
+            val full = historyText(message, isGroup, "body")
+            JSONObject().put("at", message.timestamp)
+                .put("speaker", if (isGroup) GroupProvenance.label(context, chatId, message) else message.roleName.ifBlank { message.sender })
+                .put("text", full.take(1200)).put("content_length", full.length)
+                .put("text_complete", full.length <= 1200)
+                .put("expand", "history_message: chat_id=$chatId message_at=${message.timestamp} offset=0 part=body")
+                .put("has_tools", !isGroup && com.ai.assistance.operit.util.ChatMarkupRegex.toolOrToolResultBlock.containsMatchIn(message.content))
+                .put("has_attachments", !isGroup && com.ai.assistance.operit.util.ChatMarkupRegex.attachmentTag.containsMatchIn(message.content))
+        })).put("before", page.lastOrNull()?.timestamp ?: JSONObject.NULL)
+            .put("after", if (after != null && hasMore) page.last().timestamp + 1 else JSONObject.NULL)
+            .put("end", end ?: JSONObject.NULL).put("has_more", hasMore).put("range_list_complete", !hasMore)
+            .put("note", "正文为预览；text_complete=false 时用 history_message 继续读。raw 包含已保存的工具和附件标签，附件文件本体需按标签路径用相应工具打开；文件已删除时不能恢复。")
+    }
+
+    suspend fun historyMessage(
+        context: Context, actor: String, chatId: String, at: Long, offset: Int, part: String
+    ): JSONObject {
+        val (isGroup, allowed) = readable(context, actor, chatId)
+        check(at in allowed) { "消息不在可读取的参与范围内" }
+        val message = ChatHistoryManager.getInstance(context).loadChatMessagesWindow(chatId, at, at).singleOrNull()
+            ?: error("原消息不存在或已删除")
+        val page = com.ai.assistance.operit.core.chat.HistoryTextPage.read(historyText(message, isGroup, part), offset)
+        return JSONObject().put("chat_id", chatId).put("message_at", at).put("part", part)
+            .put("text", page.text).put("total_characters", page.total).put("offset", offset)
+            .put("next_offset", page.next ?: JSONObject.NULL).put("complete", page.next == null)
     }
 }
+

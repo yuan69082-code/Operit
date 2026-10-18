@@ -16,14 +16,13 @@ internal object FeelingLog {
     }
 
     fun add(context: Context, chatId: String, text: String): JSONObject {
-        val clean = text.trim().take(300)
+        val clean = text.trim()
         require(clean.isNotBlank()) { "感受不能为空" }
         val now = System.currentTimeMillis()
         CompanionStore(context).update(key(chatId)) { data ->
             val list = data.optJSONArray("items") ?: JSONArray()
             list.put(JSONObject().put("at", now).put("text", clean))
-            // 只留最近 200 条，足够覆盖一个窗口
-            while (list.length() > 200) list.remove(0)
+            // 事件目录只显示节选；原始感受不能因新记录增长而被静默丢弃。
             data.put("items", list)
         }
         return JSONObject().put("saved", true).put("at", now)

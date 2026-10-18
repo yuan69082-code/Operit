@@ -20,6 +20,7 @@ import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.core.chat.CurrentPerceptionContext
 import com.ai.assistance.operit.core.chat.HistoricalPackageContext
+import com.ai.assistance.operit.core.chat.SegmentedSummary
 import com.ai.assistance.operit.core.chat.hooks.appendUserTurnIfMissing
 import com.ai.assistance.operit.core.chat.hooks.buildActivePromptHookMetadata
 import com.ai.assistance.operit.core.chat.hooks.mergeAdjacentTurns
@@ -896,7 +897,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 preparedHistory = finalPreparedHistory,
                 originalCurrentMessage = message,
                 finalizedCurrentMessage = finalProcessedInput
-            ).let(CurrentPerceptionContext::retainLatest).let(HistoricalPackageContext::compact).mergeAdjacentTurns { previous, current ->
+            ).let(CurrentPerceptionContext::retainLatest).let(HistoricalPackageContext::compact).let(SegmentedSummary::promptTurns).mergeAdjacentTurns { previous, current ->
                 previous.kind == PromptTurnKind.USER &&
                     current.kind == PromptTurnKind.USER &&
                     previous.toolName == current.toolName
@@ -1115,7 +1116,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                             preparedHistory = finalPreparedHistory,
                             originalCurrentMessage = message,
                             finalizedCurrentMessage = finalProcessedInput
-                        ).let(CurrentPerceptionContext::retainLatest).let(HistoricalPackageContext::compact).mergeAdjacentTurns { previous, current ->
+                        ).let(CurrentPerceptionContext::retainLatest).let(HistoricalPackageContext::compact).let(SegmentedSummary::promptTurns).mergeAdjacentTurns { previous, current ->
                             previous.kind == PromptTurnKind.USER &&
                                 current.kind == PromptTurnKind.USER &&
                                 previous.toolName == current.toolName
@@ -3247,3 +3248,4 @@ class EnhancedAIService private constructor(private val context: Context) {
         return conversationService.analyzeVideoWithIntent(videoPath, userIntent, multiServiceManager)
     }
 }
+

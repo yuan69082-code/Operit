@@ -15,6 +15,9 @@ internal data class PersonalUpdateManifest(
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
+        fun newest(candidates: List<PersonalUpdateManifest>): PersonalUpdateManifest? =
+            candidates.maxByOrNull { it.versionCode }
+
         fun parse(content: String): PersonalUpdateManifest {
             val manifest = json.decodeFromString(serializer(), content)
             require(manifest.version.isNotBlank() && manifest.versionCode > 0) {
@@ -24,3 +27,4 @@ internal data class PersonalUpdateManifest(
         }
     }
 }
+

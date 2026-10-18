@@ -142,26 +142,31 @@ class UpdateManager private constructor(private val context: Context) {
                 if (BuildConfig.APPLICATION_ID == "com.ai.assistance.operit.debug") {
                     val api = GitHubApiService(context)
                     val releases = api.getRepositoryReleases(
-                        owner = "yuan69082-code", repo = "Operit", perPage = 20
+                        owner = "yuan69082-code", repo = "Operit", perPage = 100
                     ).getOrThrow()
                     // Personal updates follow the paired preview channel, including prereleases.
                     // /releases/latest excludes it and used to offer the old standalone +114 APK.
-                    val release = releases.firstOrNull { candidate ->
+                    val candidates = releases.filter { candidate ->
                         !candidate.draft && candidate.tag_name.startsWith("shared-v") &&
                             candidate.assets.any { it.name == "shared-release.json" } &&
                             candidate.assets.any { it.name == "app-debug.apk" }
-                    } ?: return@withContext UpdateStatus.Error(
-                        context.getString(R.string.update_cannot_fetch_info)
-                    )
-                    val metadataAsset = release.assets.first { it.name == "shared-release.json" }
-                    val apkAsset = release.assets.first { it.name == "app-debug.apk" }
-                    val manifest = PersonalUpdateManifest.parse(
-                        api.downloadReleaseAsset(metadataAsset.browser_download_url)
-                            .getOrThrow().toString(Charsets.UTF_8)
-                    )
-                    require(manifest.version == release.tag_name.removePrefix("shared-v")) {
-                        "Personal update manifest version does not match its release"
                     }
+                    // GitHub can return +9 before +12; neither list order nor the separate
+                    // workflow counters determine Android's installation order.
+                    val resolved = candidates.map { candidate ->
+                        val asset = candidate.assets.first { it.name == "shared-release.json" }
+                        val manifest = PersonalUpdateManifest.parse(
+                            api.downloadReleaseAsset(asset.browser_download_url).getOrThrow().toString(Charsets.UTF_8)
+                        )
+                        require(manifest.version == candidate.tag_name.removePrefix("shared-v")) {
+                            "Personal update manifest version does not match its release"
+                        }
+                        candidate to manifest
+                    }
+                    val manifest = PersonalUpdateManifest.newest(resolved.map { it.second })
+                        ?: return@withContext UpdateStatus.Error(context.getString(R.string.update_cannot_fetch_info))
+                    val release = resolved.first { it.second == manifest }.first
+                    val apkAsset = release.assets.first { it.name == "app-debug.apk" }
                     return@withContext if (manifest.isNewerThan(BuildConfig.VERSION_CODE)) {
                         UpdateStatus.Available(
                             newVersion = manifest.version,
@@ -349,3 +354,4 @@ class UpdateManager private constructor(private val context: Context) {
         return best
     }
 }
+

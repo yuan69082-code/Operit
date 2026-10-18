@@ -7,6 +7,17 @@ import org.junit.Test
 
 class PersonalUpdateManifestTest {
     @Test
+    fun `release list order cannot hide build 12 behind build 9`() {
+        val build9 = PersonalUpdateManifest("1.12.2-pc.1+9", 5300009)
+        val build12 = PersonalUpdateManifest("1.12.2-pc.1+12", 5300012)
+        val standalone118 = PersonalUpdateManifest("1.12.2-pc.1+118", 5200118)
+        val newest = PersonalUpdateManifest.newest(listOf(build9, standalone118, build12))!!
+        assertEquals(build12, newest)
+        assertTrue(newest.isNewerThan(5300011))
+        assertFalse(newest.isNewerThan(5300012))
+    }
+
+    @Test
     fun `shared build 8 updates standalone build 118 using Android version code`() {
         val release = PersonalUpdateManifest.parse(
             """{"version":"1.12.2-pc.1+8","version_code":5300008,"android":"https://github.com/example/app-debug.apk","protocol":1}"""
@@ -33,3 +44,4 @@ class PersonalUpdateManifestTest {
         )
     }
 }
+

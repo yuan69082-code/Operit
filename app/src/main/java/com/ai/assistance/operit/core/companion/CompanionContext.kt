@@ -70,26 +70,8 @@ object CompanionContext {
                 append(com.ai.assistance.operit.core.group.RelationshipNetwork(context).prompt(roleId))
                 append("你读到其他助手的活动、私聊或关系网时，只是在查看他人的记录。保留助手ID、姓名、发言时间和来源；不得把他人的言论、观点、行为、经历或感情写成自己亲历。主助手管理权限不改变记录的归属。\n")
             }
-            if (recordSnapshot && !roleId.isNullOrBlank()) {
-                val repo = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
-                val here = repo.getChatMetadata(chatId)
-                if (here?.characterGroupId.isNullOrBlank()) {
-                    val others = repo.getAllChatMetadata()
-                        .filter { it.id != chatId && it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId }
-                        .sortedByDescending { it.updatedAt }
-                        .take(6)
-                    if (others.isNotEmpty()) {
-                        append("\n[跨窗口目录：你和她在别的窗口聊过的事，只列标题、时间和索引。换了窗口不等于那些事没发生。要看原话：group_chat action=history，chat_id 填那个窗口的，after 填段落的 from，就从那条开始往后读原文；没有段落的窗口用 before 从最新往回翻。]\n")
-                        val fmt = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
-                        others.forEach { other ->
-                            append("- 窗口「${other.title.take(40)}」最后 ${fmt.format(other.updatedAt)} chat_id=${other.id}\n")
-                            val latest = repo.getLatestSummaryTimestamp(other.id)
-                            val summary = latest?.let { repo.loadChatMessagesWindow(other.id, it, it).firstOrNull()?.content }
-                            summary?.let { com.ai.assistance.operit.core.chat.SegmentedSummary.directory(it) }
-                                ?.takeLast(8)?.forEach { line -> append("  ").append(line.take(160)).append("\n") }
-                        }
-                    }
-                }
+            if (!roleId.isNullOrBlank()) {
+                append("跨窗口回顾：group_chat action=events 可按 query/from/end/status 检索自己的所有私聊事件，chat_id 可限定窗口。结果带窗口ID和起止索引；history 用 after=from、end=to 分页，history_message 可续读完整消息、工具和附件标签。目录不包含尚未整理的新消息，未命中不等于没发生。\n")
             }
             append("资料可用 companion_library 自行分类、保存、检索；skill 是能力笔记，不会自动安装或执行代码。\n")
             if (!roleId.isNullOrBlank()) {
@@ -98,7 +80,7 @@ object CompanionContext {
                 append(if (exploration.enabled(roleId)) "你的自主探索已由用户开启；可在指定私聊用 companion_explore status 查询安排和剩余轮次，用 schedule 安排继续或 pause 暂缓。\n"
                     else "你的自主探索默认关闭或已被用户关闭；不能自行开启或安排探索唤醒。手动聊天中的查阅和明确提交的待办仍照常进行。\n")
             }
-            append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；压缩时会原样放进那段的“我的感受”，没记就空着。\n")
+            append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；事件目录只放简短原话节选；完整感受用 group_chat feelings 按 chat_id/from/end 读取，没记就空着。\n")
             append("companion_todo 是你自己的待办与私人打算，可以自主创建、批注(comment)、安排继续(submit)、暂缓或完成，不必事事等用户审批。可保存优先级、结论、下一步、共同计划和参考；只有确实需要用户决定才填写 needs_decision。完成后可沉淀到资料库或归档。\n")
             val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
             if (open.isNotEmpty()) append("待办共${open.size}项，优先关注：" +
@@ -124,3 +106,4 @@ object CompanionContext {
             org.json.JSONArray(items).toString()
     }
 }
+
