@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.data.api.GitHubApiService
 import com.ai.assistance.operit.data.api.GitHubRelease
 import com.ai.assistance.operit.R
+import com.ai.assistance.operit.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,7 +44,16 @@ class UpdateViewModel(private val context: Context) : ViewModel() {
             apiService.getRepositoryReleases(REPO_OWNER, REPO_NAME, page = 1, perPage = 20)
                 .onSuccess { releases ->
                     val updates = releases
-                        .filter { !it.draft && !it.prerelease } // 过滤掉草稿和预发布
+                        .filter { release ->
+                            !release.draft && if (BuildConfig.APPLICATION_ID == "com.ai.assistance.operit.debug") {
+                                // Personal APKs are published on the paired preview channel.
+                                // Hiding prereleases made successful builds disappear from this page.
+                                release.tag_name.startsWith("shared-v") &&
+                                    release.assets.any { it.name == "shared-release.json" } &&
+                                    release.assets.any { it.name == "app-debug.apk" }
+                            } else !release.prerelease
+                        }
+                        .sortedByDescending { it.published_at }
                         .mapIndexed { index, release -> 
                             parseReleaseToUpdateInfo(release, isLatest = index == 0)
                         }
@@ -101,4 +111,5 @@ sealed class UpdateUiState {
     data class Success(val updates: List<UpdateInfo>) : UpdateUiState()
     data class Error(val message: String) : UpdateUiState()
 }
+
 
