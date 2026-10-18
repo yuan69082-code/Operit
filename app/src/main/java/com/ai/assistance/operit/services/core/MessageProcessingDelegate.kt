@@ -1189,7 +1189,8 @@ class MessageProcessingDelegate(
                         else ""
                         val visualOnlyDescription = if (turnOptions.voiceCallVisualOnly) "本轮是摄像头更新，不是用户开口。只在有值得回应的内容时开口，否则只输出 <voice_call_quiet/>。" else ""
                         "[运行状态：mode=voice_call，正在与用户进行语音通话。此状态仅供内部使用，禁止复述、解释或输出状态标记和文件路径。$inputDescription $continuousDescription $visualDescription $visualOnlyDescription 直接说对用户说的话，正文会被朗读。通话与当前文字聊天共享身份、工具和记录。若你决定结束本次通话，可先说明原因，也可以不说话；在回复末尾单独输出 <voice_call_end/>，客户端在正文朗读结束后挂断，并以你的身份记录通话结束；这个控制标记不会被朗读。]\n$requestMessageContent"
-                    } else requestMessageContent) + (if (activeChatId != null)
+                    } else requestMessageContent) + (if (activeChatId != null && !turnOptions.proactiveWake)
+                        // 自己醒来时这段文字是软件写的唤醒说明，不是她说的话，不拿去触发旧日回声
                         com.ai.assistance.operit.core.companion.CompanionContext.related(context, activeChatId, effectiveRoleCardId, requestMessageContent) else ""),
                     // 仅在群组编排中去掉当前用户消息，避免重复拼接。
                     // userMessageAdded 只覆盖本次发送自行落库的情况；编排路径的消息由
