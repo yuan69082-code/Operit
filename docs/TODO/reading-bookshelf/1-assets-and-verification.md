@@ -18,6 +18,8 @@ Use case: photorealistic-natural. Asset type: background texture for a real Andr
 
 ## 检查记录
 
-已增加图文顺序、正文长度、非网页图片排除、重复图片、普通旧网页解析以及批注和随记时间隔离的测试。待构建检查后记录结果。
+Android Tests #115 在 cb7815b 上完成编译及全部 JVM 检查：1599 项，0 失败，6 项原有跳过。ReadingPage 5 项、ReadingRoom 9 项、AssistantDiary 3 项全部通过。新增检查覆盖图文顺序、正文长度、非网页图片排除、重复图片、普通旧网页解析以及批注和随记时间隔离。
+
+首轮测试发现 Jsoup absUrl 在重建 URL 时会丢掉凭据。图片现在直接从原始 src 使用 OkHttp 解析并校验，防止校验归一化结果丢失信息。最后的编译与测试报告已验证修正。[DONE]
 
 手机安装后的验收入口：助手房间 → 阅读角 → 书架；日记、待读、已读每层横向滑动，点书脊进入书页。来源和自主探索仍在书架上方。需另行确认手机上的最终视觉效果。
