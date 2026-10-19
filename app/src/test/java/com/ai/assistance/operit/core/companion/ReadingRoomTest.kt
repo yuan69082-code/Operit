@@ -17,6 +17,22 @@ class ReadingRoomTest {
         whenever(context.getSharedPreferences("companion_options", Context.MODE_PRIVATE)).thenReturn(prefs)
         return context
     }
+    @Test fun userAnnotationsDoNotChangeAssistantNoteTimeOrSourceBlocks() {
+        val context = context(); val room = ReadingRoom(context, "a")
+        val id = room.add("旧记录", "https://example.com/old", "原摘要").getString("id")
+        room.open(id, "summary", true)
+        room.note(id, "实际随记", true)
+        CompanionStore(context).update("reading-entry:a:$id") { it.put("ai_note_at", 1234L)
+            .put("page_blocks", ReadingPage.extract("<article><p>原文</p><img src='/a.jpg'></article>", "https://example.com")) }
+        room.note(id, "我的批注", false)
+        val entry = room.entry(id)
+        assertEquals(1234L, entry.getLong("ai_note_at"))
+        assertTrue(entry.has("user_note_at"))
+        assertEquals("实际随记", entry.getString("note"))
+        assertEquals("原摘要", entry.getString("summary"))
+        assertEquals(2, entry.getJSONArray("page_blocks").length())
+        assertFalse(room.entries(true).single().has("page_blocks"))
+    }
     @Test fun viewingByUserDoesNotClaimAssistantReadIt() {
         val context = context(); val room = ReadingRoom(context, "a")
         val id = room.add("星空", "https://example.com/sky", "来源摘要").getString("id")

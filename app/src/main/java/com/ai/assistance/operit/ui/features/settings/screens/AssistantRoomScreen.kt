@@ -80,7 +80,7 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                             "房间" -> RoomHome(room, data, chat, revision, { tab = it }, { work(it) })
                             "外观" -> RoomAppearance(room, { work(it) }, { advanced = true })
                             "日记" -> RoomDiary(room, chat, revision, { work(it) })
-                            "阅读角" -> ReadingPanel(role, chat, revision, { work(it) })
+                            "阅读角" -> ReadingPanel(role, chat, name, revision, { work(it) })
                             "设置" -> RoomOptions(room, data, { work(it) })
                         }
                     }

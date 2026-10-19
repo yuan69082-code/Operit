@@ -86,7 +86,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
     private fun index(entry: JSONObject) {
         store.update(scope) { data ->
             val old = data.optJSONArray("entries").objects().filter { it.getString("id") != entry.getString("id") }
-            val brief = JSONObject(entry.toString()).also { it.remove("body"); it.remove("summary"); it.remove("note"); it.remove("receipts") }
+            val brief = JSONObject(entry.toString()).also { it.remove("body"); it.remove("page_blocks"); it.remove("summary"); it.remove("note"); it.remove("receipts") }
             val all = old + brief
             // Only the pending queue expires; read materials and notes remain on disk and in history.
             val history = all.filter { it.optString("state") in setOf("read", "saved") }
@@ -118,7 +118,9 @@ class ReadingRoom(private val context: Context, private val role: String) {
         if (ai) check(data.has("delivered_at")) { "先打开实际材料，再记录自己的随记" }
         store.update("reading-entry:$role:$id") {
             // User annotations are separate from the assistant's own reading reflection.
-            it.put(if (ai) "note" else "user_note", text).put("state", "saved").put("noted_at", System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            it.put(if (ai) "note" else "user_note", text).put("state", "saved").put("noted_at", now)
+                .put(if (ai) "ai_note_at" else "user_note_at", now)
         }.also { index(it) }
     }
     fun skip(id: String) = synchronized(lock) {
@@ -182,14 +184,13 @@ class ReadingRoom(private val context: Context, private val role: String) {
         val (url, html) = download(entry.getString("url"))
         currentCoroutineContext().ensureActive()
         authorizeNetwork(ai, chat)
-        val document = Jsoup.parse(html, url)
-        document.select("script,style,nav,header,footer,aside").remove()
-        val body = document.selectFirst("article,main")?.text() ?: document.body().text()
+        val blocks = ReadingPage.extract(html, url)
+        val body = ReadingPage.text(blocks)
         check(body.isNotBlank()) { "网页未提供可读取的正文" }
         synchronized(lock) {
             store.update("reading-entry:$role:$id") {
                 // A parsed page may omit dynamic/paywalled content; never label the original work fully read.
-                it.put("body", body.take(16000)).put("material", "partial").put("fetched", System.currentTimeMillis()).put("resolved_url", url)
+                it.put("body", body).put("page_blocks", blocks).put("material", "partial").put("fetched", System.currentTimeMillis()).put("resolved_url", url)
             }
             open(id, "body", ai)
         }
@@ -222,7 +223,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
         fun hoursLeft(entry: JSONObject, now: Long = System.currentTimeMillis()): Long? =
             if (entry.optString("state") != "queued") null else maxOf(0L, (entry.optLong("expires") - now) / 3_600_000L)
         private val lock = Any()
-        private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+        internal val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =
                     InetAddress.getAllByName(hostname).toList().also { addresses ->
