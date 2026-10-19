@@ -37,7 +37,9 @@ internal object ReadingPage {
                 is Element -> {
                     if (node.normalName() == "img") {
                         flush()
-                        val address = imageAddress(node.absUrl("src"))
+                        // Resolve the original attribute: Jsoup's absUrl can discard credentials
+                        // while rebuilding a URL, so validating that rebuilt URL loses provenance.
+                        val address = imageAddress(node.attr("src"), node.baseUri())
                         if (remaining > 0 && address != null && images < 12 && seen.add(address)) {
                             blocks.put(JSONObject().put("type", "image").put("url", address).put("alt", node.attr("alt").take(300)))
                             images++
@@ -60,8 +62,10 @@ internal object ReadingPage {
         .filter { it.getString("type") == "text" }.joinToString("\n\n") { it.getString("text") }
 
     /** Reject non-web embeds and credentials; downloads also validate resolved public IP addresses. */
-    fun imageAddress(raw: String): String? {
-        val address = raw.toHttpUrlOrNull() ?: return null
+    fun imageAddress(raw: String, base: String? = null): String? {
+        if (raw.isBlank()) return null
+        val address = if (base == null) raw.toHttpUrlOrNull() else base.toHttpUrlOrNull()?.resolve(raw)
+        if (address == null) return null
         if (address.username.isNotEmpty() || address.password.isNotEmpty()) return null
         return address.toString()
     }

@@ -20,7 +20,7 @@ class ReadingPageTest {
 
     @Test fun rejectsNonWebAndCredentialImagesAndDeduplicates() {
         val blocks = ReadingPage.extract("""<article><p>正文</p><img src="data:image/png;base64,bad"><img src="file:///private"><img src="https://user:secret@example.com/a"><img src="/a.jpg"><img src="/a.jpg"></article>""", "https://example.com")
-        assertEquals(2, blocks.length())
+        assertEquals(blocks.toString(), 2, blocks.length())
         assertEquals("https://example.com/a.jpg", blocks.getJSONObject(1).getString("url"))
         assertNull(ReadingPage.imageAddress("javascript:alert(1)"))
     }
