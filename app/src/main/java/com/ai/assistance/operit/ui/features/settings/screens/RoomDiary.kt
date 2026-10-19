@@ -51,15 +51,21 @@ internal fun RoomDiary(room: AssistantRoom, chat: String, revision: Long, work: 
     }
     Row { TextButton(enabled = current > 0, onClick = { page = current - 1 }) { Text("上一页") }
         Text("${found.size} 篇", Modifier.padding(12.dp)); TextButton(enabled = (current + 1) * 20 < found.size, onClick = { page = current + 1 }) { Text("下一页") } }
-    if (editing) key(selected?.optString("id")) {
+    if (editing) DiaryEditor(room, chat, selected, work, { editing = false }, { editing = false })
+}
+
+@Composable
+internal fun DiaryEditor(room: AssistantRoom, chat: String, selected: JSONObject?, work: (suspend () -> Unit) -> Unit, dismiss: () -> Unit, onSaved: (JSONObject) -> Unit) {
+    val context = LocalContext.current
+    key(room.role, selected?.optString("id")) {
         var date by remember { mutableStateOf(selected?.getString("date") ?: LocalDate.now().toString()) }
         var title by remember { mutableStateOf(selected?.getString("title").orEmpty()) }
         var text by remember { mutableStateOf(selected?.getString("text").orEmpty()) }
         var old by remember { mutableStateOf<JSONObject?>(null) }
         var version by remember { mutableStateOf("") }
-        Dialog(onDismissRequest = { editing = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Dialog(onDismissRequest = { dismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding().imePadding().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("日记", style = MaterialTheme.typography.headlineSmall); TextButton(onClick = { editing = false }) { Text("关闭") } }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("日记", style = MaterialTheme.typography.headlineSmall); TextButton(onClick = { dismiss() }) { Text("关闭") } }
                 selected?.let { entry ->
                     Text("原作者：${if (entry.getString("author") == "user") "你" else "这位助手"} · 第${entry.getLong("version")}版")
                     Text("更新于 ${DateFormat.getDateTimeInstance().format(Date(entry.getLong("updated")))} · ${if (entry.getString("edited_by") == "user") "你编辑" else "助手编辑"}")
@@ -75,7 +81,7 @@ internal fun RoomDiary(room: AssistantRoom, chat: String, revision: Long, work: 
                 OutlinedTextField(date, { date = it }, label = { Text("日期 YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(title, { title = it }, label = { Text("标题") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(text, { text = it }, label = { Text("正文") }, minLines = 12, modifier = Modifier.fillMaxWidth())
-                Button(onClick = { work { room.saveDiary(selected?.getString("id"), date, title, text, chat, false, selected?.getLong("version")); editing = false } }) { Text("保存，保留旧稿") }
+                Button(onClick = { work { val saved = room.saveDiary(selected?.getString("id"), date, title, text, chat, false, selected?.getLong("version")); withContext(Dispatchers.Main) { onSaved(saved) } } }) { Text("保存，保留旧稿") }
                 old?.let { Text("第${it.optLong("version")}版 · ${it.optString("title")}", style = MaterialTheme.typography.titleMedium); Text(it.optString("text")) }
             } }
         }

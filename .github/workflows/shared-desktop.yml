@@ -44,6 +44,7 @@ jobs:
           Copy-Item LICENSE package/LICENSE
           @{version=$version; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content package/desktop/build-version.json -Encoding utf8NoBOM
           Compress-Archive -Path package/* -DestinationPath operit-windows.zip
+          Copy-Item docs/TODO/mobile-continuity/release-notes.md mobile-release-notes.md
           $tag = "shared-v$version"
           $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
           @{version=$version; version_code=($release.android_version_base*100000+[int]$env:GITHUB_RUN_NUMBER); protocol=$release.protocol; channel=$release.channel; commit=$env:GITHUB_SHA; windows="$base/operit-windows.zip"; android="$base/app-debug.apk"} | ConvertTo-Json | Set-Content shared-release.json -Encoding utf8NoBOM
@@ -53,6 +54,7 @@ jobs:
           path: |
             operit-windows.zip
             shared-release.json
+            mobile-release-notes.md
           if-no-files-found: error
   android:
     name: Same-commit Android client
@@ -88,4 +90,5 @@ jobs:
           tag="shared-v$version"
           notes="$RUNNER_TEMP/shared-preview.md"
           printf 'Windows共享聊天预览 %s\n\n同一提交构建的Windows便携包和安卓客户端。解压Windows包后运行desktop/Start-Operit.cmd。配置模型后在手机版外部HTTP设置中打开共享聊天。\n\n原生手机本地会话保持独立；旧文字记录需显式导入。本预览尚未包含跨端通话、完整历史附件迁移或原生桌面安装器。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
+          cat artifacts/windows/mobile-release-notes.md >> "$notes"
           gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Operit 双端预览 $version" --notes-file "$notes" --prerelease --latest=false
