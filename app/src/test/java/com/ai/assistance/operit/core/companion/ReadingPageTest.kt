@@ -32,4 +32,12 @@ class ReadingPageTest {
         assertEquals(16000, ReadingPage.text(blocks).length)
         assertFalse(ReadingPage.text(blocks).contains("超过正文范围"))
     }
+
+    @Test fun paragraphSeparatorsAreIncludedInTheTextBudget() {
+        val html = (1..600).joinToString("") { "<p>${"段".repeat(100)}</p>" }
+        val blocks = ReadingPage.extract("<article>$html</article>", "https://example.com")
+        assertTrue(ReadingPage.text(blocks).length <= 16000)
+        val tiny = ReadingPage.extract("<article>${"<p>字</p>".repeat(2000)}</article>", "https://example.com")
+        assertTrue(tiny.length() <= 256)
+    }
 }

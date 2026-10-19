@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -34,6 +37,8 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
     var diary by remember { mutableStateOf<JSONObject?>(null) }
     var editingDiary by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     var sourceId by remember { mutableStateOf<String?>(null) }
     var title by remember { mutableStateOf("") }; var address by remember { mutableStateOf("") }
     var kind by remember { mutableStateOf("rss") }; var hours by remember { mutableStateOf("24") }
@@ -53,7 +58,17 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
     }
     ReadingTheme {
       Column(Modifier.fillMaxWidth().background(BookPaper), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("${name}的书架", Modifier.padding(horizontal = 18.dp).padding(top = 16.dp), fontFamily = FontFamily.Serif, fontSize = 27.sp, color = BookInk)
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, top = 10.dp)) {
+            Text("${name}的书架", Modifier.weight(1f).padding(top = 8.dp), fontFamily = FontFamily.Serif, fontSize = 27.sp, color = BookInk)
+            IconButton(onClick = { searching = !searching; if (!searching) filter = ""; tab = "书架" }) { Icon(Icons.Default.Search, "搜索书架") }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "书架操作") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("放入阅读线索") }, onClick = { menu = false; tab = "书架"; add = true })
+                    DropdownMenuItem(text = { Text("写日记") }, onClick = { menu = false; diary = null; editingDiary = true })
+                }
+            }
+        }
         Text("想读的、读过的，和留下的话", Modifier.padding(horizontal = 18.dp), fontSize = 13.sp)
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("书架", "关注来源", "自主探索").forEach { label -> FilterChip(tab == label, { tab = label }, label = { Text(label) }) }
@@ -69,11 +84,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
               ReadingSources(reading, chat, sources, sourceId, { sourceId = it }, title, { title = it }, address, { address = it }, kind, { kind = it }, hours, { hours = it }, work)
           }
           else -> {
-            OutlinedTextField(filter, { filter = it }, label = { Text("找一本书 · 标题、来源或日记日期") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
-                TextButton(onClick = { add = !add }) { Text(if (add) "取消添加" else "＋ 放入阅读线索") }
-                TextButton(onClick = { diary = null; editingDiary = true }) { Text("写日记") }
-            }
+            if (searching) OutlinedTextField(filter, { filter = it }, label = { Text("标题、来源或日记日期") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             if (add) {
                 var itemTitle by remember { mutableStateOf("") }; var url by remember { mutableStateOf("") }; var summary by remember { mutableStateOf("") }
                 Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -81,6 +92,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
                     OutlinedTextField(url, { url = it }, label = { Text("原文链接") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(summary, { summary = it }, label = { Text("来源摘要，可留空") }, modifier = Modifier.fillMaxWidth())
                     Button(onClick = { work { reading.add(itemTitle, url, summary); withContext(Dispatchers.Main) { add = false } } }) { Text("放入待读") }
+                    TextButton(onClick = { add = false }) { Text("取消添加") }
                 }
             }
             fun matching(items: List<JSONObject>) = items.filter { item -> listOf("title", "url", "date", "preview").any { item.optString(it).contains(filter, true) } }

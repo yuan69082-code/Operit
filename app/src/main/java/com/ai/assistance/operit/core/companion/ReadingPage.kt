@@ -17,18 +17,21 @@ internal object ReadingPage {
         val blocks = JSONArray()
         val pending = StringBuilder()
         var remaining = 16000
+        var textCount = 0
         var images = 0
         val seen = mutableSetOf<String>()
         fun flush() {
-            val text = pending.toString().replace(Regex("\\s+"), " ").trim().take(remaining)
+            val separator = if (textCount == 0) 0 else 2
+            val text = pending.toString().replace(Regex("\\s+"), " ").trim().take((remaining - separator).coerceAtLeast(0))
             pending.setLength(0)
-            if (text.isNotEmpty()) {
+            if (text.isNotEmpty() && blocks.length() < 256) {
                 blocks.put(JSONObject().put("type", "text").put("text", text))
-                remaining -= text.length
+                remaining -= text.length + separator
+                textCount++
             }
         }
         fun visit(node: Node) {
-            if (remaining <= 0) return
+            if (remaining <= 0 || blocks.length() >= 256) return
             when (node) {
                 is TextNode -> pending.append(node.text())
                 is Element -> {
