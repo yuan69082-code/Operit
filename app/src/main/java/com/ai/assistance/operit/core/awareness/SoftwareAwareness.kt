@@ -111,6 +111,10 @@ object SoftwareAwareness {
     }
 
     fun view(context: Context, id: String, chat: String?, role: String?, name: String?, group: String?) = synchronized(presenceLock) {
+        // Visibility is recorded even when software observation is disabled, including
+        // local floating-window selection that does not update the global selected chat.
+        if (chat != null && role != null && group.isNullOrBlank())
+            com.ai.assistance.operit.core.companion.AssistantWindowRouter.selected(context, role, chat)
         val value = chat?.let { SoftwarePresence.View(it, role.orEmpty(), name.orEmpty(), group.orEmpty()) }
         savePresence(context, presence.view(id, value, System.currentTimeMillis(), SystemClock.elapsedRealtime()))
     }
@@ -136,7 +140,12 @@ object SoftwareAwareness {
         .put("chat_id", event.view?.chat).put("assistant_id", event.view?.role).put("group_id", event.view?.group)
         .put("name", event.view?.name).put("entered_at", event.entered).put("observed_duration_ms", event.duration)
 
-    fun userMessage(context: Context, chat: String, role: String?, kind: String = "message_sent", proxy: Boolean = false) {
+    suspend fun userMessage(context: Context, chat: String, role: String?, kind: String = "message_sent", proxy: Boolean = false) {
+        if (!proxy && kind == "message_sent" && role != null) {
+            val metadata = ChatHistoryManager.getInstance(context).getChatMetadata(chat)
+            if (metadata != null && metadata.characterCardId == role)
+                com.ai.assistance.operit.core.companion.AssistantWindowRouter.selected(context, metadata)
+        }
         record(context, kind, if (kind == "message_sent") "向助手发送了消息" else "向群聊发送了消息",
             if (proxy || toolRelated()) "proxy_or_tool_message" else "user_message",
             JSONObject().put("chat_id", chat).put("assistant_id", role),

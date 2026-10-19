@@ -35,7 +35,7 @@ internal fun ReadingPanel(role: String, chat: String, revision: Long, work: (sus
     Text("阅读角", style = MaterialTheme.typography.titleLarge)
     Text("新发现先放在这里。来源、读到的内容和自己的随记分别保存，是否继续阅读或分享由助手决定。")
     Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("待读", "读过的", "关注来源", "自主探索").forEach { label -> FilterChip(tab == label, { tab = label }, label = { Text(label) }) } }
-    if (tab == "自主探索") { ExplorationPanel(role, chat); return }
+    if (tab == "自主探索") { ExplorationPanel(role); return }
     if (tab == "关注来源") {
         Text("RSS 与话题按设定间隔标为待检查，在已开启的探索轮次里查阅；不会每来一条消息就唤醒或通知你。也可以手动刷新 RSS。")
         sources.forEach { item -> OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {

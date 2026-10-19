@@ -100,7 +100,7 @@ object CompanionRuntime {
         var pendingEvent = ""
         var lastSkip = 0L
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key in setOf("proactive_enabled", "target_chat")) {
+            if (key in setOf("proactive_enabled", "target_role")) {
                 noteUserInteraction()
                 pendingEvent = ""
                 events.trySend("主动联系设置已改变")
@@ -110,13 +110,14 @@ object CompanionRuntime {
                 PhoneAwarenessStore(app).discardPending()
                 signalPhoneEvent()
             }
-            if (key in setOf("capabilities_enabled", "software_role", "software_chat", "software_wake_enabled", "software_revision")) {
+            if (key in setOf("capabilities_enabled", "software_role", "software_wake_enabled", "software_revision")) {
                 if (softwareDecision) noteUserInteraction()
                 com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(app).revokePending()
                 signalSoftwareEvent()
             }
         }
         try {
+            AssistantWindowRouter.initialize(app)
             store.preferences.registerOnSharedPreferenceChangeListener(listener)
             com.ai.assistance.operit.core.tasks.TaskEvents.recoverPrivate(app)
             ExplorationStore(app).recover()
@@ -252,10 +253,12 @@ object CompanionRuntime {
                     }
                 }
                 if (!store.proactiveEnabled) continue
-                val target = store.preferences.getString("target_chat", null) ?: continue
-                var schedule = store.read("schedule:$target")
+                val targetRole = store.proactiveRole ?: continue
+                val target = AssistantWindowRouter.chat(app, targetRole) ?: continue
+                val scheduleKey = store.scheduleKey(targetRole)
+                var schedule = store.read(scheduleKey)
                 if (!schedule.has("at") && !schedule.optBoolean("paused")) {
-                    schedule = store.update("schedule:$target") {
+                    schedule = store.update(scheduleKey) {
                         it.put("at", System.currentTimeMillis() + store.proactiveMinutes * 60_000L)
                             .put("purpose", "首次唤醒，了解情况并自行安排下次活动。").put("owner", "initial")
                     }
@@ -274,7 +277,7 @@ object CompanionRuntime {
                 val epoch = generation.get()
                 val observation = schedule.optString("purpose") + "\n" + pendingEvent
                 pendingEvent = ""
-                store.update("schedule:$target") { it.put("paused", true).put("started", System.currentTimeMillis()) }
+                store.update(scheduleKey) { it.put("paused", true).put("started", System.currentTimeMillis()) }
                 decision = launch {
                     try {
                         withTimeout(300_000) { evaluate(app, target, observation, epoch) }
@@ -289,7 +292,7 @@ object CompanionRuntime {
                         store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
                     } finally {
                         if (generation.get() == epoch) owned.getAndSet(null)?.let { it.core.cancelMessage(it.chatId) }
-                        if (store.read("schedule:$target").optBoolean("paused"))
+                        if (store.read(scheduleKey).optBoolean("paused"))
                             store.log(target, "暂停", "本次未安排下一次；可在聊天中让 AI 安排，或点击一分钟后唤醒")
                     }
                 }
@@ -319,6 +322,9 @@ object CompanionRuntime {
         check(chat.characterGroupId.isNullOrBlank()) { "主动活动只支持单角色会话" }
         val roleId = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
             .getChatMetadata(chatId)?.characterCardId ?: error("请先指定目标会话所属助手")
+        check(epoch == generation.get() && AssistantWindowRouter.chat(context, roleId) == chatId) { "助手的活跃私聊已改变" }
+        if (!taskEvent && phoneRole == null && softwareRole == null && explorationWork == null)
+            check(store.proactiveEnabled && store.proactiveRole == roleId) { "主动联系助手或开关已改变" }
         if (explorationWork != null) {
             check(roleId == explorationWork.role && ExplorationStore(context).valid(explorationWork) && epoch == generation.get()) { "自主探索已关闭或目标改变" }
             ExplorationStore(context).authorize(roleId, chatId)
@@ -465,7 +471,7 @@ object CompanionRuntime {
             } else if (phoneRole != null) {
                 val phone = PhoneAwarenessStore(context)
                 if (!phone.wakeEnabled || phone.chat != chatId || phone.role != phoneRole) return@coroutineScope
-            } else if (!taskEvent && (!store.proactiveEnabled || store.preferences.getString("target_chat", null) != chatId)) return@coroutineScope
+            } else if (!taskEvent && (!store.proactiveEnabled || store.proactiveRole != roleId || AssistantWindowRouter.chat(context, roleId) != chatId)) return@coroutineScope
             val current = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId)
             if (current.lastOrNull()?.timestamp != latest?.timestamp || current.lastOrNull()?.content != latest?.content) {
                 store.log(chatId, "跳过", "聊天已更新，本次不插入旧回复")

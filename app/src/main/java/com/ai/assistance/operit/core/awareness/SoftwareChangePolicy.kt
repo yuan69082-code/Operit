@@ -63,7 +63,7 @@ object SoftwareChangePolicy {
 
     private fun ignored(source: String, key: String): Boolean =
         key.startsWith("__operit_") || source in setOf("codex_usage_preferences", "token_stats_preferences", "crash_recovery_state", "current_chat_id", "free_usage_preferences", "persona_card_chat_history") ||
-            source == "companion_options" && (key.startsWith("software_") || key == "last_status") ||
+            source == "companion_options" && (key.startsWith("software_") || key.startsWith("assistant_window") || key == "assistant_routing_v1" || key == "last_status") ||
             key.contains("last_used", true) || key.contains("scroll_position", true)
 
     fun label(source: String): String = when (source) {

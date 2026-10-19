@@ -16,7 +16,7 @@ object CompanionTools {
 
     fun prompts(): List<ToolPrompt> = RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_explore",
-            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，须在用户指定的自己私聊中使用；pause 明说要歇、暂停后续预约；本轮没安排也没 pause 时，结束后按默认3小时自动续上。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
+            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；本轮没安排也没 pause 时，结束后按默认3小时自动续上。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
         ToolPrompt(name = "software_awareness",
             description = "仅用户指定的观察助手在自己私聊中使用。查询软件变更日志和使用记录。action=status|events|usage|models|gear。gear 查看或调整你的关注档位（与 phone_awareness 共用）：level=tight盯紧/normal平常/loose放松，hours可选（到点回平常），reason降档理由。events 按递增序号分页，用 next_after 继续；可按 kind 或 assistant_id 筛选。区分打开聊天页与实际发送，停留不等于注意力，记录他人不等于自己经历；不提供密钥或聊天正文。",
@@ -50,7 +50,7 @@ object CompanionTools {
                 param("minutes", "submit 安排0–43200分钟后处理；thought 时为沉着多少分钟"), param("offset", "list 分页起点，每页20项"),
                 param("choice", "thought 时 now/sink/drop"))),
         ToolPrompt(name = "companion_schedule",
-            description = "安排本会话下次主动联系判断。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下要留意的事；可以联系或保持安静。学习取材使用独立的 companion_explore 开关与预约。只在软件主动联系开启且本会话为目标时生效；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
+            description = "安排这位助手下次主动联系判断。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下要留意的事；可以联系或保持安静。学习取材使用独立的 companion_explore 开关与预约。只在软件主动联系开启且这位助手为目标时生效，执行时跟随最近活跃私聊；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次唤醒距现在的分钟数"), param("purpose", "醒来要检查或做的事，最多500字"))),
         ToolPrompt(name = "companion_capabilities",
             description = "仅指定的软件观察助手在自己私聊中读取本会话最近请求的模型/工具能力与当前软件开关、麦克风和通知权限。可感知能力变化，但不把列出的能力当作已执行操作；没有健康数据源时不能声明能看到心率。",
@@ -152,24 +152,29 @@ object CompanionTools {
                         }
                         "companion_schedule" -> {
                             check(action == "get" || !CompanionRuntime.isExplorationWake(chatId)) { "探索请用 companion_explore 安排继续，主动联系计划保持独立" }
-                            check(store.proactiveEnabled && store.preferences.getString("target_chat", null) == chatId) { "请开启主动联系并选择本会话。" }
+                            check(store.proactiveEnabled && roleId != null && store.proactiveRole == roleId) { "请开启主动联系并选择这位助手。" }
+                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                val target = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)
+                                check(target != null && target.characterGroupId.isNullOrBlank() && target.characterCardId == roleId) { "主动联系计划只允许该助手在自己的私聊管理。" }
+                            }
+                            val scheduleKey = store.scheduleKey(requireNotNull(roleId))
                             when (action) {
                                 "get" -> Unit
                                 "set" -> {
                                     val minutes = required(tool, "minutes").toIntOrNull() ?: error("minutes 须为整数")
                                     val purpose = required(tool, "purpose")
                                     require(purpose.length <= 500) { "目的最多500字。" }
-                                    store.update("schedule:$chatId") { it.put("at", CompanionPolicy.wakeAt(System.currentTimeMillis(), minutes))
+                                    store.update(scheduleKey) { it.put("at", CompanionPolicy.wakeAt(System.currentTimeMillis(), minutes))
                                         .put("purpose", purpose).put("owner", "ai").put("paused", false) }
                                     store.log(chatId, "安排", "${minutes}分钟后：$purpose")
                                 }
                                 "cancel" -> {
-                                    store.update("schedule:$chatId") { it.put("paused", true) }
+                                    store.update(scheduleKey) { it.put("paused", true) }
                                     store.log(chatId, "安排", "AI 暂停了下一次唤醒")
                                 }
                                 else -> error("未知唤醒操作")
                             }
-                            store.read("schedule:$chatId")
+                            store.read(scheduleKey)
                         }
                         "companion_capabilities" -> {
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {

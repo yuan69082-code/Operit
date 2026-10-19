@@ -860,6 +860,7 @@ class ChatHistoryDelegate(
                     chatHistoryManager.setCurrentChatId(newChat.id)
                 } else {
                     // LOCAL_ONLY 不写回全局 currentChatId，只切换悬浮窗自己的本地会话。
+                    com.ai.assistance.operit.core.companion.AssistantWindowRouter.selected(context, newChat)
                     _currentChatId.value = newChat.id
                     loadChatMessages(newChat.id)
                 }
@@ -892,6 +893,9 @@ class ChatHistoryDelegate(
                     }
                 } else {
                     // 本地切换：只更新内存态（供悬浮窗使用），不写回 DataStore。
+                    chatHistoryManager.getChatMetadata(chatId)?.let {
+                        com.ai.assistance.operit.core.companion.AssistantWindowRouter.selected(context, it)
+                    }
                     _currentChatId.value = chatId
                     loadChatMessages(chatId)
                 }

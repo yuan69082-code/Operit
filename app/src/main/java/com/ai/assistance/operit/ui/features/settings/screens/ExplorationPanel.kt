@@ -20,10 +20,11 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-internal fun ExplorationPanel(role: String, chat: String) {
+internal fun ExplorationPanel(initialRole: String) {
     val context = LocalContext.current
     val store = remember(context) { ExplorationStore(context.applicationContext) }
     val scope = rememberCoroutineScope()
+    var role by remember(initialRole) { mutableStateOf(initialRole) }
     var status by remember(role) { mutableStateOf(JSONObject()) }
     var choices by remember(role) { mutableStateOf(setOf("reading")) }
     var limit by remember(role) { mutableStateOf("4") }
@@ -62,16 +63,17 @@ internal fun ExplorationPanel(role: String, chat: String) {
             if (!enable) {
                 // Turning off must still work with invalid, unsaved form fields.
                 val data = store.read(role)
-                store.configure(role, data.optString("chat", chat), false,
+                store.configure(role, false,
                     ExplorationPolicy.choices(data), data.optInt("limit", 4))
             } else {
                 val dailyLimit = requireNotNull(limit.toIntOrNull()) { "每日轮次请填写整数" }
-                store.configure(role, chat, true, choices, dailyLimit)
+                store.configure(role, true, choices, dailyLimit)
             }
         }
     }
 
     Text("自主探索", style = MaterialTheme.typography.titleLarge)
+    AssistantTargetPicker(role, !busy) { role = it }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween) {
         Text("允许这位助手自主探索", modifier = Modifier.weight(1f))
@@ -94,10 +96,9 @@ internal fun ExplorationPanel(role: String, chat: String) {
         label = { Text("每天最多探索几轮（1–24）") })
     Text("默认每天最多4轮，每轮最多5分钟和12次工具调用；这些限制不是固定的 token 金额。资料按需查阅，不会把整库放进每轮聊天。")
     TextButton(enabled = loaded && !busy && status.optBoolean("enabled"), onClick = { configure(true) }) {
-        Text("保存设置并使用当前私聊")
+        Text("保存这位助手的设置")
     }
-    val targetHere = status.optString("chat") == chat
-    if (status.optBoolean("enabled") && !targetHere) Text("探索目前使用这位助手的另一个私聊。可保存设置改用当前私聊。")
+    val chat = status.optString("chat")
     Text("今天已启动 ${status.optInt("used_today")} / ${status.optInt("daily_limit", 4)} 轮")
     val at = status.optLong("at")
     Text(when {
@@ -108,7 +109,7 @@ internal fun ExplorationPanel(role: String, chat: String) {
     })
     if (status.optBoolean("enabled") && status.optString("purpose").isNotBlank()) Text(status.optString("purpose"))
     Row {
-        TextButton(enabled = loaded && !busy && status.optBoolean("enabled") && targetHere,
+        TextButton(enabled = loaded && !busy && status.optBoolean("enabled") && chat.isNotBlank(),
             onClick = { perform { withContext(Dispatchers.IO) { store.schedule(role, chat, 15, "用户安排一次自主探索，可自己选择方向或安静。") } } }) {
             Text("15分钟后探索一次")
         }

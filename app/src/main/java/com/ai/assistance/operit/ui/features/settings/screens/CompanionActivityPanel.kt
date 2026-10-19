@@ -14,12 +14,14 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-internal fun CompanionActivityPanel(store: CompanionStore, chatId: String) {
-    var logs by remember(chatId) { mutableStateOf(emptyList<JSONObject>()) }
-    var schedule by remember(chatId) { mutableStateOf(JSONObject()) }
-    LaunchedEffect(chatId) {
+internal fun CompanionActivityPanel(store: CompanionStore, role: String) {
+    var chatId by remember(role) { mutableStateOf<String?>(null) }
+    var logs by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
+    var schedule by remember(role) { mutableStateOf(JSONObject()) }
+    LaunchedEffect(role) {
         while (true) {
-            withContext(Dispatchers.IO) { store.logs(chatId) to store.read("schedule:$chatId") }
+            chatId = AssistantWindowRouter.chat(store.context, role)
+            withContext(Dispatchers.IO) { (chatId?.let { store.logs(it) } ?: emptyList()) to store.read(store.scheduleKey(role)) }
                 .let { logs = it.first; schedule = it.second }
             delay(3000)
         }
@@ -29,10 +31,10 @@ internal fun CompanionActivityPanel(store: CompanionStore, chatId: String) {
     Text(if (schedule.optBoolean("paused")) "下一次唤醒已暂停" else if (at > 0)
         "下次唤醒：" + DateFormat.getDateTimeInstance().format(Date(at)) else "下次时间尚未安排")
     Text(schedule.optString("purpose"))
-    TextButton(enabled = store.proactiveEnabled && store.preferences.getString("target_chat", null) == chatId, onClick = {
-        store.update("schedule:$chatId") { it.put("at", System.currentTimeMillis() + 60_000).put("paused", false)
+    TextButton(enabled = store.proactiveEnabled && store.proactiveRole == role, onClick = {
+        store.update(store.scheduleKey(role)) { it.put("at", System.currentTimeMillis() + 60_000).put("paused", false)
             .put("purpose", "用户要求唤醒一次，请检查当前情况，自行安排下一次。").put("owner", "user") }
-        store.log(chatId, "安排", "用户安排一分钟后唤醒")
+        chatId?.let { store.log(it, "安排", "用户安排一分钟后唤醒") }
     }) { Text("一分钟后唤醒一次") }
     Text("活动日志（最近300条）", style = MaterialTheme.typography.titleMedium)
     if (logs.isEmpty()) Text("尚无记录；这里会记录开始、跳过、安静、联系、学习、下次安排以及 XC 请求结果。")

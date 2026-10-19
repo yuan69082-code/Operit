@@ -67,7 +67,7 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
     var source by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<String?>(null) }
-    var target by remember { mutableStateOf(store.preferences.getString("target_chat", null)) }
+    var target by remember { mutableStateOf(store.proactiveRole) }
 
     suspend fun refresh() {
         val selected = identity ?: return
@@ -92,17 +92,19 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
 
     LaunchedEffect(Unit) {
         try {
+            com.ai.assistance.operit.core.companion.AssistantWindowRouter.initialize(context)
+            target = store.proactiveRole
             val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
             chatId = core.currentChatId.value
-            val current = chatId ?: return@LaunchedEffect
             // The visible selector is authoritative even before this role's first message.
             // Using the previous turn's receipt here could bind XC to the wrong role after a switch.
             roleId = (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id
             if (roleId == null) {
-                error = "请先选择单个角色，再管理对应的 XC 和资料库。"
+                error = "请选择助手，再管理对应的 XC 和资料库。"
                 return@LaunchedEffect
             }
-            identity = store.scope(current, roleId)
+            identity = "role:${checkNotNull(roleId)}"
+            chatId = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, roleId)
             roleLabel = roleId?.let { com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context).getCharacterCard(it)?.name }
                 ?: "当前会话（未绑定角色卡）"
             refresh()
@@ -127,6 +129,13 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") }
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
+                AssistantTargetPicker(roleId, !busy && !editing) { selected -> perform {
+                    roleId = selected
+                    identity = "role:$selected"
+                    chatId = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, selected)
+                    roleLabel = com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context).getCharacterCard(selected).name
+                    selectedXc = null
+                } }
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知", "自主探索").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
@@ -153,17 +162,11 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     }
                     Text("主动联系可以发消息或来电，也可决定保持安静，由 AI 安排下次时间，不需要另建定时工作流。解锁和进入应用的事件唤醒在“手机感知”中单独开启。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
                     OutlinedTextField(minutes, { minutes = it }, label = { Text("首次唤醒等待，分钟（1–240）；之后由 AI 安排") }, singleLine = true)
-                    Text(if (target == null) "尚未选择主动联系的会话" else "主动联系会话已设置")
-                    TextButton(enabled = chatId != null && !busy, onClick = {
-                        val current = checkNotNull(chatId)
-                        val chat = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN).chatHistories.value.firstOrNull { it.id == current }
-                        if (!chat?.characterGroupId.isNullOrBlank()) error = "请选择单角色会话"
-                        else {
-                            CompanionRuntime.noteConversation(context, current, roleId)
-                            target = current
-                            store.preferences.edit().putString("target_chat", current).apply()
-                        }
-                    }) { Text("使用当前会话接收主动联系") }
+                    Text("主动联系助手")
+                    AssistantTargetPicker(target, !busy) { selected ->
+                        target = selected
+                        store.preferences.edit().putString("target_role", selected).apply()
+                    }
                     TextButton(onClick = {
                         val s = seconds.toIntOrNull()
                         val m = minutes.toIntOrNull()
@@ -173,13 +176,13 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     Text("额外判断会使用配置的模型额度。没有接入心率数据源；不会依据沉默猜测健康状态。")
                     Text(store.preferences.getString("last_status", "尚无主动判断记录").orEmpty())
                 } else if (section == 5) {
-                    PhoneAwarenessPanel(chatId)
+                    PhoneAwarenessPanel()
                 } else if (section == 6) {
-                    SoftwareAwarenessPanel(chatId)
+                    SoftwareAwarenessPanel()
                 } else if (identity == null) {
-                    Text("请先打开一个聊天会话，再管理对应角色的资料与记忆。")
+                    Text("请先选择助手，再管理对应的资料与记忆。")
                 } else if (section == 7) {
-                    ExplorationPanel(checkNotNull(roleId), checkNotNull(chatId))
+                    ExplorationPanel(checkNotNull(roleId))
                 } else if (section == 3) {
                     XcEmotionDashboard(xcReceipt, emotion)
                     Text("连接设置", style = MaterialTheme.typography.titleMedium)
@@ -295,7 +298,7 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 } else if (section == 2) {
                     CompanionTodoPanel(store, checkNotNull(identity))
                 } else if (section == 4) {
-                    CompanionActivityPanel(store, checkNotNull(chatId))
+                    CompanionActivityPanel(store, checkNotNull(roleId))
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (error.isNotBlank()) Text(error)
