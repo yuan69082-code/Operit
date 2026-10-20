@@ -27,6 +27,9 @@ class PhoneAwarenessStore(context: Context) {
 
     fun record(event: PhonePresence.Event, name: String, wake: Boolean, duringAiWork: Boolean, urgent: Boolean = false) {
         if (!enabled || event.app in excluded) return
+        val observer = role
+        val target = chat
+        var recorded: JSONObject? = null
         store.update(key) { data ->
             if (!enabled || event.app in excluded) return@update
             val row = JSONObject().put("id", UUID.randomUUID().toString()).put("kind", event.kind)
@@ -37,6 +40,11 @@ class PhoneAwarenessStore(context: Context) {
             event.entered?.let { row.put("entered_at", it).put("duration_ms", event.durationMs) }
             data.put("events", JSONArray((data.optJSONArray("events").rows() + row)
                 .filter { it.optLong("at") >= cutoff() }.takeLast(1500)))
+            recorded = JSONObject(row.toString())
+        }
+        if (recorded != null && enabled && event.app !in excluded && role == observer && chat == target && target != null) {
+            com.ai.assistance.operit.core.engine.EngineWindow.offer(store.context, observer, target,
+                "phone.${event.kind}", checkNotNull(recorded))
         }
     }
 

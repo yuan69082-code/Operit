@@ -74,6 +74,12 @@ object GroupWakeRuntime {
                             store.log(chatId, "取消", "禁言期间不主动唤醒", actor)
                             continue
                         }
+                        if (com.ai.assistance.operit.core.engine.EngineWindow.associated(context, actor)) {
+                            com.ai.assistance.operit.core.engine.EngineWindow.offer(context, actor, chatId,
+                                "helper.group_wake_requested", org.json.JSONObject().put("reason", purpose))
+                            store.log(chatId, "交接", "主体关联期间不启动软件自主讨论；授权事件交由引擎窗口记录", actor)
+                            continue
+                        }
                         coordinator.startGroupDiscussion(chatId, actor,
                             "主动唤醒：$purpose。先看最新群消息，不重复前次内容，可安静。结束前用 group_chat schedule 安排下次或 cancel_schedule 暂停。")
                         break

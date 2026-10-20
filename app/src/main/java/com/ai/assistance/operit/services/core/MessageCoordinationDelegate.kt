@@ -432,6 +432,9 @@ class MessageCoordinationDelegate(
         val groupOrchestrationMode = groupParticipantNamesText != null
         val workspacePath = currentChat?.workspace
         val roleCardId = resolveRegenerationRoleCardId(chatId, targetMessage)
+        check(!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleCardId)) {
+            "主体表达由引擎管理，软件不能用模型重新生成"
+        }
         val currentRoleName =
             runCatching { characterCardManager.getCharacterCardFlow(roleCardId).first().name }
                 .getOrDefault(targetMessage.roleName)
@@ -611,6 +614,18 @@ class MessageCoordinationDelegate(
         } } catch (e: Exception) {
             AppLogger.e(TAG, "解析聊天所属助手失败", e)
             uiStateDelegate.showErrorMessage(e.message ?: "无法确定聊天所属助手")
+            return
+        }
+        if (com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleCardId)) {
+            if (isAutoContinuation) {
+                uiStateDelegate.showErrorMessage("主体接续由引擎管理")
+                return
+            }
+            messageProcessingDelegate.sendEngineMessage(
+                chatId, roleCardId, effectiveMessageTextOverride, currentAttachments,
+                isGroupOrchestrationTurn, suppressUserMessageInHistory, turnOptions,
+                if (shouldReadComposerState) uiBridge.getReplyToMessage() else null
+            )
             return
         }
         val resolvedOverrides = try {
@@ -838,6 +853,10 @@ class MessageCoordinationDelegate(
 
         val originalUserText = messageProcessingDelegate.userMessage.value.text.trim()
         val hasAttachments = attachmentDelegate.attachments.value.isNotEmpty()
+        val hasEngineMember = orderedMembers.any {
+            com.ai.assistance.operit.core.engine.EngineWindow.associated(context, it.characterCardId)
+        }
+        check(!hasEngineMember || !hasAttachments) { "含引擎主体的群聊暂未接通附件协议，请先发送文字；附件已保留" }
         AppLogger.d(
             TAG,
             "群组编排输入: chatId=$chatId, userTextLength=${originalUserText.length}, hasAttachments=$hasAttachments"
@@ -875,7 +894,7 @@ class MessageCoordinationDelegate(
             null
         }
 
-        val finalUserMessageContent =
+        val finalUserMessageContent = if (hasEngineMember) originalUserText else
             messageProcessingDelegate.buildUserMessageContentForGroupOrchestration(
                 messageText = originalUserText,
                 attachments = attachments,
@@ -900,7 +919,7 @@ class MessageCoordinationDelegate(
         if (!turnOptions.hideUserMessage) com.ai.assistance.operit.core.awareness.SoftwareAwareness.userMessage(
             context, chatId, null, "group_message_sent")
         com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
-        titleFallback?.let { fallbackTitle ->
+        titleFallback?.takeUnless { hasEngineMember }?.let { fallbackTitle ->
             launchConversationTitleGeneration(
                 chatId = chatId,
                 userText = originalUserText,
@@ -1076,17 +1095,20 @@ class MessageCoordinationDelegate(
                 return
             }
             groupStore.update(chatId) { it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name).put("speaker_id", actor).remove("decision") }
-            com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
+            if (!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, actor)) {
+                com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
+            }
             val gameBefore = games.state(chatId)?.let { com.google.gson.Gson().toJson(it) }
             messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Processing("${cards.getValue(actor).name} 正在回应"))
             groupStore.log(chatId, "发言", "开始回应", actor)
             try {
                 // Resolve before launching, in the member's scope, never the group page's model.
-                val binding = withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(actor)) {
+                val engineMember = com.ai.assistance.operit.core.engine.EngineWindow.associated(context, actor)
+                val binding = if (engineMember) Pair(null, null) else withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(actor)) {
                     characterCardManager.ensureIndependentSettings(actor)
                     resolveRoleCardChatModelOverrides(actor)
                 }
-                require(!binding.first.isNullOrBlank()) { "请为 ${cards.getValue(actor).name} 选择自己的模型" }
+                require(engineMember || !binding.first.isNullOrBlank()) { "请为 ${cards.getValue(actor).name} 选择自己的模型" }
                 // A manual compression can be waiting for the previous member's tool chain.
                 // Keep this member queued until that boundary is committed or cancelled.
                 messageProcessingDelegate.awaitSummaryForChat(chatId)
@@ -1094,7 +1116,7 @@ class MessageCoordinationDelegate(
                 chatModelConfigIdOverride = binding.first, chatModelIndexOverride = binding.second,
                 isContinuation = !(first && prebuilt != null), skipSummaryCheck = true,
                 roleCardIdOverride = actor, chatIdOverride = chatId,
-                messageTextOverride = if (first && prebuilt != null) userText else "",
+                messageTextOverride = if (engineMember || first && prebuilt != null) userText else "",
                 prebuiltMessageContent = if (first) prebuilt else null,
                 suppressUserMessageInHistory = true, forceDisableSummary = true,
                 enableGroupOrchestration = false, isGroupOrchestrationTurn = true,
@@ -1236,6 +1258,7 @@ class MessageCoordinationDelegate(
 
     /** Refresh stable chat occupancy and summarize completed autonomous experiences when needed. */
     fun maintainBackgroundContext(chatId: String, roleCardId: String) {
+        if (com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleCardId)) return
         if (summaryJob?.isActive == true || sendTriggeredSummaryJob?.isActive == true ||
             _isSummarizing.value || messageProcessingDelegate.isChatLoading(chatId) ||
             android.os.SystemClock.elapsedRealtime() < (summaryRetryAfter[chatId] ?: 0L)) return
@@ -1695,6 +1718,9 @@ class MessageCoordinationDelegate(
         messageProcessingDelegate.setPendingAsyncSummaryUiForChat(targetChatId, true)
         try {
             val owner = resolveRoleCardId(targetChatId, roleCardIdOverride)
+            check(!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, owner)) {
+                "主体上下文由引擎管理，软件保留原始交流记录"
+            }
             return messageProcessingDelegate.withSummaryAfterTurn(targetChatId) {
                 kotlinx.coroutines.withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(owner)) {
                     summarizeIdleHistory(
@@ -1736,6 +1762,9 @@ class MessageCoordinationDelegate(
             InputProcessingState.Summarizing(context.getString(R.string.chat_compressing_history))
         )
         val owner = resolveRoleCardId(currentChatId, roleCardIdOverride)
+        check(!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, owner)) {
+            "主体上下文由引擎管理"
+        }
         val ownerModel = resolveRoleCardChatModelOverrides(owner)
         val effectiveChatModelConfigIdOverride = chatModelConfigIdOverride ?: ownerModel.first
         val effectiveChatModelIndexOverride = chatModelIndexOverride ?: ownerModel.second

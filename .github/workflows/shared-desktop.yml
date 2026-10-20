@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: '22'
       - name: Check shared service
-        run: node --test desktop/test/shared.test.cjs
+        run: node --test desktop/test/*.test.cjs
       - name: Prepare WebChat
         run: npm --prefix web-chat ci --no-audit --no-fund
       - name: Check WebChat types

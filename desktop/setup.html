@@ -15,6 +15,7 @@
 <fieldset><legend>迁移已有文字记录</legend><p>先在手机启用外部 HTTP 服务。这里显式导入文字记录，手机原记录保留；旧图片、附件和角色配置不包含在此次导入中。</p>
 <label>手机服务地址<input id="phoneUrl" placeholder="http://手机局域网IP:8094/"></label><label>手机服务 Token<input id="phoneToken" type="password"></label><button id="import">导入文字记录</button></fieldset>
 <fieldset><legend>双端更新</legend><p>共享版本发布后，这里提供同一批安卓包与 Windows 包。更新电脑程序时，会话数据保留在用户目录。</p><button id="updates">检查更新</button><div id="releases"></div></fieldset>
+<fieldset><legend>连续性引擎</legend><p>连接独立运行的主体。默认关闭，不改变引擎的内部模型或生命周期。</p><a href="/engine">连接、关联与投递记录</a></fieldset>
 <p id="status" role="status"></p></main>
 <script>
 const byId=id=>document.getElementById(id);
