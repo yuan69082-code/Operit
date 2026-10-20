@@ -1,7 +1,7 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
 branch: feat/continuity-engine-window
-status: verification
+status: preparation-verified
 pr: https://github.com/yuan69082-code/Operit/pull/8
 ---
 
@@ -20,3 +20,5 @@ pr: https://github.com/yuan69082-code/Operit/pull/8
 3. [验证与接续](3-verification.md)：仅在本项目的模拟服务中验证；记录真实验证结果和正式联调前置条件。
 
 本批不创建或迁移引擎主体，不复制测试身份，不把应用内部事件格式宣称为引擎已接受的协议。当前生产适配器仅允许显式健康检查；事件可以保存在软件侧，标为等待正式协议。模型和工具执行请求不自动执行。未来接入正式适配器时，沿同一身份、权限、持久化和回执边界继续，不另建主体账本。
+
+2026-10-20：软件侧准备已完成，最终代码 ad59bcf 的 Android 编译与 JVM 测试、Windows 共享服务测试均通过。真实主体通信仍等待正式协议；未发布包含本批改动的安装包。
