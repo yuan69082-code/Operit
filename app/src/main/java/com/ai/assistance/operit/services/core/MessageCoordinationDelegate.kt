@@ -1095,7 +1095,9 @@ class MessageCoordinationDelegate(
                 return
             }
             groupStore.update(chatId) { it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name).put("speaker_id", actor).remove("decision") }
-            com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
+            if (!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, actor)) {
+                com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
+            }
             val gameBefore = games.state(chatId)?.let { com.google.gson.Gson().toJson(it) }
             messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Processing("${cards.getValue(actor).name} 正在回应"))
             groupStore.log(chatId, "发言", "开始回应", actor)

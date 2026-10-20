@@ -742,12 +742,23 @@ class MessageProcessingDelegate(
                     group -> "group.turn_requested"
                     else -> "message.user"
                 }
-                val payload = org.json.JSONObject().put("text", raw)
+                val payload = org.json.JSONObject().put("text", raw).put("origin", when {
+                    group -> "software_group_dispatch"
+                    turnOptions.voiceCallEnded || turnOptions.voiceCallEvent || turnOptions.voiceCallDecision ||
+                        turnOptions.voiceCallObservation || turnOptions.voiceCallSilence || turnOptions.proactiveWake -> "software_event"
+                    else -> "user"
+                })
+                if (turnOptions.voiceCall || turnOptions.voiceCallEnded) {
+                    payload.put("call", org.json.JSONObject()
+                        .put("outcome", turnOptions.voiceCallOutcome?.name ?: org.json.JSONObject.NULL)
+                        .put("typed", turnOptions.voiceCallTyped).put("observation", turnOptions.voiceCallObservation)
+                        .put("silence", turnOptions.voiceCallSilence).put("decisionRequest", turnOptions.voiceCallDecision))
+                }
                 replyTo?.let { payload.put("replyTo", org.json.JSONObject().put("at", it.timestamp)
                     .put("speaker", it.roleName).put("text", it.content)) }
-                if (group) payload.put("participantsContext", "群内原始交流；不是私聊记忆或人设")
+                if (group) payload.put("scope", "group")
                 val store = com.ai.assistance.operit.core.engine.EngineWindow(context)
-                store.enqueue(roleCardId, chatId, kind, payload)
+                val eventId = store.enqueue(roleCardId, chatId, kind, payload)
                 if (turnOptions.persistTurn && !suppressUser && !turnOptions.hideUserMessage &&
                     !turnOptions.proactiveWake && !turnOptions.voiceCall && !turnOptions.voiceCallEnded) {
                     addMessageToChat(chatId, ChatMessage(sender = "user", content = raw,
@@ -757,7 +768,7 @@ class MessageProcessingDelegate(
                 if (messageTextOverride == null) clearUserMessageDraft(chatId)
                 // A durable local receipt exists before attempting the bridge. A failed bridge
                 // connection leaves this same event queued; it never invokes a software model.
-                store.sync(roleCardId)
+                store.sync(roleCardId, onlyEvent = eventId)
                 setChatInputProcessingState(chatId, EnhancedInputProcessingState.Error(
                     "原话已保存，等待正式引擎协议接通；尚未收到主体回应"))
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

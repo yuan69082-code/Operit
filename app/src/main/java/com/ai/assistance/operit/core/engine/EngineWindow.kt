@@ -65,7 +65,9 @@ class EngineWindow(context: Context) {
         val data = read()
         // Pending events belong to one bridge; never silently redirect them to another server.
         require(data.getString("url").isEmpty() || data.getString("url") == url.trim().trimEnd('/') ||
-            data.getJSONObject("bindings").length() == 0) { "请先解除所有主体关联，再更换电脑服务" }
+            data.getJSONObject("bindings").length() == 0 && controls(data).length() == 0) {
+            "请先解除所有主体关联并同步撤权，再更换电脑服务"
+        }
         require(token.isNotBlank() || data.getString("token").isNotBlank()) { "请填写共享服务 Token" }
         data.put("url", url.trim().trimEnd('/'))
         if (token.isNotBlank()) data.put("token", token)
@@ -193,7 +195,7 @@ class EngineWindow(context: Context) {
             return json
         }
     }
-    suspend fun sync(role: String): String = withContext(Dispatchers.IO) {
+    suspend fun sync(role: String, onlyEvent: String? = null): String = withContext(Dispatchers.IO) {
         syncLock.withLock {
             flushControls()
             val snapshot = synchronized(lock) { read() }
@@ -203,7 +205,14 @@ class EngineWindow(context: Context) {
                 .put("subjectId", selected.getString("subjectId")).put("enabled", true).put("grants", selected.getJSONArray("grants")))
             check(remote.getString("subjectId") == selected.getString("subjectId")) { "电脑端主体关联不一致" }
             var count = 0
-            for (row in events(role)) {
+            // Keep background catch-up bounded, so a large offline queue cannot hold the
+            // connection lock for minutes while the user is trying to send or revoke access.
+            val candidates = events(role).filter {
+                it.getString("bindingId") == selected.getString("id") &&
+                    it.optString("status") !in setOf("completed", "rejected", "revoked", "awaiting_protocol") &&
+                    (onlyEvent == null || it.getString("id") == onlyEvent)
+            }.take(5)
+            for (row in candidates) {
                 if (row.getString("bindingId") != selected.getString("id") || row.optString("status") == "revoked") continue
                 val current = binding(role) ?: break
                 if (!current.getBoolean("enabled") || current.getString("id") != selected.getString("id")) break

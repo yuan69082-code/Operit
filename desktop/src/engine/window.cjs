@@ -84,7 +84,11 @@ class EngineWindow {
     new PendingEngineAdapter({ baseUrl: input.baseUrl, serviceToken: token || '0'.repeat(32) });
     if (input.enabled && (typeof token !== 'string' || token.length < 32)) throw new ValidationError('请填写至少32字符的引擎服务令牌');
     if (this.active.size) fail('请等待正在进行的连接操作结束');
-    this.state.config = { enabled: input.enabled, baseUrl: input.baseUrl, serviceToken: token };
+    const origin = new URL(input.baseUrl).origin;
+    if (new URL(this.state.config.baseUrl).origin !== origin && Object.keys(this.state.bindings).length) {
+      fail('请先解除所有入口关联，再更换引擎地址；旧事件不会转交');
+    }
+    this.state.config = { enabled: input.enabled, baseUrl: origin, serviceToken: token };
     this.save();
     return this.publicConfig();
   }

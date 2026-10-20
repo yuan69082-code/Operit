@@ -57,8 +57,9 @@ test('production adapter can check health but never sends stored events to Engin
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'ready' }));
   });
   const origin = await listening(t, server);
-  const window = new EngineWindow(directory(t)); const binding = enabled(window);
-  window.configure({ enabled: true, baseUrl: origin });
+  const window = new EngineWindow(directory(t));
+  window.configure({ enabled: true, baseUrl: origin, serviceToken: 'unit-test-token-'.repeat(4) });
+  const binding = window.bind('shared', { subjectId: 'actual-subject', enabled: true, grants: ['messages'] });
   const checked = await window.inspect();
   assert.equal(checked.reachable, true);
   assert.equal(checked.bindingVerified, false);
@@ -169,4 +170,13 @@ test('unsafe Engine origins and malformed tokens are rejected without connecting
     assert.throws(() => window.configure({ enabled: false, baseUrl }), /loopback/);
   }
   assert.throws(() => window.configure({ enabled: false, baseUrl: 'http://127.0.0.1:8766', serviceToken: false }), /令牌格式/);
+});
+
+test('changing Engine service cannot redirect a live binding and its queued events', t => {
+  const window = new EngineWindow(directory(t)), binding = enabled(window);
+  const event = window.enqueue(input(binding));
+  assert.throws(() => window.configure({ enabled: true, baseUrl: 'http://127.0.0.1:9000' }), /解除所有/);
+  window.unbind('shared');
+  window.configure({ enabled: false, baseUrl: 'http://127.0.0.1:9000' });
+  assert.equal(window.event(event.id).status, 'revoked');
 });

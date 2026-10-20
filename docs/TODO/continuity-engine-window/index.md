@@ -1,7 +1,8 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
 branch: feat/continuity-engine-window
-status: implementation
+status: verification
+pr: https://github.com/yuan69082-code/Operit/pull/8
 ---
 
 # 连续性引擎的外部窗口
