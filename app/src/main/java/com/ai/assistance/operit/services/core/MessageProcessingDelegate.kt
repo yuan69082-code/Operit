@@ -714,6 +714,67 @@ class MessageProcessingDelegate(
         _currentTurnToolInvocationCountByChatId.value = updated
     }
 
+    /** Save original platform input before model selection, persona injection or compression.
+     * Until a production Engine protocol is agreed, this produces a receipt, never a reply.
+     */
+    fun sendEngineMessage(
+        chatId: String, roleCardId: String, messageTextOverride: String?,
+        attachments: List<AttachmentInfo>, group: Boolean, suppressUser: Boolean,
+        turnOptions: ChatTurnOptions, replyTo: ChatMessage? = null
+    ) {
+        val raw = messageTextOverride ?: _userMessage.value.text
+        val runtime = runtimeFor(chatId)
+        if (!claimTurn(chatId)) return
+        val turnId = runtime.turnSequence.incrementAndGet()
+        runtime.activeTurnId = turnId
+        runtime.currentTurnOptions = turnOptions
+        updateGlobalLoadingState()
+        setChatInputProcessingState(chatId, EnhancedInputProcessingState.Processing("正在保存引擎窗口事件"))
+        val job = coroutineScope.launch(Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                check(attachments.isEmpty() && turnOptions.voiceCallAudioPath == null && turnOptions.voiceCallVisualPath == null) {
+                    "引擎附件、音频和视频协议尚未接通，内容未发送"
+                }
+                val kind = when {
+                    turnOptions.voiceCallEnded -> "call.${checkNotNull(turnOptions.voiceCallOutcome).name.lowercase()}"
+                    turnOptions.voiceCall -> "call.input"
+                    turnOptions.proactiveWake -> "helper.wake_requested"
+                    group -> "group.turn_requested"
+                    else -> "message.user"
+                }
+                val payload = org.json.JSONObject().put("text", raw)
+                replyTo?.let { payload.put("replyTo", org.json.JSONObject().put("at", it.timestamp)
+                    .put("speaker", it.roleName).put("text", it.content)) }
+                if (group) payload.put("participantsContext", "群内原始交流；不是私聊记忆或人设")
+                val store = com.ai.assistance.operit.core.engine.EngineWindow(context)
+                store.enqueue(roleCardId, chatId, kind, payload)
+                if (turnOptions.persistTurn && !suppressUser && !turnOptions.hideUserMessage &&
+                    !turnOptions.proactiveWake && !turnOptions.voiceCall && !turnOptions.voiceCallEnded) {
+                    addMessageToChat(chatId, ChatMessage(sender = "user", content = raw,
+                        roleName = context.getString(R.string.message_role_user),
+                        timestamp = ChatMessageTimestampAllocator.next()))
+                }
+                if (messageTextOverride == null) clearUserMessageDraft(chatId)
+                // A durable local receipt exists before attempting the bridge. A failed bridge
+                // connection leaves this same event queued; it never invokes a software model.
+                store.sync(roleCardId)
+                setChatInputProcessingState(chatId, EnhancedInputProcessingState.Error(
+                    "原话已保存，等待正式引擎协议接通；尚未收到主体回应"))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                AppLogger.e(TAG, "Engine window submission deferred: ${failure.javaClass.simpleName}")
+                setChatInputProcessingState(chatId, EnhancedInputProcessingState.Error(failure.message.orEmpty()))
+            } finally {
+                cleanupRuntimeAfterSend(chatId, runtime, turnId)
+                if (runtime.sendJob === coroutineContext[Job]) runtime.sendJob = null
+                turnOptions.onVoiceCallComplete?.invoke("")
+                turnOptions.onCompanionComplete?.invoke("")
+            }
+        }
+        runtime.sendJob = job
+        job.start()
+    }
+
     fun sendUserMessage(
             attachments: List<AttachmentInfo> = emptyList(),
             chatId: String,
@@ -742,6 +803,9 @@ class MessageProcessingDelegate(
             groupParticipantNamesText: String? = null,
             turnOptions: ChatTurnOptions = ChatTurnOptions()
     ) {
+        check(!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleCardId)) {
+            "此入口已关联引擎，不能调用软件模型代答"
+        }
         val rawMessageText = messageTextOverride ?: _userMessage.value.text
         // 群组编排模式下，允许空消息（后续成员不需要用户消息）
         if (rawMessageText.isBlank() && attachments.isEmpty() && !isAutoContinuation && !isGroupOrchestrationTurn) {

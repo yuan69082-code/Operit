@@ -128,7 +128,7 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 }
                 Text(roleLabel, style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知", "自主探索").forEachIndexed { index, label ->
+                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知", "自主探索", "引擎连接").forEachIndexed { index, label ->
                         TextButton(onClick = { section = index }) { Text(label) }
                     }
                 }
@@ -136,6 +136,9 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (identity != null) TextButton(enabled = !busy, onClick = { perform { } }) { Text("重新读取当前数据") }
                 if (section == 0) {
+                    if (com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleId)) {
+                        Text("当前入口已关联引擎。以下原设置会保留，软件自主判断暂不参与；允许的辅助事件在“引擎连接”中设置。")
+                    }
                     Text("情绪自动接续、主动联系和能力感知可分别开关，方便交由你的引擎接管。")
                     CompanionToggle("自动接续 XC 情绪", emotion) {
                         emotion = it; store.preferences.edit().putBoolean("emotion_enabled", it).apply()
@@ -176,6 +179,8 @@ internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
                     PhoneAwarenessPanel(chatId)
                 } else if (section == 6) {
                     SoftwareAwarenessPanel(chatId)
+                } else if (section == 8) {
+                    EngineWindowPanel(roleId)
                 } else if (identity == null) {
                     Text("请先打开一个聊天会话，再管理对应角色的资料与记忆。")
                 } else if (section == 7) {

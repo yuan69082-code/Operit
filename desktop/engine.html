@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vio Life · 引擎连接</title>
+<style>
+body{font:16px/1.7 system-ui;background:#faf8f5;color:#302b2d;margin:0}
+main{max-width:760px;margin:auto;padding:24px}fieldset{border:1px solid #d8cbd1;border-radius:16px;padding:20px;margin:22px 0}
+label{display:block;margin:14px 0}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #d8cbd1;border-radius:8px;font:inherit}
+input[type=checkbox]{width:auto}button,a{font:inherit;color:#70465b}button{padding:10px 16px;background:#f4dbe5;border:0;border-radius:10px;cursor:pointer;margin:4px}
+small{color:#756c70}#status{white-space:pre-wrap}article{border-bottom:1px solid #ddd;padding:12px 0;overflow-wrap:anywhere}
+</style>
+<main>
+<a href="/setup">返回共享服务设置</a><h1>连续性引擎</h1>
+<p>这里是软件与主体的连接窗口。引擎独立运行，拥有自己的内部模型、状态和唤醒机制。关闭这里的连接不会关闭引擎。</p>
+<label>共享服务连接 Token<input id="token" type="password" autocomplete="off"></label><button id="load">读取设置</button>
+<fieldset><legend>电脑与引擎的连接</legend>
+<label><input id="enabled" type="checkbox">允许这个软件连接引擎</label>
+<label>本机引擎地址<input id="baseUrl" value="http://127.0.0.1:8766"></label>
+<label>引擎服务令牌<input id="serviceToken" type="password" autocomplete="new-password" placeholder="已配置时留空保持"></label>
+<button id="saveConnection">保存连接设置</button><button id="inspect">检查服务是否可达</button>
+<p>当前版本正在准备正式接入。健康检查不验证主体绑定；事件会留在软件侧，等待正式协议，不向引擎提交测试身份。</p>
+</fieldset>
+<fieldset><legend>共享聊天入口关联</legend>
+<label>已有引擎主体的标识<input id="subjectId" autocomplete="off"></label>
+<small>填写引擎侧提供的真实标识，不会在这里创建主体。手机原生助手请在手机中分别关联。</small>
+<label><input id="bindingEnabled" type="checkbox">允许此入口提交消息</label>
+<button id="bind">保存关联</button><button id="unbind">解除入口关联</button>
+<p id="bindingStatus">尚未读取</p>
+<p>关联期间，软件原有模型、人设与自动回复不参与。原配置保留；关闭连接仍保留关联，明确解除后才恢复原有软件模式。</p>
+</fieldset>
+<fieldset><legend>最近投递记录</legend><button id="refresh">刷新记录</button><div id="events"></div></fieldset>
+<p id="status" role="status"></p>
+</main>
+<script>
+const el=id=>document.getElementById(id);
+el('token').value=localStorage.getItem('operit-web-chat-token')||'';
+async function api(route,input){
+ const response=await fetch('/api/shared/engine/'+route,{method:input===undefined?'GET':'POST',headers:{Authorization:'Bearer '+el('token').value,'Content-Type':'application/json'},body:input===undefined?undefined:JSON.stringify(input)});
+ const data=await response.json();if(!response.ok)throw new Error(data.error);return data;
+}
+let working=false;
+async function perform(work){
+ if(working)return;working=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);
+ try{el('status').textContent='';await work();}catch(e){console.error('engine.settings',e.message);el('status').textContent=e.message;}
+ finally{working=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}
+}
+async function refresh(){
+ const events=await api('events?key=shared');el('events').replaceChildren();
+ for(const event of events.reverse()){
+  const row=document.createElement('article'),title=document.createElement('div'),detail=document.createElement('small');
+  title.textContent=event.message;detail.textContent=event.occurredAt+' · '+event.kind+' · '+event.id;
+  row.append(title,detail);el('events').append(row);
+ }
+ if(!events.length)el('events').textContent='尚无记录';
+}
+async function load(){
+ const config=await api('config'),binding=await api('binding?key=shared');
+ el('enabled').checked=config.enabled;el('baseUrl').value=config.baseUrl;
+ el('serviceToken').placeholder=config.tokenConfigured?'已配置；留空保持':'至少32字符';
+ el('subjectId').value=binding?binding.subjectId:'';
+ el('bindingEnabled').checked=binding?binding.enabled:false;
+ el('bindingStatus').textContent=binding?'已保存目标标识；等待引擎正式绑定确认':'没有关联，沿用现有软件聊天';
+ await refresh();
+}
+el('load').onclick=()=>perform(load);
+el('saveConnection').onclick=()=>perform(async()=>{await api('config',{enabled:el('enabled').checked,baseUrl:el('baseUrl').value.trim(),serviceToken:el('serviceToken').value});el('serviceToken').value='';await load();el('status').textContent='连接设置已保存';});
+el('inspect').onclick=()=>perform(async()=>{const result=await api('inspect',{});el('status').textContent=result.message;});
+el('bind').onclick=()=>perform(async()=>{await api('binding',{key:'shared',subjectId:el('subjectId').value.trim(),enabled:el('bindingEnabled').checked,grants:['messages']});await load();});
+el('unbind').onclick=()=>perform(async()=>{if(!confirm('解除软件入口关联后，将恢复软件原有模型模式。引擎本身不受影响。继续吗？'))return;await api('unbind',{key:'shared'});await load();});
+el('refresh').onclick=()=>perform(refresh);
+if(el('token').value)perform(load);
+</script></html>

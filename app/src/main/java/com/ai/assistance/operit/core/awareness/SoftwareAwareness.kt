@@ -88,6 +88,12 @@ object SoftwareAwareness {
         val copy = JSONObject(detail.toString())
         writes.trySend {
             store.record(observer, revision, kind, summary, actor, copy, at, wake, urgent)
+            val target = store.chat
+            if (store.enabled && store.role == observer && store.revision == revision && target != null) {
+                com.ai.assistance.operit.core.engine.EngineWindow.offer(app, observer, target,
+                    "software.$kind", JSONObject().put("at", at).put("summary", summary)
+                        .put("actor", actor).put("detail", copy))
+            }
             if (wake) CompanionRuntime.signalSoftwareEvent()
         }
     }
