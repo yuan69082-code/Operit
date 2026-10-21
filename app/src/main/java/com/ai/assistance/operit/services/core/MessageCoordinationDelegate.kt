@@ -909,9 +909,10 @@ class MessageCoordinationDelegate(
             )
         }
 
+        val addressed = groupStore.selected(chatId)
         val selected = com.ai.assistance.operit.core.group.GroupPolicy.targets(
-            orderedMembers.map { it.characterCardId }, groupStore.selected(chatId))
-        groupStore.update(chatId) { it.remove("mentions") }
+            orderedMembers.map { it.characterCardId }, addressed)
+        groupStore.update(chatId) { it.put("addressed", JSONArray(addressed)).remove("mentions") }
         attachmentDelegate.clearAttachments()
         uiBridge.resetAttachmentPanelState()
         uiBridge.clearReplyToMessage()
@@ -1009,7 +1010,8 @@ class MessageCoordinationDelegate(
             groupStore.log(chatId, "已发送", "私聊转群：${item.getString("id")}", actor)
             com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
             val requested = groupStore.strings(item.optJSONArray("targets"))
-            val targets = if (requested.isEmpty()) members.filter { it != actor } else requested.filter { it in members && it != actor }
+            val listeners = members.filter { it != actor }
+            val targets = com.ai.assistance.operit.core.group.GroupPolicy.targets(listeners, requested.filter { it in listeners })
             runGroupQueue(chatId, targets, "", null, ChatTurnOptions())
         }
     }
@@ -1075,7 +1077,10 @@ class MessageCoordinationDelegate(
                 groupStore.log(chatId, "限额", "达到用户设置的本次讨论上限，可继续")
                 return
             }
-            groupStore.update(chatId) { it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name).put("speaker_id", actor).remove("decision") }
+            groupStore.update(chatId) {
+                it.put("pending", JSONArray(listOf(actor) + queue.toList())).put("speaker", cards.getValue(actor).name)
+                    .put("speaker_id", actor).put("published", false).remove("decision")
+            }
             com.ai.assistance.operit.core.group.GroupTools.ensureEnabledOnce(context, actor)
             val gameBefore = games.state(chatId)?.let { com.google.gson.Gson().toJson(it) }
             messageProcessingDelegate.setInputProcessingStateForChat(chatId, InputProcessingState.Processing("${cards.getValue(actor).name} 正在回应"))
@@ -1126,10 +1131,8 @@ class MessageCoordinationDelegate(
             val decision = groupStore.takeDecision(chatId)
             val action = decision?.optString("action")
             quiet = if (action == "quiet") quiet + 1 else 0
-            if (action == "end" || action == "wait_user") {
-                groupStore.log(chatId, if (action == "end") "达成结束" else "等待用户", requireNotNull(decision).optString("reason"), actor)
-                break
-            }
+            if (action == "end" || action == "wait_user")
+                groupStore.log(chatId, "个人决定", requireNotNull(decision).optString("reason"), actor)
             val current = groupStore.read(chatId)
             val gamePending = games.pending(chatId)
             if (gamePending != null) {
@@ -1141,8 +1144,8 @@ class MessageCoordinationDelegate(
                 gamePending.filter { it != "user" }.forEach { queue.addLast(it) }
             }
             if (gamePending == null) {
-                val next = com.ai.assistance.operit.core.group.GroupTurnPolicy.next(queue.toList(), action,
-                    groupStore.strings(decision?.optJSONArray("targets")), ids.toSet(), actor, current.optBoolean("continuous"))
+                val next = com.ai.assistance.operit.core.group.GroupTurnPolicy.next(
+                    queue.toList(), ids.toSet(), actor, current.optBoolean("published"))
                 queue.clear()
                 next.forEach { queue.addLast(it) }
                 if (action == "wait_user") groupStore.log(chatId, "等待用户", decision?.optString("reason").orEmpty(), actor)
@@ -1841,3 +1844,4 @@ class MessageCoordinationDelegate(
         }
     }
 }
+
