@@ -35,4 +35,3 @@ object GroupReplyGate {
         }
     }.share(scope, replay = 1)
 }
-

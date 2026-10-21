@@ -157,5 +157,3 @@ object GroupContext {
             .put("next_offset", page.next ?: JSONObject.NULL).put("complete", page.next == null)
     }
 }
-
-

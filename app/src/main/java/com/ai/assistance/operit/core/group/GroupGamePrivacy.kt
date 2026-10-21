@@ -27,4 +27,3 @@ object GroupGamePrivacy {
         emit(publicText(result.toString()))
     }.share(scope, replay = 1)
 }
-

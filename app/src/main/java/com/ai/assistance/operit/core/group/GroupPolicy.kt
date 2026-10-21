@@ -17,4 +17,3 @@ object GroupPolicy {
         return now + minutes * 60_000L
     }
 }
-

@@ -61,12 +61,15 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
+            Column(Modifier.safeDrawingPadding().imePadding().padding(horizontal = if (tab == "阅读角") 0.dp else 16.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("$name · 房间", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    if (tab == "阅读角") {
+                        TextButton(onClick = { tab = "房间" }) { Text("‹ 返回房间") }
+                        Spacer(Modifier.weight(1f))
+                    } else Text("$name · 房间", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("回到聊天") }
                 }
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (tab != "阅读角") Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("房间", "外观", "日记", "阅读角", "设置").forEach { label ->
                         FilterChip(selected = label == tab, onClick = { tab = label; error = "" }, label = { Text(label) })
                     }
@@ -75,12 +78,12 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                 HorizontalDivider()
                 key(role, tab) {
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = if (tab == "阅读角") 0.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         when (tab) {
                             "房间" -> RoomHome(room, data, chat, revision, { tab = it }, { work(it) })
                             "外观" -> RoomAppearance(room, { work(it) }, { advanced = true })
                             "日记" -> RoomDiary(room, chat, revision, { work(it) })
-                            "阅读角" -> ReadingPanel(role, chat, revision, { work(it) })
+                            "阅读角" -> ReadingPanel(role, chat, name, revision, { work(it) })
                             "设置" -> RoomOptions(room, data, { work(it) })
                         }
                     }

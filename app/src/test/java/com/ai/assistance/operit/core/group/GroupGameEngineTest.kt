@@ -119,4 +119,3 @@ class GroupGameEngineTest {
         assertFalse(GroupPolicy.canRead(null, "a", true, 10, 20, 9))
     }
 }
-

@@ -312,8 +312,9 @@ class VoiceCallController(
                                 continuousWarning = "有一段声音分析结果不完整，未发送给AI；通话继续收音。"
                                 if (manualMode && phase == Phase.RECOGNIZING) phase = Phase.LISTENING
                             } },
-                            onSpeechState = { active -> withContext(Dispatchers.Main) {
-                                speechTurnActive.set(active)
+                            onSpeechState = { active -> withContext(Dispatchers.Main.immediate) {
+                                val previous = speechTurnActive.getAndSet(active)
+                                if (previous != active) AppLogger.d("VoiceCall", "Speech gate active=$active queued=${pendingHeard.size} ready=$heardTurnReady")
                                 // A real utterance supersedes an in-flight silence response.
                                 if (active && silenceTurnActive && phase == Phase.THINKING) {
                                     viewModel.cancelMessage(chatId)
@@ -349,6 +350,7 @@ class VoiceCallController(
                                     ))
                                     // Intermediate long-speech chunks accumulate without waking the main model.
                                     heardTurnReady = !clip.windowEnded
+                                    AppLogger.d("VoiceCall", "Analyzed clip queued: file=${java.io.File(path).name} begin=${clip.beginMillis} end=${clip.endMillis} chunk=${clip.windowEnded} queued=${pendingHeard.size}")
                                 }
                                 // The closing window can be all silence; it still releases earlier speech.
                                 if (!clip.windowEnded && pendingHeard.isNotEmpty()) {
@@ -593,6 +595,7 @@ class VoiceCallController(
     private fun takeHeardInput(): CallInput? {
         if (pendingHeard.isEmpty() || muted.value || !heardTurnReady || speechTurnActive.get()) return null
         val clips = pendingHeard.toList()
+        AppLogger.d("VoiceCall", "Delivering analyzed clips: count=${clips.size}")
         pendingHeard.clear()
         heardTurnReady = false
         heardReady.tryReceive()

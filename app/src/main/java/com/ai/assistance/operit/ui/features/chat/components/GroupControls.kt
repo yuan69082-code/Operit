@@ -239,4 +239,3 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
             }
         } }, confirmButton = { TextButton(onClick = { tab = "" }) { Text("关闭") } })
 }
-

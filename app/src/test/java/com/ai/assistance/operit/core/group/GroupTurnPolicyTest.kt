@@ -68,4 +68,3 @@ class GroupTurnPolicyTest {
         assertEquals("end", GroupTurnPolicy.control("事情结束了。$marker")?.action)
     }
 }
-

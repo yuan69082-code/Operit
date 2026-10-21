@@ -79,4 +79,3 @@ object GroupDelivery {
         state.put("outbox", JSONArray((0 until old.length()).map { old.getJSONObject(it) }.filter { it.optString("id") != id }))
     }
 }
-

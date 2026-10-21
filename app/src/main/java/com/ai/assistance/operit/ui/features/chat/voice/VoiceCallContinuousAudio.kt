@@ -34,7 +34,12 @@ class VoiceCallContinuousAudio(
         val speechPending = AtomicInteger()
         suspend fun publishSpeechState() {
             // Include in-flight speech analysis: old sound observations cannot reply first.
-            onSpeechState(capturingSpeech.get() || speechPending.get() > 0)
+            // Read on the controller's owner thread, not before dispatching its callback.
+            // Capture runs on IO: a queued true snapshot could otherwise arrive after
+            // analysis publishes false and leave a retained recording blocked indefinitely.
+            withContext(Dispatchers.Main.immediate) {
+                onSpeechState(capturingSpeech.get() || speechPending.get() > 0)
+            }
         }
         val clips = Channel<VoiceCallAudioRecorder.Clip>(4, BufferOverflow.DROP_OLDEST,
             onUndeliveredElement = {
