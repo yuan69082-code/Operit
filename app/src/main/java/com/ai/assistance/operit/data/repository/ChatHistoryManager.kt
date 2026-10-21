@@ -1543,7 +1543,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
                 }
                 // 删除聊天实体（级联删除所有消息）
                 chatDao.deleteChat(chatId)
-                com.ai.assistance.operit.core.companion.AssistantWindowRouter.removed(context, chat)
+                com.ai.assistance.operit.core.companion.AssistantWindowRouter.removed(context, chat.toChatHistory())
 
                 // 如果删除的是当前聊天，清除当前聊天ID
                 val currentChatId = currentChatIdFlow.first()
