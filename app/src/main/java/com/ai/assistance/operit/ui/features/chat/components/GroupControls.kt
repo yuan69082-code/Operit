@@ -15,13 +15,10 @@ import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.core.group.*
 import com.ai.assistance.operit.data.model.CharacterCard
-import com.ai.assistance.operit.data.model.ChatHistory
 import com.ai.assistance.operit.data.preferences.*
-import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,7 +36,6 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
     var tab by remember(chatId) { mutableStateOf("") }
     var error by remember(chatId) { mutableStateOf<String?>(null) }
     var members by remember(groupId) { mutableStateOf(emptyList<CharacterCard>()) }
-    var privateChats by remember(groupId) { mutableStateOf(emptyList<ChatHistory>()) }
     var purpose by remember(chatId) { mutableStateOf(settings.optString("purpose")) }
     var rules by remember(chatId) { mutableStateOf("") }
     var title by remember(chatId) { mutableStateOf("") }
@@ -61,7 +57,6 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
         members = group?.members?.sortedBy { it.orderIndex }?.map {
             CharacterCardManager.getInstance(context).getCharacterCard(it.characterCardId)
         }.orEmpty()
-        privateChats = ChatHistoryManager.getInstance(context).chatHistoriesFlow.first().filter { it.characterGroupId.isNullOrBlank() }
     }
     LaunchedEffect(draft.text, draft.selection) {
         if (draft.text.take(draft.selection.end).endsWith("@")) tab = "@"
@@ -116,7 +111,7 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
                     }
                 }
                 "@" -> {
-                    Text("未指定时，所有成员各回应一次。可选择多位助手；选择跟随助手身份，不受模型切换影响。")
+                    Text("@ 表示你在找谁，被@的人先决定是否回应。其他成员仍可自行插话；所有人都可以潜水、冒泡或单独私聊你。")
                     TextButton(onClick = { work { store.update(chatId) { it.put("mentions", JSONArray()) } } }) { Text("@ 所有人") }
                     members.forEach { member ->
                         val selected = store.selected(chatId)
@@ -141,23 +136,13 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
                 "群设置" -> {
                     GroupMemberModels(members)
                     HorizontalDivider()
-                    Text("成员沿用各自的个人记忆、模型和能力。关联私聊的近期内容自动带入，较早记录按需查看。")
+                    Text("成员沿用各自的个人记忆、模型和能力，自动跟随各自最近活跃的私聊。群内可以自行决定接话，也可以潜水时单独私聊你。")
                     members.forEach { member ->
                         Text(member.name, style = MaterialTheme.typography.titleSmall)
-                        val choices = privateChats.filter { it.characterCardId == member.id }.sortedByDescending { it.updatedAt }
-                        val linked = settings.optJSONObject("links")?.optString(member.id).orEmpty()
                         Text("个人记忆：${member.name} 的独立记忆库")
-                        TextButton(onClick = { work { store.update(chatId) {
-                            val links = it.optJSONObject("links") ?: JSONObject(); links.remove(member.id); it.put("links", links)
-                        } } }) { Text(if (linked.isBlank()) "✓ 延续最近的私聊" else "延续最近的私聊") }
-                        choices.forEach { chat ->
-                            TextButton(onClick = { work { store.update(chatId) {
-                                val links = it.optJSONObject("links") ?: JSONObject(); links.put(member.id, chat.id); it.put("links", links)
-                            } } }) { Text((if (linked == chat.id) "✓ " else "") + chat.title) }
-                        }
                     }
                     HorizontalDivider()
-                    Row { Switch(settings.optBoolean("continuous"), onCheckedChange = { enabled -> work { store.update(chatId) { it.put("continuous", enabled) } } }); Text("持续讨论", Modifier.padding(12.dp)) }
+                    Text("新公开发言会让其他成员重新决定是否接话，不需要点名交棒；所有人都安静后停下。")
                     OutlinedTextField(purpose, { purpose = it }, label = { Text("讨论目的，可留空自由聊天") })
                     Row { Switch(settings.optBoolean("proactive"), onCheckedChange = { enabled -> work {
                         store.update(chatId) { it.put("proactive", enabled) }
@@ -254,3 +239,4 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
             }
         } }, confirmButton = { TextButton(onClick = { tab = "" }) { Text("关闭") } })
 }
+

@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupPrivacyTest {
+    @Test fun internalLookupsLeaveOnlyPublicSpeechWithoutNotices() {
+        val raw = "<tool name='group_chat'><param name='action'>whisper</param><param name='text'>只想对你说</param></tool>" +
+            "<tool_result name='group_chat'><content>私聊位置</content></tool_result>群里说的话"
+        assertEquals("群里说的话", GroupGamePrivacy.publicText(raw))
+        val old = "[工具内部操作不在群公共上下文中展开][此助手查询的私人资料不在群公共上下文中展开]旧正文"
+        assertEquals("旧正文", GroupGamePrivacy.withoutInternalNotices(old))
+    }
     @Test fun interruptedPrivateLookupIsRemovedFromContinuitySnapshots() {
         val message = ChatMessage(sender = "ai", content = "公开发言<tool_result_x1 name='assistant_admin'><content>另一助手的私聊")
         val preview = GroupContext.visible(message)
@@ -54,3 +61,4 @@ class GroupPrivacyTest {
         }
     }
 }
+

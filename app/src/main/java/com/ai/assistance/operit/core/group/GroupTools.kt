@@ -25,8 +25,8 @@ object GroupTools {
     private fun param(name: String, description: String, required: Boolean = false) =
         ToolParameterSchema(name = name, type = "string", description = description, required = required)
     fun prompts() = listOf(
-        ToolPrompt(name = "group_chat", description = "群聊与连续记忆。events 搜索自己的全部私聊事件（query/from/end/status，chat_id可限定窗口），每页10件。history 用 after=from/end=to 分页查看事件原文，返回预览和has_more；history_message 用 message_at/part/offset 续读完整已存内容，直到complete=true；feelings 按窗口和时间范围续读自己保存的感受。不能读取别人的私聊。status 查看本群成员与讨论状态；respond 提议其他助手接话（targets 为助手ID的JSON数组，只在持续讨论开启时生效）；quiet 表示本轮无新内容，不必重复上句话；end 在目的达成时结束讨论并给 reason；schedule 自定下一次在本群醒来的分钟数和目的；cancel_schedule 取消自己的唤醒。groups 列出你已加入的群；send 可从私聊向已有群发送公开消息，指定 chat_id 和 text，targets 可选。无需用户先在群内开口。mute 仅主助手可用，targets 可为多人，all=true 为全员。tasks 返回群待办简表；get_task 用 task_id 读取详情，offset 为历史分页起点；save_task 创建或更新共同计划及自己想做的事。comment_task 用 task_id/text 写署名批注；submit_task 用 task_id/assignee/minutes 自主安排接手助手继续，不必等用户审批；只有确需用户决定时填 needs_decision。wait_user 把话交给用户并停止排队，可保留本轮给用户的正文。quiet 会丢弃本轮全部公开正文，禁止把‘我只需要等待’当聊天发出。respond 必须明确接话对象；没有接话指令就不会自动轮转。不要复述来源标签。", parametersStructured = listOf(
-            param("action", "windows/events/history/history_message/feelings/groups/send/status/respond/quiet/wait_user/end/schedule/cancel_schedule/mute/tasks/get_task/save_task/comment_task/submit_task", true),
+        ToolPrompt(name = "group_chat", description = "群聊与连续记忆。events 搜索自己的全部私聊事件（query/from/end/status，chat_id可限定窗口），每页10件。history 用 after=from/end=to 分页查看事件原文，返回预览和has_more；history_message 用 message_at/part/offset 续读完整已存内容，直到complete=true；feelings 按窗口和时间范围续读自己保存的感受。不能读取别人的私聊。status 查看本群成员与讨论状态；所有成员自主决定接话，无需点名。respond 仅表达邀请，不限制其他人；quiet 表示本轮无新内容，不必重复上句话；end 表示自己聊完并给 reason；schedule 自定下一次在本群醒来的分钟数和目的；cancel_schedule 取消自己的唤醒。groups 列出你已加入的群；whisper 在群里用 text 向自己的活跃私聊单独联系用户，不公开私聊内容；send 可从私聊向已有群发送公开消息，指定 chat_id 和 text，targets 可选。无需用户先在群内开口。mute 仅主助手可用，targets 可为多人，all=true 为全员。tasks 返回群待办简表；get_task 用 task_id 读取详情，offset 为历史分页起点；save_task 创建或更新共同计划及自己想做的事。comment_task 用 task_id/text 写署名批注；submit_task 用 task_id/assignee/minutes 自主安排接手助手继续，不必等用户审批；只有确需用户决定时填 needs_decision。wait_user 表示自己等待用户，不停止其他成员，可保留本轮给用户的正文。quiet 会丢弃本轮全部公开正文，禁止把‘我只需要等待’当聊天发出。每条公开新消息都让其他成员自主决定潜水或冒泡；quiet、wait_user、end只管自己，不能替别人闭麦。不要复述来源标签。", parametersStructured = listOf(
+            param("action", "windows/events/history/history_message/feelings/groups/send/whisper/status/respond/quiet/wait_user/end/schedule/cancel_schedule/mute/tasks/get_task/save_task/comment_task/submit_task", true),
             param("chat_id", "已有目标群会话ID，私聊向群发送时必填；history 可指自己的私聊"), param("before", "history 下一页游标"),
             param("after", "history 正序读：从这个时间戳开始往后读20条，用段落索引里的 from；继续读传返回的 after"),
             param("end", "history/events/feelings 的结束时间戳，包含该条；事件索引的 to"),
@@ -34,9 +34,9 @@ object GroupTools {
             param("query", "events 事件关键词，空格分隔多个条件；省略 chat_id 检索自己的所有私聊窗口。windows 按窗口标题查找，包括尚无摘要的窗口"),
             param("message_at", "history_message 必填，消息的 at 时间戳，也可用事件的 summary_at 读取窗口摘要"),
             param("part", "history_message: body正文/raw完整已存内容/tools工具参数和结果/attachments附件标签；群聊只允许body。附件本体按标签路径调用对应文件或媒体工具读取"),
-            param("targets", "respond 的助手ID JSON数组"), param("reason", "安静或结束的原因"),
+            param("targets", "respond或send可选的邀请助手ID JSON数组，不是发言许可"), param("reason", "安静或结束的原因"),
             param("minutes", "schedule 为1–43200分钟；submit_task 可为0，表示尽快"), param("purpose", "下次活动目的"),
-            param("text", "send 的公开消息，仅发送这段文字，不转发私聊历史"),
+            param("text", "send公开消息或whisper私聊正文，仅发送主动选择的这段文字"),
             param("all", "mute 是否全员，true/false"), param("muted", "mute 禁言true，解除false"),
             param("task_id", "save_task 修改时填写已有ID，新建省略"), param("title", "待办标题"),
             param("assignee", "接手助手ID、user 或空"), param("status", "events用悬着/已结束；任务用open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
@@ -74,6 +74,8 @@ object GroupTools {
                             arg("end")?.toLong() ?: error("缺少 end"), arg("offset")?.toInt() ?: 0)
                     } else if (name == "group_chat" && action == "groups") {
                         result = GroupDelivery.groups(context, actor)
+                    } else if (name == "group_chat" && action == "whisper") {
+                        result = GroupDelivery.whisper(context, actor, chat, arg("text") ?: error("缺少私聊 text"))
                     } else if (name == "group_chat" && action == "send") {
                         result = GroupDelivery.enqueue(context, actor, arg("chat_id") ?: error("缺少目标 chat_id"),
                             arg("text") ?: error("缺少公开 text"), store.strings(arg("targets")?.let { JSONArray(it) }))
@@ -100,7 +102,7 @@ object GroupTools {
                             result = when (action) {
                                 "status" -> JSONObject().put("members", JSONArray(group.members.map {
                                     JSONObject().put("id", it.characterCardId).put("name", CharacterCardManager.getInstance(context).getCharacterCard(it.characterCardId).name)
-                                })).put("continuous", store.read(targetChat).optBoolean("continuous")).put("purpose", store.read(targetChat).optString("purpose"))
+                                })).put("continuous", true).put("participation", "autonomous").put("purpose", store.read(targetChat).optString("purpose"))
                                     .put("mute_all", store.read(targetChat).optBoolean("mute_all"))
                                     .put("muted", store.read(targetChat).optJSONArray("muted") ?: JSONArray())
                                 "mute" -> {
@@ -135,9 +137,8 @@ object GroupTools {
                                 "respond", "quiet", "wait_user", "end" -> {
                                     val decision = JSONObject().put("actor", actor).put("action", action).put("reason", arg("reason").orEmpty().take(500))
                                     if (action == "respond") {
-                                        val targets = store.strings(JSONArray(arg("targets") ?: error("缺少 targets")))
-                                        require(targets.isNotEmpty() && targets.all { it in ids && it != actor }) { "接话对象必须是本群其他成员" }
-                                        check(store.read(chat).optBoolean("continuous")) { "本群尚未开启持续讨论" }
+                                        val targets = store.strings(arg("targets")?.let { JSONArray(it) })
+                                        require(targets.all { it in ids && it != actor }) { "接话对象必须是本群其他成员" }
                                         decision.put("targets", JSONArray(targets))
                                     }
                                     store.update(chat) { it.put("decision", decision) }
@@ -160,4 +161,5 @@ object GroupTools {
         }) }
     }
 }
+
 

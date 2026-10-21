@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.core.group
 
 import android.content.Context
+import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
 import com.ai.assistance.operit.data.preferences.CharacterGroupCardManager
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
@@ -10,6 +11,37 @@ import java.util.UUID
 
 /** An intentional public message, not a copy of the caller's private conversation. */
 object GroupDelivery {
+    /** Send only the author's chosen words to their own user-selected private conversation. */
+    suspend fun whisper(context: Context, actor: String, source: String, text: String): JSONObject {
+        require(text.isNotBlank() && text.length <= 12000) { "私聊消息需为 1–12000 字" }
+        val repo = ChatHistoryManager.getInstance(context)
+        val metadata = requireNotNull(repo.getChatMetadata(source)) { "群会话不存在" }
+        val group = requireNotNull(metadata.characterGroupId?.let {
+            CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it)
+        }) { "whisper 须在群内使用" }
+        check(group.members.any { it.characterCardId == actor }) { "你不在本群内" }
+        com.ai.assistance.operit.core.companion.AssistantWindowRouter.initialize(context)
+        val target = requireNotNull(com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, actor)) {
+            "尚无你的活跃私聊，请先建立你和用户的私聊"
+        }
+        val privateChat = requireNotNull(repo.getChatMetadata(target)) { "私聊已删除" }
+        check(privateChat.characterCardId == actor && privateChat.characterGroupId.isNullOrBlank()) { "私聊归属不匹配" }
+        val card = com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context).getCharacterCard(actor)
+        val body = GroupTurnPolicy.publicBody(GroupGamePrivacy.publicText(text))
+        require(body.isNotBlank()) { "私聊正文为空" }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            val core = com.ai.assistance.operit.api.chat.ChatRuntimeHolder.getInstance(context)
+                .getCore(com.ai.assistance.operit.api.chat.ChatRuntimeSlot.MAIN)
+            core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = card.name,
+                content = body, timestamp = ChatMessageTimestampAllocator.next(), completedAt = System.currentTimeMillis()), target)
+            com.ai.assistance.operit.api.chat.AIForegroundService.notifyReplyCompleted(
+                context, target, card.name, body, null, notifyReplyOverride = true, notifyWhileForeground = true)
+        }
+        // Group activity records only delivery, never the private message body or destination.
+        GroupStore(context).log(source, "私聊", "已向用户发送私聊", actor)
+        return JSONObject().put("sent", true).put("chat_id", target)
+    }
+
     suspend fun groups(context: Context, actor: String): JSONArray {
         val result = JSONArray()
         val manager = CharacterGroupCardManager.getInstance(context)
@@ -47,3 +79,4 @@ object GroupDelivery {
         state.put("outbox", JSONArray((0 until old.length()).map { old.getJSONObject(it) }.filter { it.optString("id") != id }))
     }
 }
+
