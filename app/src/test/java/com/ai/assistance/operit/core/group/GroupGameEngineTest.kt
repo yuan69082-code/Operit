@@ -110,7 +110,7 @@ class GroupGameEngineTest {
     }
     @Test fun routingAndHistoricalReadBoundariesKeepAssistantsIsolated() {
         assertEquals(listOf("a","b"), GroupPolicy.targets(listOf("a","b"), emptyList()))
-        assertEquals(listOf("b"), GroupPolicy.targets(listOf("a","b"), listOf("b")))
+        assertEquals(listOf("b", "a"), GroupPolicy.targets(listOf("a","b"), listOf("b")))
         assertThrows(IllegalArgumentException::class.java) { GroupPolicy.targets(listOf("a"), listOf("b")) }
         assertFalse(GroupPolicy.canRead("b", "a", false, 0, 0, 1))
         assertTrue(GroupPolicy.canRead("a", "a", false, 0, 0, 1))

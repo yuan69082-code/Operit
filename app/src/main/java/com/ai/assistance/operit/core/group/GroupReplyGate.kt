@@ -18,8 +18,7 @@ object GroupReplyGate {
         val groupId = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chat)?.characterGroupId
         val members = groupId?.let { com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }?.members.orEmpty().map { it.characterCardId }
         if (control != null) {
-            if (actor in members && (control.action != "respond" || store.read(chat).optBoolean("continuous") &&
-                    control.targets.isNotEmpty() && control.targets.all { it in members && it != actor })) {
+            if (actor in members && control.targets.all { it in members && it != actor }) {
                 store.update(chat) { it.put("decision", org.json.JSONObject().put("actor", actor).put("action", control.action)
                     .put("targets", org.json.JSONArray(control.targets)).put("reason", "本轮发言控制")) }
                 store.log(chat, "决定", control.action, actor)
@@ -29,7 +28,10 @@ object GroupReplyGate {
         val action = decision?.takeIf { it.optString("actor") == actor }?.optString("action")
         if (actor in members && permittedAtStart && !moderation.manuallyMuted(chat, actor) && !GroupTurnPolicy.suppress(action)) {
             val text = GroupTurnPolicy.publicBody(publicText)
-            if (text.isNotBlank()) emit(text)
+            if (text.isNotBlank()) {
+                store.update(chat) { it.put("published", true) }
+                emit(text)
+            }
         }
     }.share(scope, replay = 1)
 }

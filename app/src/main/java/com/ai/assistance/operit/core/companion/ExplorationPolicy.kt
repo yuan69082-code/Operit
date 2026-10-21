@@ -19,20 +19,18 @@ object ExplorationPolicy {
     fun day(now: Long): String = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().toString()
     fun used(data: JSONObject, day: String): Int = if (data.optString("day") == day) data.optInt("used") else 0
 
-    fun configure(data: JSONObject, enable: Boolean, chat: String, choices: Set<String>, limit: Int, now: Long) {
+    fun configure(data: JSONObject, enable: Boolean, choices: Set<String>, limit: Int, now: Long) {
         require(limit in 1..24) { "每天探索轮次须为1–24次" }
         require(choices.all { it in activities } && (!enable || choices.isNotEmpty())) { "请选择至少一项探索活动" }
-        require(!enable || chat.isNotBlank()) { "请先打开该助手的私聊" }
         val wasEnabled = enabled(data)
-        val previousChat = data.optString("chat")
         val interrupted = data.has("running")
-        data.put("enabled", enable).put("chat", chat).put("activities", JSONArray(choices.toList()))
+        data.put("enabled", enable).put("activities", JSONArray(choices.toList()))
             .put("limit", limit).put("revision", revision(data) + 1)
         data.remove("running")
         if (!enable || interrupted) {
             data.put("paused", true)
             data.remove("at")
-        } else if (!wasEnabled || previousChat != chat) {
+        } else if (!wasEnabled) {
             data.put("at", now + 15 * 60_000L).put("paused", false)
                 .put("purpose", "首次自主探索，可挑选感兴趣的方向，也可以安静或暂缓。")
         }
@@ -59,13 +57,14 @@ object ExplorationPolicy {
     }
 
     fun due(data: JSONObject, now: Long, day: String): Boolean = enabled(data) &&
-        data.optString("chat").isNotBlank() && choices(data).isNotEmpty() && !data.optBoolean("paused", true) &&
+        choices(data).isNotEmpty() && !data.optBoolean("paused", true) &&
         !data.has("running") && data.has("at") && data.optLong("at") <= now &&
         used(data, day) < data.optInt("limit", 4).coerceIn(1, 24)
 
-    fun claim(data: JSONObject, now: Long, day: String, ticket: String): Boolean {
+    fun claim(data: JSONObject, now: Long, day: String, ticket: String, chat: String): Boolean {
+        require(chat.isNotBlank()) { "执行探索需要助手的活跃私聊" }
         if (!due(data, now, day)) return false
-        data.put("used", used(data, day) + 1).put("day", day).put("running", ticket)
+        data.put("chat", chat).put("used", used(data, day) + 1).put("day", day).put("running", ticket)
             .put("started", now).put("paused", true)
         data.remove("at")
         data.remove("self_paused")

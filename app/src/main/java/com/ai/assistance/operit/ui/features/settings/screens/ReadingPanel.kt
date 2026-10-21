@@ -79,7 +79,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
             TextButton(onClick = { reload++ }) { Text("重新载入") }
         }
         when (tab) {
-          "自主探索" -> Column(Modifier.padding(16.dp)) { ExplorationPanel(role, chat) }
+          "自主探索" -> Column(Modifier.padding(16.dp)) { ExplorationPanel(role) }
           "关注来源" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
               ReadingSources(reading, chat, sources, sourceId, { sourceId = it }, title, { title = it }, address, { address = it }, kind, { kind = it }, hours, { hours = it }, work)
           }

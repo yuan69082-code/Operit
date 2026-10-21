@@ -12,7 +12,6 @@ import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.core.awareness.PhoneAwareness
 import com.ai.assistance.operit.core.awareness.PhoneAwarenessStore
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
-import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -20,14 +19,14 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun PhoneAwarenessPanel(currentChat: String?) {
+fun PhoneAwarenessPanel() {
     val context = LocalContext.current
     val store = remember { PhoneAwarenessStore(context) }
     val scope = rememberCoroutineScope()
     var enabled by remember { mutableStateOf(store.enabled) }
     var wake by remember { mutableStateOf(store.wakeEnabled) }
     var interval by remember { mutableStateOf((store.intervalMs / 1000).toString()) }
-    var selectedChat by remember { mutableStateOf(store.chat) }
+    var selectedRole by remember { mutableStateOf(store.role) }
     var observer by remember { mutableStateOf("尚未选择") }
     var status by remember { mutableStateOf(JSONObject()) }
     var hasUsage by remember { mutableStateOf(false) }
@@ -56,14 +55,10 @@ fun PhoneAwarenessPanel(currentChat: String?) {
     }
     fun openSettings(action: String) { perform { context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
 
-    LaunchedEffect(selectedChat) {
+    LaunchedEffect(selectedRole) {
         try {
-            observer = if (selectedChat == null) "尚未选择" else {
-                val chat = ChatHistoryManager.getInstance(context).getChatMetadata(checkNotNull(selectedChat))
-                val card = CharacterCardManager.getInstance(context).getAllCharacterCards().firstOrNull { it.id == chat?.characterCardId }
-                if (chat == null || card == null || !chat.characterGroupId.isNullOrBlank()) "目标会话已失效，请重新指定"
-                else card.name + " · " + chat.title
-            }
+            observer = CharacterCardManager.getInstance(context).getAllCharacterCards().firstOrNull { it.id == selectedRole }?.name
+                ?: if (selectedRole == null) "尚未选择" else "助手已删除，请重新选择"
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { error = "无法读取观察助手：${failure.message}" }
     }
@@ -105,19 +100,15 @@ fun PhoneAwarenessPanel(currentChat: String?) {
     } }) { Text("用已授权 Shizuku 开通使用情况访问") }
     TextButton(onClick = { openSettings(Settings.ACTION_USAGE_ACCESS_SETTINGS) }) { Text("打开系统使用情况权限设置") }
     Text("观察助手：$observer")
-    TextButton(enabled = !busy && currentChat != null, onClick = { perform {
-        val id = checkNotNull(currentChat)
-        val chat = ChatHistoryManager.getInstance(context).getChatMetadata(id) ?: error("请先打开目标助手的私聊")
-        check(chat.characterGroupId.isNullOrBlank()) { "请选择独立助手的私聊" }
-        val role = requireNotNull(chat.characterCardId) { "当前会话尚未绑定助手，请先发送一条消息" }
+    AssistantTargetPicker(selectedRole, !busy) { role -> perform {
         CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "phone_awareness", true)
-        store.preferences.edit().putString("phone_chat", id).putString("phone_role", role).apply()
-        selectedChat = id
-    } }) { Text("让当前私聊的助手负责观察") }
-    Text("可先打开主助手的私聊再指定。仅这位助手可在自己的私聊查记录；群聊和其他助手不会自动收到。选择时会启用她/他的手机感知查询工具，其他能力仍使用各自设置。")
+        store.preferences.edit().putString("phone_role", role).apply()
+        selectedRole = role
+    } }
+    Text("仅这位助手可在自己的私聊查记录；选择时启用该助手的手机感知查询工具。")
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("解锁或进入应用时唤醒助手", Modifier.weight(1f))
-        Switch(enabled = enabled && selectedChat != null && !busy, checked = wake, onCheckedChange = { value ->
+        Switch(enabled = enabled && selectedRole != null && !busy, checked = wake, onCheckedChange = { value ->
             store.preferences.edit().putBoolean("phone_wake_enabled", value).apply(); wake = value
         })
     }

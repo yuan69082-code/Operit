@@ -17,20 +17,20 @@ class GroupTurnPolicyTest {
         assertEquals("正文", clean)
         assertEquals(clean, GroupTurnPolicy.cleanLegacyPrefix(clean))
     }
-    @Test fun endAndWaitingForUserCancelAlreadyQueuedSpeakers() {
-        for (action in listOf("end", "wait_user"))
-            assertTrue(GroupTurnPolicy.next(listOf("B", "C"), action, emptyList(), setOf("A", "B", "C"), "A", true).isEmpty())
+    @Test fun personalWaitOrEndDoesNotCancelOtherMembers() {
+        assertEquals(listOf("B", "C"), GroupTurnPolicy.next(listOf("B", "C"), setOf("A", "B", "C"), "A", false))
     }
-    @Test fun exhaustedQueueNeverAutomaticallyRestarts() {
-        assertTrue(GroupTurnPolicy.next(emptyList(), null, emptyList(), setOf("A", "B"), "A", true).isEmpty())
-        assertTrue(GroupTurnPolicy.next(emptyList(), "quiet", emptyList(), setOf("A", "B"), "A", true).isEmpty())
+    @Test fun silenceDoesNotRestartAnExhaustedQueue() {
+        assertTrue(GroupTurnPolicy.next(emptyList(), setOf("A", "B"), "A", false).isEmpty())
     }
     @Test fun ordinaryUserMessageStillOffersEveryoneOneTurn() {
-        assertEquals(listOf("B", "C"), GroupTurnPolicy.next(listOf("B", "C"), null, emptyList(), setOf("A", "B", "C"), "A", false))
+        assertEquals(listOf("B", "C"), GroupTurnPolicy.next(listOf("B", "C"), setOf("A", "B", "C"), "A", false))
     }
-    @Test fun directedTurnOnlyInvitesRecipientsAndDropsRemovedMembers() {
-        assertEquals(listOf("B"), GroupTurnPolicy.next(listOf("B", "C"), "respond",
-            listOf("B", "A", "gone", "B"), setOf("A", "B", "C"), "A", true))
+    @Test fun publicSpeechLetsPreviousLurkersJoinWithoutStarvingWaitingMembers() {
+        assertEquals(listOf("C", "A"), GroupTurnPolicy.next(listOf("C", "gone", "B", "C"),
+            linkedSetOf("A", "B", "C"), "B", true))
+        assertEquals(listOf("A", "B"), GroupTurnPolicy.next(emptyList(),
+            linkedSetOf("A", "B", "C"), "C", true))
     }
     @Test fun quietSuppressesPublicTextButWaitCanAddressUser() {
         assertTrue(GroupTurnPolicy.suppress("quiet"))

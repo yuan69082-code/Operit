@@ -2,7 +2,6 @@ package com.ai.assistance.operit.core.tasks
 
 import android.content.Context
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
-import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import org.json.JSONObject
 
 object TaskEvents {
@@ -22,17 +21,13 @@ object TaskEvents {
         }
     }
     suspend fun nextPrivate(context: Context): Work? {
-        val repo = ChatHistoryManager.getInstance(context)
-        val chats = repo.getAllChatMetadata()
+        com.ai.assistance.operit.core.companion.AssistantWindowRouter.initialize(context)
         for (card in CharacterCardManager.getInstance(context).getAllCharacterCards()) {
             val board = TaskBoard(context, "role:${card.id}", false)
             val row = board.pending() ?: continue
-            val chat = chats.filter { it.characterCardId == card.id && it.characterGroupId.isNullOrBlank() }.maxByOrNull { it.updatedAt }
-            if (chat == null) {
-                board.dispatchState(row.getString("id"), row.getJSONObject("dispatch").getString("id"), "failed", "助手尚无私聊窗口，请先建立自己的私聊")
-                continue
-            }
-            return Work(board, row, chat.id, card.id)
+            val chat = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, card.id)
+            if (chat == null) continue
+            return Work(board, row, chat, card.id)
         }
         return null
     }

@@ -21,6 +21,8 @@ class CompanionStore(context: Context) {
     val emotionEnabled get() = preferences.getBoolean("emotion_enabled", false)
     val capabilitiesEnabled get() = preferences.getBoolean("capabilities_enabled", false)
     val proactiveEnabled get() = preferences.getBoolean("proactive_enabled", false)
+    val proactiveRole get() = preferences.getString("target_role", null)
+    fun scheduleKey(role: String) = "schedule:role:$role"
     val silenceEnabled get() = preferences.getBoolean("silence_enabled", true)
     val silenceSeconds get() = preferences.getInt("silence_seconds", 12).coerceIn(5, 120)
     val proactiveMinutes get() = preferences.getInt("proactive_minutes", 15).coerceIn(1, 240)

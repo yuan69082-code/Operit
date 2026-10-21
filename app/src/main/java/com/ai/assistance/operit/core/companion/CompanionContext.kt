@@ -77,7 +77,7 @@ object CompanionContext {
             if (!roleId.isNullOrBlank()) {
                 append(AssistantRoom(context, roleId).prompt())
                 val exploration = ExplorationStore(context)
-                append(if (exploration.enabled(roleId)) "你的自主探索已由用户开启；可在指定私聊用 companion_explore status 查询安排和剩余轮次，用 schedule 安排继续或 pause 暂缓。\n"
+                append(if (exploration.enabled(roleId)) "你的自主探索已由用户开启；可在自己的私聊用 companion_explore status 查询安排和剩余轮次，用 schedule 安排继续或 pause 暂缓；执行跟随最近活跃私聊。\n"
                     else "你的自主探索默认关闭或已被用户关闭；不能自行开启或安排探索唤醒。手动聊天中的查阅和明确提交的待办仍照常进行。\n")
             }
             append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；事件目录只放简短原话节选；完整感受用 group_chat feelings 按 chat_id/from/end 读取，没记就空着。\n")
@@ -86,9 +86,9 @@ object CompanionContext {
             if (open.isNotEmpty()) append("待办共${open.size}项，优先关注：" +
                 open.sortedByDescending { it.optString("urgency") == "urgent" }.take(3).joinToString("；") { it.optString("title") } + "\n")
             if (!roleId.isNullOrBlank()) append(ThoughtPool.prompt(ThoughtPool.all(context, roleId), System.currentTimeMillis()))
-            if (store.proactiveEnabled && store.preferences.getString("target_chat", null) == chatId) {
+            if (store.proactiveEnabled && store.proactiveRole == roleId && roleId != null) {
                 append("你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。当前安排：")
-                append(store.read("schedule:$chatId").toString())
+                append(store.read(store.scheduleKey(roleId)).toString())
             }
             append("\n</operit_state>\n")
         }

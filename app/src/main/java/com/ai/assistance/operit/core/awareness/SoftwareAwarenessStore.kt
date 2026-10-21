@@ -9,8 +9,8 @@ class SoftwareAwarenessStore(context: Context) {
     private val store = CompanionStore(context)
     val preferences = store.preferences
     val role get() = preferences.getString("software_role", null)
-    val chat get() = preferences.getString("software_chat", null)
-    val enabled get() = store.capabilitiesEnabled && role != null && chat != null
+    val chat get() = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(store.context, role)
+    val enabled get() = store.capabilitiesEnabled && role != null
     val wakeEnabled get() = enabled && preferences.getBoolean("software_wake_enabled", false)
     val revision get() = preferences.getLong("software_revision", 0)
     val intervalMs get() = preferences.getInt("software_wake_seconds", 60).coerceIn(15, 600) * 1000L
@@ -35,7 +35,7 @@ class SoftwareAwarenessStore(context: Context) {
     data class Batch(val id: String, val chat: String, val role: String, val revision: Long, val prompt: String)
     fun claim(now: Long): Batch? {
         if (!wakeEnabled) return null
-        val target = checkNotNull(chat)
+        val target = chat ?: return null
         val observer = checkNotNull(role)
         val version = revision
         if (SoftwareEventPolicy.rows(data()).none { it.optString("dispatch") == "pending" }) return null

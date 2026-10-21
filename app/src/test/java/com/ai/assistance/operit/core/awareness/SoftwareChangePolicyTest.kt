@@ -38,6 +38,8 @@ class SoftwareChangePolicyTest {
         assertTrue(SoftwareChangePolicy.changes("api_settings", value, value).isEmpty())
         assertTrue(SoftwareChangePolicy.changes("token_stats_preferences", emptyMap(), value).isEmpty())
         assertTrue(SoftwareChangePolicy.changes("companion_options", emptyMap(), mapOf("software_revision" to 9)).isEmpty())
+        assertTrue(SoftwareChangePolicy.changes("companion_options", emptyMap(), mapOf(
+            "assistant_window:a" to "new-private", "assistant_windows:a" to "[new-private]", "assistant_routing_v1" to true)).isEmpty())
         assertFalse(SoftwareChangePolicy.mayWake("web_session_history"))
     }
     @Test fun membershipIsAttributedToTheNewAssistant() {

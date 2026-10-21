@@ -12,7 +12,7 @@ class PhoneAwarenessStore(context: Context) {
     val preferences = store.preferences
     val enabled get() = preferences.getBoolean("phone_enabled", false)
     val wakeEnabled get() = enabled && preferences.getBoolean("phone_wake_enabled", false)
-    val chat get() = preferences.getString("phone_chat", null)
+    val chat get() = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(store.context, role)
     val role get() = preferences.getString("phone_role", null)
     val intervalMs get() = preferences.getInt("phone_wake_seconds", 30).coerceIn(5, 600) * 1000L
     val excluded get() = preferences.getStringSet("phone_excluded", emptySet()).orEmpty().toSet()

@@ -5,7 +5,8 @@ object GroupPolicy {
     fun ownsTurn(actor: String?, author: String?): Boolean = actor != null && author != null && actor == author
     fun targets(memberIds: List<String>, selected: List<String>): List<String> {
         require(selected.all { it in memberIds }) { "@ 的助手已离开本群，请重新选择" }
-        return if (selected.isEmpty()) memberIds.distinct() else selected.distinct()
+        // Mentions indicate who the user is addressing, never who is allowed to hear or reply.
+        return (selected + memberIds).distinct()
     }
 
     fun canRead(privateOwner: String?, actor: String, group: Boolean, first: Long, through: Long, at: Long): Boolean =

@@ -11,7 +11,6 @@ import com.ai.assistance.operit.core.awareness.SoftwareAwareness
 import com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore
 import com.ai.assistance.operit.core.companion.CompanionRuntime
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
-import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -19,7 +18,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun SoftwareAwarenessPanel(currentChat: String?) {
+fun SoftwareAwarenessPanel() {
     val context = LocalContext.current
     val store = remember { SoftwareAwarenessStore(context) }
     val scope = rememberCoroutineScope()
@@ -70,20 +69,15 @@ fun SoftwareAwarenessPanel(currentChat: String?) {
     Text("软件感知", style = MaterialTheme.typography.titleLarge)
     Text("记录 Vio Life 内发生的变化：模型与助手增删、设置变更、页面访问、进入后台、聊天停留及实际发送。只有你指定的助手能在自己的私聊接收和查询。与手机感知、主助手管理权分别设置。")
     Text("观察助手：$observer")
-    TextButton(enabled = currentChat != null && !busy, onClick = { perform {
-        val id = checkNotNull(currentChat)
-        val chat = ChatHistoryManager.getInstance(context).getChatMetadata(id) ?: error("请先打开目标助手的私聊")
-        check(chat.characterGroupId.isNullOrBlank()) { "请使用独立助手的私聊" }
-        val selected = checkNotNull(chat.characterCardId) { "当前会话没有所属助手" }
+    AssistantTargetPicker(role, !busy) { selected -> perform {
         check(CharacterCardManager.getInstance(context).getAllCharacterCards().any { it.id == selected }) { "助手不存在" }
         listOf("software_awareness", "companion_capabilities").forEach {
             CharacterCardManager.getInstance(context).setToolSelected(selected, "builtin", it, true)
         }
-        store.preferences.edit().putString("software_role", selected).putString("software_chat", id)
+        store.preferences.edit().putString("software_role", selected)
             .putLong("software_revision", store.revision + 1).apply()
         role = selected; changed()
-    } }) { Text("指定当前私聊的助手") }
-    Text("先打开要指定的助手私聊，再进入这里选择。原来只开了能力感知、尚未指定助手的，需要在这里补选一次。")
+    } }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("记录变化并在对话中提供", Modifier.weight(1f))
         Switch(enabled = role != null && !busy, checked = enabled, onCheckedChange = { value ->

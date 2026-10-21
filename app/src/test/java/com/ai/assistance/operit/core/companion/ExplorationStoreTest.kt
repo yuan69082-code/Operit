@@ -26,14 +26,14 @@ class ExplorationStoreTest {
     @Test fun persistedExplorationAndLibrariesKeepAssistantOwnership() {
         val context = context()
         val storage = CompanionStore(context)
-        storage.update("exploration:a") { ExplorationPolicy.configure(it, true, "a-private", setOf("reading"), 4, 0) }
-        storage.update("exploration:b") { ExplorationPolicy.configure(it, true, "b-private", setOf("web"), 2, 0) }
+        storage.update("exploration:a") { ExplorationPolicy.configure(it, true, setOf("reading"), 4, 0) }
+        storage.update("exploration:b") { ExplorationPolicy.configure(it, true, setOf("web"), 2, 0) }
         storage.saveEntry("role:a", null, "我的随记", "随记", "knowledge", "读过的那一页", null)
-        storage.update("exploration:a") { ExplorationPolicy.configure(it, false, "a-private", setOf("reading"), 4, 1) }
+        storage.update("exploration:a") { ExplorationPolicy.configure(it, false, setOf("reading"), 4, 1) }
         val reopened = ExplorationStore(context)
         assertFalse(reopened.enabled("a"))
         assertTrue(reopened.enabled("b"))
-        assertEquals("b-private", reopened.read("b").getString("chat"))
+        assertFalse(reopened.read("b").has("chat"))
         assertEquals(setOf("web"), ExplorationPolicy.choices(reopened.read("b")))
         assertEquals("读过的那一页", CompanionStore(context).entries("role:a").single().getString("content"))
         assertTrue(CompanionStore(context).entries("role:b").isEmpty())

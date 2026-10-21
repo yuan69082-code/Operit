@@ -1,6 +1,6 @@
 package com.ai.assistance.operit.core.group
 
-/** Routing is explicit: an empty queue is not permission to start another round. */
+/** New public speech lets every other member decide again; silence does not create new work. */
 object GroupTurnPolicy {
     data class Control(val action: String, val targets: List<String>)
     private val marker = Regex("""<group_turn\s+action="(quiet|wait_user|end|respond)"(?:\s+targets="([^"]*)")?\s*/>""")
@@ -13,13 +13,11 @@ object GroupTurnPolicy {
         }
     }
     fun publicBody(text: String): String = cleanLegacyPrefix(marker.replace(text, "")).trim()
-    fun next(pending: List<String>, action: String?, targets: List<String>, members: Set<String>,
-             actor: String, continuous: Boolean): List<String> {
-        if (action == "end" || action == "wait_user") return emptyList()
+    fun next(pending: List<String>, members: Set<String>, actor: String, published: Boolean): List<String> {
         val eligible = pending.filter { it in members && it != actor }
-        return if (action == "respond" && continuous)
-            targets.filter { it in members && it != actor }.distinct()
-        else eligible.distinct()
+        // Keep waiting listeners ahead of members who have already decided. A member's
+        // wait/end decision cannot remove anyone else's opportunity to speak.
+        return (eligible + if (published) members.filter { it != actor } else emptyList()).distinct()
     }
 
     fun suppress(action: String?): Boolean = action == "quiet"
