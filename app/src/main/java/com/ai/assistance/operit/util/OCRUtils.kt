@@ -95,21 +95,10 @@ object OCRUtils {
      * @return 经过处理的Bitmap，如果无需处理则返回原始Bitmap
      */
     private fun preprocessBitmap(bitmap: Bitmap): Bitmap {
-        // 对于高质量模式，我们放大图像。这可以显著提高小图像的OCR准确性。
-        // 我们使用一个缩放因子，但避免使图像过大。
-        val scaleFactor = 2.0f
-        val maxDimension = 4096 // 限制最大尺寸以避免OOM
-
-        val newWidth = (bitmap.width * scaleFactor).toInt()
-        val newHeight = (bitmap.height * scaleFactor).toInt()
-
-        // 如果图像已经足够大或放大后会超出限制，则不进行处理
-        if (bitmap.width >= newWidth ||
-                        bitmap.height >= newHeight ||
-                        newWidth > maxDimension ||
-                        newHeight > maxDimension
-        ) {
-            AppLogger.d(TAG, "Bitmap already large enough, not upscaling for OCR.")
+        // 1080x2400 等长屏无法整体放大两倍，但仍可在尺寸与像素预算内放大。
+        // 不缩小原图，不锐化或猜测笔画，避免预处理反而丢失文字细节。
+        val (newWidth, newHeight) = OcrImageSizing.highQualitySize(bitmap.width, bitmap.height)
+        if (newWidth == bitmap.width && newHeight == bitmap.height) {
             return bitmap
         }
 
@@ -231,7 +220,7 @@ object OCRUtils {
     // --------- 高级API：简化的接口，直接返回文本字符串 ---------//
 
     /**
-     * 识别图像中的文本（同时识别拉丁文和中文）
+     * 识别图像中的中英文文本，使用同一个中文识别器
      *
      * @param context 上下文
      * @param bitmap 图像
@@ -244,20 +233,9 @@ object OCRUtils {
             bitmap: Bitmap,
             quality: Quality = Quality.LOW
     ): String {
-        // 同时进行拉丁文和中文识别
-        val latinResult = recognizeTextFromBitmap(bitmap, Language.LATIN, quality)
-        val chineseResult = recognizeTextFromBitmap(bitmap, Language.CHINESE, quality)
-
-        val latinText = if (latinResult is OCRResult.Success) latinResult.getFullText() else ""
-        val chineseText = if (chineseResult is OCRResult.Success) chineseResult.getFullText() else ""
-
-        // 合并结果，如果两种结果相同或其中一个为空，则直接返回非空结果
-        return when {
-            latinText.isEmpty() -> chineseText
-            chineseText.isEmpty() -> latinText
-            latinText == chineseText -> latinText
-            else -> "$latinText\n$chineseText" // 不同结果合并返回
-        }
+        // 中文模型本身支持拉丁字符。另跑拉丁模型再拼接全文，会把中文误识别
+        // 得到的碎字也送给助手，形成同一屏幕的两份互相矛盾的文本。
+        return recognizeText(context, bitmap, Language.CHINESE, quality)
     }
 
     /**
@@ -287,7 +265,7 @@ object OCRUtils {
     }
 
     /**
-     * 从文件Uri识别文本（同时识别拉丁文和中文）
+     * 从文件Uri识别中英文文本，使用同一个中文识别器
      *
      * @param context 上下文
      * @param uri 图像Uri
@@ -296,19 +274,14 @@ object OCRUtils {
      */
     @WorkerThread
     suspend fun recognizeText(context: Context, uri: Uri, quality: Quality = Quality.LOW): String {
-        // 同时进行拉丁文和中文识别
-        val latinResult = recognizeTextFromUri(context, uri, Language.LATIN, quality)
-        val chineseResult = recognizeTextFromUri(context, uri, Language.CHINESE, quality)
-
-        val latinText = if (latinResult is OCRResult.Success) latinResult.getFullText() else ""
-        val chineseText = if (chineseResult is OCRResult.Success) chineseResult.getFullText() else ""
-
-        // 合并结果，如果两种结果相同或其中一个为空，则直接返回非空结果
-        return when {
-            latinText.isEmpty() -> chineseText
-            chineseText.isEmpty() -> latinText
-            latinText == chineseText -> latinText
-            else -> "$latinText\n$chineseText" // 不同结果合并返回
+        // 与 Bitmap 入口一致，只解码和识别一次，不附带另一模型的错误转写。
+        val result = recognizeTextFromUri(context, uri, Language.CHINESE, quality)
+        return when (result) {
+            is OCRResult.Success -> result.getFullText()
+            is OCRResult.Error -> {
+                AppLogger.e(TAG, "Text recognition failed: ${result.message}")
+                ""
+            }
         }
     }
 
