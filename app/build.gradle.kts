@@ -731,7 +731,8 @@ dependencies {
     implementation(libs.mediapipe.tasks.text)
     
     // ONNX Runtime for Android - 支持更强大的多语言Embedding模型
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+    // PP-OCRv5's pinned ONNX model uses IR v10; 1.17 only supports IR v9.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
 
     // Room 数据库
     implementation(libs.room.runtime)

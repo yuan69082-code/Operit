@@ -21,10 +21,11 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
-/** OCR工具类，封装ML Kit的文本识别功能 */
+/** OCR工具类：ML Kit 文字定位与高质量中英文逐行识别。 */
 object OCRUtils {
     private const val TAG = "OCRUtils"
 
@@ -46,7 +47,7 @@ object OCRUtils {
     enum class Quality {
         /** 快速、低精度，适用于预览或简单文本 */
         LOW,
-        /** 慢速、高精度，会进行图像预处理以提升准确率 */
+        /** 默认中英文入口使用逐行识别；显式语言接口使用图像预处理。 */
         HIGH
     }
 
@@ -220,7 +221,7 @@ object OCRUtils {
     // --------- 高级API：简化的接口，直接返回文本字符串 ---------//
 
     /**
-     * 识别图像中的中英文文本，使用同一个中文识别器
+     * 识别图像中的中英文文本，高质量模式按文字行识别原始像素
      *
      * @param context 上下文
      * @param bitmap 图像
@@ -233,6 +234,16 @@ object OCRUtils {
             bitmap: Bitmap,
             quality: Quality = Quality.LOW
     ): String {
+        if (quality == Quality.HIGH) {
+            return try {
+                ChineseScreenOcr.recognize(context, bitmap)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "High quality Chinese OCR failed", e)
+                ""
+            }
+        }
         // 中文模型本身支持拉丁字符。另跑拉丁模型再拼接全文，会把中文误识别
         // 得到的碎字也送给助手，形成同一屏幕的两份互相矛盾的文本。
         return recognizeText(context, bitmap, Language.CHINESE, quality)
@@ -265,7 +276,7 @@ object OCRUtils {
     }
 
     /**
-     * 从文件Uri识别中英文文本，使用同一个中文识别器
+     * 从文件Uri识别中英文文本，高质量模式按文字行识别原始像素
      *
      * @param context 上下文
      * @param uri 图像Uri
@@ -274,6 +285,24 @@ object OCRUtils {
      */
     @WorkerThread
     suspend fun recognizeText(context: Context, uri: Uri, quality: Quality = Quality.LOW): String {
+        if (quality == Quality.HIGH) {
+            return withContext(Dispatchers.IO) {
+                try {
+                    val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        ?: throw IOException("Cannot decode OCR input")
+                    try {
+                        recognizeText(context, bitmap, quality)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLogger.e(TAG, "High quality Chinese OCR input failed", e)
+                    ""
+                }
+            }
+        }
         // 与 Bitmap 入口一致，只解码和识别一次，不附带另一模型的错误转写。
         val result = recognizeTextFromUri(context, uri, Language.CHINESE, quality)
         return when (result) {
