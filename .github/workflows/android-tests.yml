@@ -2,6 +2,8 @@ name: Android Tests
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main, feat/assistant-workspaces, feat/group-continuity-games]
     paths:
