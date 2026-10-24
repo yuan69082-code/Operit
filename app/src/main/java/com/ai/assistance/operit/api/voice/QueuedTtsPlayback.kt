@@ -7,6 +7,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CoroutineScope
@@ -226,16 +227,23 @@ internal class QueuedTtsPlayback(
     }
 
     private suspend fun playAudioFile(audioFile: File, onPlaybackStart: (suspend () -> Unit)?) {
-        if (!audioFile.exists() || audioFile.length() == 0L) {
-            AppLogger.e(tag, "Audio file is invalid: ${audioFile.absolutePath}")
-            return
-        }
+        // A silent return used to complete the call sentence as successfully spoken.
+        check(audioFile.isFile && audioFile.length() > 0L) { "语音服务返回的音频为空或已失效" }
 
+        val playbackError = AtomicReference<IllegalStateException?>(null)
         try {
             withContext(Dispatchers.IO) {
                 isPaused.set(false)
                 FileInputStream(audioFile).use { fis ->
-                    val mp = MediaPlayer().apply {
+                    val mp = MediaPlayer()
+                    // Retain ownership before prepare/start so failed decodes are released too.
+                    mediaPlayer?.release()
+                    mediaPlayer = mp
+                    mp.apply {
+                        setOnErrorListener { _, what, extra ->
+                            playbackError.set(IllegalStateException("语音播放失败 ($what/$extra)"))
+                            true
+                        }
                         setAudioAttributes(
                             AudioAttributes.Builder()
                                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -248,8 +256,6 @@ internal class QueuedTtsPlayback(
                         start()
                     }
 
-                    mediaPlayer?.release()
-                    mediaPlayer = mp
                     _isSpeaking.value = true
                 }
             }
@@ -257,11 +263,14 @@ internal class QueuedTtsPlayback(
             onPlaybackStart?.invoke()
             mediaPlayer?.let {
                 while (it.isPlaying || isPaused.get()) {
+                    playbackError.get()?.let { error -> throw error }
                     delay(100)
                 }
             }
+            playbackError.get()?.let { throw it }
         } catch (e: Exception) {
             AppLogger.e(tag, "播放TTS音频失败", e)
+            throw e
         } finally {
             _isSpeaking.value = false
             isPaused.set(false)

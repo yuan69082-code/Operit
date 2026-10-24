@@ -148,14 +148,14 @@ class VoiceCallAudioRecorder(private val context: Context) {
         val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minBuffer > 0) { "Microphone does not support 16 kHz PCM" }
         val manager = context.getSystemService(AudioManager::class.java)
-        val previousMode = manager.mode
+        val audioRoute = VoiceCallAudioRoute(manager)
         val recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate,
             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate * 2))
         var echo: AcousticEchoCanceler? = null
         var vad: OnnxSileroVad? = null
         try {
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
-            manager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioRoute.start()
             if (AcousticEchoCanceler.isAvailable()) {
                 echo = AcousticEchoCanceler.create(recorder.audioSessionId)
                 echo?.setEnabled(true)
@@ -182,6 +182,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
             while (true) {
                 currentCoroutineContext().ensureActive()
+                audioRoute.checkHealthy()
                 val count = recorder.read(frame, 0, frame.size)
                 check(count > 0) { "Microphone read failed: $count" }
                 totalSamples += count
@@ -291,8 +292,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 try { vad?.close() } finally {
                     try { echo?.release() } finally {
                         try { recorder.release() } finally {
-                            manager.mode = previousMode
-                            onSpeechState(false)
+                            try { audioRoute.close() } finally { onSpeechState(false) }
                         }
                     }
                 }
