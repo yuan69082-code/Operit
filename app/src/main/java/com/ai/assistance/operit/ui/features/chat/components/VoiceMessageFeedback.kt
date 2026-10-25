@@ -30,7 +30,12 @@ fun VoiceMessageOutboxRows(viewModel: ChatViewModel, chatId: String?) {
                     Text("[语音条] ${item.durationMillis / 1000} 秒 · ${item.status}",
                         color = if (item.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSecondaryContainer,
                         style = MaterialTheme.typography.bodyMedium)
-                    if (item.failed && item.analysisFailed && !item.sendWithoutAnalysis && item.text.isNotBlank()) {
+                    if (item.interrupted) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { viewModel.discardInterruptedVoiceMessage(item.id) }) { Text("重录") }
+                            TextButton(onClick = { viewModel.retryVoiceMessage(item.id) }) { Text("发送") }
+                        }
+                    } else if (item.failed && item.analysisFailed && !item.sendWithoutAnalysis && item.text.isNotBlank()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = { viewModel.retryVoiceMessage(item.id, reanalyze = true) }) { Text("重新分析") }
                             TextButton(onClick = { viewModel.sendVoiceMessageWithoutAnalysis(item.id) }) { Text("直接发送") }
@@ -70,7 +75,11 @@ fun VoiceRecordingFeedback(viewModel: ChatViewModel, modifier: Modifier = Modifi
             Spacer(Modifier.width(12.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text("${recording.millis / 1000} 秒", style = MaterialTheme.typography.titleMedium)
-                Text("松开发送", style = MaterialTheme.typography.labelSmall)
+                Text(
+                    if (recording.cancelArmed) "松开取消" else "松开发送 · 上滑取消",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (recording.cancelArmed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
