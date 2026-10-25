@@ -57,10 +57,20 @@ class TranscriptionInputTest(unittest.TestCase):
                 return iter([SimpleNamespace(words=[SimpleNamespace(
                     word="测试", start=0.0, end=0.1, probability=0.9)])]), SimpleNamespace(duration=0.1)
 
+        class FakeOpenCC:
+            def __init__(self, config):
+                self.config = config
+
+            def convert(self, word):
+                return word.replace("聽", "听").replace("什麼", "什么")
+
         with tempfile.TemporaryDirectory() as directory:
             audio_path = pathlib.Path(directory) / "sample.wav"
             sf.write(audio_path, np.zeros(1600, dtype=np.float32), 16000)
-            with mock.patch.dict(sys.modules, {"faster_whisper": SimpleNamespace(WhisperModel=FakeModel)}):
+            with mock.patch.dict(sys.modules, {
+                "faster_whisper": SimpleNamespace(WhisperModel=FakeModel),
+                "opencc": SimpleNamespace(OpenCC=FakeOpenCC),
+            }):
                 module.transcribe(audio_path)
             self.assertEqual("small", calls["name"])
             self.assertTrue(calls["kwargs"]["local_files_only"])
@@ -68,6 +78,11 @@ class TranscriptionInputTest(unittest.TestCase):
             self.assertEqual(np.float32, calls["audio"].dtype)
             self.assertEqual(1600, len(calls["audio"]))
             self.assertTrue(calls["options"]["word_timestamps"])
+            self.assertEqual("zh", calls["options"]["language"])
+            self.assertIn("园园", calls["options"]["initial_prompt"])
+            self.assertTrue(calls["options"]["vad_filter"])
+            self.assertEqual(200, calls["options"]["vad_parameters"]["speech_pad_ms"])
+            self.assertFalse(calls["options"]["condition_on_previous_text"])
             self.assertTrue(pathlib.Path(str(audio_path) + ".words.json").exists())
 
     def test_invalid_sample_rate_rejected_before_model_load(self):
@@ -81,6 +96,23 @@ class TranscriptionInputTest(unittest.TestCase):
             sf.write(audio_path, np.zeros(800, dtype=np.float32), 8000)
             with self.assertRaisesRegex(ValueError, "16 kHz mono WAV"):
                 module.transcribe(audio_path)
+
+
+class ChineseTranscriptValidationTest(unittest.TestCase):
+    def test_reject_emoji_only_and_punctuation_only(self):
+        for text in ("😉", "……", "?!。", "  "):
+            with self.subTest(text=text):
+                self.assertFalse(module.is_valid_chinese_transcript([{"word": text}]))
+
+    def test_accept_chinese_and_repeated_words(self):
+        self.assertTrue(module.is_valid_chinese_transcript([{"word": "我"}, {"word": "听见了"}]))
+
+    def test_convert_traditional_before_persisting(self):
+        try:
+            from opencc import OpenCC
+        except ImportError:
+            self.skipTest("OpenCC dependency required for actual conversion test")
+        self.assertEqual("听什么", OpenCC("t2s").convert("聽什麼"))
 
 
 if __name__ == "__main__":
