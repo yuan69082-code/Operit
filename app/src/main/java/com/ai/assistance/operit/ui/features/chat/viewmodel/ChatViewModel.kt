@@ -1485,12 +1485,19 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     private val voiceOutbox by lazy { com.ai.assistance.operit.ui.features.chat.voice.VoiceMessageOutbox(context.applicationContext) }
     val voiceMessages get() = voiceOutbox.items
-    data class VoiceRecordingState(val active: Boolean = false, val millis: Long = 0, val levels: List<Float> = emptyList())
+    data class VoiceRecordingState(
+        val active: Boolean = false, val millis: Long = 0, val levels: List<Float> = emptyList(),
+        val cancelArmed: Boolean = false,
+    )
     private val _voiceRecording = kotlinx.coroutines.flow.MutableStateFlow(VoiceRecordingState())
     val voiceRecording: kotlinx.coroutines.flow.StateFlow<VoiceRecordingState> = _voiceRecording
     fun updateVoiceRecording(active: Boolean, rms: Float = 0f, millis: Long = 0) {
+        val previous = _voiceRecording.value
         _voiceRecording.value = if (active) VoiceRecordingState(true, millis,
-            (_voiceRecording.value.levels + rms).takeLast(48)) else VoiceRecordingState()
+            (previous.levels + rms).takeLast(48), cancelArmed = previous.cancelArmed) else VoiceRecordingState()
+    }
+    fun updateVoiceCancelArmed(armed: Boolean) {
+        _voiceRecording.value = _voiceRecording.value.copy(cancelArmed = armed)
     }
     private val voiceSendMutex = kotlinx.coroutines.sync.Mutex()
     private val voiceJobs = mutableMapOf<Long, kotlinx.coroutines.Job>()
@@ -1506,6 +1513,21 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    fun saveInterruptedVoiceMessage(file: java.io.File, quiet: List<Pair<Long, Long>>, chatId: String) {
+        try {
+            voiceOutbox.add(file, quiet, chatId, interrupted = true)
+            showToast("录音中断，已保存；可发送或重录")
+        } catch (error: Exception) {
+            com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Cannot save interrupted recording", error)
+            showToast("录音已保留在 "+file.absolutePath+"；待发记录保存失败："+error.message)
+        }
+    }
+
+    fun discardInterruptedVoiceMessage(id: Long) {
+        voiceOutbox.discardInterrupted(id)
+        showToast("已放弃中断录音，请按住麦克风重新录制")
+    }
+
     fun sendVoiceMessageWithoutAnalysis(id: Long) {
         if (voiceJobs[id]?.isActive == true) return
         val item = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
@@ -1519,6 +1541,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         if (voiceJobs[id]?.isActive == true) return
         val initial = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
         voiceOutbox.update(initial.copy(status = "发送中 · 等待处理", failed = false,
+            interrupted = false,
             analysisFailed = if (reanalyze) false else initial.analysisFailed,
             sendWithoutAnalysis = if (reanalyze) false else initial.sendWithoutAnalysis,
             acoustic = if (reanalyze) "" else initial.acoustic))
