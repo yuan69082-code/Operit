@@ -16,6 +16,7 @@ class VoiceMessageOutbox(context: Context) {
         val archive: String = "", val text: String = "", val acoustic: String = "",
         val status: String = "发送中 · 已保存", val failed: Boolean = false,
         val completed: Int = 0, val total: Int = 0,
+        val analysisFailed: Boolean = false, val sendWithoutAnalysis: Boolean = false,
     )
     private val directory = File(context.filesDir, "voice_outbox").apply { mkdirs() }
     private val state = MutableStateFlow<List<Item>>(emptyList())
@@ -28,7 +29,10 @@ class VoiceMessageOutbox(context: Context) {
                 Item(json.getLong("id"), json.getString("chat"), json.getString("path"),
                     (0 until intervals.length()).map { intervals.getJSONArray(it).let { row -> row.getLong(0) to row.getLong(1) } },
                     json.getLong("duration"), json.getString("archive"), json.getString("text"), json.optString("acoustic"),
-                    "发送中断 · 录音已保存，点按重试", failed = true)
+                    status = if (json.optBoolean("analysisFailed") && !json.optBoolean("sendWithoutAnalysis"))
+                        "本地声学分析失败 · 原模型转写和录音已保存" else "发送中断 · 录音已保存，点按重试",
+                    failed = true, analysisFailed = json.optBoolean("analysisFailed"),
+                    sendWithoutAnalysis = json.optBoolean("sendWithoutAnalysis"))
             } catch (error: Exception) {
                 com.ai.assistance.operit.util.AppLogger.e("VoiceOutbox", "Cannot read $file; retained for recovery", error)
                 null
@@ -46,6 +50,7 @@ class VoiceMessageOutbox(context: Context) {
         val json = JSONObject().put("id", item.id).put("chat", item.chatId).put("path", item.path)
             .put("quiet", org.json.JSONArray().apply { item.quiet.forEach { (a, b) -> put(org.json.JSONArray().put(a).put(b)) } })
             .put("duration", item.durationMillis).put("archive", item.archive).put("text", item.text).put("acoustic", item.acoustic)
+        json.put("analysisFailed", item.analysisFailed).put("sendWithoutAnalysis", item.sendWithoutAnalysis)
         val atomic = AtomicFile(File(directory, "${item.id}.json"))
         val output = atomic.startWrite()
         try { output.write(json.toString().toByteArray(Charsets.UTF_8)); atomic.finishWrite(output) }
