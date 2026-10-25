@@ -471,6 +471,9 @@ class VoiceCallController(
                                         }
                                     }
                                     for ((sentence, queued) in sentences) {
+                                        // Show the received reply while synthesis prepares audio. Previously
+                                        // a failed player hid both the answer and the source of the silence.
+                                        reply = sentence
                                         val played = if (queued != null) queued.await() else {
                                             phase = Phase.SPEAKING
                                             reply = sentence

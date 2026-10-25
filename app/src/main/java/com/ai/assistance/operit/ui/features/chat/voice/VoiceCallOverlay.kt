@@ -95,6 +95,12 @@ class VoiceCallOverlay(private val context: Context, private val call: VoiceCall
                                     Icon(Icons.Default.Close, contentDescription = "临时隐藏，通话继续")
                                 }
                             }
+                            // Errors must remain visible in the floating/compact call too.
+                            if (call.phase == VoiceCallController.Phase.ERROR) {
+                                Text(call.errorMessage, color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = 120.dp)
+                                        .verticalScroll(rememberScrollState()))
+                            }
                             if (!compact) {
                                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
                                     if (call.phase == VoiceCallController.Phase.RINGING) Text("等待对方接听…")
