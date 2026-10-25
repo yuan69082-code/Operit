@@ -1506,10 +1506,22 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun retryVoiceMessage(id: Long) {
+    fun sendVoiceMessageWithoutAnalysis(id: Long) {
+        if (voiceJobs[id]?.isActive == true) return
+        val item = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
+        // Only an explicit user choice may bypass failed supplemental analysis.
+        if (!item.failed || !item.analysisFailed || item.text.isBlank()) return
+        voiceOutbox.update(item.copy(sendWithoutAnalysis = true))
+        retryVoiceMessage(id)
+    }
+
+    fun retryVoiceMessage(id: Long, reanalyze: Boolean = false) {
         if (voiceJobs[id]?.isActive == true) return
         val initial = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
-        voiceOutbox.update(initial.copy(status = "发送中 · 等待处理", failed = false))
+        voiceOutbox.update(initial.copy(status = "发送中 · 等待处理", failed = false,
+            analysisFailed = if (reanalyze) false else initial.analysisFailed,
+            sendWithoutAnalysis = if (reanalyze) false else initial.sendWithoutAnalysis,
+            acoustic = if (reanalyze) "" else initial.acoustic))
         voiceJobs[id] = viewModelScope.launch {
             voiceSendMutex.lock()
             var item = voiceOutbox.items.value.firstOrNull { it.id == id } ?: run { voiceSendMutex.unlock(); return@launch }
@@ -1541,9 +1553,18 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     item = item.copy(text = text)
                     voiceOutbox.update(item)
                 }
-                if (item.acoustic.isBlank()) {
-                    val acoustic = com.ai.assistance.operit.ui.features.chat.voice.VoiceLocalAnalysis(app).analyze(item.archive) { stage(it) }
-                    item = item.copy(acoustic = acoustic)
+                if (item.acoustic.isBlank() && !item.sendWithoutAnalysis) {
+                    val acoustic = try {
+                        com.ai.assistance.operit.ui.features.chat.voice.VoiceLocalAnalysis(app).analyze(item.archive) { stage(it) }
+                    } catch (error: Exception) {
+                        if (error is kotlinx.coroutines.CancellationException) throw error
+                        com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Supplemental analysis failed", error)
+                        item = item.copy(analysisFailed = true, failed = true,
+                            status = "本地声学分析失败 · 原模型转写和录音已保存：" + error.message.orEmpty())
+                        voiceOutbox.update(item)
+                        return@launch
+                    }
+                    item = item.copy(acoustic = acoustic, analysisFailed = false)
                     voiceOutbox.update(item)
                 }
                 stage("发送中 · 等待 AI 空闲")
@@ -1553,7 +1574,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 val accepted = kotlinx.coroutines.CompletableDeferred<Unit>()
                 messageCoordinationDelegate.sendUserMessage(
                     chatIdOverride = item.chatId, roleCardIdOverride = chat.characterCardId,
-                    messageTextOverride = item.text + item.acoustic,
+                    messageTextOverride = item.text + if (item.sendWithoutAnalysis)
+                        com.ai.assistance.operit.util.VoiceCallMessageText.LOCAL_ANALYSIS_FAILED_NOTICE else item.acoustic,
                     turnOptions = com.ai.assistance.operit.data.model.ChatTurnOptions(
                         voiceMessageTimestamp = item.id,
                         onUserMessagePersisted = { voiceOutbox.sent(id); accepted.complete(Unit) },
