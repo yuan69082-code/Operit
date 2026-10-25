@@ -770,14 +770,13 @@ class VoiceCallController(
             check(recognizer.startRecognition(
                 continuousMode = false,
                 partialResults = true,
-                silenceDurationMs = if (manualMode) 60_000 else 2000,
+                silenceDurationMs = if (manualMode) Int.MAX_VALUE else 2000,
             )) { context.getString(R.string.voice_call_stt_failed) }
             if (manualMode) manualTimer = launch {
                 val start = android.os.SystemClock.elapsedRealtime()
                 while (!result.isCompleted && phase == Phase.LISTENING) {
                     delay(100)
                     recordingMillis = android.os.SystemClock.elapsedRealtime() - start
-                    if (recordingMillis >= 60_000) { recognizer.stopRecognition(); break }
                 }
             }
             result.await()

@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -34,6 +33,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
         check(minBuffer > 0) { "Microphone does not support 16 kHz PCM" }
         val recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate * 2))
+        val pcm = PcmWaveBuffer(File(checkNotNull(context.getExternalFilesDir(null)), "voice_recordings"))
         try {
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
             val frame = ShortArray(320) // 20 ms frames; cancellation never waits for a long recording.
@@ -41,7 +41,6 @@ class VoiceCallAudioRecorder(private val context: Context) {
             // Keep a bounded manual buffer so a quiet sentence can be submitted explicitly,
             // even when it never crosses the automatic sound threshold.
             val manualFrames = ArrayDeque<ByteArray>()
-            val pcm = ByteArrayOutputStream()
             var recordingSound = manual
             var quietFrames = 0
             var sampleCount = 0L
@@ -92,24 +91,17 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     }
                     quietFrames = if (hasSound) 0 else quietFrames + 1
                     // A natural thinking pause must not terminate the user's sentence.
-                    if ((!manual && quietFrames >= 100) || pcm.size() >= rate * 2 * 60) break
+                    if (!manual && quietFrames >= 100) break
                 }
             }
-            val data = pcm.toByteArray()
             quietStartMillis?.let { start ->
-                val end = data.size.toLong() * 1000 / (rate * 2)
+                val end = pcm.size() * 1000 / (rate * 2)
                 if (end - start >= 120) quietIntervals.add(start to end)
             }
             lastQuietIntervals = quietIntervals.toList()
-            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-                .put("RIFF".toByteArray()).putInt(data.size + 36).put("WAVEfmt ".toByteArray())
-                .putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2)
-                .putShort(2).putShort(16).put("data".toByteArray()).putInt(data.size).array()
-            val directory = File(checkNotNull(context.getExternalFilesDir(null)), "voice_recordings").apply { mkdirs() }
-            File.createTempFile("call-", ".wav", directory).also { file ->
-                file.outputStream().use { it.write(header); it.write(data) }
-            }
+            pcm.finish()
         } finally {
+            pcm.reset()
             try {
                 if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
             } finally {
@@ -151,6 +143,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
         val audioRoute = VoiceCallAudioRoute(manager)
         val recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate,
             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate * 2))
+        val pcm = PcmWaveBuffer(File(checkNotNull(context.getExternalFilesDir(null)), "voice_recordings"))
         var echo: AcousticEchoCanceler? = null
         var vad: OnnxSileroVad? = null
         try {
@@ -169,7 +162,6 @@ class VoiceCallAudioRecorder(private val context: Context) {
             var speechFrame = false
             var speechTurnOpen = false
             var nonSpeechSamples = 0L
-            val pcm = ByteArrayOutputStream()
             val preRoll = ArrayDeque<ByteArray>()
             val quietIntervals = mutableListOf<Pair<Long, Long>>()
             var quietStart: Long? = null
@@ -231,7 +223,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                     nonSpeechSamples = 0L
                 } else if (speechTurnOpen) nonSpeechSamples += count
                 val manualSubmit = shouldSubmit()
-                if (pcm.size() == 0) {
+                if (pcm.size() == 0L) {
                     preRoll.addLast(bytes.array())
                     if (preRoll.size > 10) preRoll.removeFirst()
                     if (!manual && !hasSound && !speechTurnOpen && !manualSubmit) continue
@@ -255,18 +247,11 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 val windowEnded = boundary == VoiceCallSegmentPolicy.Boundary.CHUNK
                 if (boundary != VoiceCallSegmentPolicy.Boundary.CONTINUE) {
                     quietStart?.let { if (elapsed - it >= 120) quietIntervals.add(it to elapsed) }
-                    val data = pcm.toByteArray()
-                    val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-                        .put("RIFF".toByteArray()).putInt(data.size + 36).put("WAVEfmt ".toByteArray())
-                        .putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2)
-                        .putShort(2).putShort(16).put("data".toByteArray()).putInt(data.size).array()
-                    val dir = File(checkNotNull(context.getExternalFilesDir(null)), "voice_recordings").apply { mkdirs() }
-                    val file = File.createTempFile("live-call-", ".wav", dir)
+                    val file = pcm.finish()
                     try {
-                        file.outputStream().use { it.write(header); it.write(data) }
                         onClip(Clip(file, quietIntervals.toList(), clipStartSamples * 1000 / rate,
                             totalSamples * 1000 / rate, windowEnded, remoteText, epoch, speechTurnOpen || manual))
-                        if (manual) onManualSubmitted()
+                        if (manual && !windowEnded) onManualSubmitted()
                     } catch (error: Throwable) {
                         file.delete()
                         throw error
@@ -286,6 +271,7 @@ class VoiceCallAudioRecorder(private val context: Context) {
                 }
             }
         } finally {
+            pcm.reset()
             try {
                 if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
             } finally {

@@ -1483,6 +1483,115 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         )
     }
 
+    private val voiceOutbox by lazy { com.ai.assistance.operit.ui.features.chat.voice.VoiceMessageOutbox(context.applicationContext) }
+    val voiceMessages get() = voiceOutbox.items
+    data class VoiceRecordingState(val active: Boolean = false, val millis: Long = 0, val levels: List<Float> = emptyList())
+    private val _voiceRecording = kotlinx.coroutines.flow.MutableStateFlow(VoiceRecordingState())
+    val voiceRecording: kotlinx.coroutines.flow.StateFlow<VoiceRecordingState> = _voiceRecording
+    fun updateVoiceRecording(active: Boolean, rms: Float = 0f, millis: Long = 0) {
+        _voiceRecording.value = if (active) VoiceRecordingState(true, millis,
+            (_voiceRecording.value.levels + rms).takeLast(48)) else VoiceRecordingState()
+    }
+    private val voiceSendMutex = kotlinx.coroutines.sync.Mutex()
+    private val voiceJobs = mutableMapOf<Long, kotlinx.coroutines.Job>()
+
+    fun sendVoiceMessage(file: java.io.File, quiet: List<Pair<Long, Long>>, chatId: String) {
+        try {
+            // Persist before launching any network work, including while another response streams.
+            val item = voiceOutbox.add(file, quiet, chatId)
+            retryVoiceMessage(item.id)
+        } catch (error: Exception) {
+            com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Cannot queue recording", error)
+            showToast("录音已保留在 "+file.absolutePath+"；无法建立发送任务："+error.message)
+        }
+    }
+
+    fun sendVoiceMessageWithoutAnalysis(id: Long) {
+        if (voiceJobs[id]?.isActive == true) return
+        val item = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
+        // Only an explicit user choice may bypass failed supplemental analysis.
+        if (!item.failed || !item.analysisFailed || item.text.isBlank()) return
+        voiceOutbox.update(item.copy(sendWithoutAnalysis = true))
+        retryVoiceMessage(id)
+    }
+
+    fun retryVoiceMessage(id: Long, reanalyze: Boolean = false) {
+        if (voiceJobs[id]?.isActive == true) return
+        val initial = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
+        voiceOutbox.update(initial.copy(status = "发送中 · 等待处理", failed = false,
+            analysisFailed = if (reanalyze) false else initial.analysisFailed,
+            sendWithoutAnalysis = if (reanalyze) false else initial.sendWithoutAnalysis,
+            acoustic = if (reanalyze) "" else initial.acoustic))
+        voiceJobs[id] = viewModelScope.launch {
+            voiceSendMutex.lock()
+            var item = voiceOutbox.items.value.firstOrNull { it.id == id } ?: run { voiceSendMutex.unlock(); return@launch }
+            fun stage(label: String, completed: Int = 0, total: Int = 0) {
+                item = item.copy(status = label, failed = false, completed = completed, total = total)
+                voiceOutbox.update(item)
+            }
+            try {
+                val app = context.applicationContext
+                val history = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(app)
+                // Reconcile a process death between history commit and outbox acknowledgement.
+                if (history.loadChatMessages(item.chatId).any { it.timestamp == item.id && it.sender == "user" }) {
+                    voiceOutbox.sent(id)
+                    return@launch
+                }
+                val file = java.io.File(item.path)
+                check(file.isFile) { "录音文件不存在：" + item.path }
+                if (item.archive.isBlank()) {
+                    stage("发送中 · 保存原始录音")
+                    item = item.copy(archive = com.ai.assistance.operit.ui.features.chat.voice.VoiceMessageArchive.save(app, file))
+                    voiceOutbox.update(item)
+                }
+                if (item.text.isBlank()) {
+                    val analysis = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(app).analyze(file, null, item.quiet,
+                        onProgress = { done, total -> stage("发送中 · 转写 "+done+"/"+total+" 段", done, total) })
+                    check(analysis.userText.isNotBlank() || analysis.soundActivity) { "没有识别到说话或声音" }
+                    val text = analysis.toContext().replace("[语音通话转写]", "[语音条转写]").replace("本次通话", "本条录音").replace("暂定通话方", "暂定发言者") +
+                        "\n[客户端：这是一条语音消息，未建立电话通话。以上声音分析来自独立音频模型。]"
+                    item = item.copy(text = text)
+                    voiceOutbox.update(item)
+                }
+                if (item.acoustic.isBlank() && !item.sendWithoutAnalysis) {
+                    val acoustic = try {
+                        com.ai.assistance.operit.ui.features.chat.voice.VoiceLocalAnalysis(app).analyze(item.archive) { stage(it) }
+                    } catch (error: Exception) {
+                        if (error is kotlinx.coroutines.CancellationException) throw error
+                        com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Supplemental analysis failed", error)
+                        item = item.copy(analysisFailed = true, failed = true,
+                            status = "本地声学分析失败 · 原模型转写和录音已保存：" + error.message.orEmpty())
+                        voiceOutbox.update(item)
+                        return@launch
+                    }
+                    item = item.copy(acoustic = acoustic, analysisFailed = false)
+                    voiceOutbox.update(item)
+                }
+                stage("发送中 · 等待 AI 空闲")
+                activeStreamingChatIds.first { item.chatId !in it }
+                val chat = checkNotNull(history.getChatMetadata(item.chatId)) { "原会话不存在；录音仍已保存" }
+                stage("发送中 · 写入聊天")
+                val accepted = kotlinx.coroutines.CompletableDeferred<Unit>()
+                messageCoordinationDelegate.sendUserMessage(
+                    chatIdOverride = item.chatId, roleCardIdOverride = chat.characterCardId,
+                    messageTextOverride = item.text + if (item.sendWithoutAnalysis)
+                        com.ai.assistance.operit.util.VoiceCallMessageText.LOCAL_ANALYSIS_FAILED_NOTICE else item.acoustic,
+                    turnOptions = com.ai.assistance.operit.data.model.ChatTurnOptions(
+                        voiceMessageTimestamp = item.id,
+                        onUserMessagePersisted = { voiceOutbox.sent(id); accepted.complete(Unit) },
+                        onUserMessageRejected = { accepted.completeExceptionally(IllegalStateException(it)) },
+                    ),
+                )
+                kotlinx.coroutines.withTimeout(180_000) { accepted.await() }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Voice message failed", error)
+                if (voiceOutbox.items.value.any { it.id == id }) voiceOutbox.update(item.copy(
+                    status = "发送失败 · 录音已保存，点按重试：" + error.message.orEmpty(), failed = true))
+            } finally { voiceSendMutex.unlock() }
+        }
+    }
+
     var isVoiceCallActive: Boolean = false
         private set
 

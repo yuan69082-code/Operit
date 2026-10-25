@@ -190,6 +190,11 @@ fun ClassicChatInputSection(
             else -> true // Mic button
         }
 
+    val voiceMessageGesture = com.ai.assistance.operit.ui.features.chat.components.rememberVoiceMessageGesture(
+        actualViewModel, enabled = sendButtonEnabled && !showQueueAction && !canSendMessage,
+        onTap = { if (showCancelAction) onCancelMessage() }
+    )
+
     val voicePermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission()
@@ -659,8 +664,9 @@ fun ClassicChatInputSection(
                                         .primary
                             }
                         )
-                        .clickable(
-                            enabled = sendButtonEnabled,
+                        .then(voiceMessageGesture)
+                        .then(if (!showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
+                            enabled = sendButtonEnabled && (showCancelAction || showQueueAction || canSendMessage),
                             onClick = {
                                 when {
                                     showCancelAction ->
@@ -683,16 +689,11 @@ fun ClassicChatInputSection(
                                     }
 
                                     else -> {
-                                        actualViewModel.onFloatingButtonClick(
-                                            FloatingMode.FULLSCREEN,
-                                            voicePermissionLauncher,
-                                            colorScheme,
-                                            typography
-                                        )
+                                        Unit
                                     }
                                 }
                             }
-                        ),
+                        )),
                     contentAlignment = Alignment.Center
                 ) {
                     val iconTint =

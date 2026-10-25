@@ -10,9 +10,10 @@ class VoiceCallSegmentPolicyTest {
         assertEquals(CONTINUE, VoiceCallSegmentPolicy.boundary(true, false, false, 0, 4000))
         assertEquals(CONTINUE, VoiceCallSegmentPolicy.boundary(true, false, true, 0, 35000))
     }
-    @Test fun explicitSendWorksWithoutVadAndManualDurationIsBounded() {
+    @Test fun explicitSendWorksWithoutVadAndManualHasNoSixtySecondLimit() {
         assertEquals(COMPLETE, VoiceCallSegmentPolicy.boundary(true, true, false, 0, 100))
-        assertEquals(COMPLETE, VoiceCallSegmentPolicy.boundary(true, false, true, 0, 60000))
+        assertEquals(CONTINUE, VoiceCallSegmentPolicy.boundary(true, false, true, 0, 60000))
+        assertEquals(CONTINUE, VoiceCallSegmentPolicy.boundary(true, false, false, 900000, 3600000))
         assertEquals(CONTINUE, VoiceCallSegmentPolicy.boundary(true, false, true, 0, 59999))
     }
     @Test fun realtimeKeepsSpeechPauseAndNonSpeechWindowSeparate() {
