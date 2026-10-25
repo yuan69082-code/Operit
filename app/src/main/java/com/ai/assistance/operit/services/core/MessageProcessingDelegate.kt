@@ -753,6 +753,7 @@ class MessageProcessingDelegate(
         }
         val chatRuntime = runtimeFor(chatId)
         if (!claimTurn(chatId)) {
+            turnOptions.onUserMessageRejected?.invoke("AI 正在处理消息，请稍后重试")
             AppLogger.w(
                 TAG,
                 "sendUserMessage忽略: chat正在处理中, chatId=$chatId, roleCardId=$roleCardId, override=${!messageTextOverride.isNullOrBlank()}, suppressUserMessageInHistory=$suppressUserMessageInHistory"
@@ -897,6 +898,7 @@ class MessageProcessingDelegate(
             var userMessage = ChatMessage(
                 sender = "user",
                 content = finalMessageContent,
+                timestamp = turnOptions.voiceMessageTimestamp ?: com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(),
                 roleName = context.getString(R.string.message_role_user), // 用户消息的角色名固定为"用户"
                 displayMode =
                     if (effectiveHideUserMessage) {
@@ -943,6 +945,7 @@ class MessageProcessingDelegate(
                 val addUserMessageStartTime = messageTimingNow()
                 addMessageToChat(chatId, userMessage)
                 userMessageAdded = true
+                turnOptions.onUserMessagePersisted?.invoke()
                 if (!turnOptions.voiceCallEnded && !turnOptions.proactiveWake && !isAutoContinuation &&
                     !turnOptions.voiceCallEvent && !turnOptions.voiceCallDecision && !turnOptions.voiceCallSilence &&
                     !turnOptions.voiceCallObservation && !effectiveHideUserMessage) {
@@ -1641,6 +1644,7 @@ class MessageProcessingDelegate(
                     details = "chatId=$activeChatId, waifu=$isWaifuModeEnabled, autoRead=$didStreamAutoRead"
                 )
             } catch (e: Exception) {
+                turnOptions.onUserMessageRejected?.invoke(e.message ?: "发送被中断")
                 if (e is kotlinx.coroutines.CancellationException) {
                     AppLogger.d(TAG, "消息发送被取消")
                     finalInputStateAfterSend = EnhancedInputProcessingState.Idle

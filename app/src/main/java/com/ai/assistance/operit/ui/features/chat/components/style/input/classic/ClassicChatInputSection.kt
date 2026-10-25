@@ -191,7 +191,8 @@ fun ClassicChatInputSection(
         }
 
     val voiceMessageGesture = com.ai.assistance.operit.ui.features.chat.components.rememberVoiceMessageGesture(
-        actualViewModel, enabled = sendButtonEnabled && !showCancelAction && !showQueueAction && !canSendMessage
+        actualViewModel, enabled = sendButtonEnabled && !showQueueAction && !canSendMessage,
+        onTap = { if (showCancelAction) onCancelMessage() }
     )
 
     val voicePermissionLauncher =
@@ -664,7 +665,7 @@ fun ClassicChatInputSection(
                             }
                         )
                         .then(voiceMessageGesture)
-                        .then(if (!showCancelAction && !showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
+                        .then(if (!showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
                             enabled = sendButtonEnabled && (showCancelAction || showQueueAction || canSendMessage),
                             onClick = {
                                 when {
