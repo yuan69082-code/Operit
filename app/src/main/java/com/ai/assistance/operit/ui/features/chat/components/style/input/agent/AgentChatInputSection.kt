@@ -406,6 +406,10 @@ fun AgentChatInputSection(
         }
     }
 
+    val voiceMessageGesture = com.ai.assistance.operit.ui.features.chat.components.rememberVoiceMessageGesture(
+        actualViewModel, enabled = sendButtonEnabled && !showCancelAction && !showQueueAction && !canSendMessage
+    )
+
     val voicePermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
@@ -978,8 +982,9 @@ fun AgentChatInputSection(
                                     Modifier
                                         .size(36.dp)
                                         .background(actionButtonBackground, CircleShape)
-                                        .clickable(
-                                            enabled = sendButtonEnabled,
+                                        .then(voiceMessageGesture)
+                        .then(if (!showCancelAction && !showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
+                            enabled = sendButtonEnabled && (showCancelAction || showQueueAction || canSendMessage),
                                             onClick = {
                                                 when {
                                                     showCancelAction -> onCancelMessage()
@@ -996,16 +1001,11 @@ fun AgentChatInputSection(
                                                         }
                                                     }
                                                     else -> {
-                                                        actualViewModel.onFloatingButtonClick(
-                                                            FloatingMode.FULLSCREEN,
-                                                            voicePermissionLauncher,
-                                                            colorScheme,
-                                                            typography,
-                                                        )
+                                                        Unit
                                                     }
                                                 }
                                             },
-                                        ),
+                                        )),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -1278,8 +1278,9 @@ fun AgentChatInputSection(
                                         Modifier
                                             .size(36.dp)
                                             .background(actionButtonBackground, CircleShape)
-                                            .clickable(
-                                                enabled = sendButtonEnabled,
+                                            .then(voiceMessageGesture)
+                        .then(if (!showCancelAction && !showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
+                            enabled = sendButtonEnabled && (showCancelAction || showQueueAction || canSendMessage),
                                                 onClick = {
                                                     when {
                                                         showCancelAction -> onCancelMessage()
@@ -1296,16 +1297,11 @@ fun AgentChatInputSection(
                                                             }
                                                         }
                                                         else -> {
-                                                            actualViewModel.onFloatingButtonClick(
-                                                                FloatingMode.FULLSCREEN,
-                                                                voicePermissionLauncher,
-                                                                colorScheme,
-                                                                typography,
-                                                            )
+                                                            Unit
                                                         }
                                                     }
                                                 },
-                                            ),
+                                            )),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(

@@ -19,7 +19,7 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
-fun VoiceMessageButton(viewModel: ChatViewModel, enabled: Boolean) {
+fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean): Modifier {
     val context = LocalContext.current
     val chatId by viewModel.currentChatId.collectAsState()
     val busy by viewModel.voiceMessageBusy.collectAsState()
@@ -36,9 +36,8 @@ fun VoiceMessageButton(viewModel: ChatViewModel, enabled: Boolean) {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         viewModel.showToast(if (granted) "麦克风已开启，请按住说话" else "发送语音需要麦克风权限")
     }
-    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
-            .pointerInput(chatId, enabled, busy, foreground) {
+    if (!enabled) return Modifier
+    return Modifier            .pointerInput(chatId, enabled, busy, foreground) {
                 detectTapGestures(onPress = {
                     val target = chatId
                     if (!enabled || busy || !foreground || target == null) return@detectTapGestures
@@ -46,6 +45,8 @@ fun VoiceMessageButton(viewModel: ChatViewModel, enabled: Boolean) {
                         permission.launch(Manifest.permission.RECORD_AUDIO)
                         return@detectTapGestures
                     }
+                    // A tap no longer opens the voice page. Begin only after holding.
+                    if (withTimeoutOrNull(300) { tryAwaitRelease() } != null) return@detectTapGestures
                     try {
                         check(VoiceCallRuntime.controller == null && VoiceCallIncoming.pending == null) { "请先结束通话或处理来电" }
                         VoiceCallAudioAnalysis(context).requireConfigured()
@@ -57,6 +58,7 @@ fun VoiceMessageButton(viewModel: ChatViewModel, enabled: Boolean) {
                             val audio = async { recorder.recordTurn(shouldSubmit = { released.get() }, manual = true).also { captured = it } }
                             try {
                             recording = true
+                            viewModel.showToast("正在录音，松开发送，移出取消")
                             if (tryAwaitRelease()) {
                                 released.set(true)
                                 val file = audio.await()
@@ -84,8 +86,5 @@ fun VoiceMessageButton(viewModel: ChatViewModel, enabled: Boolean) {
                         recording = false
                     }
                 })
-            }) {
-        Text(if (recording) "松开发送 · 移出取消" else if (busy) "语音转写中…" else "按住说话 · 最长60秒",
-            modifier = Modifier.padding(12.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-    }
+            }
 }
