@@ -1883,6 +1883,9 @@ private fun ChatInputBottomBar(
         }
     }
 
+    Column {
+    com.ai.assistance.operit.ui.features.chat.components.VoiceMessageButton(actualViewModel, enabled = !isLoading)
+
     if (inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT) {
         AgentChatInputSection(
                 actualViewModel = actualViewModel,
@@ -2043,6 +2046,8 @@ private fun ChatInputBottomBar(
                 },
         )
     }
+}
+
 }
 
 @Composable

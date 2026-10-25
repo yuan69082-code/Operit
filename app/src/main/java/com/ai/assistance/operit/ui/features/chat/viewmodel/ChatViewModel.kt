@@ -1483,6 +1483,40 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         )
     }
 
+    private val _voiceMessageBusy = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val voiceMessageBusy: kotlinx.coroutines.flow.StateFlow<Boolean> = _voiceMessageBusy
+
+    fun sendVoiceMessage(file: java.io.File, quiet: List<Pair<Long, Long>>, chatId: String) {
+        if (_voiceMessageBusy.value) { file.delete(); return }
+        _voiceMessageBusy.value = true
+        viewModelScope.launch {
+            try {
+                val app = context.applicationContext
+                val chat = checkNotNull(com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(app).getChatMetadata(chatId))
+                val analysis = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(app).analyze(file, null, quiet)
+                check(analysis.userText.isNotBlank() || analysis.soundActivity) { "没有识别到说话或声音，请重新录制" }
+                val text = analysis.toContext().replace("[语音通话转写]", "[语音条转写]").replace("本次通话", "本条录音").replace("暂定通话方", "暂定发言者") +
+                    "\n[客户端：这是一条语音消息，未建立电话通话。以上声音分析来自独立音频模型。]"
+                kotlinx.coroutines.withTimeout(180_000) { activeStreamingChatIds.first { chatId !in it } }
+                messageCoordinationDelegate.sendUserMessage(
+                    chatIdOverride = chatId,
+                    roleCardIdOverride = chat.characterCardId,
+                    messageTextOverride = text,
+                )
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                showToast("语音发送等待超时，请稍后重试")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Voice message failed", error)
+                showToast("语音发送失败：" + error.message.orEmpty())
+            } finally {
+                file.delete()
+                _voiceMessageBusy.value = false
+            }
+        }
+    }
+
     var isVoiceCallActive: Boolean = false
         private set
 

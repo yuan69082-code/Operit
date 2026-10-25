@@ -31,6 +31,7 @@ object VoiceCallIncoming {
         private set
     private const val CHANNEL = "voice_call_incoming_v2"
     private const val NOTIFICATION = 304
+    private const val RING_TIMEOUT_MS = 120_000L
 
     fun restore(context: Context) {
         if (pending != null) return
@@ -40,7 +41,7 @@ object VoiceCallIncoming {
         val request = Request(data.getString("id"), data.getString("chat"),
             data.optString("role").takeIf { it.isNotBlank() }, data.getString("reason"), data.getLong("expires"), data.getString("caller"))
         pending = request
-        if (request.expiresAt <= System.currentTimeMillis()) { finish(context, "ai", "无人接听，呼叫结束"); return }
+        if (request.expiresAt <= System.currentTimeMillis()) { unanswered(context); return }
         startRingtone(context, request)
         scheduleTimeout(context, request)
     }
@@ -49,7 +50,7 @@ object VoiceCallIncoming {
         restore(context)
         check(VoiceCallRuntime.controller == null && pending == null) { "已有通话或来电，请勿重复拨打" }
         val incoming = Request(java.util.UUID.randomUUID().toString(), chatId, roleCardId,
-            reason.take(160), System.currentTimeMillis() + 60_000, callerName.take(80))
+            reason.take(160), System.currentTimeMillis() + RING_TIMEOUT_MS, callerName.take(80))
         val prefs = context.observedSharedPreferences("voice_call_incoming", Context.MODE_PRIVATE)
         prefs.edit().putString("request", JSONObject().put("id", incoming.id).put("chat", chatId)
             .put("role", roleCardId.orEmpty()).put("reason", incoming.reason).put("expires", incoming.expiresAt).put("caller", incoming.callerName).toString()).apply()
@@ -72,7 +73,7 @@ object VoiceCallIncoming {
                 .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("${incoming.callerName} 来电")
                 .setContentText(incoming.reason).setCategory(NotificationCompat.CATEGORY_CALL)
                 .setPriority(NotificationCompat.PRIORITY_HIGH).setContentIntent(open).setDeleteIntent(reject)
-                .setTimeoutAfter(60_000).addAction(android.R.drawable.sym_call_incoming, "查看并接听", open)
+                .setTimeoutAfter(RING_TIMEOUT_MS).addAction(android.R.drawable.sym_call_incoming, "查看并接听", open)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "拒接", reject).build())
             scheduleTimeout(context, incoming)
             startRingtone(context, incoming)
@@ -88,8 +89,17 @@ object VoiceCallIncoming {
         timeout?.cancel()
         timeout = scope.launch {
             delay((request.expiresAt - System.currentTimeMillis()).coerceAtLeast(0))
-            if (pending?.id == request.id) finish(context, "ai", "无人接听，呼叫结束")
+            if (pending?.id == request.id) unanswered(context)
         }
+    }
+
+    private fun unanswered(context: Context) {
+        val request = pending ?: return
+        // Consume first: timeout, restoration and notification callbacks can race.
+        // Release the incoming slot before the assistant decides whether to redial.
+        clear(context)
+        VoiceCallEvents.sendUserOutcome(context, request.chatId, request.roleCardId,
+            com.ai.assistance.operit.data.model.VoiceCallUserOutcome.UNANSWERED)
     }
 
     fun clear(context: Context) {
@@ -106,7 +116,7 @@ object VoiceCallIncoming {
     fun reject(context: Context, requestId: String) {
         val request = pending?.takeIf { it.id == requestId } ?: return
         if (request.expiresAt <= System.currentTimeMillis()) {
-            finish(context, "ai", "无人接听，呼叫结束")
+            unanswered(context)
             return
         }
         // Consume before dispatch: repeated UI/notification callbacks cannot send twice.

@@ -14,7 +14,7 @@ import com.ai.assistance.operit.data.preferences.VoiceCallAnalysisPreferences
 @Composable
 fun VoiceCallAnalysisSettingsButton() {
     var show by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { show = true }) { Text("通话音频分析设置") }
+    OutlinedButton(onClick = { show = true }) { Text("电话与语音条音频分析设置") }
     if (show) VoiceCallAnalysisSettingsDialog { show = false }
 }
 
@@ -29,10 +29,10 @@ fun VoiceCallAnalysisSettingsDialog(onDismiss: () -> Unit) {
     var error by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("通话音频分析") },
+        title = { Text("电话与语音条音频分析") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("录音由独立音频模型转写并描述声音，当前聊天模型收到文字。设置在本机保存。")
+                Text("电话录音和聊天语音条共用此配置。录音由独立音频模型转写并描述声音，当前聊天模型收到文字。设置在本机保存。")
                 OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS 接口地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Text("可填以 /v1 结尾的基础地址，保存时会补齐 /chat/completions。域名和 Key 必须对应你的服务商与地域。")
                 OutlinedTextField(model, { model = it }, label = { Text("音频模型") }, singleLine = true, modifier = Modifier.fillMaxWidth())
