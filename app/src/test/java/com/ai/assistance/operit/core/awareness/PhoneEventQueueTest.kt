@@ -7,7 +7,7 @@ import org.junit.Test
 
 class PhoneEventQueueTest {
     private val now = 1_000_000L
-    private fun event(at: Long = now - 100, state: String = "pending") = JSONObject().put("at", at)
+    private fun event(at: Long = now - 6000, state: String = "pending") = JSONObject().put("at", at)
         .put("dispatch", state).put("kind", "app_enter").put("package", "test.app").put("app_name", "应用")
     @Test fun burstIsClaimedOnlyOnceAndPromptIsBounded() {
         val rows = JSONArray((1..60).map { event() })
@@ -45,5 +45,43 @@ class PhoneEventQueueTest {
         assertFalse(observation.has("text"))
         assertFalse(observation.has("result"))
         assertEquals("test.app", observation.getString("package"))
+    }
+    @Test fun entryWaitsForShortVisitWindowEvenOnFirstWake() {
+        val data = JSONObject().put("events", JSONArray().put(event(now - 100)))
+        assertNull(PhoneEventQueue.claim(data, now, 5000))
+        assertNotNull(PhoneEventQueue.claim(data, now + 5000, 5000))
+    }
+    @Test fun briefDialogCannotWakeAloneAndIsBundledWithNextStableEntry() {
+        val enter = event(now - 4000)
+        val leave = event(now - 2000, "recorded").put("kind", "app_leave")
+            .put("entered_at", now - 4000).put("duration_ms", 2000)
+        val rows = JSONArray().put(enter).put(leave)
+        val data = JSONObject().put("events", rows)
+        assertNull(PhoneEventQueue.claim(data, now, 5000))
+        assertEquals("coalesced", enter.getString("dispatch"))
+        rows.put(event(now - 2000).put("package", "next.app"))
+        val batch = requireNotNull(PhoneEventQueue.claim(data, now + 4000, 5000))
+        assertEquals(1, batch.getInt("brief_visit_count"))
+        val observation = batch.getJSONArray("observations").getJSONObject(0)
+        assertEquals(2000L, observation.getJSONObject("previous_app").getLong("duration_ms"))
+        assertTrue(batch.getJSONArray("completed_visits").getJSONObject(0).getBoolean("brief"))
+        assertNull(PhoneEventQueue.claim(data, now + 60_000, 5000))
+    }
+    @Test fun switchedObservationIncludesPreviousAppsFullDuration() {
+        val leave = event(now - 6000, "recorded").put("kind", "app_leave")
+            .put("entered_at", now - 66_000).put("duration_ms", 60_000)
+        val data = JSONObject().put("events", JSONArray().put(leave).put(event()))
+        val batch = requireNotNull(PhoneEventQueue.claim(data, now, 5000))
+        val previous = batch.getJSONArray("observations").getJSONObject(0).getJSONObject("previous_app")
+        assertEquals(60_000L, previous.getLong("duration_ms"))
+        assertEquals(now - 66_000, previous.getLong("entered_at"))
+    }
+    @Test fun unlockCanDeliverVisitClosedAtScreenOffWithoutCountingTheNight() {
+        val leave = event(now - 3_600_000, "recorded").put("kind", "app_leave")
+            .put("entered_at", now - 3_660_000).put("duration_ms", 60_000)
+        val unlock = event(now - 100).put("kind", "unlock").put("urgent", true)
+        val data = JSONObject().put("events", JSONArray().put(leave).put(unlock))
+        val batch = requireNotNull(PhoneEventQueue.claim(data, now, 5000))
+        assertEquals(60_000L, batch.getJSONArray("completed_visits").getJSONObject(0).getLong("duration_ms"))
     }
 }

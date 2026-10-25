@@ -37,6 +37,8 @@ object PhoneAwarenessRuntime {
         var active = false
         var usageGranted = false
         var locked = keyguard.isKeyguardLocked
+        var interactive = power.isInteractive
+        var resumedWhileLocked: String? = null
         var lastCapture = 0L
         var lastPrune = 0L
         var captureJob: Job? = null
@@ -81,7 +83,8 @@ object PhoneAwarenessRuntime {
                         continue
                     }
                     if (!active) {
-                        cursor = now; locked = keyguard.isKeyguardLocked; usageGranted = false
+                        cursor = now; locked = keyguard.isKeyguardLocked; interactive = power.isInteractive; usageGranted = false
+                        resumedWhileLocked = null
                         store.recover(); store.prune()
                         record(PhonePresence.Event("collection_started", now))
                         // The already-visible app has no known entry time. Only subsequent events create intervals.
@@ -106,31 +109,62 @@ object PhoneAwarenessRuntime {
                             val item = UsageEvents.Event()
                             while (events.hasNextEvent()) {
                                 events.getNextEvent(item)
-                                if (item.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND || item.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND)
-                                    observed += Triple(item.timeStamp, if (item.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) "resume" else "pause", item.packageName.orEmpty())
+                                val kind = when (item.eventType) {
+                                    UsageEvents.Event.MOVE_TO_FOREGROUND -> "resume"
+                                    UsageEvents.Event.SCREEN_NON_INTERACTIVE -> Intent.ACTION_SCREEN_OFF
+                                    UsageEvents.Event.SCREEN_INTERACTIVE -> Intent.ACTION_SCREEN_ON
+                                    UsageEvents.Event.KEYGUARD_SHOWN -> "lock"
+                                    UsageEvents.Event.KEYGUARD_HIDDEN -> Intent.ACTION_USER_PRESENT
+                                    else -> null
+                                }
+                                if (kind != null) observed += Triple(item.timeStamp, kind, item.packageName.orEmpty())
                             }
                         } catch (failure: Exception) {
                             AppLogger.e("PhoneAwareness", "应用使用事件不可用", failure)
                             usageError = failure.message.orEmpty().take(180)
                             presence = PhonePresence()
+                            resumedWhileLocked = null
                             // Display events are a separate source; a failed usage query must not discard them.
-                            observed.removeAll { it.second == "resume" || it.second == "pause" }
+                            observed.removeAll { it.second == "resume" }
                         }
                     }
                     cursor = now
-                    observed.sortedBy { it.first }.forEach { (at, kind, pkg) ->
+                    // Screen boundaries precede same-timestamp resumes, so a keyguard
+                    // activity cannot reopen an interval after the screen has gone off.
+                    observed.distinct().sortedWith(
+                        compareBy<Triple<Long, String, String>> { it.first }.thenBy { if (it.second == "resume") 1 else 0 }
+                    ).forEach { (at, kind, pkg) ->
                         when (kind) {
-                            "resume" -> presence.resume(pkg, at).forEach { record(it) }
-                            "pause" -> presence.pause(pkg, at)
-                            Intent.ACTION_SCREEN_OFF -> { presence.close(at).forEach { record(it) }; record(PhonePresence.Event("screen_off", at)) }
-                            Intent.ACTION_SCREEN_ON -> record(PhonePresence.Event("screen_on", at))
-                            Intent.ACTION_USER_PRESENT -> { locked = false; record(PhonePresence.Event("unlock", at)) }
+                            "resume" -> if (interactive) {
+                                if (locked) resumedWhileLocked = pkg
+                                else presence.resume(pkg, at).forEach { record(it) }
+                            }
+                            Intent.ACTION_SCREEN_OFF -> {
+                                interactive = false
+                                resumedWhileLocked = null
+                                presence.close(at).forEach { record(it) }
+                                record(PhonePresence.Event("screen_off", at))
+                            }
+                            "lock" -> {
+                                locked = true
+                                presence.close(at).forEach { record(it) }
+                                record(PhonePresence.Event("lock", at))
+                            }
+                            Intent.ACTION_SCREEN_ON -> { interactive = true; record(PhonePresence.Event("screen_on", at)) }
+                            Intent.ACTION_USER_PRESENT -> {
+                                locked = false
+                                record(PhonePresence.Event("unlock", at))
+                                if (interactive) resumedWhileLocked?.let { pkg -> presence.resume(pkg, at).forEach { record(it) } }
+                                resumedWhileLocked = null
+                            }
                         }
                     }
-                    presence.flush(now).forEach { record(it) }
                     if (keyguard.isKeyguardLocked != locked) {
                         locked = keyguard.isKeyguardLocked
+                        if (locked) presence.close(now).forEach { record(it) }
                         record(PhonePresence.Event(if (locked) "lock" else "unlock", now))
+                        if (!locked && interactive) resumedWhileLocked?.let { pkg -> presence.resume(pkg, now).forEach { record(it) } }
+                        resumedWhileLocked = null
                     }
                     store.status(when {
                         usageError != null -> "亮灭屏仍在记录；应用记录中断：$usageError"
@@ -153,7 +187,7 @@ object PhoneAwarenessRuntime {
                     AppLogger.e("PhoneAwareness", "手机观察未完成", failure)
                     store.status("观察中断：${failure.message.orEmpty().take(180)}")
                     // A service/query gap is not a measured visit. Do not fabricate its duration.
-                    presence = PhonePresence(); cursor = System.currentTimeMillis()
+                    presence = PhonePresence(); resumedWhileLocked = null; cursor = System.currentTimeMillis()
                 }
                 delay(2000)
             }
