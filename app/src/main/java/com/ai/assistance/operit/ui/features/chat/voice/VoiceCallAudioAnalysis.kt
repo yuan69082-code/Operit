@@ -41,9 +41,46 @@ class VoiceCallAudioAnalysis(context: Context) {
         check(prefs.endpoint.isNotBlank()) { "请填写音频接口地址" }
     }
 
-    suspend fun analyze(file: File, reference: File?, quietIntervals: List<Pair<Long, Long>>, continuous: Boolean = false, playbackText: String = ""): VoiceCallAnalysisResult = withContext(Dispatchers.IO) {
+    suspend fun analyze(file: File, reference: File?, quietIntervals: List<Pair<Long, Long>>, continuous: Boolean = false, playbackText: String = "", onProgress: suspend (Int, Int) -> Unit = { _, _ -> }): VoiceCallAnalysisResult = withContext(Dispatchers.IO) {
         requireConfigured()
-        require(file.length() in 1..7_000_000) { "音频文件为空或过大" }
+        require(file.length() >= 44) { "音频文件为空" }
+        val chunkBytes = 120 * 32000
+        if (file.length() > chunkBytes + 44) {
+            val total = ((file.length() - 44 + chunkBytes - 1) / chunkBytes).toInt()
+            val results = mutableListOf<VoiceCallAnalysisResult>()
+            java.io.RandomAccessFile(file, "r").use { input ->
+                val header = ByteArray(44).also { input.readFully(it) }
+                var offset = 0L
+                repeat(total) { index ->
+                    onProgress(index, total)
+                    val size = minOf(chunkBytes.toLong(), input.length() - input.filePointer).toInt()
+                    val bytes = ByteArray(size).also { input.readFully(it) }
+                    val part = File.createTempFile("analysis-", ".wav", file.parentFile)
+                    try {
+                        ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).putInt(4, size + 36).putInt(40, size)
+                        part.outputStream().use { it.write(header); it.write(bytes) }
+                        val start = offset / 32
+                        val end = (offset + size) / 32
+                        val quiet = quietIntervals.mapNotNull { (a, b) ->
+                            if (b <= start || a >= end) null else (maxOf(a, start) - start) to (minOf(b, end) - start)
+                        }
+                        results += analyze(part, reference, quiet, continuous, playbackText)
+                    } finally { part.delete() }
+                    offset += size
+                    onProgress(index + 1, total)
+                }
+            }
+            return@withContext VoiceCallAnalysisResult(
+                if (results.any { it.speakerMatch == "matched" }) "matched" else "uncertain",
+                results.joinToString("；") { it.speakerEvidence },
+                results.flatMap { result -> result.utterances.map { utterance ->
+                    if (result.speakerMatch != "matched" && utterance.speaker == "caller") utterance.copy(speaker = "uncertain") else utterance
+                } },
+                results.joinToString("；") { it.uncertainWords }, results.joinToString("；") { it.environment },
+                results.any { it.soundActivity }, results.joinToString("；") { it.soundEvents },
+            )
+        }
+        onProgress(0, 1)
         val currentBytes = file.readBytes()
         require(currentBytes.size >= 44) { "Invalid recorded WAV" }
         val merged: ByteArray
@@ -127,7 +164,7 @@ class VoiceCallAudioAnalysis(context: Context) {
                 coroutine.ensureActive()
                 check(complete && text.isNotBlank()) { "音频分析结果为空或连接提前结束" }
                 try {
-                    VoiceCallAnalysisResult.parse(text.toString())
+                    VoiceCallAnalysisResult.parse(text.toString()).also { onProgress(1, 1) }
                 } catch (error: Exception) {
                     // Preserve the exact parser failure; this is a rejected window, not a recorder failure.
                     throw InvalidAnalysisResult(error)

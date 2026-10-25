@@ -19,10 +19,10 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
-fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean): Modifier {
+fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean, onTap: () -> Unit = {}): Modifier {
     val context = LocalContext.current
     val chatId by viewModel.currentChatId.collectAsState()
-    val busy by viewModel.voiceMessageBusy.collectAsState()
+    val tapAction by rememberUpdatedState(onTap)
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     var foreground by remember { mutableStateOf(lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) }
     DisposableEffect(lifecycle) {
@@ -32,43 +32,37 @@ fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean): Mod
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    var recording by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         viewModel.showToast(if (granted) "麦克风已开启，请按住说话" else "发送语音需要麦克风权限")
     }
     if (!enabled) return Modifier
-    return Modifier            .pointerInput(chatId, enabled, busy, foreground) {
+    return Modifier.pointerInput(chatId, enabled, foreground) {
                 detectTapGestures(onPress = {
                     val target = chatId
-                    if (!enabled || busy || !foreground || target == null) return@detectTapGestures
+                    if (!enabled || !foreground || target == null) return@detectTapGestures
+                    // A tap no longer opens the voice page. Begin only after holding.
+                    val earlyRelease = withTimeoutOrNull(300) { tryAwaitRelease() }
+                    if (earlyRelease != null) { if (earlyRelease) tapAction(); return@detectTapGestures }
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                         permission.launch(Manifest.permission.RECORD_AUDIO)
                         return@detectTapGestures
                     }
-                    // A tap no longer opens the voice page. Begin only after holding.
-                    if (withTimeoutOrNull(300) { tryAwaitRelease() } != null) return@detectTapGestures
                     try {
                         check(VoiceCallRuntime.controller == null && VoiceCallIncoming.pending == null) { "请先结束通话或处理来电" }
-                        VoiceCallAudioAnalysis(context).requireConfigured()
                         coroutineScope {
                             val released = AtomicBoolean(false)
                             val recorder = VoiceCallAudioRecorder(context.applicationContext)
                             var captured: java.io.File? = null
                             var handedOff = false
-                            val audio = async { recorder.recordTurn(shouldSubmit = { released.get() }, manual = true).also { captured = it } }
+                            val audio = async { recorder.recordTurn(shouldSubmit = { released.get() }, manual = true,
+                                onProgress = { rms, millis, _ -> viewModel.updateVoiceRecording(true, rms, millis) }).also { captured = it } }
                             try {
-                            recording = true
-                            viewModel.showToast("正在录音，松开发送，移出取消")
+                            viewModel.updateVoiceRecording(true)
                             if (tryAwaitRelease()) {
                                 released.set(true)
                                 val file = audio.await()
-                                if (file.length() < 44 + 16000) {
-                                    file.delete()
-                                    viewModel.showToast("说话时间太短，请重新按住说话")
-                                } else {
-                                    viewModel.sendVoiceMessage(file, recorder.lastQuietIntervals, target)
-                                    handedOff = true
-                                }
+                                viewModel.sendVoiceMessage(file, recorder.lastQuietIntervals, target)
+                                handedOff = true
                             } else {
                                 audio.cancelAndJoin()
                             }
@@ -83,7 +77,7 @@ fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean): Mod
                         com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Recording failed", error)
                         viewModel.showToast(error.message.orEmpty())
                     } finally {
-                        recording = false
+                        viewModel.updateVoiceRecording(false)
                     }
                 })
             }

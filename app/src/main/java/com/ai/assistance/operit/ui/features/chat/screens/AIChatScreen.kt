@@ -1883,6 +1883,9 @@ private fun ChatInputBottomBar(
         }
     }
 
+    Column {
+        com.ai.assistance.operit.ui.features.chat.components.VoiceMessageOutboxRows(actualViewModel, currentChatId)
+        Box {
     if (inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT) {
         AgentChatInputSection(
                 actualViewModel = actualViewModel,
@@ -2043,6 +2046,10 @@ private fun ChatInputBottomBar(
                 },
         )
     }
+            com.ai.assistance.operit.ui.features.chat.components.VoiceRecordingFeedback(actualViewModel, Modifier.matchParentSize())
+        }
+    }
+
 }
 
 @Composable

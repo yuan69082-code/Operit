@@ -553,7 +553,7 @@ class MessageCoordinationDelegate(
         val isBackgroundSend =
             !chatIdOverride.isNullOrBlank() && chatIdOverride != chatHistoryDelegate.currentChatId.value
         // 自动续聊由总结消息中的续接指令驱动，不能消费用户尚未提交的编辑器状态。
-        val shouldReadComposerState = !isGroupOrchestrationTurn && !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
+        val shouldReadComposerState = turnOptions.voiceMessageTimestamp == null && !isGroupOrchestrationTurn && !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
         val effectiveMessageTextOverride = if (isAutoContinuation) "" else messageTextOverride
         // 获取当前聊天ID和工作区路径
         val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
@@ -779,7 +779,7 @@ class MessageCoordinationDelegate(
         }
 
         // 只有在非续写（即用户主动发送）时才清空附件和UI状态
-        if (!isBackgroundSend && !isContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded) {
+        if (turnOptions.voiceMessageTimestamp == null && !isBackgroundSend && !isContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded) {
             if (currentAttachments.isNotEmpty()) {
                 attachmentDelegate.clearAttachments()
             }
@@ -888,6 +888,7 @@ class MessageCoordinationDelegate(
         val userMessage = ChatMessage(
             sender = "user",
             content = finalUserMessageContent,
+            timestamp = turnOptions.voiceMessageTimestamp ?: com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(),
             roleName = context.getString(R.string.message_role_user),
             displayMode =
                 if (turnOptions.hideUserMessage) {
@@ -897,6 +898,7 @@ class MessageCoordinationDelegate(
                 }
         )
         chatHistoryDelegate.addMessageToChat(userMessage, chatId)
+        turnOptions.onUserMessagePersisted?.invoke()
         if (!turnOptions.hideUserMessage) com.ai.assistance.operit.core.awareness.SoftwareAwareness.userMessage(
             context, chatId, null, "group_message_sent")
         com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
