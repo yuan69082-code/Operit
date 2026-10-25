@@ -137,10 +137,12 @@ fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean, onTa
                         event.getPointerId(event.actionIndex) == session.pointerId
                     if (matches) {
                         val interrupted = event.actionMasked == MotionEvent.ACTION_CANCEL
-                        session.end = when {
-                            interrupted -> VoiceHoldEnd.INTERRUPTED
-                            session.cancelArmed -> VoiceHoldEnd.CANCEL_BY_SWIPE
-                            else -> VoiceHoldEnd.SEND
+                        if (session.end == null) {
+                            session.end = when {
+                                interrupted -> VoiceHoldEnd.INTERRUPTED
+                                session.cancelArmed -> VoiceHoldEnd.CANCEL_BY_SWIPE
+                                else -> VoiceHoldEnd.SEND
+                            }
                         }
                         if (!session.started && !interrupted && !session.cancelArmed &&
                             event.eventTime - event.downTime < 300) {
