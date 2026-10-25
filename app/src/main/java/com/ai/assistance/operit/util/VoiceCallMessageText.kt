@@ -11,6 +11,9 @@ object VoiceCallMessageText {
             val body = text.removePrefix("[语音通话打字]").replace(media, "").trim()
             return "[语音通话 · 打字]\n$body"
         }
+        if (text.startsWith("[语音条转写]")) {
+            return forDisplay(text.replaceFirst("[语音条转写]", "[语音通话转写]")).replaceFirst("[语音通话]", "[语音条]")
+        }
         if (text.startsWith("[语音通话转写]")) {
             val body = text.removePrefix("[语音通话转写]").trim()
             val original = if (body.startsWith("【原话】")) body.removePrefix("【原话】").trim() else body

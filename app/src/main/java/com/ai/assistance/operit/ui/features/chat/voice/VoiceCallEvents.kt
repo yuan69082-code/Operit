@@ -22,7 +22,9 @@ object VoiceCallEvents {
         val core = ChatRuntimeHolder.getInstance(app).getCore(ChatRuntimeSlot.MAIN)
         return scope.launch {
             try {
-                val wakeCancellation = CompanionRuntime.noteUserInteraction()
+                // An unanswered timer is not a user interaction and must not cancel unrelated work.
+                val wakeCancellation = if (outcome == VoiceCallUserOutcome.UNANSWERED) null
+                    else CompanionRuntime.noteUserInteraction()
                 // Let the caller release ringtone/call resources before starting a text reply.
                 yield()
                 withTimeout(180_000) {
