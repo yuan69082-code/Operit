@@ -20,6 +20,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+internal fun isVoiceSwipeCancel(deltaYpx: Float, thresholdPx: Float): Boolean =
+    deltaYpx <= -thresholdPx
+
 private enum class VoiceHoldEnd { SEND, CANCEL_BY_SWIPE, INTERRUPTED }
 
 private class VoiceHoldSession(val pointerId: Int, val startY: Float) {
@@ -121,7 +124,7 @@ fun rememberVoiceMessageGesture(viewModel: ChatViewModel, enabled: Boolean, onTa
                         session.end = VoiceHoldEnd.INTERRUPTED
                         viewModel.updateVoiceCancelArmed(false)
                     } else {
-                        val armed = event.getY(index) - session.startY <= -swipeCancelPx
+                        val armed = isVoiceSwipeCancel(event.getY(index) - session.startY, swipeCancelPx)
                         if (session.cancelArmed != armed) {
                             session.cancelArmed = armed
                             viewModel.updateVoiceCancelArmed(armed)
