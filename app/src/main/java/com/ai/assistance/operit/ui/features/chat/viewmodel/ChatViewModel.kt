@@ -1487,11 +1487,14 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     val voiceMessageBusy: kotlinx.coroutines.flow.StateFlow<Boolean> = _voiceMessageBusy
 
     fun sendVoiceMessage(file: java.io.File, quiet: List<Pair<Long, Long>>, chatId: String) {
-        if (_voiceMessageBusy.value) { file.delete(); return }
+        if (_voiceMessageBusy.value) { showToast("上一条语音仍在处理，原录音保留在 " + file.absolutePath); return }
         _voiceMessageBusy.value = true
         viewModelScope.launch {
+            var archived = false
             try {
                 val app = context.applicationContext
+                com.ai.assistance.operit.ui.features.chat.voice.VoiceMessageArchive.save(app, file)
+                archived = true
                 val chat = checkNotNull(com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(app).getChatMetadata(chatId))
                 val analysis = com.ai.assistance.operit.ui.features.chat.voice.VoiceCallAudioAnalysis(app).analyze(file, null, quiet)
                 check(analysis.userText.isNotBlank() || analysis.soundActivity) { "没有识别到说话或声音，请重新录制" }
@@ -1511,7 +1514,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 com.ai.assistance.operit.util.AppLogger.e("VoiceMessage", "Voice message failed", error)
                 showToast("语音发送失败：" + error.message.orEmpty())
             } finally {
-                file.delete()
+                // Only the temporary capture is removed; the public WAV archive survives failures.
+                if (archived) file.delete()
                 _voiceMessageBusy.value = false
             }
         }
