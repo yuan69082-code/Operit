@@ -18,6 +18,12 @@ def save(path, value):
     os.replace(target, path)
 
 
+def is_valid_chinese_transcript(words):
+    """Never treat emoji or punctuation-only Whisper hallucinations as speech."""
+    import re
+    return bool(re.search(r"[\u4e00-\u9fff]", "".join(word["word"] for word in words)))
+
+
 def transcribe(source):
     import soundfile as sf
     # Feed pre-decoded PCM to faster-whisper: passing a filename uses PyAV decoding.
@@ -29,13 +35,23 @@ def transcribe(source):
     # Offline only. A missing small cache is an error, never an implicit download.
     model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=2,
                          local_files_only=True)
-    segments, info = model.transcribe(samples, word_timestamps=True, beam_size=5,
-                                     vad_filter=False, condition_on_previous_text=False)
+    segments, info = model.transcribe(
+        samples, language="zh",
+        initial_prompt="以下是普通话。阿屿，沈知屿，园园，哎呀。",
+        word_timestamps=True, beam_size=5, vad_filter=True,
+        vad_parameters={"speech_pad_ms": 200},
+        condition_on_previous_text=False,
+    )
+    # Force decoding of the lazy segment generator before accepting a result.
+    from opencc import OpenCC
+    converter = OpenCC("t2s")
     words = []
     for segment in segments:
         for word in segment.words or []:
-            words.append({"word": word.word, "start": float(word.start), "end": float(word.end),
-                          "probability": float(word.probability)})
+            words.append({"word": converter.convert(word.word), "start": float(word.start),
+                          "end": float(word.end), "probability": float(word.probability)})
+    if not is_valid_chinese_transcript(words):
+        raise ValueError("本地转写未识别到有效中文（可能是轻声、气声或仅有 emoji/标点）；保留原模型转写")
     save(str(source) + ".words.json", {"words": words, "duration": float(info.duration)})
 
 

@@ -33,6 +33,9 @@ class VoiceLocalAnalysis(private val context: Context) {
                 "(test -f ~/.operit/voice-analysis/.deps-1.2.1-0.11.0 || (" +
                 "~/.operit/voice-analysis/venv/bin/python -m pip install --disable-pip-version-check faster-whisper==1.2.1 librosa==0.11.0 && " +
                 "touch ~/.operit/voice-analysis/.deps-1.2.1-0.11.0)) && " +
+                "(test -f ~/.operit/voice-analysis/.opencc-0.1.7 || (" +
+                "~/.operit/voice-analysis/venv/bin/python -m pip install --disable-pip-version-check opencc-python-reimplemented==0.1.7 && " +
+                "touch ~/.operit/voice-analysis/.opencc-0.1.7)) && " +
                 "printf %s '${script}' | base64 -d > ~/.operit/voice-analysis/analyze.py")
             val command = "~/.operit/voice-analysis/venv/bin/python ~/.operit/voice-analysis/analyze.py "
             onStage("发送中 · 本地 Whisper small 词时间（只用已缓存模型）")
