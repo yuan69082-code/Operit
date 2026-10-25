@@ -1,8 +1,9 @@
 """Local voice analysis, shared by Operit Linux terminal and desktop Python.
 
-Install: python -m pip install faster-whisper==1.2.1 librosa==0.11.0
-Run: python analyze.py all recording.wav
-No recording is uploaded. First transcription downloads the base model.
+Install once: python -m pip install faster-whisper==1.2.1 librosa==0.11.0
+Pre-cache small once while online, before using the offline transcription path.
+Run: HF_HUB_OFFLINE=1 python analyze.py all recording.wav
+No recording is uploaded. Transcription never downloads a model.
 """
 import argparse
 import json
@@ -18,9 +19,17 @@ def save(path, value):
 
 
 def transcribe(source):
+    import soundfile as sf
+    # Feed pre-decoded PCM to faster-whisper: passing a filename uses PyAV decoding.
+    with sf.SoundFile(source) as audio:
+        if audio.format != "WAV" or audio.samplerate != 16000 or audio.channels != 1:
+            raise ValueError("Expected 16 kHz mono WAV")
+        samples = audio.read(dtype="float32")
     from faster_whisper import WhisperModel
-    model = WhisperModel("base", device="cpu", compute_type="int8", cpu_threads=2)
-    segments, info = model.transcribe(str(source), word_timestamps=True, beam_size=5,
+    # Offline only. A missing small cache is an error, never an implicit download.
+    model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=2,
+                         local_files_only=True)
+    segments, info = model.transcribe(samples, word_timestamps=True, beam_size=5,
                                      vad_filter=False, condition_on_previous_text=False)
     words = []
     for segment in segments:
