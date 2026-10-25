@@ -25,7 +25,7 @@ fun VoiceMessageOutboxRows(viewModel: ChatViewModel, chatId: String?) {
         items(pending, key = { it.id }) { item ->
             Surface(shape = RoundedCornerShape(16.dp),
                 color = if (item.failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.fillMaxWidth(.88f).clickable(enabled = item.failed && (!item.analysisFailed || item.sendWithoutAnalysis)) { viewModel.retryVoiceMessage(item.id) }) {
+                modifier = Modifier.fillMaxWidth(.88f).clickable(enabled = item.failed && !item.interrupted && (!item.analysisFailed || item.sendWithoutAnalysis)) { viewModel.retryVoiceMessage(item.id) }) {
                 Column(Modifier.padding(12.dp)) {
                     Text("[语音条] ${item.durationMillis / 1000} 秒 · ${item.status}",
                         color = if (item.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSecondaryContainer,
