@@ -112,12 +112,12 @@ internal fun ExplorationPanel(initialRole: String) {
     if (status.optBoolean("enabled") && status.optString("purpose").isNotBlank()) Text(status.optString("purpose"))
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FilledTonalButton(enabled = loaded && !busy && status.optBoolean("enabled") && chat.isNotBlank(),
-            onClick = { perform { withContext(Dispatchers.IO) { store.schedule(role, chat, 15, "用户安排一次自主探索，可自己选择方向或安静。") } } }) {
+            onClick = { perform { withContext(Dispatchers.IO) { store.schedule(role, chat, 15, "用户只提供一次自由判断机会；是否探索、探索什么、转向还是休息，由你自己决定。") } } }) {
             Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text("15分钟后探索一次")
         }
         OutlinedButton(enabled = loaded && !busy && status.optBoolean("enabled"),
             onClick = { perform { withContext(Dispatchers.IO) { store.pause(role) } } }) { Icon(Icons.Default.Pause, null); Spacer(Modifier.width(8.dp)); Text("暂停后续预约") }
     }
-    SpaceExplanation("探索如何安排", "首次开启安排在15分钟后；此后由 AI 决定继续的时间。需要后台服务运行，实际执行也取决于手机系统和当前对话是否空闲。达到每日上限后，预约等待下一天；关闭再开启不会重置当天次数。过程见“唤醒与记录”，收获见书房资料和私人打算。")
+    SpaceExplanation("探索如何安排", "首次开启会在15分钟后给一次自由判断机会。之后 AI 可以自己安排下一次或暂停；若一轮结束时两者都没做，软件默认3小时后再给一次自由判断机会，这不等于继续同一方向。需要后台服务运行，实际执行也取决于手机系统和当前对话是否空闲。达到每日上限后，预约等待下一天；关闭再开启不会重置当天次数。过程见“唤醒与记录”，收获见书房资料和私人打算。")
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }

@@ -98,9 +98,9 @@ class ExplorationStore(private val context: Context) {
     fun finish(work: Work, outcome: String) {
         store.update(scope(work.role)) { ExplorationPolicy.finish(it, work.ticket, outcome) }
         store.log(work.chat, "探索结束", when (outcome) {
-            "completed" -> "本轮结束；阅读、整理的实际结果见资料库和私人待办；未自行安排的会按默认间隔续上"
-            "interrupted" -> "探索已中断；未自行安排的会按默认间隔续上"
-            else -> "探索未完成；未自行安排的会按默认间隔加倍后续上"
+            "completed" -> "本轮结束；阅读、整理的实际结果见资料库和私人待办；未自行安排时，软件会按默认间隔再给一次自由判断机会"
+            "interrupted" -> "探索已中断；未自行安排时，软件会按默认间隔再给一次自由判断机会"
+            else -> "探索未完成；未自行安排时，软件会加倍间隔后再给一次自由判断机会"
         })
     }
     fun recover() {
@@ -108,7 +108,7 @@ class ExplorationStore(private val context: Context) {
             if (!read(role).has("running")) continue
             var interrupted = false
             val data = store.update(scope(role)) { interrupted = ExplorationPolicy.recover(it) }
-            if (interrupted) store.log(data.optString("chat"), "探索中断", "上次运行未结束；未自行安排的已按默认间隔续上")
+            if (interrupted) store.log(data.optString("chat"), "探索中断", "上次运行未结束；未自行安排时已按默认间隔保留下一次自由判断机会")
         }
     }
 

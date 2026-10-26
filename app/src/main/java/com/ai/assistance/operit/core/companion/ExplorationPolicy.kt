@@ -32,7 +32,7 @@ object ExplorationPolicy {
             data.remove("at")
         } else if (!wasEnabled) {
             data.put("at", now + 15 * 60_000L).put("paused", false)
-                .put("purpose", "首次自主探索，可挑选感兴趣的方向，也可以安静或暂缓。")
+                .put("purpose", "第一次自主探索：先看看此刻有没有自己还想继续或新出现的方向；没有也可以休息，不必为了探索而找题目。")
         }
     }
 
@@ -82,11 +82,11 @@ object ExplorationPolicy {
         // 本轮里已自己约了下一次，或明说要歇：尊重它
         if (data.has("at") || data.optBoolean("self_paused")) return
         if (!enabled(data)) { pause(data); return }
-        // 忘了约就自动续上，不让一次遗漏把整个探索停掉；失败的多歇一会儿
+        // 没有自行安排时，只给下一次重新判断的机会；不替助手认定兴趣仍然持续。失败的多歇一会儿。
         val minutes = if (outcome == "failed") AUTO_CONTINUE_MINUTES * 2 else AUTO_CONTINUE_MINUTES
         val last = data.optString("purpose").take(400)
         data.put("at", now + minutes * 60_000L).put("paused", false).put("auto_continued", true)
-            .put("purpose", "上一轮没给自己约下一次，软件按默认${minutes / 60}小时续上。上次的打算：$last".take(500))
+            .put("purpose", "软件提供一次新的自由判断机会；这不代表你仍想继续上次方向。上一轮没有自行安排下一次。上次的打算仅供参考：$last".take(500))
     }
 
     fun recover(data: JSONObject): Boolean {
