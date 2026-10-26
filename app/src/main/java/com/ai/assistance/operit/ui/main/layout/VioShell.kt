@@ -32,6 +32,7 @@ import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.ui.common.NavItem
 import com.ai.assistance.operit.ui.features.chat.components.RelationshipEditor
 import com.ai.assistance.operit.ui.features.settings.screens.VioTownPage
+import com.ai.assistance.operit.ui.features.settings.screens.CompanionSettingsButton
 import com.ai.assistance.operit.ui.main.screens.Screen
 import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
 import kotlinx.coroutines.Dispatchers
@@ -190,6 +191,7 @@ private fun PrivatePage() {
 @Composable
 private fun MinePage(navItems: List<NavItem>, onOpen: (Screen) -> Unit) {
     PageFrame("我的") {
+        CompanionSettingsButton()
         navItems.filter { it != NavItem.AiChat }.forEach { item ->
             val title = stringResource(item.titleResId)
             Card(Modifier.fillMaxWidth().clickable(role = Role.Button) {

@@ -1,6 +1,8 @@
 package com.ai.assistance.operit.ui.features.settings.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -66,7 +68,7 @@ fun SoftwareAwarenessPanel() {
         }
     }
     LaunchedEffect(query) { page = 0 }
-    Text("软件感知", style = MaterialTheme.typography.titleLarge)
+    SpaceSectionTitle("观察与权限")
     Text("记录 Vio Life 内发生的变化：模型与助手增删、设置变更、页面访问、进入后台、聊天停留及实际发送。只有你指定的助手能在自己的私聊接收和查询。与手机感知、主助手管理权分别设置。")
     Text("观察助手：$observer")
     AssistantTargetPicker(role, !busy) { selected -> perform {
@@ -92,19 +94,19 @@ fun SoftwareAwarenessPanel() {
             wake = value; changed()
         })
     }
-    Text("不开事件唤醒也会保留记录，并在你下次与观察助手聊天时提供简报。开启后等对话/通话空闲再判断，密集操作合并；助手可安静处理，不强制发消息。判断会使用该助手的模型额度。")
+    SpaceExplanation("事件怎样交给助手", "不开事件唤醒也会保留记录，并在你下次与观察助手聊天时提供简报。开启后等对话/通话空闲再判断，密集操作合并；助手可安静处理，不强制发消息。判断会使用该助手的模型额度。")
     OutlinedTextField(interval, { interval = it }, label = { Text("两次事件判断至少间隔秒数（15–600）") }, singleLine = true)
-    TextButton(enabled = !busy, onClick = { perform {
+    Button(enabled = !busy, onClick = { perform {
         val seconds = interval.toIntOrNull()
         require(seconds != null && seconds in 15..600) { "请填写15–600的整数秒数" }
         store.preferences.edit().putInt("software_wake_seconds", seconds).apply()
-    } }) { Text("保存间隔") }
+    } }) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(8.dp)); Text("保存间隔") }
     Text("停留时间表示已观察到的前台聊天页面可见时长，不等于注意力。软件退到后台与进程关闭分开看；被系统直接终止时，不能知道精确关闭时间。设置记录不保存密钥、令牌、提示词或聊天正文。")
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     HorizontalDivider()
     Text("变化与访问日志", style = MaterialTheme.typography.titleMedium)
     Text("本机保留最近14天、最多3000条。观察助手只能查这里保留的范围。")
-    OutlinedTextField(query, { query = it }, label = { Text("搜索模型、助手、设置字段或事件类型") }, singleLine = true)
+    OutlinedTextField(query, { query = it }, label = { Text("搜索模型、助手或事件") }, leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
     val found = rows.filter { query.isBlank() || it.toString().contains(query, true) }
     Text("共 ${found.size} 条")
     found.drop(page * 20).take(20).forEach { row ->
@@ -124,7 +126,7 @@ fun SoftwareAwarenessPanel() {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(row.getString("summary"))
                 Text("${time.format(Date(row.getLong("at")))} · $origin · $state", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { expanded = if (expanded == id) null else id }) { Text(if (expanded == id) "收起详情" else "查看详情") }
+                IconButton(onClick = { expanded = if (expanded == id) null else id }) { Icon(if (expanded == id) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded == id) "收起详情" else "查看详情") }
                 if (expanded == id) {
                     val detail = row.getJSONObject("detail")
                     if (detail.has("observed_duration_ms")) Text("本次停留 ${detail.optLong("observed_duration_ms") / 1000} 秒")
@@ -147,7 +149,7 @@ fun SoftwareAwarenessPanel() {
     Row {
         TextButton(enabled = page > 0, onClick = { page-- }) { Text("上一页") }
         TextButton(enabled = (page + 1) * 20 < found.size, onClick = { page++ }) { Text("下一页") }
-        TextButton(onClick = { clearConfirm = true }) { Text("清除记录") }
+        OutlinedButton(onClick = { clearConfirm = true }) { Icon(Icons.Default.DeleteOutline, null); Spacer(Modifier.width(6.dp)); Text("清除记录") }
     }
     if (clearConfirm) AlertDialog(onDismissRequest = { clearConfirm = false }, title = { Text("清除软件观察记录？") },
         text = { Text("会删除这里的日志并取消待判断事件。不会删除聊天内容。") },

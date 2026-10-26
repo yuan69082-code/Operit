@@ -1,6 +1,8 @@
 package com.ai.assistance.operit.ui.features.settings.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -31,11 +33,11 @@ internal fun CompanionActivityPanel(store: CompanionStore, role: String) {
     Text(if (schedule.optBoolean("paused")) "下一次唤醒已暂停" else if (at > 0)
         "下次唤醒：" + DateFormat.getDateTimeInstance().format(Date(at)) else "下次时间尚未安排")
     Text(schedule.optString("purpose"))
-    TextButton(enabled = store.proactiveEnabled && store.proactiveRole == role, onClick = {
+    FilledTonalButton(enabled = store.proactiveEnabled && store.proactiveRole == role, onClick = {
         store.update(store.scheduleKey(role)) { it.put("at", System.currentTimeMillis() + 60_000).put("paused", false)
             .put("purpose", "用户要求唤醒一次，请检查当前情况，自行安排下一次。").put("owner", "user") }
         chatId?.let { store.log(it, "安排", "用户安排一分钟后唤醒") }
-    }) { Text("一分钟后唤醒一次") }
+    }) { Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text("一分钟后唤醒一次") }
     Text("活动日志（最近300条）", style = MaterialTheme.typography.titleMedium)
     if (logs.isEmpty()) Text("尚无记录；这里会记录开始、跳过、安静、联系、学习、下次安排以及 XC 请求结果。")
     logs.forEach { row ->

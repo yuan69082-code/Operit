@@ -93,6 +93,8 @@ class ExplorationPolicyTest {
         ExplorationPolicy.finish(a, "one", "completed", now + 900_000)
         assertFalse(a.getBoolean("paused"))
         assertTrue(a.getBoolean("auto_continued"))
+        assertTrue(a.getString("purpose").contains("自由判断机会"))
+        assertTrue(a.getString("purpose").contains("不代表你仍想继续上次方向"))
         assertEquals(now + 900_000 + ExplorationPolicy.AUTO_CONTINUE_MINUTES * 60_000L, a.getLong("at"))
         assertFalse(ExplorationPolicy.due(a, now + 900_001, day))
         assertTrue(ExplorationPolicy.due(a, a.getLong("at"), day))

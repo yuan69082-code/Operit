@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.time.LocalDate
 
 object RoomPolicy {
-    val widgets = linkedMapOf("diary" to "日记", "todo" to "私人打算", "reading" to "阅读角", "collection" to "收藏与资料", "dates" to "纪念日")
+    val widgets = linkedMapOf("diary" to "日记", "todo" to "私人打算", "reading" to "书房 · 阅读", "collection" to "书房 · 资料", "dates" to "纪念日")
     val fields = linkedMapOf("title" to "房间名字", "subtitle" to "房间寄语", "cover" to "封面", "widgets" to "组件布局", "dates" to "纪念日", "theme" to "聊天外观")
     fun locked(data: JSONObject, field: String) = data.optJSONArray("locks")?.let { array -> (0 until array.length()).any { array.getString(it) == field } } == true
     fun authorize(data: JSONObject, patch: JSONObject, ai: Boolean) {

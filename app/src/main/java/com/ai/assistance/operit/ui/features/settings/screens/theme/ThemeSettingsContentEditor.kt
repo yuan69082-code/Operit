@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.ui.features.settings.screens.theme
 
+import androidx.activity.compose.BackHandler
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -92,7 +93,11 @@ private sealed interface ThemeEditorPendingAction {
 @OptIn(ExperimentalMaterial3Api::class)
 @NonRestartableComposable
 @Composable
-internal fun ThemeSettingsContent() {
+internal fun ThemeSettingsContent(
+    fixedTarget: ActivePrompt? = null,
+    closeRequest: Int = 0,
+    onClose: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val preferencesManager = remember { UserPreferencesManager.getInstance(context) }
     val displayPreferencesManager = remember { DisplayPreferencesManager.getInstance(context) }
@@ -111,7 +116,7 @@ internal fun ThemeSettingsContent() {
         characterCards = characterCardManager.getAllCharacterCards()
     }
 
-    val initialThemeTarget = activePrompt
+    val initialThemeTarget = fixedTarget ?: activePrompt
     if (initialThemeTarget == null) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -126,6 +131,9 @@ internal fun ThemeSettingsContent() {
             scope = scope,
             activePromptManager = activePromptManager,
             activeThemeTarget = initialThemeTarget,
+            targetLocked = fixedTarget != null,
+            closeRequest = closeRequest,
+            onClose = onClose,
             characterCards = characterCards,
             characterGroups = characterGroups,
         )
@@ -141,6 +149,9 @@ internal fun ThemeSettingsContentEditor(
     activeThemeTarget: ActivePrompt,
     characterCards: List<CharacterCard>,
     characterGroups: List<CharacterGroupCard>,
+    targetLocked: Boolean = false,
+    closeRequest: Int = 0,
+    onClose: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val cardColors = CardDefaults.cardColors(
@@ -267,7 +278,8 @@ internal fun ThemeSettingsContentEditor(
             ThemeEditorPendingAction.LeaveScreen -> {
                 val continuation = exitContinuation
                 exitContinuation = null
-                continuation?.resume(allowNavigation)
+                if (continuation != null) continuation.resume(allowNavigation)
+                else if (allowNavigation) onClose?.invoke()
                 if (!allowNavigation && editorState?.target != activeThemeTarget) {
                     editorReloadToken += 1
                 }
@@ -310,6 +322,14 @@ internal fun ThemeSettingsContentEditor(
         }
     }
 
+    fun requestClose() {
+        if (isSaving || pendingAction != null) return
+        if (hasUnsavedChanges) pendingAction = ThemeEditorPendingAction.LeaveScreen
+        else onClose?.invoke()
+    }
+    BackHandler(enabled = onClose != null) { requestClose() }
+    LaunchedEffect(closeRequest) { if (closeRequest > 0) requestClose() }
+
     RegisterRouteBackGuard {
         if (pendingAction != null) {
             return@RegisterRouteBackGuard false
@@ -338,7 +358,7 @@ internal fun ThemeSettingsContentEditor(
             characterCards = characterCards,
             characterGroups = characterGroups,
             enabled =
-                editorState != null &&
+                !targetLocked && editorState != null &&
                     pendingAction == null &&
                     !isSaving &&
                     targetSwitchesInFlight == 0,
