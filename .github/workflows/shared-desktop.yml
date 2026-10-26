@@ -3,7 +3,7 @@ name: Shared desktop preview
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/desktop-shared-chat]
+    branches: [main, feat/desktop-shared-chat, feat/polaris-experience]
 
 permissions:
   contents: write
@@ -22,13 +22,15 @@ jobs:
         with:
           node-version: '22'
       - name: Check shared service
-        run: node --test desktop/test/shared.test.cjs
+        run: node --test desktop/test/*.test.cjs
       - name: Prepare WebChat
         run: npm --prefix web-chat ci --no-audit --no-fund
       - name: Check WebChat types
         run: npm --prefix web-chat run typecheck
       - name: Build WebChat
         run: npm --prefix web-chat run build
+      - name: Prepare verified Electron window runtime
+        run: node desktop/scripts/package-electron.cjs
       - name: Package portable Windows client
         shell: pwsh
         run: |
@@ -89,6 +91,6 @@ jobs:
           version=$(python3 -c 'import json;print(json.load(open("artifacts/windows/shared-release.json"))["version"])')
           tag="shared-v$version"
           notes="$RUNNER_TEMP/shared-preview.md"
-          printf 'Windows共享聊天预览 %s\n\n同一提交构建的Windows便携包和安卓客户端。解压Windows包后运行desktop/Start-Operit.cmd。配置模型后在手机版外部HTTP设置中打开共享聊天。\n\n原生手机本地会话保持独立；旧文字记录需显式导入。本预览尚未包含跨端通话、完整历史附件迁移或原生桌面安装器。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
+          printf 'Windows共享聊天预览 %s\n\n同一提交构建的Windows便携包和安卓客户端。解压Windows包后运行desktop/Start-Operit-Window.cmd打开独立窗口，或Start-Operit.cmd使用浏览器。配置模型后在手机版外部HTTP设置中打开共享聊天。\n\n原生手机本地会话保持独立；旧文字记录需显式导入。本预览尚未包含跨端通话、完整历史附件迁移或原生桌面安装器。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
           cat artifacts/windows/mobile-release-notes.md >> "$notes"
           gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Operit 双端预览 $version" --notes-file "$notes" --prerelease --latest=false
