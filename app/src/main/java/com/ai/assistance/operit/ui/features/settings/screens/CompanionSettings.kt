@@ -131,7 +131,7 @@ private fun AssistantSpaceOverview(role: String?, navigate: (AssistantSpacePage)
         counts?.let { "${it[1]} 条待读 · ${it[2]} 份资料" }, enabled = role != null, onClick = { room("书房") })
     SpaceLinkCard("私人打算", "想继续的事、进展和下一步", Icons.Default.Checklist,
         counts?.let { "${it[3]} 件进行中的事" }, enabled = role != null, onClick = { navigate(AssistantSpacePage.PLANS) })
-    SpaceLinkCard("情绪与状态", "查看当前助手的 XC 记录与连接", Icons.Default.FavoriteBorder,
+    SpaceLinkCard("情绪与状态", "内部状态、变化轨迹、演化规则与 XC 连接", Icons.Default.FavoriteBorder,
         enabled = role != null, onClick = { navigate(AssistantSpacePage.EMOTION) })
     if (role == null) Text("选择助手后，可打开房间、书房与私人打算。", style = MaterialTheme.typography.bodySmall)
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
@@ -189,6 +189,7 @@ private fun CompanionContactPanel() {
 
 @Composable
 private fun CompanionEmotionPanel(role: String) {
+    InternalStatePanel(role)
     val context = LocalContext.current
     val store = remember { CompanionStore(context) }
     val scope = rememberCoroutineScope()

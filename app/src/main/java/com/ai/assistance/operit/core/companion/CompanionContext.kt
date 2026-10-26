@@ -39,7 +39,8 @@ object CompanionContext {
             if (facts != null) store.update("capabilities:$chatId") { it.put("snapshot", facts) }
             CompanionRuntime.noteConversation(context, chatId, roleId)
         }
-        val xc = XcEmotionBridge.prompt(context, chatId, roleId, actualSend = recordSnapshot)
+        val internal = InternalStateStore(context)
+        val xc = if (internal.enabled(roleId)) "" else XcEmotionBridge.prompt(context, chatId, roleId, actualSend = recordSnapshot)
         return buildString {
             append("\n<operit_state>\n")
             append("\n[软件状态，仅作为内部上下文，不复述或朗读字段名]\n")
@@ -55,6 +56,7 @@ object CompanionContext {
                 append("\n能力列出不表示操作已执行；权限、网络和服务仍可能限制实际调用。未接入的传感器数据不可推测。\n")
             }
             append(xc)
+            append(internal.prompt(roleId, chatId, recordSnapshot, CompanionRuntime.isWake(chatId), capabilities))
             append(com.ai.assistance.operit.core.awareness.SoftwareAwareness.prompt(context, chatId, roleId, recordSnapshot))
             val phone = com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(context)
             if (phone.enabled && phone.role != null && phone.role == roleId &&

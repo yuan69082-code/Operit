@@ -1394,6 +1394,7 @@ class ChatHistoryDelegate(
                 )
                 chatHistoryManager.updateMessage(targetChatId, message)
                 ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
+                com.ai.assistance.operit.core.companion.InternalStateStore.noteMessage(context, targetChatId, message)
                 return@withLock
             }
 
@@ -1401,6 +1402,7 @@ class ChatHistoryDelegate(
                     // 非当前会话：使用“更新或插入”语义，避免每个chunk都插入新消息
                 chatHistoryManager.updateMessage(targetChatId, message)
                 ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
+                com.ai.assistance.operit.core.companion.InternalStateStore.noteMessage(context, targetChatId, message)
                 return@withLock
             }
 
@@ -1426,6 +1428,7 @@ class ChatHistoryDelegate(
                     ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
                 }
             }
+            com.ai.assistance.operit.core.companion.InternalStateStore.noteMessage(context, targetChatId, message)
         }
     }
 

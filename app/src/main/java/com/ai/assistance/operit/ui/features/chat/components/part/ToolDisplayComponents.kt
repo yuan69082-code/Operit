@@ -51,6 +51,10 @@ fun CompactToolDisplay(
     val (displayToolName, displayParams) = remember(toolName, params) {
         normalizeToolDisplayForStrictProxy(toolName, params)
     }
+    if (displayToolName == "companion_internal_state") {
+        Text("内部状态 · 定义与记录见助手空间", modifier = modifier, color = textColor)
+        return
+    }
     // 弹窗状态
     var showDetailDialog by remember { mutableStateOf(false) }
     val hasParams = displayParams.isNotBlank()
@@ -104,6 +108,10 @@ fun DetailedToolDisplay(
     val context = LocalContext.current
     val (displayToolName, displayParams) = remember(toolName, params) {
         normalizeToolDisplayForStrictProxy(toolName, params)
+    }
+    if (displayToolName == "companion_internal_state") {
+        Text("内部状态 · 定义与记录见助手空间", modifier = modifier, color = textColor)
+        return
     }
     var showDetailDialog by remember { mutableStateOf(false) }
     val hasParams = displayParams.isNotBlank()

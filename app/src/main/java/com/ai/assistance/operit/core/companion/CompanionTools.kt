@@ -12,9 +12,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = RoomTools.names + setOf("companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
+    val names = RoomTools.names + setOf("companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
 
     fun prompts(): List<ToolPrompt> = RoomTools.prompts() + listOf(
+        ToolPrompt(name = "companion_internal_state",
+            description = "Operit 自有内部状态。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件和版本，offset翻页。其余操作必须有id、expected_version（新建0）、reason（经历及区别）、evidence（get返回事件ID的JSON数组）。create/revise传完整definition JSON：id,name,description,baseline,min,max,maxDelta,halfLifeHours（0不恢复，否则按小时半衰期回归baseline）,scope=global|session,private,share（AI愿向本机公开）,participates,triggers=[{source,delta,contains可选}],effects=[{action,weight,cue,target可选}]。source=user_message|assistant_reply|assistant_action|tool_success|tool_failure|reading|exploration|todo_progress|todo_failed|todo_completed|wake|time；time的delta是每小时漂移量，其余是每事件增量，宿主限制总maxDelta。effects action=contact|explore|todo|tool|reply|defer|drop|rest，weight为-10..10的相对基准倾向，cue解释高低状态如何影响选择，target可为待办/阅读来源ID或工具名。merge用target指定同作用域现有目标，宿主平均归一化值并停用来源；旧历史保留。规则修订不重置当前值，不能自行报告事件或写当前值。状态不授予工具、探索或联系权限。",
+            parametersStructured = listOf(param("action", "操作", true), param("id", "维度稳定ID"),
+                param("definition", "完整维度定义JSON"), param("expected_version", "get读取的版本，新建0"),
+                param("reason", "演化经过与理由"), param("evidence", "真实事件ID的JSON数组"),
+                param("target", "merge目标维度ID"), param("offset", "历史分页起点"))),
         ToolPrompt(name = "companion_explore",
             description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；本轮没安排也没 pause 时，软件默认3小时后再给一次自由判断机会，不代表继续同一兴趣。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材、继续旧方向或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
@@ -71,6 +77,18 @@ object CompanionTools {
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
                     val result = when (name) {
+                        "companion_internal_state" -> {
+                            val actor = requireNotNull(roleId) { "请先选择独立助手" }
+                            val internal = InternalStateStore(context)
+                            check(internal.enabled(actor)) { "内部状态未开启" }
+                            if (action != "get") {
+                                val evidence = JSONArray(required(tool, "evidence"))
+                                internal.evolve(actor, chatId, requireNotNull(action), required(tool, "id"),
+                                    required(tool, "expected_version").toInt(), value(tool, "definition")?.let { JSONObject(it) },
+                                    value(tool, "target"), required(tool, "reason"), (0 until evidence.length()).map { evidence.getString(it) })
+                            }
+                            internal.inspect(actor, chatId, value(tool, "offset")?.toInt() ?: 0)
+                        }
                         "companion_explore" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                             val exploration = ExplorationStore(context)
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
@@ -116,7 +134,8 @@ object CompanionTools {
                         } else if (action == "thought" || action == "thoughts") {
                             // 念头池
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
-                            val share = runCatching { kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { XcEmotionBridge.cached(context, chatId, roleId) } }.getOrNull()
+                            val internalEnabled = InternalStateStore(context).enabled(roleId)
+                            val share = if (internalEnabled) null else runCatching { kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { XcEmotionBridge.cached(context, chatId, roleId) } }.getOrNull()
                             val result = JSONObject()
                             if (action == "thought") result.put("saved", ThoughtPool.save(context, actor, value(tool, "id"), value(tool, "content"),
                                 required(tool, "choice"), value(tool, "minutes")?.let { it.toIntOrNull() ?: error("minutes 须为整数") }))
@@ -124,7 +143,8 @@ object CompanionTools {
                             val items = ThoughtPool.all(context, actor)
                             result.put("surfaced", JSONArray(ThoughtPool.surfaced(items, now)))
                                 .put("sinking", items.count { it.optString("state") == "sink" })
-                                .put("xc", ThoughtPool.hint(ThoughtPool.shareDrive(share)))
+                            if (!internalEnabled) result.put("xc", ThoughtPool.hint(ThoughtPool.shareDrive(share)))
+                            result
                         } else {
                             check(action != "submit" || !CompanionRuntime.isExplorationWake(chatId)) { "本轮探索请用 companion_explore schedule 安排继续；可以保存或批注待办" }
                             when (action) {

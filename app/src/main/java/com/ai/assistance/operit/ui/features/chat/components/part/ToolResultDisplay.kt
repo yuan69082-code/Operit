@@ -38,6 +38,10 @@ fun ToolResultDisplay(
         modifier: Modifier = Modifier,
         enableDialog: Boolean = true  // 新增参数：是否启用弹窗功能，默认启用
 ) {
+    if (toolName == "companion_internal_state") {
+        Text("内部状态记录已收起，请在助手空间查看获准公开的状态。", modifier = modifier)
+        return
+    }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val hasContent = result.isNotBlank()
