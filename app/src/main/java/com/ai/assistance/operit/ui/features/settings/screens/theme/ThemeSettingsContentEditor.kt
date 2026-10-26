@@ -1,4 +1,5 @@
 package com.ai.assistance.operit.ui.features.settings.screens.theme
+import kotlinx.coroutines.flow.first
 
 import androidx.activity.compose.BackHandler
 import android.net.Uri
@@ -95,6 +96,7 @@ private sealed interface ThemeEditorPendingAction {
 @Composable
 internal fun ThemeSettingsContent(
     fixedTarget: ActivePrompt? = null,
+    sharedAppearance: Boolean = false,
     closeRequest: Int = 0,
     onClose: (() -> Unit)? = null,
 ) {
@@ -116,7 +118,7 @@ internal fun ThemeSettingsContent(
         characterCards = characterCardManager.getAllCharacterCards()
     }
 
-    val initialThemeTarget = fixedTarget ?: activePrompt
+    val initialThemeTarget = if (sharedAppearance) ActivePrompt.CharacterCard(CharacterCardManager.DEFAULT_CHARACTER_CARD_ID) else fixedTarget ?: activePrompt
     if (initialThemeTarget == null) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -132,6 +134,7 @@ internal fun ThemeSettingsContent(
             activePromptManager = activePromptManager,
             activeThemeTarget = initialThemeTarget,
             targetLocked = fixedTarget != null,
+            sharedAppearance = sharedAppearance,
             closeRequest = closeRequest,
             onClose = onClose,
             characterCards = characterCards,
@@ -150,6 +153,7 @@ internal fun ThemeSettingsContentEditor(
     characterCards: List<CharacterCard>,
     characterGroups: List<CharacterGroupCard>,
     targetLocked: Boolean = false,
+    sharedAppearance: Boolean = false,
     closeRequest: Int = 0,
     onClose: (() -> Unit)? = null,
 ) {
@@ -183,7 +187,7 @@ internal fun ThemeSettingsContentEditor(
             return@LaunchedEffect
         }
         editorState = null
-        val snapshot = when (target) {
+        val snapshot = if (sharedAppearance) preferencesManager.observeSharedAppearance().first() else when (target) {
             is ActivePrompt.CharacterCard ->
                 preferencesManager.resolveThemePreferenceSnapshot(characterCardId = target.id)
 
@@ -300,7 +304,9 @@ internal fun ThemeSettingsContentEditor(
         draft.beginSave(savedValues)
         scope.launch {
             try {
-                if (resetRequested) {
+                if (sharedAppearance) {
+                    preferencesManager.saveSharedAppearance(savedValues)
+                } else if (resetRequested) {
                     activePromptManager.resetThemeDraft(target, savedValues)
                 } else {
                     activePromptManager.commitThemeDraft(target, savedValues)
@@ -351,7 +357,8 @@ internal fun ThemeSettingsContentEditor(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ThemeSettingsTargetSelector(
+        if (sharedAppearance) Text("软件公共外观 · 所有助手共用", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+        else ThemeSettingsTargetSelector(
             selectedTarget = editorTarget,
             selectedLabel = selectedThemeTargetName,
             selectedAvatarUri = selectedAvatarUri,
@@ -375,7 +382,7 @@ internal fun ThemeSettingsContentEditor(
         )
 
         val draft = editorState?.session
-        ThemeStudioEntry(
+        if (!sharedAppearance) ThemeStudioEntry(
             target = editorTarget,
             enabled = draft != null && !hasUnsavedChanges && !isSaving && targetSwitchesInFlight == 0,
             onClosed = { editorReloadToken++ },
@@ -401,6 +408,7 @@ internal fun ThemeSettingsContentEditor(
             // External picker callbacks retain this exact draft, even after another target is selected.
             key(draft) {
                 ThemeSettingsTabbedContent(
+                    tabs = if (sharedAppearance) listOf(ThemeSettingsTab.BASIC, ThemeSettingsTab.BACKGROUND, ThemeSettingsTab.INTERFACE) else ThemeSettingsTab.values().toList(),
                     selectedTab = selectedThemeTab,
                     onSelectedTabChange = { selectedThemeTab = it },
                     scrollState = scrollState,
@@ -432,6 +440,7 @@ internal fun ThemeSettingsContentEditor(
                     },
                     interfaceContent = {
                         ThemeSettingsInterfaceTab(
+                            sharedAppearance = sharedAppearance,
                             shared = shared,
                             cardColors = cardColors,
                         )

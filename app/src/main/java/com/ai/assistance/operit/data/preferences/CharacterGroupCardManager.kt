@@ -158,7 +158,8 @@ class CharacterGroupCardManager private constructor(private val context: Context
             val currentList = preferences[CHARACTER_GROUP_LIST]?.toMutableSet() ?: mutableSetOf()
             currentList.add(group.id)
             preferences[CHARACTER_GROUP_LIST] = currentList
-            preferences[groupDataKey(group.id)] = gson.toJson(normalizedGroup)
+            val current = preferences[groupDataKey(group.id)]?.let { gson.fromJson(it, CharacterGroupCard::class.java) }
+            preferences[groupDataKey(group.id)] = gson.toJson(normalizedGroup.copy(ended = current?.ended ?: normalizedGroup.ended))
         }
 
         val shouldRegenerateDefaultAvatar =
@@ -166,6 +167,15 @@ class CharacterGroupCardManager private constructor(private val context: Context
                 isManagedDefaultGroupAvatar(previousAvatarUri, group.id)
         if (shouldRegenerateDefaultAvatar) {
             regenerateDefaultAvatarForGroup(normalizedGroup, previousAvatarUri)
+        }
+    }
+
+    /** Lifecycle changes are independent of a potentially older group-edit form. */
+    suspend fun setGroupEnded(groupId: String, ended: Boolean) {
+        dataStore.edit { preferences ->
+            val raw = requireNotNull(preferences[groupDataKey(groupId)]) { "群聊已删除" }
+            val current = gson.fromJson(raw, CharacterGroupCard::class.java)
+            preferences[groupDataKey(groupId)] = gson.toJson(current.copy(ended = ended, updatedAt = System.currentTimeMillis()))
         }
     }
 

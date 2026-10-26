@@ -159,7 +159,8 @@ fun AppContent(
         actions: @Composable RowScope.() -> Unit = {},
         titleContent: TopBarTitleContent? = null,
         /** 当前导航栈中仍存活的路由 screenKey（路由级 ViewModelStore 清理依据）。 */
-        aliveScreenKeys: Set<String>
+        aliveScreenKeys: Set<String>,
+        showTopBar: Boolean = true,
 ) {
     // Get background image state
     val context = LocalContext.current
@@ -270,7 +271,7 @@ fun AppContent(
             topBar = {
                 // 单一工具栏 - 使用小型化的设计
                 // 使用 windowInsets 参数让 TopAppBar 自己处理状态栏的 insets
-                TopAppBar(
+                if (showTopBar) TopAppBar(
                     windowInsets = WindowInsets.statusBars,
                     title = {
                         if (titleContent != null) {
@@ -707,7 +708,8 @@ fun AppContent(
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         screenStateHolder.SaveableStateProvider(screenKey) {
                                             CompositionLocalProvider(
-                                                LocalIsCurrentScreen provides isCurrentScreen,
+                                                LocalIsCurrentScreen provides (isCurrentScreen && com.ai.assistance.operit.ui.main.layout.LocalRouteSurfaceVisible.current &&
+                                                    (currentScreen !is Screen.AiChat || com.ai.assistance.operit.ui.main.layout.LocalChatNavigation.current?.directoryVisible != true)),
                                                 LocalRouteInstanceId provides screenKey,
                                                 LocalSetScreenSoftInputMode provides { mode ->
                                                     if (isCurrentScreen && currentScreenSoftInputMode != mode) {

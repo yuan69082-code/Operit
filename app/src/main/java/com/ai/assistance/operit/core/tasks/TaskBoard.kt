@@ -31,14 +31,15 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
         }
         return saved
     }
-    private fun row(id: String, change: (JSONObject) -> Unit) = update { data ->
+    private fun row(id: String, requireOpen: Boolean = false, change: (JSONObject) -> Unit) = update { data ->
+        if (group && requireOpen) check(data.optBoolean("group_exists", true)) { "群已结束，不能提交执行" }
         val rows = data.optJSONArray(key) ?: error("待办不存在")
         val i = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id } ?: error("待办不存在")
         val row = TaskRecords.normalize(rows.getJSONObject(i))
         change(row); rows.put(i, row)
     }
     fun comment(id: String, actor: String, text: String) = row(id) { TaskRecords.comment(it, actor, text, System.currentTimeMillis()) }
-    fun submit(id: String, actor: String, recipient: String, members: Set<String>, minutes: Int) = row(id) {
+    fun submit(id: String, actor: String, recipient: String, members: Set<String>, minutes: Int) = row(id, requireOpen = true) {
         require(recipient in members) { "接手助手不在此范围" }
         TaskRecords.submit(it, actor, recipient, minutes, System.currentTimeMillis())
     }
@@ -50,6 +51,7 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
     fun claim(id: String, event: String): JSONObject? {
         var claimed: JSONObject? = null
         update { data ->
+            if (group && !data.optBoolean("group_exists", true)) return@update
             val rows = data.optJSONArray(key) ?: return@update
             val index = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).optString("id") == id } ?: return@update
             val row = TaskRecords.normalize(rows.getJSONObject(index))

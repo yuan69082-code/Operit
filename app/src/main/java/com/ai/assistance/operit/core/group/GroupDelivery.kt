@@ -49,6 +49,7 @@ object GroupDelivery {
             val group = chat.characterGroupId?.let { manager.getCharacterGroupCard(it) } ?: continue
             if (group.members.any { it.characterCardId == actor }) result.put(JSONObject()
                 .put("chat_id", chat.id).put("group_id", group.id).put("name", chat.title)
+                .put("group_exists", !group.ended)
                 .put("members", JSONArray(group.members.map { it.characterCardId }))
                 .put("muted", !GroupModeration(context).mayPublish(chat.id, actor)))
         }
@@ -59,6 +60,7 @@ object GroupDelivery {
         val metadata = requireNotNull(ChatHistoryManager.getInstance(context).getChatMetadata(chat)) { "群会话不存在" }
         val group = requireNotNull(metadata.characterGroupId?.let { CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }) { "目标必须是已有群聊" }
         val ids = group.members.map { it.characterCardId }
+        check(!group.ended) { "目标群已结束，不能发送消息" }
         require(actor in ids && targets.all { it in ids && it != actor }) { "只能以自己身份向已加入的群和群成员发言" }
         require(text.isNotBlank() && text.length <= 12000) { "公开消息需为 1–12000 字" }
         check(GroupModeration(context).mayPublish(chat, actor)) { "你目前在目标群被禁言" }
@@ -67,6 +69,7 @@ object GroupDelivery {
             .put("text", GroupTurnPolicy.cleanLegacyPrefix(text)).put("targets", JSONArray(targets))
             .put("timestamp", ChatMessageTimestampAllocator.next())
         store.update(chat) { state ->
+            check(state.optBoolean("group_exists", true)) { "群已结束，不能提交待发消息" }
             val outbox = state.optJSONArray("outbox") ?: JSONArray()
             require(outbox.length() < 30) { "此群待发消息已满，请等待投递" }
             outbox.put(item); state.put("outbox", outbox)

@@ -14,6 +14,7 @@ class GroupGames(context: Context) {
     fun start(chat: String, kind: String, players: List<String>, rules: String): GroupGameState {
         val game = GroupGameEngine.create(kind, players, rules)
         store.update(chat) {
+            check(it.optBoolean("group_exists", true)) { "群已结束，不能开始游戏" }
             val existing = it.optJSONObject("game")
             check(existing == null || existing.optString("phase") == "ended") { "请先结束当前游戏" }
             it.put("game", JSONObject(gson.toJson(game)))
@@ -47,6 +48,7 @@ class GroupGames(context: Context) {
     }
     fun act(chat: String, actor: String, move: JSONObject): JSONObject {
         store.update(chat) { value ->
+            check(value.optBoolean("group_exists", true)) { "群已结束，不能继续游戏" }
             val s = value.optJSONObject("game")?.let { gson.fromJson(it.toString(), GroupGameState::class.java) } ?: error("尚未开局")
             check(actor in s.players) { "你不是本局玩家" }
             when(s.kind) {

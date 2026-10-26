@@ -1220,6 +1220,28 @@ class UserPreferencesManager private constructor(private val context: Context) {
         deleteThemeByPrefix(getCharacterGroupThemePrefix(characterGroupId))
     }
 
+    /** One-time adoption of the current appearance; later assistant changes never rewrite it. */
+    suspend fun initializeSharedAppearance(values: ThemePreferenceValues) {
+        context.userPreferencesDataStore.edit { preferences ->
+            val initialized = booleanPreferencesKey("shared_appearance_initialized")
+            if (preferences[initialized] != true) {
+                writeVisualThemeValues(preferences, "shared_appearance_", values)
+                preferences[initialized] = true
+            }
+        }
+    }
+
+    fun observeSharedAppearance(): Flow<ThemePreferenceSnapshot> = context.userPreferencesDataStore.data
+        .map { ThemePreferenceSnapshot(source = "application", values = readThemePreferenceValues(it, "shared_appearance_")) }
+        .distinctUntilChanged()
+
+    suspend fun saveSharedAppearance(values: ThemePreferenceValues) {
+        context.userPreferencesDataStore.edit { preferences ->
+            writeVisualThemeValues(preferences, "shared_appearance_", values)
+            preferences[booleanPreferencesKey("shared_appearance_initialized")] = true
+        }
+    }
+
     fun observeThemePreferenceSnapshot(
         characterCardId: String? = null,
         characterGroupId: String? = null

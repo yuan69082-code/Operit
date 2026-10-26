@@ -5,219 +5,259 @@ import android.content.Context
 import android.content.Intent
 import android.provider.AlarmClock
 import android.provider.CalendarContract
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.ui.common.NavItem
-import com.ai.assistance.operit.ui.features.chat.components.RelationshipEditor
-import com.ai.assistance.operit.ui.features.settings.screens.VioTownPage
-import com.ai.assistance.operit.ui.features.settings.screens.CompanionSettingsButton
+import com.ai.assistance.operit.ui.features.settings.screens.CompanionSettingsDialog
+import com.ai.assistance.operit.ui.features.settings.screens.AssistantTargetPicker
+import com.ai.assistance.operit.ui.features.settings.screens.InternalStatePanel
+import com.ai.assistance.operit.data.model.ActivePrompt
+import com.ai.assistance.operit.data.preferences.ActivePromptManager
+import com.ai.assistance.operit.ui.features.settings.screens.SpaceLinkCard
+import com.ai.assistance.operit.ui.main.navigation.NavigationEntrySpec
 import com.ai.assistance.operit.ui.main.screens.Screen
 import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
+import com.ai.assistance.operit.ui.theme.LocalAppThemeScope
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
-/** 底部五个按钮。CONTENT 不是按钮，是原来那套路由页面（聊天、设置等）正在显示。 */
-internal enum class VioTab { TOWN, CONTENT, LIFE, PRIVATE, MINE }
-
+internal enum class VioTab { HOME, CHAT, SPACE, TOOLS, LIFE, PRIVATE, MINE, DETAIL }
 private data class BarItem(val tab: VioTab, val label: String, val icon: ImageVector)
-
 private val barItems = listOf(
-    BarItem(VioTab.TOWN, "小镇", Icons.Filled.Home),
-    BarItem(VioTab.CONTENT, "聊天", Icons.Filled.ChatBubble),
-    BarItem(VioTab.LIFE, "生活", Icons.Filled.WbSunny),
-    BarItem(VioTab.PRIVATE, "私域", Icons.Filled.Lock),
-    BarItem(VioTab.MINE, "我的", Icons.Filled.Person),
+    BarItem(VioTab.HOME, "首页", Icons.Default.Home),
+    BarItem(VioTab.CHAT, "聊天", Icons.Default.ChatBubbleOutline),
+    BarItem(VioTab.SPACE, "空间", Icons.Default.AutoAwesome),
+    BarItem(VioTab.TOOLS, "工具", Icons.Default.GridView),
+    BarItem(VioTab.LIFE, "生活", Icons.Default.WbSunny),
+    BarItem(VioTab.PRIVATE, "私域", Icons.Default.Lock),
+    BarItem(VioTab.MINE, "我的", Icons.Default.PersonOutline),
 )
+private val toolItems = setOf(NavItem.Packages, NavItem.Toolbox, NavItem.ShizukuCommands, NavItem.Workflow, NavItem.Terminal, NavItem.ToolPermissions)
 
-/**
- * Vio Life 外壳：打开先是小镇，底部一排导航。原来的页面整块放在 [content] 里不动，
- * 侧边栏也还留着当备用。
- * @param navItems 原侧边栏的入口，收进「我的」。
- * @param onOpenScreen 让原路由切到某个页面。
- */
+/** All host destinations and plugin routes remain real routes; root pages share one appearance. */
 @Composable
 internal fun VioShell(
     currentScreen: Screen,
     navItems: List<NavItem>,
+    pluginEntries: List<NavigationEntrySpec>,
     onOpenScreen: (Screen) -> Unit,
+    onOpenPlugin: (NavigationEntrySpec) -> Unit,
+    isNetworkAvailable: Boolean,
+    networkType: String,
     canGoBack: Boolean,
-    content: @Composable (mineBack: (() -> Unit)?) -> Unit,
+    content: @Composable (shellBack: (() -> Unit)?) -> Unit,
 ) {
-    var tab by rememberSaveable { mutableStateOf(VioTab.TOWN) }
-    var neighborsOpen by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val chatId by ChatHistoryManager.getInstance(context).currentChatIdFlow.collectAsState()
-    var role by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(chatId) {
-        role = chatId?.let { ChatHistoryManager.getInstance(context).getChatMetadata(it)?.characterCardId }
-            ?.takeUnless { it.startsWith("unassigned:") }
+    var tab by rememberSaveable { mutableStateOf(if (currentScreen is Screen.AiChat) VioTab.HOME else VioTab.DETAIL) }
+    var origin by rememberSaveable { mutableStateOf(VioTab.MINE) }
+    val chatNavigation = requireNotNull(LocalChatNavigation.current)
+    LaunchedEffect(chatNavigation.externalRequest) {
+        if (chatNavigation.externalRequest > 0) tab = VioTab.CHAT
     }
-    fun openChat() { onOpenScreen(ScreenRouteRegistry.defaultScreenForNavItem(NavItem.AiChat)); tab = VioTab.CONTENT }
-
-    // 在小镇以外的按钮页按返回，先回小镇
-    BackHandler(enabled = tab == VioTab.LIFE || tab == VioTab.PRIVATE || tab == VioTab.MINE) { tab = VioTab.TOWN }
-
-    // 打字时把底栏让出来，免得顶住输入框
-    val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val onChatRoute = currentScreen is Screen.AiChat
-    // 从「我的」点进去的页面没有自己的返回栈，给它一个回「我的」的路
-    val mineBack: (() -> Unit)? = if (tab == VioTab.CONTENT && !onChatRoute) ({ tab = VioTab.MINE }) else null
-    BackHandler(enabled = mineBack != null && !canGoBack) { tab = VioTab.MINE }
-    val selected = when {
-        tab != VioTab.CONTENT -> tab
-        onChatRoute -> VioTab.CONTENT
-        else -> VioTab.MINE
+    val themeScope = LocalAppThemeScope.current
+    val focus = LocalFocusManager.current
+    fun root(destination: VioTab) {
+        focus.clearFocus()
+        if (destination == VioTab.CHAT) {
+            chatNavigation.showDirectory()
+            onOpenScreen(ScreenRouteRegistry.defaultScreenForNavItem(NavItem.AiChat))
+        }
+        tab = destination
     }
-
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            // 原内容一直挂着，切走也不重建聊天页
-            content(mineBack)
-            when (tab) {
-                VioTab.TOWN -> VioTownPage(
-                    role = role, chat = chatId.orEmpty(),
-                    onGate = ::openChat,
-                    onOuterPlace = { key -> if (key == "neighbors") neighborsOpen = true else openChat() },
-                )
-                VioTab.LIFE -> LifePage()
-                VioTab.PRIVATE -> PrivatePage()
-                VioTab.MINE -> MinePage(navItems) { screen -> onOpenScreen(screen); tab = VioTab.CONTENT }
-                VioTab.CONTENT -> Unit
+    fun openDestination(item: NavItem) {
+        origin = tab
+        tab = VioTab.DETAIL
+        onOpenScreen(ScreenRouteRegistry.defaultScreenForNavItem(item))
+    }
+    var previousScreen by remember { mutableStateOf(currentScreen) }
+    LaunchedEffect(currentScreen) {
+        // Routes opened by tools, history or settings must not remain hidden under a root page.
+        if (currentScreen != previousScreen) {
+            if (currentScreen is Screen.AiChat) {
+                if (tab == VioTab.DETAIL) tab = VioTab.CHAT
+            } else if (tab != VioTab.DETAIL) {
+                origin = tab; tab = VioTab.DETAIL
             }
+            previousScreen = currentScreen
         }
-        // 聊天页用窄的底栏，只留图标，把位置让给消息
-        val compact = tab == VioTab.CONTENT && onChatRoute
-        if (!imeOpen || tab != VioTab.CONTENT) NavigationBar(
-            modifier = if (compact) Modifier.windowInsetsPadding(WindowInsets.navigationBars).height(52.dp) else Modifier,
-            windowInsets = if (compact) WindowInsets(0) else NavigationBarDefaults.windowInsets,
-        ) {
-            barItems.forEach { item ->
-                NavigationBarItem(
-                    selected = selected == item.tab,
-                    onClick = { if (item.tab == VioTab.CONTENT) openChat() else tab = item.tab },
-                    icon = { Icon(item.icon, contentDescription = if (compact) item.label else null) },
-                    label = if (compact) null else ({ Text(item.label) }),
-                    alwaysShowLabel = !compact,
-                )
+    }
+    val conversation = tab == VioTab.CHAT && currentScreen is Screen.AiChat && !chatNavigation.directoryVisible
+    SideEffect { themeScope?.conversationVisible = conversation }
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(tab, conversation) {
+        if (tab != VioTab.DETAIL) com.ai.assistance.operit.core.awareness.SoftwareAwareness.record(
+            appContext, "page", "打开软件页面", "navigation",
+            org.json.JSONObject().put("route", if (conversation) "conversation" else tab.name.lowercase()))
+    }
+    val back: () -> Unit = {
+        focus.clearFocus()
+        if (conversation) chatNavigation.showDirectory() else tab = origin
+    }
+    BackHandler(enabled = conversation) { back() }
+    BackHandler(enabled = tab != VioTab.HOME && tab != VioTab.DETAIL && !conversation) { root(VioTab.HOME) }
+    BackHandler(enabled = tab == VioTab.DETAIL && !canGoBack) { back() }
+
+    val routeVisible = tab == VioTab.CHAT || tab == VioTab.DETAIL
+    CompositionLocalProvider(LocalRouteSurfaceVisible provides routeVisible) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                // Keep the route/service mounted while browsing root pages.
+                Box(if (routeVisible) Modifier.fillMaxSize() else Modifier.fillMaxSize().clearAndSetSemantics {}.layout { measurable, constraints ->
+                    val measured = measurable.measure(constraints)
+                    layout(measured.width, measured.height) { /* Kept in composition, never placed or hit-tested. */ }
+                }) {
+                    content(back)
+                }
+                when (tab) {
+                    VioTab.HOME -> HomePage(
+                        onChat = { root(VioTab.CHAT) }, onSpace = { root(VioTab.SPACE) },
+                        onTools = { root(VioTab.TOOLS) }, onLife = { root(VioTab.LIFE) },
+                    )
+                    VioTab.SPACE -> CompanionSettingsDialog(embedded = true) { root(VioTab.HOME) }
+                    VioTab.TOOLS -> DestinationPage("工具", "把需要的能力放在手边",
+                        (navItems.filter { it in toolItems } + listOf(NavItem.Terminal, NavItem.ToolPermissions)).distinct(), pluginEntries, ::openDestination,
+                        { entry ->
+                            if (entry.action == null) { origin = VioTab.TOOLS; tab = VioTab.DETAIL }
+                            onOpenPlugin(entry)
+                        })
+                    VioTab.MINE -> DestinationPage("我的", "偏好、模型与软件管理",
+                        (navItems.filter { it != NavItem.AiChat && it !in toolItems && it != NavItem.MemoryBase } + listOf(NavItem.ChatHistorySettings, NavItem.TokenConfig)).distinct(),
+                        emptyList(), ::openDestination, onOpenPlugin,
+                        network = if (isNetworkAvailable) networkType else "网络未连接")
+                    VioTab.LIFE -> LifePage { openDestination(NavItem.MemoryBase) }
+                    VioTab.PRIVATE -> PrivatePage()
+                    VioTab.CHAT, VioTab.DETAIL -> Unit
+                }
             }
-        }
-    }
-    if (neighborsOpen) AlertDialog(
-        onDismissRequest = { neighborsOpen = false }, title = { Text("邻居") },
-        text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) { RelationshipEditor(chatId.orEmpty()) } },
-        confirmButton = { TextButton(onClick = { neighborsOpen = false }) { Text("关闭") } },
-    )
-}
-
-@Composable
-private fun PageFrame(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            Modifier.statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(title, style = MaterialTheme.typography.headlineSmall)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun EntryCard(title: String, hint: String?, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-/** 生活：第一版只放天气、闹钟、提醒，手表数据以后再接。 */
-@Composable
-private fun LifePage() {
-    val context = LocalContext.current
-    var weather by remember { mutableStateOf("正在看天…") }
-    LaunchedEffect(Unit) { weather = fetchWeather() ?: "天气没取到，等会儿再看看" }
-    PageFrame("生活") {
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("天气", style = MaterialTheme.typography.titleMedium)
-                Text(weather)
-            }
-        }
-        EntryCard("闹钟", "打开手机自带的闹钟") { launch(context, Intent(AlarmClock.ACTION_SHOW_ALARMS)) }
-        EntryCard("提醒", "打开日历，新建一条提醒") {
-            launch(context, Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI))
-        }
-        Text("手表的心率、睡眠还没接进来，下一版再放。", style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-/** 私域：先占位。 */
-@Composable
-private fun PrivatePage() {
-    Surface(Modifier.fillMaxSize(), color = Color(0xFF1B1A2E)) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("这里还没开放", color = Color(0xFFFFE3B0), style = MaterialTheme.typography.titleMedium)
-        }
-    }
-}
-
-/** 我的：原侧边栏的入口收在这里，聊天已经有自己的按钮，不重复放。 */
-@Composable
-private fun MinePage(navItems: List<NavItem>, onOpen: (Screen) -> Unit) {
-    PageFrame("我的") {
-        CompanionSettingsButton()
-        navItems.filter { it != NavItem.AiChat }.forEach { item ->
-            val title = stringResource(item.titleResId)
-            Card(Modifier.fillMaxWidth().clickable(role = Role.Button) {
-                onOpen(ScreenRouteRegistry.defaultScreenForNavItem(item))
-            }) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(item.icon, contentDescription = null)
-                    Spacer(Modifier.width(12.dp))
-                    Text(title, style = MaterialTheme.typography.titleMedium)
+            if (!conversation) NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                val selected = if (tab == VioTab.DETAIL) origin else tab
+                barItems.forEach { item ->
+                    NavigationBarItem(selected = selected == item.tab, onClick = { root(item.tab) },
+                        icon = { Icon(item.icon, null) }, label = { Text(item.label) })
                 }
             }
         }
     }
 }
 
-private fun launch(context: Context, intent: Intent) {
-    try { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-    catch (_: ActivityNotFoundException) { }
+@Composable
+private fun PageFrame(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = if (com.ai.assistance.operit.ui.theme.LocalThemePreferenceSnapshot.current.useBackgroundImage) Color.Transparent else MaterialTheme.colorScheme.background) {
+        Column(Modifier.statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(title, style = MaterialTheme.typography.headlineLarge)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(4.dp))
+            content()
+            Spacer(Modifier.height(12.dp))
+        }
+    }
 }
 
-/** wttr.in 按网络位置给一行天气，失败就返回 null。 */
-private suspend fun fetchWeather(): String? = withContext(Dispatchers.IO) {
-    runCatching {
-        val conn = URL("https://wttr.in/?format=%l:+%C+%t+体感%f+湿度%h&lang=zh").openConnection() as HttpURLConnection
-        conn.connectTimeout = 6000; conn.readTimeout = 6000
-        try { conn.inputStream.bufferedReader().readText().trim().takeIf { it.isNotEmpty() && it.length < 200 } }
-        finally { conn.disconnect() }
-    }.getOrNull()
+@Composable
+private fun HomePage(onChat: () -> Unit, onSpace: () -> Unit, onTools: () -> Unit, onLife: () -> Unit) {
+    val date = LocalDate.now().format(DateTimeFormatter.ofPattern("M 月 d 日 · EEEE", java.util.Locale.CHINA))
+    PageFrame("此刻", date) {
+        Card(shape = RoundedCornerShape(30.dp), colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
+            Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(
+                MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer)))
+                .padding(26.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                Icon(Icons.Default.WbSunny, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(32.dp))
+                Text("今天，从这里开始。", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("找一位朋友聊聊，或去看看留下来的生活。", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Button(onClick = onChat) { Icon(Icons.Default.ChatBubbleOutline, null); Spacer(Modifier.width(8.dp)); Text("打开聊天") }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("日常入口", style = MaterialTheme.typography.titleMedium)
+        SpaceLinkCard("助手空间", "房间、书房、私人打算与自主活动", Icons.Default.AutoAwesome, onClick = onSpace)
+        SpaceLinkCard("工具与创作", "插件、工作流和手机能力", Icons.Default.Widgets, onClick = onTools)
+        SpaceLinkCard("生活", "天气、日历、闹钟与记忆", Icons.Default.WbSunny, onClick = onLife)
+    }
+}
+
+@Composable
+private fun DestinationPage(
+    title: String, subtitle: String, items: List<NavItem>, plugins: List<NavigationEntrySpec>,
+    onOpen: (NavItem) -> Unit, onPlugin: (NavigationEntrySpec) -> Unit, network: String? = null,
+) {
+    PageFrame(title, subtitle) {
+        if (network != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Default.Wifi, null, tint = MaterialTheme.colorScheme.secondary)
+            Text(network, style = MaterialTheme.typography.labelLarge)
+        }
+        items.forEach { item ->
+            SpaceLinkCard(stringResource(item.titleResId), destinationHint(item), item.icon, onClick = { onOpen(item) })
+        }
+        if (plugins.isNotEmpty()) {
+            Text("已安装扩展", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+            plugins.forEach { entry -> SpaceLinkCard(entry.title, entry.description.orEmpty(), entry.icon, onClick = { onPlugin(entry) }) }
+        }
+    }
+}
+
+private fun destinationHint(item: NavItem): String = when (item) {
+    NavItem.AssistantConfig -> "助手、群组、模型与对话配置"
+    NavItem.Packages -> "插件、沙盒包、Skill 与 MCP"
+    NavItem.Toolbox -> "可直接使用的工具与扩展"
+    NavItem.ShizukuCommands -> "手机控制与执行权限"
+    NavItem.Workflow -> "编排与运行自动化流程"
+    NavItem.Terminal -> "终端会话与命令环境"
+    NavItem.ToolPermissions -> "工具的授权与使用范围"
+    NavItem.ChatHistorySettings -> "聊天记录的保存、整理与导出"
+    NavItem.TokenConfig -> "用量与额度配置"
+    NavItem.MemoryBase -> "查看和整理已有记忆"
+    NavItem.Settings -> "主题与外观、语音、数据和软件偏好"
+    NavItem.Help -> "使用指南与常见问题"
+    NavItem.About -> "版本信息与更新"
+    else -> "打开管理页面"
+}
+
+@Composable
+private fun PrivatePage() {
+    val context = LocalContext.current
+    var role by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { role = (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id }
+    PageFrame("私域", "只展开他愿意向你开放的部分") {
+        AssistantTargetPicker(role, true) { role = it }
+        val selected = role
+        if (selected == null) Text("先选择一位助手。")
+        else key(selected) { InternalStatePanel(selected) }
+    }
+}
+
+@Composable
+private fun LifePage(onMemory: () -> Unit) {
+    val context = LocalContext.current
+    PageFrame("生活", "安排今天，也留住走过的日子") {
+        WeatherCard()
+        SpaceLinkCard("闹钟", "查看手机闹钟", Icons.Default.Alarm, onClick = { launch(context, Intent(AlarmClock.ACTION_SHOW_ALARMS)) })
+        SpaceLinkCard("日历与提醒", "在日历中记录下一件事", Icons.Default.Event,
+            onClick = { launch(context, Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)) })
+        SpaceLinkCard("记忆库", "已有记忆、分类与检索", Icons.Default.History, onClick = onMemory)
+    }
+}
+private fun launch(context: Context, intent: Intent) {
+    try { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    catch (_: ActivityNotFoundException) { Toast.makeText(context, "手机上没有可处理此操作的应用", Toast.LENGTH_LONG).show() }
 }

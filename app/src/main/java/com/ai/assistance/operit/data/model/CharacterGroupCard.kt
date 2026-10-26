@@ -17,5 +17,7 @@ data class CharacterGroupCard(
     val description: String = "",
     val members: List<GroupMemberConfig> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    // Missing in older serialized cards means false: existing groups stay open.
+    val ended: Boolean = false
 )

@@ -59,6 +59,8 @@ internal fun ThemeSettingsColorCustomizationSection(
     onColorModeInput: String,
     onShowColorPicker: (String) -> Unit,
     contentMode: ThemeSettingsColorContentMode,
+    showChatControls: Boolean = true,
+    showDrawerControls: Boolean = true,
 ) {
     val showPaletteControls = contentMode == ThemeSettingsColorContentMode.PALETTE
     val showInterfaceControls = contentMode == ThemeSettingsColorContentMode.INTERFACE
@@ -259,7 +261,7 @@ internal fun ThemeSettingsColorCustomizationSection(
     }
     }
 
-    if (showInterfaceControls) {
+    if (showInterfaceControls && showDrawerControls) {
     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), colors = cardColors) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -416,7 +418,7 @@ internal fun ThemeSettingsColorCustomizationSection(
     }
     }
 
-    if (showInterfaceControls) {
+    if (showInterfaceControls && showChatControls) {
     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), colors = cardColors) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -552,6 +554,7 @@ internal fun ThemeSettingsColorCustomizationSection(
         }
     }
 
+    if (showChatControls) {
     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), colors = cardColors) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -574,6 +577,8 @@ internal fun ThemeSettingsColorCustomizationSection(
             )
         }
     }
+    }
+
     }
 
     if (showPaletteControls) {

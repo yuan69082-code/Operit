@@ -32,6 +32,9 @@ object GroupWakeRuntime {
                     val coordinator = core.getMessageCoordinationDelegate()
                     for (chatId in store.ids()) {
                         val state = store.read(chatId)
+                        val chatGroupId = ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.characterGroupId
+                        val chatGroup = chatGroupId?.let { CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }
+                        if (chatGroup == null || chatGroup.ended) continue
                         val outbound = state.optJSONArray("outbox")?.optJSONObject(0)
                         val task = com.ai.assistance.operit.core.tasks.TaskBoard(context, chatId, true).pending()
                         val wakes = state.optJSONObject("wakes") ?: org.json.JSONObject()
