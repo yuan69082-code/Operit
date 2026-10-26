@@ -4,6 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { randomUUID, createHmac, timingSafeEqual } = require('node:crypto');
 const { Store } = require('./store.cjs');
+const { WorkspaceSync } = require('./workspace-sync.cjs');
 const { generate } = require('./model.cjs');
 const { createTools } = require('./tools.cjs');
 const theme = require('./theme.cjs');
@@ -28,6 +29,7 @@ function equal(a, b) {
 function createSharedServer(options = {}) {
   const dataDir = options.dataDir || path.join(process.env.LOCALAPPDATA || os.homedir(), 'Operit', 'shared-data');
   const store = new Store(dataDir);
+  const workspaceSync = new WorkspaceSync(dataDir);
   const busy = new Map();
   const tools = options.tools || createTools(dataDir);
   const transport = options.generate || generate;
@@ -120,6 +122,9 @@ function createSharedServer(options = {}) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
+      if (url.pathname === '/workspace' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(fs.readFileSync(path.join(__dirname, '../workspace.html'))); return;
+      }
       if (url.pathname === '/setup' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(fs.readFileSync(path.join(__dirname, '../setup.html'))); return;
       }
@@ -144,6 +149,19 @@ function createSharedServer(options = {}) {
       let input = {};
       if (['POST', 'PATCH', 'PUT'].includes(req.method) && url.pathname !== '/api/web/uploads') {
         const raw = await body(req); input = raw.length ? JSON.parse(raw.toString('utf8')) : {};
+      }
+      if (url.pathname === '/api/shared/workspaces') {
+        if (req.method === 'GET') return json(res, workspaceSync.list());
+        if (req.method === 'POST') return json(res, workspaceSync.register(input.root));
+        fail('Method not allowed', 405);
+      }
+      const workspaceRoute = url.pathname.match(/^\/api\/shared\/workspaces\/([a-f0-9-]{36})(?:\/(plan|apply))?$/);
+      if (workspaceRoute) {
+        const [, id, action] = workspaceRoute;
+        if (!action && req.method === 'GET') return json(res, workspaceSync.open(id));
+        if (action === 'plan' && req.method === 'POST') return json(res, workspaceSync.plan(id, input.files, input.choices));
+        if (action === 'apply' && req.method === 'POST') return json(res, workspaceSync.apply(id, input.files, input.choices, input.revision, input.fingerprint));
+        fail('Method not allowed', 405);
       }
       if (url.pathname === '/api/shared/config') {
         if (req.method === 'GET') return json(res, publicConfig());

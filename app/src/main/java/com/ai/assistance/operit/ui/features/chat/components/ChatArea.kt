@@ -679,6 +679,7 @@ private fun MessageItem(
     bubbleAiContentPaddingRight: Float = 12f,
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
+    var collectionOwner by remember { mutableStateOf<String?>(null) }
     var showMessageInfoDialog by remember { mutableStateOf(false) }
     var showHiddenUserMessageDialog by remember { mutableStateOf(false) }
     var showDeleteMessageConfirmDialog by remember { mutableStateOf(false) }
@@ -690,6 +691,9 @@ private fun MessageItem(
     val coroutineScope = rememberCoroutineScope()
     val messageInteractionSource = remember { MutableInteractionSource() }
 
+    collectionOwner?.let { owner ->
+        com.ai.assistance.operit.ui.features.settings.screens.CollectionPanel(owner, { collectionOwner = null }, { collectionOwner = null })
+    }
     // 只有用户和AI的消息才能被操作
     val isActionable = message.sender == "user" || message.sender == "ai"
     val isHiddenUserMessage = isHiddenUserPlaceholder(message)
@@ -1168,16 +1172,24 @@ private fun MessageItem(
                     coroutineScope.launch {
                         try {
                             val metadata = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(currentChatId)
-                            val role = metadata?.characterCardId ?: com.ai.assistance.operit.data.preferences.ActivePromptManager.getInstance(context).resolveActiveCardIdForSend()
+                            val role = metadata?.characterGroupId?.let { "group:$it" } ?: requireNotNull(metadata?.characterCardId) { "请先为会话指定助手" }
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 com.ai.assistance.operit.core.experience.CollectionStore(context).create(role, currentChatId, message)
                             }
-                            android.widget.Toast.makeText(context, "已保存，可在助手空间的布置页打开收藏与项目", android.widget.Toast.LENGTH_LONG).show()
+                            collectionOwner = role
                         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                         catch (e: Exception) { android.widget.Toast.makeText(context, "收藏失败：" + e.message, android.widget.Toast.LENGTH_LONG).show() }
                     }
                 },
             )
+
+            DropdownMenuItem(text = { Text("打开收藏与项目") }, onClick = {
+                showContextMenu = false
+                coroutineScope.launch {
+                    val metadata = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(currentChatId)
+                    collectionOwner = metadata?.characterGroupId?.let { "group:$it" } ?: metadata?.characterCardId
+                }
+            })
 
             // 信息
             DropdownMenuItem(

@@ -32,8 +32,9 @@ fun MessageInfoDialog(
     chatId: String? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val author = chatId?.let { com.ai.assistance.operit.core.group.GroupProvenance.author(context, it, message) }
     val recall = remember(chatId, message.sentAt) {
-        chatId?.let { com.ai.assistance.operit.core.experience.RecallEvidence(context).read(it, message.sentAt) }
+        chatId?.let { com.ai.assistance.operit.core.experience.RecallEvidence(context).read(it, message.sentAt, author) }
     }
     val diagnostics = remember(chatId, message.sentAt) {
         chatId?.let { com.ai.assistance.operit.core.experience.RequestDiagnostics(context).read(it, message.sentAt) }

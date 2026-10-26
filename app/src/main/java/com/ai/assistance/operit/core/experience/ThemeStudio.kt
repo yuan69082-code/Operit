@@ -192,6 +192,12 @@ class ThemeStudio(private val context: Context) {
             require(change.ints.keys.all { it in colors || it in base.ints }) { "未知主题数值字段" }
             require(change.floats.keys.all { it in defaults.floats }) { "未知主题尺寸字段" }
             require(change.floats.values.all { it.isFinite() && it >= 0f && it <= 100f }) { "主题尺寸超出范围" }
+            for ((name, value) in change.floats) {
+                if (name == "font_scale") require(value in .5f..3f) { "字体缩放须为0.5到3" }
+                if (name.endsWith("opacity") || name.contains("repeat_")) require(value in 0f..1f) { "透明度和分割比例须为0到1" }
+                if (name == "studio_bubble_corner") require(value in 0f..40f)
+            }
+            require(change.strings["studio_bubble_sticker"].orEmpty().length <= 8) { "贴纸文字过长" }
             return ThemePreferenceValues(base.strings + change.strings, base.booleans + change.booleans,
                 base.ints + change.ints, base.floats + change.floats)
         }

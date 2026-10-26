@@ -1,0 +1,27 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Operit 项目同步</title>
+<style>body{font:16px/1.6 system-ui;background:#faf8f5;color:#302b2d;max-width:980px;margin:32px auto;padding:20px}input,textarea,select,button{font:inherit;padding:10px;margin:6px;border:1px solid #ccc;border-radius:8px}textarea{width:95%;height:220px;font:14px/1.5 monospace}button{cursor:pointer}pre{white-space:pre-wrap}section{border:1px solid #ddd;padding:12px;margin:12px 0}label{display:block}</style>
+<h1>项目与磁盘同步</h1><a href="/setup">返回共享服务</a><p>编辑应用侧文本文件，预览差异后同步。磁盘与应用同时改动同一文件时，须逐项选择。仅支持UTF-8文本；忽略 .git、node_modules、build 与 .gradle。</p>
+<label>本机绝对目录<input id="directory" placeholder="C:\projects\my-app"></label><button id="register">绑定目录</button><select id="projects"></select><button id="open">打开</button>
+<section><label>当前文件<select id="files"></select></label><input id="newPath" placeholder="新文件相对路径"><button id="add">新增文件</button><button id="remove">标记删除当前文件</button><textarea id="editor" spellcheck="false"></textarea><p id="root"></p></section>
+<button id="preview">预览同步差异</button><button id="apply" disabled>确认同步</button><button id="export">导出应用侧文件JSON</button><input id="import" type="file" accept="application/json"><pre id="changes"></pre><div id="conflicts"></div><pre id="status" role="status"></pre>
+<script>
+const $=id=>document.getElementById(id);let id=null, files={}, selected=null, plan=null, choices={};
+async function api(route, input){const response=await fetch('/api/shared/workspaces'+route,{method:input===undefined?'GET':'POST',headers:{Authorization:'Bearer '+(localStorage.getItem('operit-web-chat-token')||''),'Content-Type':'application/json'},body:input===undefined?undefined:JSON.stringify(input)});const data=await response.json();if(!response.ok)throw new Error(data.error);return data;}
+const show=e=>{$('status').textContent=e instanceof Error?e.message:e;};
+function invalidate(){plan=null;$('apply').disabled=true;}
+function flush(){if(selected!==null)files[selected]=$('editor').value;}
+function render(){const picker=$('files');picker.replaceChildren();for(const name of Object.keys(files).sort()){const option=document.createElement('option');option.value=name;option.textContent=name;picker.append(option);}selected=Object.keys(files).sort()[0]??null;picker.value=selected??'';$('editor').value=selected===null?'':files[selected];$('editor').disabled=selected===null;}
+async function refresh(){const rows=await api('');$('projects').replaceChildren();for(const row of rows){const option=document.createElement('option');option.value=row.id;option.textContent=row.root;$('projects').append(option);}if(id)$('projects').value=id;}
+async function open(project){id=project.id;files={...project.files};$('root').textContent=project.root;render();invalidate();choices={};show('已载入上次同步基线。预览同步会读取当前磁盘改动。');await refresh();}
+$('register').onclick=async()=>{try{await open(await api('',{root:$('directory').value}));}catch(e){show(e);}};
+$('open').onclick=async()=>{try{await open(await api('/'+$('projects').value));}catch(e){show(e);}};
+$('files').onchange=()=>{flush();selected=$('files').value;$('editor').value=files[selected];};
+$('editor').oninput=()=>{flush();invalidate();};
+$('add').onclick=()=>{flush();const name=$('newPath').value;if(!name||Object.hasOwn(files,name)){show('请填写尚不存在的相对文件路径');return;}files[name]='';render();invalidate();};
+$('remove').onclick=()=>{if(selected!==null){delete files[selected];render();invalidate();}};
+$('preview').onclick=async()=>{try{if(!id)throw new Error('请先打开项目');flush();plan=await api('/'+id+'/plan',{files,choices});$('changes').textContent=plan.changes.map(x=>x.action+' '+x.path).join('\n')||'没有待写入磁盘的文件';$('conflicts').replaceChildren();for(const conflict of plan.conflicts){const box=document.createElement('section'),label=document.createElement('p'),select=document.createElement('select');label.textContent='冲突：'+conflict.path;for(const [value,text] of [['','请选择'],['app','使用应用侧（含删除）'],['disk','使用磁盘侧（含删除）']]){const o=document.createElement('option');o.value=value;o.textContent=text;select.append(o);}select.value=choices[conflict.path]||'';select.onchange=()=>{choices[conflict.path]=select.value;invalidate();show('选择已记录，请重新预览确认差异');};const detail=document.createElement('pre');detail.textContent='应用侧：\n'+(conflict.app??'[已删除]')+'\n磁盘侧：\n'+(conflict.disk??'[已删除]');box.append(label,select,detail);$('conflicts').append(box);}$('apply').disabled=plan.conflicts.some(x=>!['app','disk'].includes(choices[x.path]));show('请检查新增、更新和删除列表；确认后才会写入磁盘。');}catch(e){show(e);}};
+$('apply').onclick=async()=>{try{if(!plan)return;const result=await api('/'+id+'/apply',{files,choices,revision:plan.revision,fingerprint:plan.fingerprint});files=result.files;render();invalidate();choices={};show('同步完成，应用侧和磁盘侧均已更新。');}catch(e){invalidate();show(e);}};
+$('export').onclick=()=>{flush();const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify({files},null,2)],{type:'application/json'}));a.href=url;a.download='operit-project-files.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+$('import').onchange=async()=>{try{const file=$('import').files[0];if(!file)return;const parsed=JSON.parse(await file.text());if(!parsed.files||typeof parsed.files!=='object')throw new Error('缺少files对象');files=parsed.files;render();invalidate();show('应用侧已载入，请预览同步；尚未写入磁盘。');}catch(e){show(e);}};
+refresh().catch(show);
+</script></html>

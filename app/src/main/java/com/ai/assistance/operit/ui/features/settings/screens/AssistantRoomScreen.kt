@@ -94,6 +94,7 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                                 RoleRulesEntry(role)
                                 PersonaWizardEntry()
                                 CollectionEntry(role, onDismiss)
+                                ExperienceDataEntry()
                                 RoomOptions(room, data, { work(it) })
                             }
                         }

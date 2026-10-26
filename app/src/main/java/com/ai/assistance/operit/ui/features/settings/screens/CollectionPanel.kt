@@ -36,7 +36,7 @@ internal fun CollectionEntry(role: String, onNavigate: () -> Unit) {
 }
 
 @Composable
-private fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: () -> Unit) {
+internal fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: () -> Unit) {
     val context = LocalContext.current
     val store = remember { CollectionStore(context) }
     val scope = rememberCoroutineScope()
@@ -56,6 +56,16 @@ private fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: () 
     LaunchedEffect(role, revision) {
         try { entries = withContext(Dispatchers.IO) { store.list().filter { it.getString("role") == role } } }
         catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message.orEmpty() }
+    }
+    val importFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val item = selected
+        if (uri != null && item != null) work {
+            selected = withContext(Dispatchers.IO) {
+                val text = requireNotNull(context.contentResolver.openInputStream(uri)).bufferedReader().use { it.readText() }
+                store.importFiles(item.getString("id"), JSONObject(text).getJSONObject("files"), item.getLong("version"))
+            }
+            path = ""; fileText = ""
+        }
     }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val item = exportDocument
@@ -116,6 +126,8 @@ private fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: () 
                         Text("tool.js 使用 input 参数与可写 state 对象，return 返回结果。成功后保存 state。启用后此助手可调用，脚本的工具操作仍遵守现有权限。")
                         Row { Checkbox(item.getBoolean("toolEnabled"), { enabled -> work { selected = withContext(Dispatchers.IO) { store.enableTool(id, enabled) } } }); Text("允许这位助手调用") }
                     }
+                    Text("导入文件JSON会替换此项目文件集合并关闭脚本调用权限，请先导出保留旧版本。")
+                    TextButton(enabled = !busy, onClick = { importFiles.launch(arrayOf("application/json", "text/plain")) }) { Text("导入项目文件JSON") }
                     TextButton(onClick = { exportDocument = item; export.launch("operit-project-$id.zip") }) { Text("导出卡片、项目和状态") }
                     TextButton(onClick = { work { withContext(Dispatchers.IO) { store.delete(id) }; selected = null } }) { Text("删除收藏副本") }
                     if (preview) ProjectPreview(store, id, onDismiss = { preview = false; work { selected = withContext(Dispatchers.IO) { store.read(id) } } })
@@ -125,7 +137,7 @@ private fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: () 
     }
 }
 
-private class PreviewBridge(private val store: CollectionStore, private val id: String, private val onError: (String) -> Unit) {
+internal class PreviewBridge(private val store: CollectionStore, private val id: String, private val onError: (String) -> Unit) {
     @JavascriptInterface fun save(value: String) { try { store.savePreview(id, value) }
         catch (e: Exception) { onError(e.message.orEmpty()) } }
 }
@@ -140,9 +152,13 @@ private fun ProjectPreview(store: CollectionStore, id: String, onDismiss: () -> 
     var view by remember { mutableStateOf<WebView?>(null) }
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) { onDispose { view?.removeJavascriptInterface("OperitPreview"); view?.destroy() } }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    fun closePreview() {
+        val current = view
+        if (current == null) onDismiss() else current.evaluateJavascript("window.__operitPersistPreview && window.__operitPersistPreview()") { onDismiss() }
+    }
+    Dialog(onDismissRequest = ::closePreview, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding()) {
-            Row { Text("项目预览", Modifier.weight(1f)); TextButton(onClick = onDismiss) { Text("关闭") } }
+            Row { Text("项目预览", Modifier.weight(1f)); TextButton(onClick = ::closePreview) { Text("关闭") } }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             AndroidView(modifier = Modifier.weight(1f).fillMaxWidth(), factory = { context -> WebView(context).apply {
                 view = this
@@ -159,7 +175,7 @@ private fun ProjectPreview(store: CollectionStore, id: String, onDismiss: () -> 
                         if (name == "index.html") {
                             // Restore before project code runs. Every project has a distinct web origin.
                             val state = JSONObject.quote(item.getJSONObject("previewState").toString()).replace("<", "\\u003c")
-                            text = "<script>(function(){const s=JSON.parse($state);for(const [k,v] of Object.entries(s.local||{}))localStorage.setItem(k,v);for(const [k,v] of Object.entries(s.session||{}))sessionStorage.setItem(k,v);window.addEventListener('DOMContentLoaded',()=>{const forms=Array.from(document.querySelectorAll('input,textarea,select'));forms.forEach((e,i)=>{const f=(s.forms||[])[i];if(f){e.value=f.value;e.checked=f.checked;}});const save=()=>{try{OperitPreview.save(JSON.stringify({local:{...localStorage},session:{...sessionStorage},forms:forms.map(e=>({value:e.value,checked:e.checked})),text:document.body.innerText.slice(0,20000),url:location.href}));}catch(e){console.error(e);}};document.addEventListener('input',save);document.addEventListener('change',save);setInterval(save,2000);save();});})();</script>" + text
+                            text = "<script>(function(){const s=JSON.parse($state);for(const [k,v] of Object.entries(s.local||{}))localStorage.setItem(k,v);for(const [k,v] of Object.entries(s.session||{}))sessionStorage.setItem(k,v);window.addEventListener('DOMContentLoaded',()=>{const forms=Array.from(document.querySelectorAll('input,textarea,select'));forms.forEach((e,i)=>{const f=(s.forms||[])[i];if(f){e.value=f.value;e.checked=f.checked;}});const save=()=>{try{OperitPreview.save(JSON.stringify({local:{...localStorage},session:{...sessionStorage},forms:forms.map(e=>({value:e.value,checked:e.checked})),text:document.body.innerText.slice(0,20000),url:location.href}));}catch(e){console.error(e);}};window.__operitPersistPreview=save;document.addEventListener('input',save);document.addEventListener('change',save);setInterval(save,2000);save();});})();</script>" + text
                         }
                         return WebResourceResponse(mime, "UTF-8", ByteArrayInputStream(text.toByteArray()))
                     }

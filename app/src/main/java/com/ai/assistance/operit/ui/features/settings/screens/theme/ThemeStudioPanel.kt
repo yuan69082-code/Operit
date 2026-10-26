@@ -29,6 +29,7 @@ internal fun ThemeStudioEntry(target: ActivePrompt, enabled: Boolean, onClosed: 
 @Composable
 private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
     val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val studio = remember { ThemeStudio(context) }
     val scope = rememberCoroutineScope()
     var state by remember(target) { mutableStateOf(studio.library(target)) }
@@ -41,6 +42,9 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
     var starSize by remember { mutableFloatStateOf(3f) }
     var starGlow by remember { mutableFloatStateOf(8f) }
     var warmth by remember { mutableFloatStateOf(.5f) }
+    var bubbleRadius by remember { mutableFloatStateOf(20f) }
+    var sticker by remember { mutableStateOf("") }
+    var tail by remember { mutableStateOf(false) }
     var patchText by remember { mutableStateOf("{\"ints\":{\"custom_primary_color\":-12627531}}") }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -103,6 +107,7 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
                 Row {
                     TextButton(enabled = !busy, onClick = { run { studio.saveSkin(target, name); status = "已存入皮肤库" } }) { Text("保存皮肤") }
                     TextButton(enabled = !busy, onClick = { export.launch("operit-theme-${System.currentTimeMillis()}.json") }) { Text("导出") }
+                    TextButton(enabled = !busy, onClick = { run { clipboard.setText(androidx.compose.ui.text.AnnotatedString(studio.exportSkin(target, name))); status = "已复制主题" } }) { Text("复制") }
                     TextButton(enabled = !busy, onClick = { import.launch(arrayOf("application/json", "text/plain")) }) { Text("导入") }
                 }
                 listOf("skins" to "皮肤库", "history" to "历史版本").forEach { (key, title) ->
@@ -121,6 +126,13 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
                         }
                     }
                 }
+                Text("气泡圆角 "+bubbleRadius.toInt()); Slider(bubbleRadius, { bubbleRadius = it }, valueRange = 0f..40f)
+                Row { Checkbox(tail, { tail = it }); Text("气泡尾巴") }
+                OutlinedTextField(sticker, { sticker = it.take(8) }, label = { Text("气泡装饰贴纸（短文字或emoji）") })
+                TextButton(enabled = !busy, onClick = { run {
+                    studio.preview(target, JSONObject().put("floats", JSONObject().put("studio_bubble_corner", bubbleRadius))
+                        .put("booleans", JSONObject().put("studio_bubble_tail", tail)).put("strings", JSONObject().put("studio_bubble_sticker", sticker)), "气泡装饰")
+                } }) { Text("试穿气泡装饰") }
                 OutlinedTextField(patchText, { patchText = it }, label = { Text("局部原生字段补丁 JSON") })
                 TextButton(enabled = !busy, onClick = { run { studio.preview(target, JSONObject(patchText), name); status = "已试穿局部修改" } }) { Text("试穿局部修改") }
                 Text("先检查参数，再修改对应背景、顶部栏、气泡、文字、输入区字段。未提供的字段保持当前值。")

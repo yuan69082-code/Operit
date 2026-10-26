@@ -10,7 +10,7 @@ import org.json.JSONObject
 class RequestDiagnostics(context: Context) {
     private val prefs = context.getSharedPreferences("experience_request_diagnostics", Context.MODE_PRIVATE)
     fun begin(chat: String, sentAt: Long, role: String?) = guarded {
-        val key = "$chat:$sentAt"
+        val key = "$chat:$sentAt:${role.orEmpty()}"
         check(prefs.edit().putString("active:$chat:${role.orEmpty()}", key).putString(key,
             JSONObject().put("role", role).put("events", JSONArray()).toString()).commit())
     }
@@ -19,7 +19,7 @@ class RequestDiagnostics(context: Context) {
         if (key != null) {
             val doc = JSONObject(requireNotNull(prefs.getString(key, null)))
             val rows = doc.getJSONArray("events")
-            rows.put(JSONObject().put("time", System.currentTimeMillis()).put("stage", stage).put("detail", detail.take(60000)))
+            rows.put(JSONObject().put("time", System.currentTimeMillis()).put("stage", stage).put("detail", detail.take(60000) + if (detail.length > 60000) "\n[显示已截断，完整结果见原消息工具记录]" else ""))
             check(prefs.edit().putString(key, doc.toString()).commit())
         }
     }
@@ -29,11 +29,17 @@ class RequestDiagnostics(context: Context) {
             append(key, "实际记忆返回", result.result.toString())
         }
     }
-    fun read(chat: String, sentAt: Long): String? = prefs.getString("$chat:$sentAt", null)?.let { text ->
-        val rows = JSONObject(text).getJSONArray("events")
-        (0 until rows.length()).joinToString("\n\n") { i ->
-            val row = rows.getJSONObject(i)
-            "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(row.getLong("time")))} · ${row.getString("stage")}\n${row.getString("detail")}"
+    fun read(chat: String, sentAt: Long, role: String? = null): String? {
+        val prefix = "$chat:$sentAt:"
+        val documents = prefs.all.filter { (key, _) -> key.startsWith(prefix) && (role == null || key == prefix + role) }.values
+        if (documents.isEmpty()) return null
+        return documents.joinToString("\n\n") { text ->
+            val rows = JSONObject(text as String).getJSONArray("events")
+            (0 until rows.length()).joinToString("\n\n") { i ->
+                val row = rows.getJSONObject(i)
+                java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(row.getLong("time"))) +
+                    " · " + row.getString("stage") + "\n" + row.getString("detail")
+            }
         }
     }
     private fun guarded(block: () -> Unit) { synchronized(lock) {

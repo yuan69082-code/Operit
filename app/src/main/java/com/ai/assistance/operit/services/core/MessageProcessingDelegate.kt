@@ -1838,6 +1838,7 @@ class MessageProcessingDelegate(
 
             var firstResponseElapsed: Long? = null
             val requestSentAt = System.currentTimeMillis()
+            com.ai.assistance.operit.core.experience.RequestDiagnostics(context).begin(chatId, requestSentAt, roleCardId)
             val requestStartElapsed = messageTimingNow()
             val effectiveRequestMessageContent =
                 if (groupOrchestrationMode &&

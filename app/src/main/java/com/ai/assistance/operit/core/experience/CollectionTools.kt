@@ -23,18 +23,21 @@ object CollectionTools {
                 val role = requireNotNull(p("__operit_package_caller_card_id"))
                 val store = CollectionStore(context)
                 val result = runBlocking(Dispatchers.IO + ToolExecutionManager.inheritedRuntimeContext()) {
+                    val chatId = requireNotNull(p("__operit_package_chat_id"))
+                    val chat = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)
+                    val owner = chat?.characterGroupId?.let { "group:$it" } ?: role
                     val action = requireNotNull(p("action"))
-                    if (action == "list") JSONArray(store.list().filter { it.getString("role") == role }.map {
+                    if (action == "list") JSONArray(store.list().filter { it.getString("role") == owner }.map {
                         JSONObject().put("id", it.getString("id")).put("title", it.getString("title"))
                             .put("toolEnabled", it.getBoolean("toolEnabled")).put("version", it.getLong("version"))
                     }) else {
                         val id = requireNotNull(p("id")); val item = store.read(id)
-                        check(item.getString("role") == role) { "不能读取其他助手的收藏" }
+                        check(item.getString("role") == owner) { "不能读取其他助手的收藏" }
                         when (action) {
                             "read" -> item
                             "preview_state" -> item.getJSONObject("previewState")
                             "write_file" -> store.saveFile(id, requireNotNull(p("path")), requireNotNull(p("content")), requireNotNull(p("version")).toLong())
-                            "run" -> store.execute(id, role, JSONObject(p("input") ?: "{}"))
+                            "run" -> store.execute(id, owner, JSONObject(p("input") ?: "{}"))
                             else -> error("未知操作")
                         }
                     }

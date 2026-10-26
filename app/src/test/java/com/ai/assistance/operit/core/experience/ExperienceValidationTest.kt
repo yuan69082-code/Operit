@@ -31,4 +31,24 @@ class ExperienceValidationTest {
     @Test fun alwaysOnWorldbookDoesNotRequireARegex() {
         RoleRules.validate(JSONObject().put("worldbook", JSONArray().put(JSONObject().put("always", true).put("text", "资料"))))
     }
+    @Test fun proseRulesPreserveToolArgumentsAndCode() {
+        val rules = JSONArray().put(JSONObject().put("pattern", "cat").put("replacement", "dog").put("direction", "both"))
+        val original = "cat <tool name=\"x\"><param>cat</param></tool> cat "+"```"+"js\ncat\n"+"```"
+        val result = TextTransforms.apply(original, rules, "output")
+        assertTrue(result.startsWith("dog <tool name=\"x\"><param>cat</param></tool> dog"))
+        assertTrue(result.endsWith("```"+"js\ncat\n"+"```"))
+    }
+    @Test fun inputOnlyRuleDoesNotChangeOutput() {
+        val rules = JSONArray().put(JSONObject().put("pattern", "x").put("replacement", "y").put("direction", "input"))
+        assertEquals("x", TextTransforms.apply("x", rules, "output"))
+    }
+    @Test fun projectTraversalIsRejected() {
+        assertThrows(IllegalArgumentException::class.java) { CollectionStore.validatePath("../outside") }
+        CollectionStore.validatePath("src/main.js")
+    }
+    @Test fun kelivoDatesAcceptEpochAndIsoWithoutInventedTimes() {
+        assertEquals(1700000000000L, KelivoImport.timestamp(1700000000L))
+        assertEquals(1700000000000L, KelivoImport.timestamp("2023-11-14T22:13:20Z"))
+        assertThrows(IllegalArgumentException::class.java) { KelivoImport.timestamp(null) }
+    }
 }

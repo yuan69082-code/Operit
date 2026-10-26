@@ -64,6 +64,13 @@ class CollectionStore(private val context: Context) {
         if (enabled) require(item.getJSONObject("files").has("tool.js")) { "请先添加 tool.js" }
         write(item.put("toolEnabled", enabled))
     }
+    fun importFiles(id: String, files: JSONObject, expectedVersion: Long): JSONObject = synchronized(lock) {
+        for (path in files.keys()) { validatePath(path); require(files.get(path) is String) { "项目文件必须是文本" } }
+        val item = read(id)
+        check(item.getLong("version") == expectedVersion) { "项目已变化，请重新打开后导入" }
+        // Importing executable source revokes prior consent until the user enables it again.
+        write(item.put("files", files).put("toolEnabled", false))
+    }
     fun savePreview(id: String, snapshot: String) = synchronized(lock) {
         require(snapshot.length <= 1_000_000) { "预览状态过大" }
         val item = read(id)
