@@ -8,7 +8,7 @@ class GroupModeration(private val context: Context) {
     private val store = GroupStore(context)
     fun manuallyMuted(chat: String, actor: String): Boolean {
         val state = store.read(chat)
-        return state.optBoolean("mute_all") || actor in store.strings(state.optJSONArray("muted"))
+        return !state.optBoolean("group_exists", true) || state.optBoolean("mute_all") || actor in store.strings(state.optJSONArray("muted"))
     }
     fun gameMuted(chat: String, actor: String): Boolean = gameMuted(GroupGames(context).state(chat), actor)
     fun mayPublish(chat: String, actor: String) = !manuallyMuted(chat, actor) && !gameMuted(chat, actor)

@@ -151,7 +151,7 @@ fun ChatHeader(
                 }
 
                 // Character Switcher
-                Row(
+                if (com.ai.assistance.operit.ui.main.layout.LocalChatNavigation.current == null || isFloatingMode) Row(
                         modifier =
                                 Modifier
                                         .widthIn(max = 176.dp)

@@ -16,7 +16,8 @@ object GroupReplyGate {
         val control = GroupTurnPolicy.control(publicText)
         val store = GroupStore(context)
         val groupId = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chat)?.characterGroupId
-        val members = groupId?.let { com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }?.members.orEmpty().map { it.characterCardId }
+        val group = groupId?.let { com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(it) }
+        val members = group?.members.orEmpty().map { it.characterCardId }
         if (control != null) {
             if (actor in members && control.targets.all { it in members && it != actor }) {
                 store.update(chat) { it.put("decision", org.json.JSONObject().put("actor", actor).put("action", control.action)
@@ -26,7 +27,7 @@ object GroupReplyGate {
         }
         val decision = store.read(chat).optJSONObject("decision")
         val action = decision?.takeIf { it.optString("actor") == actor }?.optString("action")
-        if (actor in members && permittedAtStart && !moderation.manuallyMuted(chat, actor) && !GroupTurnPolicy.suppress(action)) {
+        if (group?.ended == false && actor in members && permittedAtStart && !moderation.manuallyMuted(chat, actor) && !GroupTurnPolicy.suppress(action)) {
             val text = GroupTurnPolicy.publicBody(publicText)
             if (text.isNotBlank()) {
                 store.update(chat) { it.put("published", true) }

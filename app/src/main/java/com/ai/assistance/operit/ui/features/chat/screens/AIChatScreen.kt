@@ -787,6 +787,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     }
 
     // 从CompositionLocal获取设置TopBar Actions的函数
+    val chatNavigation = com.ai.assistance.operit.ui.main.layout.LocalChatNavigation.current
     val setTopBarActions = LocalTopBarActions.current
     val appBarContentColor = LocalAppBarContentColor.current
     val setScreenSoftInputMode = LocalSetScreenSoftInputMode.current
@@ -810,7 +811,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     // 当showWebView或showAiComputer状态改变时，更新TopAppBar的actions
     // 使用DisposableEffect确保当AIChatScreen离开组合时，actions被清空
-    LaunchedEffect(isCurrentScreen, embedded, showWebView, showAiComputer, isWorkspacePreparing, appBarContentColor, hasBoundWorkspace) {
+    LaunchedEffect(isCurrentScreen, embedded, showWebView, showAiComputer, isWorkspacePreparing, appBarContentColor, hasBoundWorkspace, currentChatId, currentChatView?.characterCardId, currentChatView?.characterGroupId) {
         if (isCurrentScreen && !embedded) {
             setTopBarActions {
                 // AI电脑模式切换按钮
@@ -856,6 +857,9 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                         )
                     }
                 }
+                com.ai.assistance.operit.ui.features.chat.components.ChatMoreMenu(
+                    currentChatId, currentChatView?.characterCardId?.takeUnless { it.startsWith("unassigned:") },
+                    currentChatView?.characterGroupId?.takeIf { it.isNotBlank() }, actualViewModel, onNavigateToModelPrompts)
             }
         }
     }
@@ -943,7 +947,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 .graphicsLayer { translationY = -chatViewportTranslationYPx }
                     ) {
                         ChatScreenContent(
-                                modifier = Modifier.fillMaxSize().padding(top = if (currentChatId != null && !isFloatingMode) 44.dp else 0.dp),
+                                modifier = Modifier.fillMaxSize(),
                                 paddingValues =
                                         PaddingValues(), // Padding is already handled by the parent Box
                                 bottomInset = bottomBarHeightDp,
@@ -1144,16 +1148,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                         )
                     }
 
-                    if (!isFloatingMode && currentChatId != null && !currentChatView?.characterGroupId.isNullOrBlank()) {
-                        com.ai.assistance.operit.ui.features.chat.components.GroupControls(
-                            chatId = currentChatId!!, groupId = currentChatView!!.characterGroupId!!,
-                            viewModel = actualViewModel, modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().height(44.dp))
-                    } else if (!isFloatingMode && currentChatId != null) {
-                        com.ai.assistance.operit.ui.features.chat.components.PrivateSocialControls(
-                            chatId = currentChatId!!, actor = currentChatView?.characterCardId, viewModel = actualViewModel,
-                            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().height(44.dp))
-                    }
-                    CharacterSelectorPanel(
+                    if (chatNavigation == null || isFloatingMode) CharacterSelectorPanel(
                         isVisible = showCharacterSelector,
                         onDismiss = { showCharacterSelector = false },
                         onSelectCharacter = onSwitchCharacter,
@@ -1462,6 +1457,12 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                 ),
             maxHeight = 280.dp
         )
+        if (chatNavigation?.directoryVisible == true && !isFloatingMode) {
+            com.ai.assistance.operit.ui.features.chat.components.ContactDirectory(
+                onOpen = { chatNavigation.openConversation() },
+                onEdit = onNavigateToModelPrompts,
+            )
+        }
     }
 
     // Show popup message dialog when needed

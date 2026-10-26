@@ -60,6 +60,7 @@ import com.google.android.exoplayer2.ui.AspectRatioFrameLayout
 import com.google.android.exoplayer2.ui.StyledPlayerView
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -91,18 +92,32 @@ private val LightColorScheme =
 
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
-fun OperitTheme(content: @Composable () -> Unit) {
+fun OperitTheme(sharedOutsideChat: Boolean = false, content: @Composable () -> Unit) {
     val context = LocalContext.current
     val activePromptManager = remember { ActivePromptManager.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
     val activePrompt by activePromptManager.activePromptFlow.collectAsState(
         initial = ActivePrompt.CharacterCard(CharacterCardManager.DEFAULT_CHARACTER_CARD_ID),
     )
-    val themeSnapshot = rememberActiveThemePreferenceSnapshot()
+    val activeSnapshot = rememberActiveThemePreferenceSnapshot()
+    val appearanceScope = remember { AppThemeScope() }
+    val preferences = remember(context) { UserPreferencesManager.getInstance(context) }
+    val sharedSnapshot by preferences.observeSharedAppearance().collectAsState(
+        initial = com.ai.assistance.operit.data.preferences.ThemePreferenceSnapshot(
+            source = "application", values = com.ai.assistance.operit.data.preferences.ThemePreferenceValues.defaultVisual()))
+    LaunchedEffect(sharedOutsideChat) {
+        if (sharedOutsideChat) {
+            val snapshot = activePromptManager.activeThemePreferenceSnapshotFlow.first()
+            preferences.initializeSharedAppearance(snapshot.values)
+        }
+    }
+    val usingSharedAppearance = sharedOutsideChat && !appearanceScope.conversationVisible
+    val themeSnapshot = if (usingSharedAppearance) sharedSnapshot else activeSnapshot
 
     fun disableBackgroundForTarget(target: ActivePrompt) {
         coroutineScope.launch {
-            activePromptManager.mutateActiveThemeForPrompt(target) { values ->
+            if (usingSharedAppearance) preferences.saveSharedAppearance(themeSnapshot.values.withBoolean("use_background_image", false))
+            else activePromptManager.mutateActiveThemeForPrompt(target) { values ->
                 values.withBoolean("use_background_image", false)
             }
         }
@@ -341,6 +356,7 @@ fun OperitTheme(content: @Composable () -> Unit) {
 
         CompositionLocalProvider(
             LocalThemePreferenceSnapshot provides themeSnapshot,
+            LocalAppThemeScope provides if (sharedOutsideChat) appearanceScope else null,
             LocalLiquidGlassBackdrop provides liquidGlassBackdrop,
             LocalWaterGlassState provides waterGlassState,
         ) {

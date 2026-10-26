@@ -20,10 +20,12 @@ import kotlinx.coroutines.launch
 internal fun ThemeSettingsInterfaceTab(
     shared: ThemeSettingsShared,
     cardColors: CardColors,
+    sharedAppearance: Boolean = false,
 ) {
     ThemeSettingsInterfaceColorPanel(
         shared = shared,
         cardColors = cardColors,
+        sharedAppearance = sharedAppearance,
     )
 }
 
@@ -32,6 +34,7 @@ internal fun ThemeSettingsInterfaceTab(
 private fun ThemeSettingsInterfaceColorPanel(
     shared: ThemeSettingsShared,
     cardColors: CardColors,
+    sharedAppearance: Boolean = false,
 ) {
     val editorSession = shared.editorSession
     val navigationDrawerAppearance = rememberNavigationDrawerAppearance()
@@ -113,6 +116,8 @@ private fun ThemeSettingsInterfaceColorPanel(
             showColorPicker = true
         },
         contentMode = ThemeSettingsColorContentMode.INTERFACE,
+        showChatControls = !sharedAppearance,
+        showDrawerControls = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600,
     )
 
     if (showColorPicker) {

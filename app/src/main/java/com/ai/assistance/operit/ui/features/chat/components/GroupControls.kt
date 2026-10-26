@@ -25,7 +25,8 @@ import org.json.JSONObject
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, modifier: Modifier = Modifier) {
+fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, modifier: Modifier = Modifier,
+    showToolbar: Boolean = true, requestedTab: String? = null, onClose: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context) { GroupStore(context) }
@@ -34,6 +35,7 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
     val settings = remember(chatId, revision) { store.read(chatId) }
     val draft by viewModel.userMessage.collectAsState()
     var tab by remember(chatId) { mutableStateOf("") }
+    LaunchedEffect(requestedTab) { if (requestedTab != null) tab = requestedTab }
     var error by remember(chatId) { mutableStateOf<String?>(null) }
     var members by remember(groupId) { mutableStateOf(emptyList<CharacterCard>()) }
     var purpose by remember(chatId) { mutableStateOf(settings.optString("purpose")) }
@@ -67,11 +69,12 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
         return result
     }
     fun play(move: JSONObject) = work {
+        GroupLifecycle.requireOpen(context, chatId)
         games.act(chatId, "user", move)
         selectedCards = emptySet(); publicAction = ""; hiddenAction = ""
         core.getMessageCoordinationDelegate().startGroupDiscussion(chatId)
     }
-    Row(modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    if (showToolbar) Row(modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         TextButton(onClick = { tab = "@" }) {
             val selected = store.selected(chatId)
             Text(if (selected.isEmpty()) "@ 全员" else "@ " + members.filter { it.id in selected }.joinToString { it.name })
@@ -84,10 +87,19 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
         TextButton(onClick = { tab = "游戏" }) { Text("游戏") }
         TextButton(onClick = { tab = "活动" }) { Text(if (settings.optString("status") == "running") settings.optString("speaker", "讨论中") else "活动记录") }
     }
-    if (tab.isNotEmpty()) AlertDialog(onDismissRequest = { tab = "" }, title = { Text(tab) },
+    if (tab.isNotEmpty()) AlertDialog(onDismissRequest = { tab = ""; onClose() }, title = { Text(tab) },
         text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             when(tab) {
+                "群状态" -> {
+                    var groupExists by remember { mutableStateOf<Boolean?>(null) }
+                    LaunchedEffect(groupId, revision) { groupExists = CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(groupId)?.let { !it.ended } }
+                    Text("结束群会停止发言与唤醒，保留聊天和所有记忆；重新开放不会自动开启主动唤醒。")
+                    groupExists?.let { exists ->
+                        Text(if (exists) "这个群仍然开放" else "这个群已结束")
+                        Button(onClick = { work { GroupLifecycle.setExists(context, chatId, null, !exists) } }) { Text(if (exists) "结束这个群" else "重新开放") }
+                    }
+                }
                 "关系网" -> RelationshipEditor(chatId)
                 "禁言" -> GroupMutePanel(chatId, members)
                 "群待办" -> GroupTasksPanel(chatId, members)
@@ -145,6 +157,7 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
                     Text("新公开发言会让其他成员重新决定是否接话，不需要点名交棒；所有人都安静后停下。")
                     OutlinedTextField(purpose, { purpose = it }, label = { Text("讨论目的，可留空自由聊天") })
                     Row { Switch(settings.optBoolean("proactive"), onCheckedChange = { enabled -> work {
+                        if (enabled) GroupLifecycle.requireOpen(context, chatId)
                         store.update(chatId) { it.put("proactive", enabled) }
                         if (enabled) members.forEachIndexed { index, member -> store.schedule(chatId, member.id, index+1, "了解群聊近况，决定是否开话题并安排下次醒来") }
                         else members.forEach { store.cancelWake(chatId, it.id) }
@@ -183,15 +196,15 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
                         Text("斗地主需要三位玩家；狼人杀需要4–12位，包含你。游戏身份仅在本局生效。")
                         FlowRow {
                             listOf("landlord" to "斗地主", "werewolf" to "狼人杀").forEach { (kind,label) ->
-                                TextButton(onClick = { work { games.start(chatId, kind, listOf("user") + members.map { it.id }, ""); core.getMessageCoordinationDelegate().startGroupDiscussion(chatId) } }) { Text(label) }
+                                TextButton(onClick = { work { GroupLifecycle.requireOpen(context, chatId); games.start(chatId, kind, listOf("user") + members.map { it.id }, ""); core.getMessageCoordinationDelegate().startGroupDiscussion(chatId) } }) { Text(label) }
                             }
                         }
                         OutlinedTextField(title, { title = it }, label = { Text("小游戏名称") })
                         OutlinedTextField(rules, { rules = it }, label = { Text("场景、规则与目标，也可以让 AI 帮你编写") }, minLines = 3)
                         FlowRow {
                             TextButton(onClick = { work { games.template(title, rules) } }) { Text("保存模板") }
-                            TextButton(onClick = { work { games.start(chatId, "story", listOf("user") + members.map { it.id }, rules) } }) { Text("情景开局") }
-                            TextButton(onClick = { work { games.start(chatId, "custom", listOf("user") + members.map { it.id }, rules) } }) { Text("自制游戏开局") }
+                            TextButton(onClick = { work { GroupLifecycle.requireOpen(context, chatId); games.start(chatId, "story", listOf("user") + members.map { it.id }, rules) } }) { Text("情景开局") }
+                            TextButton(onClick = { work { GroupLifecycle.requireOpen(context, chatId); games.start(chatId, "custom", listOf("user") + members.map { it.id }, rules) } }) { Text("自制游戏开局") }
                         }
                         games.templates().forEach { (name, text) -> TextButton(onClick = { title = name; rules = text }) { Text(name) } }
                         if (game != null) Text("上一局：${game.winner.ifBlank { "已结束" }}")
@@ -237,5 +250,5 @@ fun GroupControls(chatId: String, groupId: String, viewModel: ChatViewModel, mod
                     }
                 }
             }
-        } }, confirmButton = { TextButton(onClick = { tab = "" }) { Text("关闭") } })
+        } }, confirmButton = { TextButton(onClick = { tab = ""; onClose() }) { Text("关闭") } })
 }

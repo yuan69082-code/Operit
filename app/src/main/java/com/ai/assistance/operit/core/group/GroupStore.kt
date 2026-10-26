@@ -36,19 +36,11 @@ class GroupStore(context: Context) {
         }
     }
     fun selected(chat: String): List<String> = strings(read(chat).optJSONArray("mentions"))
-    fun markSeen(chat: String, actor: String, first: Long, through: Long, excerpt: String) {
-        update(chat) { state ->
-            val seen = state.optJSONObject("seen") ?: JSONObject()
-            val own = seen.optJSONObject(actor) ?: JSONObject().put("first", first)
-            own.put("through", maxOf(own.optLong("through"), through)).put("excerpt", excerpt.takeLast(3000))
-            seen.put(actor, own)
-            state.put("seen", seen)
-        }
-    }
     fun schedule(chat: String, actor: String, minutes: Int, purpose: String) {
         require(purpose.isNotBlank() && purpose.length <= 500) { "请填写 1–500 字的唤醒目的" }
         update(chat) { state ->
             check(state.optBoolean("proactive")) { "请先开启本群的主动对话" }
+            check(state.optBoolean("group_exists", true)) { "群已结束，不能安排唤醒" }
             val wakes = state.optJSONObject("wakes") ?: JSONObject()
             wakes.put(actor, JSONObject().put("at", GroupPolicy.wakeAt(System.currentTimeMillis(), minutes))
                 .put("purpose", purpose).put("paused", false))

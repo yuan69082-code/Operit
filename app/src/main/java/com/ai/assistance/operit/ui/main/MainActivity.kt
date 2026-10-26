@@ -594,7 +594,7 @@ class MainActivity : ComponentActivity() {
     // ======== 设置应用内容 ========
     private fun setAppContent() {
         setContent {
-            OperitTheme {
+            OperitTheme(sharedOutsideChat = true) {
                 Box {
                     // 检查是否需要显示用户协议
                         if (!agreementPreferences.isAgreementAccepted()) {

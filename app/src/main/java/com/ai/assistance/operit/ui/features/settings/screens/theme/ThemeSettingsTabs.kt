@@ -48,6 +48,7 @@ internal fun ThemeSettingsTabbedContent(
     footerContent: @Composable () -> Unit,
     scrollState: ScrollState,
     modifier: Modifier = Modifier,
+    tabs: List<ThemeSettingsTab> = ThemeSettingsTab.values().toList(),
 ) {
     var renderedTab by remember { mutableStateOf(selectedTab) }
     var isSwitchingTab by remember { mutableStateOf(false) }
@@ -64,13 +65,13 @@ internal fun ThemeSettingsTabbedContent(
 
     Column(modifier = modifier) {
         ScrollableTabRow(
-            selectedTabIndex = selectedTab.ordinal,
+            selectedTabIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
             edgePadding = 0.dp,
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.primary,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            ThemeSettingsTab.values().forEach { tab ->
+            tabs.forEach { tab ->
                 Tab(
                     selected = selectedTab == tab,
                     onClick = { onSelectedTabChange(tab) },

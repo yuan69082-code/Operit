@@ -828,6 +828,7 @@ class MessageCoordinationDelegate(
         if (orderedMembers.isEmpty()) {
             return false
         }
+        com.ai.assistance.operit.core.group.GroupLifecycle.requireOpen(context, chatId)
         check(com.ai.assistance.operit.core.group.GroupModeration(context).mayPublish(chatId, "user")) { "你目前在本群被禁言，可以在禁言或游戏面板管理" }
         val availableCards = characterCardManager.getAllCharacterCards().map { it.id }.toSet()
         require(orderedMembers.all { it.characterCardId in availableCards }) { "群聊中有已删除的助手，请先调整群成员。" }
@@ -973,6 +974,7 @@ class MessageCoordinationDelegate(
         if (groupJobs[chatId]?.isActive == true) return
         launchGroup(chatId) {
             val group = requireNotNull(resolveTargetGroupForChat(chatId)) { "群聊不存在" }
+            check(!group.ended) { "群已结束，请先重新开放" }
             val ids = group.members.sortedBy { it.orderIndex }.map { it.characterCardId }
             val pending = groupStore.strings(groupStore.read(chatId).optJSONArray("pending"))
             val queue = if (actor != null) listOf(actor) else if (pending.isNotEmpty()) pending else ids
@@ -990,7 +992,7 @@ class MessageCoordinationDelegate(
         launchGroup(chatId) {
             val actor = item.getString("actor")
             val group = resolveTargetGroupForChat(chatId)
-            if (group == null) {
+            if (group == null || group.ended) {
                 com.ai.assistance.operit.core.group.GroupDelivery.remove(groupStore, chatId, item.getString("id"))
                 groupStore.log(chatId, "投递取消", "目标群聊已删除", actor)
                 return@launchGroup
@@ -1021,6 +1023,7 @@ class MessageCoordinationDelegate(
     fun processGroupTask(chatId: String, task: JSONObject) {
         if (isGroupRunning(chatId) || messageProcessingDelegate.isChatLoading(chatId)) return
         launchGroup(chatId) {
+            com.ai.assistance.operit.core.group.GroupLifecycle.requireOpen(context, chatId)
             val board = com.ai.assistance.operit.core.tasks.TaskBoard(context, chatId, true)
             val id = task.getString("id")
             val dispatch = task.getJSONObject("dispatch")
@@ -1029,6 +1032,7 @@ class MessageCoordinationDelegate(
             val claimed = board.claim(id, event) ?: return@launchGroup
             try {
                 val group = requireNotNull(resolveTargetGroupForChat(chatId))
+                check(!group.ended) { "群已结束" }
                 check(group.members.any { it.characterCardId == actor }) { "接手助手已离群" }
                 check(com.ai.assistance.operit.core.group.GroupModeration(context).mayPublish(chatId, actor)) { "接手助手被禁言" }
                 groupStore.update(chatId) { it.put("task_event", board.prompt(claimed)).put("task_actor", actor) }
@@ -1062,6 +1066,7 @@ class MessageCoordinationDelegate(
         while (queue.isNotEmpty()) {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             val group = requireNotNull(resolveTargetGroupForChat(chatId)) { "群聊已删除" }
+            if (group.ended) return
             val members = group.members.sortedBy { it.orderIndex }
             val ids = members.map { it.characterCardId }
             val actor = queue.removeFirst()
@@ -1108,7 +1113,13 @@ class MessageCoordinationDelegate(
                 groupParticipantNamesText = buildGroupParticipantNamesText(members, cards), turnOptions = options)
             check(messageProcessingDelegate.isChatLoading(chatId)) { "${cards.getValue(actor).name} 未能启动回应，请检查其个人配置" }
             check(withTimeoutOrNull(180_000) {
-                while (messageProcessingDelegate.isChatLoading(chatId)) delay(100)
+                while (messageProcessingDelegate.isChatLoading(chatId)) {
+                    if (!groupStore.read(chatId).optBoolean("group_exists", true)) {
+                        messageProcessingDelegate.cancelMessageAndWait(chatId)?.join()
+                        return@withTimeoutOrNull true
+                    }
+                    delay(100)
+                }
                 true
             } == true) { "${cards.getValue(actor).name} 回应超时" }
             check(withTimeoutOrNull(60_000) {
@@ -1128,6 +1139,7 @@ class MessageCoordinationDelegate(
             }
             first = false
             completedTurns++
+            if (!groupStore.read(chatId).optBoolean("group_exists", true)) return
             com.ai.assistance.operit.core.group.GroupContext.rememberMembers(context, chatId)
             groupStore.log(chatId, "完成", "本轮回应处理结束", actor)
             val decision = groupStore.takeDecision(chatId)

@@ -22,7 +22,7 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 
 internal enum class AssistantSpacePage(val title: String) {
-    OVERVIEW("助手空间"), CONTACT("主动联系"), PLANS("私人打算"), EMOTION("情绪与状态"),
+    OVERVIEW("助手空间"), CONTACT("主动联系"), PLANS("私人打算"), EMOTION("XC 连接与同步"),
     ACTIVITY("唤醒与记录"), PHONE("手机感知"), SOFTWARE("软件感知"), EXPLORATION("自主探索")
 }
 
@@ -36,6 +36,7 @@ fun CompanionSettingsButton() {
 @Composable
 internal fun CompanionSettingsDialog(
     initialPage: AssistantSpacePage = AssistantSpacePage.OVERVIEW,
+    embedded: Boolean = false,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -63,7 +64,7 @@ internal fun CompanionSettingsDialog(
         catch (failure: Exception) { error = failure.message.orEmpty() }
     }
     fun back() { if (page == AssistantSpacePage.OVERVIEW) onDismiss() else page = AssistantSpacePage.OVERVIEW }
-    Dialog(onDismissRequest = { back() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    val body: @Composable () -> Unit = {
         BackHandler { back() }
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
@@ -100,6 +101,7 @@ internal fun CompanionSettingsDialog(
             }
         }
     }
+    if (embedded) body() else Dialog(onDismissRequest = { back() }, properties = DialogProperties(usePlatformDefaultWidth = false), content = body)
     val selectedRole = role
     val selectedTab = roomTab
     if (selectedRole != null && selectedTab != null) {
@@ -131,7 +133,7 @@ private fun AssistantSpaceOverview(role: String?, navigate: (AssistantSpacePage)
         counts?.let { "${it[1]} 条待读 · ${it[2]} 份资料" }, enabled = role != null, onClick = { room("书房") })
     SpaceLinkCard("私人打算", "想继续的事、进展和下一步", Icons.Default.Checklist,
         counts?.let { "${it[3]} 件进行中的事" }, enabled = role != null, onClick = { navigate(AssistantSpacePage.PLANS) })
-    SpaceLinkCard("情绪与状态", "内部状态、变化轨迹、演化规则与 XC 连接", Icons.Default.FavoriteBorder,
+    SpaceLinkCard("XC 连接与同步", "管理外部情绪连接；内部状态与私密层在底部私域查看", Icons.Default.FavoriteBorder,
         enabled = role != null, onClick = { navigate(AssistantSpacePage.EMOTION) })
     if (role == null) Text("选择助手后，可打开房间、书房与私人打算。", style = MaterialTheme.typography.bodySmall)
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
@@ -189,7 +191,6 @@ private fun CompanionContactPanel() {
 
 @Composable
 private fun CompanionEmotionPanel(role: String) {
-    InternalStatePanel(role)
     val context = LocalContext.current
     val store = remember { CompanionStore(context) }
     val scope = rememberCoroutineScope()

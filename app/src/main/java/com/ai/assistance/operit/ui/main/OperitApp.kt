@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.ai.assistance.operit.ui.main.layout.ChatNavigationState
+import com.ai.assistance.operit.ui.main.layout.LocalChatNavigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -98,6 +102,7 @@ fun OperitApp(
     val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val phoneChatNavigation = rememberSaveable(saver = ChatNavigationState.saver) { ChatNavigationState() }
     val context = LocalContext.current
     val appContext = remember(context) { context.applicationContext }
     val packageManager = remember {
@@ -202,6 +207,7 @@ fun OperitApp(
         requestRouteTransition {
             isNavigatingBack = false
             navigationTransitionSource = NavigationTransitionSource.DEFAULT
+            if (requestNavItem == NavItem.AiChat) phoneChatNavigation.requestConversation()
             routerState.resetTo(targetEntry)
         }
     }
@@ -225,6 +231,7 @@ fun OperitApp(
         requestRouteTransition {
             isNavigatingBack = false
             navigationTransitionSource = NavigationTransitionSource.DEFAULT
+            if (requestRouteId == AppRouteCatalog.toEntry(Screen.AiChat).routeId) phoneChatNavigation.requestConversation()
             routerState.resetTo(
                 com.ai.assistance.operit.ui.main.navigation.RouteEntry(
                     routeId = requestRouteId,
@@ -254,9 +261,11 @@ fun OperitApp(
                     else RouteEntrySource.DEFAULT
             )
         if (currentRouteEntry.routeId == nextEntry.routeId && currentRouteEntry.args == nextEntry.args) {
+            if (newScreen is Screen.AiChat && !fromDrawer) phoneChatNavigation.requestConversation()
             return
         }
         requestRouteTransition {
+            if (newScreen is Screen.AiChat && !fromDrawer) phoneChatNavigation.requestConversation()
             isNavigatingBack = false
             navigationTransitionSource =
                 if (fromDrawer) NavigationTransitionSource.DRAWER
@@ -358,6 +367,8 @@ fun OperitApp(
     // - Less than 600dp: phone
     // - 600dp and above: tablet
     val useTabletLayout = screenWidthDp >= 600
+    val appThemeScope = com.ai.assistance.operit.ui.theme.LocalAppThemeScope.current
+    SideEffect { if (useTabletLayout) appThemeScope?.conversationVisible = currentScreen is Screen.AiChat }
 
     var remoteAnnouncement by remember { mutableStateOf<RemoteAnnouncementDisplay?>(null) }
 
@@ -459,9 +470,11 @@ fun OperitApp(
                             currentEntry.routeId == routeId &&
                             currentEntry.args == args
                     ) {
+                        if (routeId == AppRouteCatalog.toEntry(Screen.AiChat).routeId) phoneChatNavigation.requestConversation()
                         return@install
                     }
                     requestRouteTransition {
+                        if (routeId == AppRouteCatalog.toEntry(Screen.AiChat).routeId) phoneChatNavigation.requestConversation()
                         isNavigatingBack = false
                         navigationTransitionSource =
                             if (source == RouteEntrySource.DRAWER) NavigationTransitionSource.DRAWER
@@ -477,6 +490,7 @@ fun OperitApp(
                 reset = { routeId, args, source ->
                     navigationModel.routesById[routeId] ?: return@install
                     requestRouteTransition {
+                        if (routeId == AppRouteCatalog.toEntry(Screen.AiChat).routeId) phoneChatNavigation.requestConversation()
                         isNavigatingBack = false
                         navigationTransitionSource =
                             if (source == RouteEntrySource.DRAWER) NavigationTransitionSource.DRAWER
@@ -500,6 +514,7 @@ fun OperitApp(
             }
         }
         CompositionLocalProvider(
+            LocalChatNavigation provides if (useTabletLayout) null else phoneChatNavigation,
             LocalAppNavigationModel provides navigationModel,
             LocalRouteBackGuardRegistry provides routeBackGuardRegistry,
             LocalTopBarActions provides { actions: @Composable RowScope.() -> Unit ->
