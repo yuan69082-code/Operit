@@ -403,7 +403,7 @@ fun BubbleUserMessageComposable(
                     Modifier
                         .widthIn(max = if (isHiddenPlaceholder) minOf(maxBubbleWidth, 320.dp) else maxBubbleWidth)
                         .defaultMinSize(minHeight = 44.dp)
-                            .studioSticker()
+                            .studioSticker(user = true, background = backgroundColor)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -547,7 +547,7 @@ fun BubbleUserMessageComposable(
                         Modifier
                             .widthIn(max = if (isHiddenPlaceholder) minOf(maxBubbleWidth, 320.dp) else maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
-                            .studioSticker()
+                            .studioSticker(user = true, background = backgroundColor)
 
                     if (effectiveBubbleImageStyle != null) {
                         BubbleImageBackgroundSurface(

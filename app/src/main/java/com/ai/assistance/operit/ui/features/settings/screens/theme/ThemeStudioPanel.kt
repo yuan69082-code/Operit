@@ -42,6 +42,9 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
     var starSize by remember { mutableFloatStateOf(3f) }
     var starGlow by remember { mutableFloatStateOf(8f) }
     var warmth by remember { mutableFloatStateOf(.5f) }
+    var component by remember { mutableStateOf("send_button") }
+    var componentColor by remember { mutableStateOf("FF596DA6") }
+    var componentCorner by remember { mutableFloatStateOf(12f) }
     var bubbleRadius by remember { mutableFloatStateOf(20f) }
     var sticker by remember { mutableStateOf("") }
     var tail by remember { mutableStateOf(false) }
@@ -133,6 +136,19 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
                     studio.preview(target, JSONObject().put("floats", JSONObject().put("studio_bubble_corner", bubbleRadius))
                         .put("booleans", JSONObject().put("studio_bubble_tail", tail)).put("strings", JSONObject().put("studio_bubble_sticker", sticker)), "气泡装饰")
                 } }) { Text("试穿气泡装饰") }
+                Text("组件微调")
+                com.ai.assistance.operit.ui.theme.StudioComponents.targets.forEach { key ->
+                    FilterChip(component == key, { component = key }, { Text(when(key) { "send_button" -> "发送/麦克风按钮"; "attachment" -> "附件标签"; "tool_receipt" -> "工具回执"; "history_search" -> "历史搜索框"; else -> "助手空间筛选标签" }) })
+                }
+                OutlinedTextField(componentColor, { componentColor = it }, label = { Text("ARGB十六进制颜色，如 FF596DA6") })
+                Text("组件圆角"); Slider(componentCorner, { componentCorner = it }, valueRange = 0f..40f)
+                TextButton(enabled = !busy, onClick = { run {
+                    require(componentColor.length == 8) { "颜色需要8位ARGB值" }
+                    val color = componentColor.toLong(16).toInt()
+                    val styles = JSONObject(studio.current(target).string("studio_component_styles") ?: "{}")
+                    styles.put(component, JSONObject().put("color", color).put("corner", componentCorner))
+                    studio.preview(target, JSONObject().put("strings", JSONObject().put("studio_component_styles", styles.toString())), "组件微调")
+                } }) { Text("试穿组件修改") }
                 OutlinedTextField(patchText, { patchText = it }, label = { Text("局部原生字段补丁 JSON") })
                 TextButton(enabled = !busy, onClick = { run { studio.preview(target, JSONObject(patchText), name); status = "已试穿局部修改" } }) { Text("试穿局部修改") }
                 Text("先检查参数，再修改对应背景、顶部栏、气泡、文字、输入区字段。未提供的字段保持当前值。")

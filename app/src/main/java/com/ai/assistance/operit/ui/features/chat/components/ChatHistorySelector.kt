@@ -1890,6 +1890,10 @@ fun ChatHistorySelector(
         if (showSearchBox) {
             OutlinedTextField(
                 value = searchQuery,
+                shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("history_search", androidx.compose.foundation.shape.RoundedCornerShape(4.dp)),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("history_search", Color.Transparent),
+                    unfocusedContainerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("history_search", Color.Transparent)),
                 onValueChange = onSearchQueryChange,
                 label = { Text(stringResource(R.string.search)) },
                 placeholder = { Text(stringResource(R.string.search_chat_history_hint)) },

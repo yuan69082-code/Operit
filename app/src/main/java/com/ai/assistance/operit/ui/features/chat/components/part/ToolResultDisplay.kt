@@ -139,9 +139,9 @@ private fun ToolResultDetailDialog(
     ) {
         Card(
                 modifier = cardModifier,
-                shape = RoundedCornerShape(16.dp),
+                shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("tool_receipt", RoundedCornerShape(16.dp)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = CardDefaults.cardColors(containerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("tool_receipt", MaterialTheme.colorScheme.surface))
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // 标题栏

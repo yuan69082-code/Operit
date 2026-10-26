@@ -186,6 +186,7 @@ class ThemeStudio(private val context: Context) {
 
         fun patch(base: ThemePreferenceValues, document: JSONObject): ThemePreferenceValues {
             val change = decode(document)
+            change.strings["studio_component_styles"]?.let(com.ai.assistance.operit.ui.theme.StudioComponents::validate)
             val defaults = ThemePreferenceValues.defaultVisual()
             require(change.strings.keys.all { it in defaults.strings || it in base.strings || it in setOf("background_image_uri", "bubble_user_image_uri", "bubble_ai_image_uri") }) { "未知主题文字字段" }
             require(change.booleans.keys.all { it in defaults.booleans }) { "未知主题开关" }

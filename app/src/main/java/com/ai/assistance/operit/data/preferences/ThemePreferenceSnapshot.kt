@@ -51,6 +51,7 @@ data class ThemePreferenceValues(
             ThemePreferenceValues(
                 strings = mapOf(
                     "studio_bubble_sticker" to "",
+                    "studio_component_styles" to "{}",
                     "theme_mode" to UserPreferencesManager.THEME_MODE_LIGHT,
                     "background_media_type" to UserPreferencesManager.MEDIA_TYPE_IMAGE,
                     "app_bar_content_color_mode" to

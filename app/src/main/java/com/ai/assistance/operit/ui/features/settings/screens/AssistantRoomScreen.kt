@@ -70,7 +70,7 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                 }
                 if (tab != "书房") Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("房间", "日记", "书房", "布置").forEach { label ->
-                        FilterChip(selected = label == tab, onClick = { tab = label; error = "" }, label = { Text(label) }, leadingIcon = { Icon(when (label) { "房间" -> Icons.Default.Home; "日记" -> Icons.Default.EditNote; "书房" -> Icons.Default.MenuBook; else -> Icons.Default.Tune }, null, Modifier.size(18.dp)) })
+                        FilterChip(shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("room_tabs", RoundedCornerShape(8.dp)), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("room_tabs", MaterialTheme.colorScheme.secondaryContainer)), selected = label == tab, onClick = { tab = label; error = "" }, label = { Text(label) }, leadingIcon = { Icon(when (label) { "房间" -> Icons.Default.Home; "日记" -> Icons.Default.EditNote; "书房" -> Icons.Default.MenuBook; else -> Icons.Default.Tune }, null, Modifier.size(18.dp)) })
                     }
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())

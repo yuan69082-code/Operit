@@ -84,7 +84,7 @@ fun CompactToolDisplay(
         summary = summary,
         semanticDescription = semanticDescription,
         leadingIcon = getToolIcon(displayToolName),
-        titleColor = MaterialTheme.colorScheme.primary,
+        titleColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("tool_receipt", MaterialTheme.colorScheme.primary),
         summaryColor = textColor.copy(alpha = 0.7f),
         modifier = modifier,
         onClick =

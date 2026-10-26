@@ -1818,7 +1818,7 @@ private fun ChatInputBottomBar(
     if (confirmCommandUndo) androidx.compose.material3.AlertDialog(onDismissRequest = { confirmCommandUndo = false },
         title = { Text("回溯最近一轮") }, text = { Text("将撤回至最近一条用户消息，并回溯关联工作区；后面的消息会被移除。") },
         confirmButton = { TextButton(onClick = {
-            val index = chatHistory.indexOfLast { it.sender == "user" }
+            val index = actualViewModel.chatHistory.value.indexOfLast { it.sender == "user" }
             if (index >= 0) actualViewModel.rollbackToMessage(index)
             confirmCommandUndo = false
         }) { Text("确认回溯") } },

@@ -365,7 +365,7 @@ fun BubbleAiMessageComposable(
                         Modifier
                             .widthIn(max = maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
-                            .studioSticker()
+                            .studioSticker(user = false, background = backgroundColor)
                     val renderContent: @Composable () -> Unit = {
                         key(message.timestamp) {
                             val stream = rememberRevisableTextStream(message.contentStream)
@@ -567,7 +567,7 @@ fun BubbleAiMessageComposable(
                         Modifier
                             .widthIn(max = maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
-                            .studioSticker()
+                            .studioSticker(user = false, background = backgroundColor)
                     val renderContent: @Composable () -> Unit = {
                         // 使用 message.timestamp 作为 key，确保在重组期间，
                         // 只要是同一条消息，StreamMarkdownRenderer就不会被销毁和重建。

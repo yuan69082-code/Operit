@@ -982,7 +982,7 @@ fun AgentChatInputSection(
                                 modifier =
                                     Modifier
                                         .size(36.dp)
-                                        .background(actionButtonBackground, CircleShape)
+                                        .background(com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
                                         .then(voiceMessageGesture)
                         .then(if (!showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
                             enabled = sendButtonEnabled && (showCancelAction || showQueueAction || canSendMessage),
@@ -1278,7 +1278,7 @@ fun AgentChatInputSection(
                                     modifier =
                                         Modifier
                                             .size(36.dp)
-                                            .background(actionButtonBackground, CircleShape)
+                                            .background(com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
                                             .then(voiceMessageGesture)
                         .then(if (!showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
                             enabled = sendButtonEnabled && (showCancelAction || showQueueAction || canSendMessage),
