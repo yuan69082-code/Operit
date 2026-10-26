@@ -341,6 +341,16 @@ object CompanionRuntime {
                 software.role == softwareRole && software.revision == softwareRevision && epoch == generation.get()) { "软件感知目标或开关已改变" }
             com.ai.assistance.operit.core.awareness.SoftwareAwareness.authorize(context, chatId, softwareRole)
         }
+        if (com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleId)) {
+            // Auxiliary wake is an observation/proposal, never a second decision maker.
+            // Do not mark a task or exploration as completed merely because it was queued.
+            if (phoneRole == null && softwareRole == null) {
+                com.ai.assistance.operit.core.engine.EngineWindow.offer(context, roleId, chatId,
+                    "helper.wake_requested", org.json.JSONObject().put("reason", event)
+                        .put("taskEvent", taskEvent).put("exploration", explorationWork != null))
+            }
+            error("软件自主判断已停用；主体由引擎管理，获授权的事件保存在引擎窗口记录中")
+        }
         CharacterCardManager.getInstance(context).ensureIndependentSettings(roleId)
         val card = CharacterCardManager.getInstance(context).getCharacterCard(roleId)
         val history = core.getChatHistoryDelegate().getRuntimeChatHistory(chatId).map { it.copy() }
