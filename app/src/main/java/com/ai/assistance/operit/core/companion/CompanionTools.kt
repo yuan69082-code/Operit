@@ -12,9 +12,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = RoomTools.names + setOf("companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
+    val names = com.ai.assistance.operit.core.experience.ExperienceTools.names + RoomTools.names + setOf("companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
 
-    fun prompts(): List<ToolPrompt> = RoomTools.prompts() + listOf(
+    fun prompts(): List<ToolPrompt> = com.ai.assistance.operit.core.experience.ExperienceTools.prompts() + RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_internal_state",
             description = "Operit 自有内部状态。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件和版本，offset翻页。其余操作必须有id、expected_version（新建0）、reason（经历及区别）、evidence（get返回事件ID的JSON数组）。create/revise传完整definition JSON：id,name,description,baseline,min,max,maxDelta,halfLifeHours（0不恢复，否则按小时半衰期回归baseline）,scope=global|session,private,share（AI愿向本机公开）,participates,triggers=[{source,delta,contains可选}],effects=[{action,weight,cue,target可选}]。source=user_message|assistant_reply|assistant_action|tool_success|tool_failure|reading|exploration|todo_progress|todo_failed|todo_completed|wake|time；time的delta是每小时漂移量，其余是每事件增量，宿主限制总maxDelta。effects action=contact|explore|todo|tool|reply|defer|drop|rest，weight为-10..10的相对基准倾向，cue解释高低状态如何影响选择，target可为待办/阅读来源ID或工具名。merge用target指定同作用域现有目标，宿主平均归一化值并停用来源；旧历史保留。规则修订不重置当前值，不能自行报告事件或写当前值。状态不授予工具、探索或联系权限。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "维度稳定ID"),
@@ -68,7 +68,8 @@ object CompanionTools {
 
     fun register(handler: AIToolHandler, context: Context) {
         RoomTools.register(handler, context)
-        names.filterNot { it in RoomTools.names }.forEach { name ->
+        com.ai.assistance.operit.core.experience.ExperienceTools.register(handler, context)
+        names.filterNot { it in RoomTools.names || it in com.ai.assistance.operit.core.experience.ExperienceTools.names }.forEach { name ->
             handler.registerTool(name = name, descriptionGenerator = { name }, executor = { tool ->
                 try {
                     val chatId = required(tool, "__operit_package_chat_id")

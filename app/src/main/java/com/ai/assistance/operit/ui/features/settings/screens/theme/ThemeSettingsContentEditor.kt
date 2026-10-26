@@ -375,6 +375,11 @@ internal fun ThemeSettingsContentEditor(
         )
 
         val draft = editorState?.session
+        ThemeStudioEntry(
+            target = editorTarget,
+            enabled = draft != null && !hasUnsavedChanges && !isSaving && targetSwitchesInFlight == 0,
+            onClosed = { editorReloadToken++ },
+        )
         if (draft == null) {
             Box(
                 modifier = Modifier.fillMaxWidth().weight(1f),

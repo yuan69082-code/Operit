@@ -1213,6 +1213,11 @@ fun SpeechServicesSettingsScreen(
 
                         AnimatedVisibility(visible = ttsServiceTypeInput == VoiceServiceFactory.VoiceServiceType.MINIMAX_TTS) {
                             Column(modifier = Modifier.padding(top = 16.dp)) {
+                                MiniMaxVoiceDesigner(
+                                    endpoint = ttsUrlTemplateInput,
+                                    apiKey = ttsApiKeyInput,
+                                    onSelect = { ttsVoiceIdInput = it },
+                                )
                                 Text(
                                     text = stringResource(R.string.speech_services_minimax_config),
                                     style = MaterialTheme.typography.titleMedium,

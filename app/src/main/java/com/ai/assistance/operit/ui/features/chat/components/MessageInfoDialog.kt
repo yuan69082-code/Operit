@@ -28,8 +28,13 @@ import java.util.Locale
 @Composable
 fun MessageInfoDialog(
     message: ChatMessage,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    chatId: String? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val recall = remember(chatId, message.sentAt) {
+        chatId?.let { com.ai.assistance.operit.core.experience.RecallEvidence(context).read(it, message.sentAt) }
+    }
     val unavailable = stringResource(R.string.message_info_unavailable)
     val dateFormatter = remember {
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
@@ -69,6 +74,10 @@ fun MessageInfoDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (recall != null) MessageInfoCard {
+                    Text("本轮记忆证据", style = MaterialTheme.typography.titleSmall)
+                    Text(recall, style = MaterialTheme.typography.bodySmall)
+                }
                 MessageInfoCard {
                     MessageInfoTwoColumnRow(
                         leftLabel = stringResource(R.string.message_info_sender),

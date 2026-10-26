@@ -1221,6 +1221,7 @@ private fun MessageItem(
         if (showMessageInfoDialog) {
             MessageInfoDialog(
                 message = message,
+                chatId = currentChatId,
                 onDismiss = { showMessageInfoDialog = false }
             )
         }

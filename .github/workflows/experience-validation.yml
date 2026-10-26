@@ -1,0 +1,15 @@
+name: Experience integration validation
+on:
+  push:
+    branches: [feat/polaris-experience]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android-build.yml
+    with:
+      gradle_task: assembleDebug
+    secrets: inherit

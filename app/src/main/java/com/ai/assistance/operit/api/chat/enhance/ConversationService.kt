@@ -703,6 +703,14 @@ class ConversationService(
                 }
             }
         }
+        if (!roleCardId.isNullOrBlank()) {
+            val roleContext = com.ai.assistance.operit.core.experience.RoleRules(context).context(
+                roleCardId, effectiveChatHistory.map { it.content }, processedInput,
+            )
+            if (roleContext.isNotBlank()) preparedHistory.add(
+                PromptTurn(kind = PromptTurnKind.SYSTEM, content = roleContext)
+            )
+        }
         val afterContext =
             dispatchHistoryHooks(
                 beforeContext.copy(
