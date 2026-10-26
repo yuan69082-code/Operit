@@ -53,6 +53,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -274,6 +275,16 @@ fun ChatArea(
     var viewportHeightPx by remember { mutableStateOf(0) }
     val messageAnchors = remember(currentChatId) { mutableStateMapOf<Long, ChatScrollMessageAnchor>() }
     var pendingJumpToMessageTimestamp by remember(currentChatId) { mutableStateOf<Long?>(null) }
+    val collectionJump by com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.pending.collectAsState()
+    LaunchedEffect(currentChatId, collectionJump) {
+        val jump = collectionJump ?: return@LaunchedEffect
+        if (jump.first == currentChatId) {
+            onAutoScrollToBottomChange?.invoke(false)
+            onRevealMessageForLocator?.invoke(jump.second)
+            pendingJumpToMessageTimestamp = jump.second
+            com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.pending.value = null
+        }
+    }
     val lastMessage = chatHistory.lastOrNull()
     val pendingTargetAnchor =
         pendingJumpToMessageTimestamp?.let { targetTimestamp -> messageAnchors[targetTimestamp] }
@@ -402,6 +413,7 @@ fun ChatArea(
                     .background(Color.Transparent)
                     .padding(top = topPadding, bottom = bottomPadding),
         ) {
+            ThemePreviewNotice(currentChatId)
             if (hasOlderDisplayHistory) {
                 Text(
                     text = stringResource(id = R.string.load_more_history),
@@ -667,6 +679,7 @@ private fun MessageItem(
     bubbleAiContentPaddingRight: Float = 12f,
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
+    var collectionOwner by remember { mutableStateOf<String?>(null) }
     var showMessageInfoDialog by remember { mutableStateOf(false) }
     var showHiddenUserMessageDialog by remember { mutableStateOf(false) }
     var showDeleteMessageConfirmDialog by remember { mutableStateOf(false) }
@@ -678,6 +691,9 @@ private fun MessageItem(
     val coroutineScope = rememberCoroutineScope()
     val messageInteractionSource = remember { MutableInteractionSource() }
 
+    collectionOwner?.let { owner ->
+        com.ai.assistance.operit.ui.features.settings.screens.CollectionPanel(owner, { collectionOwner = null }, { collectionOwner = null })
+    }
     // 只有用户和AI的消息才能被操作
     val isActionable = message.sender == "user" || message.sender == "ai"
     val isHiddenUserMessage = isHiddenUserPlaceholder(message)
@@ -1149,6 +1165,32 @@ private fun MessageItem(
                 modifier = Modifier.height(36.dp)
             )
 
+            if (isActionable && message.contentStream == null) DropdownMenuItem(
+                text = { Text("保存为收藏卡") },
+                onClick = {
+                    showContextMenu = false
+                    coroutineScope.launch {
+                        try {
+                            val metadata = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(currentChatId)
+                            val role = metadata?.characterGroupId?.let { "group:$it" } ?: requireNotNull(metadata?.characterCardId) { "请先为会话指定助手" }
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.ai.assistance.operit.core.experience.CollectionStore(context).create(role, currentChatId, message)
+                            }
+                            collectionOwner = role
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { android.widget.Toast.makeText(context, "收藏失败：" + e.message, android.widget.Toast.LENGTH_LONG).show() }
+                    }
+                },
+            )
+
+            DropdownMenuItem(text = { Text("打开收藏与项目") }, onClick = {
+                showContextMenu = false
+                coroutineScope.launch {
+                    val metadata = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(currentChatId)
+                    collectionOwner = metadata?.characterGroupId?.let { "group:$it" } ?: metadata?.characterCardId
+                }
+            })
+
             // 信息
             DropdownMenuItem(
                 text = {
@@ -1221,6 +1263,7 @@ private fun MessageItem(
         if (showMessageInfoDialog) {
             MessageInfoDialog(
                 message = message,
+                chatId = currentChatId,
                 onDismiss = { showMessageInfoDialog = false }
             )
         }

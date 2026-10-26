@@ -50,6 +50,8 @@ data class ThemePreferenceValues(
         fun defaultVisual(): ThemePreferenceValues =
             ThemePreferenceValues(
                 strings = mapOf(
+                    "studio_bubble_sticker" to "",
+                    "studio_component_styles" to "{}",
                     "theme_mode" to UserPreferencesManager.THEME_MODE_LIGHT,
                     "background_media_type" to UserPreferencesManager.MEDIA_TYPE_IMAGE,
                     "app_bar_content_color_mode" to
@@ -68,6 +70,7 @@ data class ThemePreferenceValues(
                         UserPreferencesManager.BUBBLE_IMAGE_RENDER_MODE_TILED_NINE_SLICE,
                 ),
                 booleans = mapOf(
+                    "studio_bubble_tail" to false,
                     "use_system_theme" to true,
                     "use_custom_colors" to false,
                     "use_background_image" to false,
@@ -120,6 +123,7 @@ data class ThemePreferenceValues(
                     "bubble_ai_use_custom_font" to false,
                 ),
                 floats = mapOf(
+                    "studio_bubble_corner" to 20f,
                     "background_image_opacity" to 0.3f,
                     "background_blur_radius" to 10f,
                     "avatar_corner_radius" to 8f,

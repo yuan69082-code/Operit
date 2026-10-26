@@ -1808,6 +1808,21 @@ private fun ChatInputBottomBar(
         actualViewModel.showToast(context.getString(R.string.chat_queue_added))
     }
 
+    var commandReport by remember { mutableStateOf<String?>(null) }
+    var confirmCommandUndo by remember { mutableStateOf(false) }
+    commandReport?.let { report ->
+        androidx.compose.material3.AlertDialog(onDismissRequest = { commandReport = null },
+            title = { Text("聊天命令") }, text = { Text(report) },
+            confirmButton = { TextButton(onClick = { commandReport = null }) { Text("知道了") } })
+    }
+    if (confirmCommandUndo) androidx.compose.material3.AlertDialog(onDismissRequest = { confirmCommandUndo = false },
+        title = { Text("回溯最近一轮") }, text = { Text("将撤回至最近一条用户消息，并回溯关联工作区；后面的消息会被移除。") },
+        confirmButton = { TextButton(onClick = {
+            val index = actualViewModel.chatHistory.value.indexOfLast { it.sender == "user" }
+            if (index >= 0) actualViewModel.rollbackToMessage(index)
+            confirmCommandUndo = false
+        }) { Text("确认回溯") } },
+        dismissButton = { TextButton(onClick = { confirmCommandUndo = false }) { Text("取消") } })
     val sendMessage: () -> Unit = {
         coroutineScope.launch {
             if (currentChatId.isNullOrBlank()) {
@@ -1819,6 +1834,16 @@ private fun ChatInputBottomBar(
                 return@launch
             }
 
+            if (attachments.isEmpty() && com.ai.assistance.operit.ui.features.chat.components.ChatCommands.recognizes(userMessage.text)) {
+                if (isLoading) { commandReport = "请等待当前回复完成后执行聊天命令"; return@launch }
+                try {
+                    if (userMessage.text.trim() == "/undo") confirmCommandUndo = true
+                    else commandReport = com.ai.assistance.operit.ui.features.chat.components.ChatCommands.execute(context, actualViewModel, requireNotNull(currentChatId), userMessage.text)
+                    actualViewModel.updateUserMessage(TextFieldValue(""))
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { commandReport = "命令未完成：" + e.message }
+                return@launch
+            }
             val submitDecision =
                 ChatInputHookRegistry.dispatchSubmitRequested(
                     buildChatInputHookContext(

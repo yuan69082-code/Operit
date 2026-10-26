@@ -159,6 +159,10 @@ internal fun WorkspaceImagePreview(
             }
         }
 
+        if (previewUri != null && !isSourceLoading && !hasImageError) {
+            ImageQrAction(previewUri, Modifier.align(Alignment.TopEnd).padding(16.dp))
+        }
+
         AnimatedVisibility(
             visible = isSourceLoading || (!hasImageError && isImageLoading),
             enter = fadeIn(),

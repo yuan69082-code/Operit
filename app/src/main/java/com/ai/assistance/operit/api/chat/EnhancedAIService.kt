@@ -848,7 +848,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 modelConfig = modelConfig
             )
 
-        var finalProcessedInput = message
+        var finalProcessedInput = if (roleCardId.isNullOrBlank()) message else com.ai.assistance.operit.core.experience.RoleRules(context).transform(roleCardId, message, "input")
         var finalPreparedHistory = preparedHistory
         val beforeFinalizeContext =
             applyPromptFinalizeHooks(
@@ -895,7 +895,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         val requestHistory =
             applyFinalizedCurrentUserTurn(
                 preparedHistory = finalPreparedHistory,
-                originalCurrentMessage = message,
+                originalCurrentMessage = if (roleCardId.isNullOrBlank()) message else com.ai.assistance.operit.core.experience.RoleRules(context).transform(roleCardId, message, "input"),
                 finalizedCurrentMessage = finalProcessedInput
             ).let(CurrentPerceptionContext::retainLatest).let(HistoricalPackageContext::compact).let(SegmentedSummary::promptTurns).mergeAdjacentTurns { previous, current ->
                 previous.kind == PromptTurnKind.USER &&
@@ -1070,7 +1070,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     val tAfterGetTools = messageTimingNow()
                     AppLogger.d(TAG, "sendMessage本地耗时: getAvailableToolsForFunction=${tAfterGetTools - tAfterGetService}ms")
 
-                    var finalProcessedInput = message
+                    var finalProcessedInput = if (roleCardId.isNullOrBlank()) message else com.ai.assistance.operit.core.experience.RoleRules(context).transform(roleCardId, message, "input")
                     var finalPreparedHistory = preparedHistory
                     val beforeFinalizeContext =
                         applyPromptFinalizeHooks(
@@ -1114,7 +1114,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     val requestHistory =
                         applyFinalizedCurrentUserTurn(
                             preparedHistory = finalPreparedHistory,
-                            originalCurrentMessage = message,
+                            originalCurrentMessage = if (roleCardId.isNullOrBlank()) message else com.ai.assistance.operit.core.experience.RoleRules(context).transform(roleCardId, message, "input"),
                             finalizedCurrentMessage = finalProcessedInput
                         ).let(CurrentPerceptionContext::retainLatest).let(HistoricalPackageContext::compact).let(SegmentedSummary::promptTurns).mergeAdjacentTurns { previous, current ->
                             previous.kind == PromptTurnKind.USER &&
@@ -1132,6 +1132,9 @@ class EnhancedAIService private constructor(private val context: Context) {
                     
                     // 使用新的Stream API
                     AppLogger.d(TAG, "sendMessage请求前准备耗时: ${tAfterGetTools - startTime}ms, 流式输出: $stream")
+                    com.ai.assistance.operit.core.experience.RequestDiagnostics(context).let { trace ->
+                        trace.append(trace.active(chatId, roleCardId), "发送给模型的工具列表", availableTools?.joinToString("\n") { it.name } ?: "未提供结构化工具列表；文本工具说明以系统提示词为准")
+                    }
                     val requestStartTime = messageTimingNow()
                     val responseStream =
                             serviceForFunction.sendMessage(

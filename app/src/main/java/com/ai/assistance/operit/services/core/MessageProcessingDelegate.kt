@@ -1162,6 +1162,14 @@ class MessageProcessingDelegate(
                 }
 
                 val prepareResponseStreamStartTime = messageTimingNow()
+                val recalledContext = if (!turnOptions.proactiveWake && activeChatId != null)
+                    com.ai.assistance.operit.core.companion.CompanionContext.related(context, activeChatId, effectiveRoleCardId, requestMessageContent)
+                    else ""
+                if (activeChatId != null) {
+                    com.ai.assistance.operit.core.experience.RecallEvidence(context).save(
+                        activeChatId, requestSentAt, effectiveRoleCardId, recalledContext,
+                    )
+                }
                 if (activeChatId != null) com.ai.assistance.operit.core.companion.XcEmotionBridge.beginTurn(activeChatId)
                 if (activeChatId != null && !turnOptions.proactiveWake && !turnOptions.voiceCallEvent && !turnOptions.voiceCallSilence)
                     runCatching { com.ai.assistance.operit.core.companion.AttentionGear.noteUserText(context, activeChatId, requestMessageContent) }
@@ -1192,9 +1200,7 @@ class MessageProcessingDelegate(
                         else ""
                         val visualOnlyDescription = if (turnOptions.voiceCallVisualOnly) "本轮是摄像头更新，不是用户开口。只在有值得回应的内容时开口，否则只输出 <voice_call_quiet/>。" else ""
                         "[运行状态：mode=voice_call，正在与用户进行语音通话。此状态仅供内部使用，禁止复述、解释或输出状态标记和文件路径。$inputDescription $continuousDescription $visualDescription $visualOnlyDescription 直接说对用户说的话，正文会被朗读。通话与当前文字聊天共享身份、工具和记录。若你决定结束本次通话，可先说明原因，也可以不说话；在回复末尾单独输出 <voice_call_end/>，客户端在正文朗读结束后挂断，并以你的身份记录通话结束；这个控制标记不会被朗读。]\n$requestMessageContent"
-                    } else requestMessageContent) + (if (activeChatId != null && !turnOptions.proactiveWake)
-                        // 自己醒来时这段文字是软件写的唤醒说明，不是她说的话，不拿去触发旧日回声
-                        com.ai.assistance.operit.core.companion.CompanionContext.related(context, activeChatId, effectiveRoleCardId, requestMessageContent) else ""),
+                    } else requestMessageContent) + recalledContext,
                     // 仅在群组编排中去掉当前用户消息，避免重复拼接。
                     // userMessageAdded 只覆盖本次发送自行落库的情况；编排路径的消息由
                     // orchestrateGroupConversation 预先落库（suppressUserMessageInHistory=true，
@@ -1832,6 +1838,7 @@ class MessageProcessingDelegate(
 
             var firstResponseElapsed: Long? = null
             val requestSentAt = System.currentTimeMillis()
+            com.ai.assistance.operit.core.experience.RequestDiagnostics(context).begin(chatId, requestSentAt, roleCardId)
             val requestStartElapsed = messageTimingNow()
             val effectiveRequestMessageContent =
                 if (groupOrchestrationMode &&
@@ -1930,7 +1937,7 @@ class MessageProcessingDelegate(
                     }
             }
 
-            val finalContent = resolveFinalContent(aiMessage)
+            val finalContent = transformFinalProse(chatId, aiMessage, resolveFinalContent(aiMessage))
             var turnInputTokens = 0L
             var turnOutputTokens = 0L
             var turnCachedInputTokens = 0L
@@ -2029,6 +2036,13 @@ class MessageProcessingDelegate(
             "回合完成: chatId=$activeChatId, nextWindow=$nextWindowSize, service=${service.javaClass.simpleName}"
         )
         onTurnComplete(activeChatId, service, nextWindowSize, turnOptions)
+    }
+
+    private suspend fun transformFinalProse(chatId: String?, message: ChatMessage, content: String): String {
+        if (chatId == null) return content
+        val role = com.ai.assistance.operit.core.group.GroupProvenance.author(context, chatId, message)
+            ?: com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.characterCardId
+        return if (role == null) content else com.ai.assistance.operit.core.experience.RoleRules(context).transform(role, content, "output")
     }
 
     private suspend fun finalizeMessageAndNotify(

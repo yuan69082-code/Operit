@@ -42,7 +42,7 @@ fun AttachmentChip(attachmentInfo: AttachmentInfo, onRemove: () -> Unit, onInser
     val context = LocalContext.current
     val isImage = attachmentInfo.mimeType.startsWith("image/")
     val icon: ImageVector = if (isImage) Icons.Default.Image else Icons.Default.Description
-    val chipShape = RoundedCornerShape(13.dp)
+    val chipShape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("attachment", RoundedCornerShape(13.dp))
     val imageModel =
         remember(attachmentInfo.filePath, isImage) {
             if (isImage) {
@@ -93,7 +93,7 @@ fun AttachmentChip(attachmentInfo: AttachmentInfo, onRemove: () -> Unit, onInser
                         shape = chipShape,
                     ),
             shape = chipShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            color = com.ai.assistance.operit.ui.theme.StudioComponents.color("attachment", MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),

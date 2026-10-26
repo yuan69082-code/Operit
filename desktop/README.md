@@ -1,6 +1,6 @@
 # Operit Windows 共享聊天预览
 
-Windows便携包解压后双击desktop/Start-Operit.cmd。包内包含Node运行时，不要求单独安装Node。启动窗口需要保持打开，浏览器窗口承载复用的WebChat界面；本阶段不是原生桌面安装器。
+Windows便携包解压后双击desktop/Start-Operit-Window.cmd打开独立Electron窗口，菜单可切换聊天、设置和项目磁盘同步。包内包含校验过的Electron与Node运行时，不要求另行安装。关闭独立窗口会停止共享服务。仍可双击desktop/Start-Operit.cmd使用浏览器，两种启动方式不能同时占用同一个端口。这是便携窗口应用，尚不包含安装器或自动替换。
 
 首次打开电脑服务设置，填写完整OpenAI兼容chat/completions接口地址、API Key、模型名、原有角色名称及系统提示词。此阶段不自动读取手机版的密钥和角色配置，不新建一套替代主体的提示词。开启电脑工具后，可使用当前Windows用户权限下的截图、鼠标点击、SendKeys、PowerShell和文件工具。视觉模型才能理解截图；未启用视觉的接口会明确报错。尚未实现通话、摄像头、UIA控件树或长期记忆折叠。
 

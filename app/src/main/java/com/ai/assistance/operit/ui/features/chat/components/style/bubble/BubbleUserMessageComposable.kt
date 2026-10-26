@@ -398,15 +398,12 @@ fun BubbleUserMessageComposable(
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val maxBubbleWidth = maxWidth
                 val bubbleShape =
-                    if (bubbleRoundedCornersEnabled) {
-                        RoundedCornerShape(20.dp, 4.dp, 20.dp, 20.dp)
-                    } else {
-                        RoundedCornerShape(0.dp)
-                    }
+                    studioBubbleShape(user = true, rounded = bubbleRoundedCornersEnabled)
                 val bubbleModifier =
                     Modifier
                         .widthIn(max = if (isHiddenPlaceholder) minOf(maxBubbleWidth, 320.dp) else maxBubbleWidth)
                         .defaultMinSize(minHeight = 44.dp)
+                            .studioSticker(user = true, background = backgroundColor)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -545,15 +542,12 @@ fun BubbleUserMessageComposable(
                 BoxWithConstraints {
                     val maxBubbleWidth = maxWidth * 0.85f
                     val bubbleShape =
-                        if (bubbleRoundedCornersEnabled) {
-                            RoundedCornerShape(20.dp, 4.dp, 20.dp, 20.dp)
-                        } else {
-                            RoundedCornerShape(0.dp)
-                        }
+                        studioBubbleShape(user = true, rounded = bubbleRoundedCornersEnabled)
                     val bubbleModifier =
                         Modifier
                             .widthIn(max = if (isHiddenPlaceholder) minOf(maxBubbleWidth, 320.dp) else maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
+                            .studioSticker(user = true, background = backgroundColor)
 
                     if (effectiveBubbleImageStyle != null) {
                         BubbleImageBackgroundSurface(

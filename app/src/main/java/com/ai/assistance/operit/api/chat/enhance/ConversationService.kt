@@ -507,7 +507,10 @@ class ConversationService(
                         ) + activePromptMetadata
                 )
             )
-        val effectiveChatHistory = beforeContext.chatHistory
+        // Replace our own transient segment once per request; tool follow-ups carry SYSTEM turns.
+        val effectiveChatHistory = beforeContext.chatHistory.filterNot {
+            it.kind == PromptTurnKind.SYSTEM && it.content.startsWith(com.ai.assistance.operit.core.experience.RoleRules.CONTEXT_MARKER)
+        }
         val preparedHistory = mutableListOf<PromptTurn>()
         var resolvedUseEnglish: Boolean? = null
         conversationMutex.withLock {
@@ -702,6 +705,24 @@ class ConversationService(
                     preparedHistory.add(message)
                 }
             }
+        }
+        if (!roleCardId.isNullOrBlank()) {
+            val rules = com.ai.assistance.operit.core.experience.RoleRules(context)
+            for (i in preparedHistory.indices) {
+                val turn = preparedHistory[i]
+                if (turn.kind == PromptTurnKind.USER && turn.metadata["operit_input_transformed"] != true) {
+                    preparedHistory[i] = turn.copy(content = rules.transform(roleCardId, turn.content, "input"),
+                        metadata = turn.metadata + ("operit_input_transformed" to true))
+                }
+            }
+            val roleContext = com.ai.assistance.operit.core.experience.RoleRules(context).context(
+                roleCardId, effectiveChatHistory.filter {
+                    it.kind == PromptTurnKind.USER || it.kind == PromptTurnKind.ASSISTANT
+                }.map { it.content }, processedInput,
+            )
+            if (roleContext.isNotBlank()) preparedHistory.add(
+                PromptTurn(kind = PromptTurnKind.SYSTEM, content = roleContext)
+            )
         }
         val afterContext =
             dispatchHistoryHooks(

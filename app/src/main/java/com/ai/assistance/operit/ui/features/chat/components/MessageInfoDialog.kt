@@ -28,8 +28,17 @@ import java.util.Locale
 @Composable
 fun MessageInfoDialog(
     message: ChatMessage,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    chatId: String? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val author = chatId?.let { com.ai.assistance.operit.core.group.GroupProvenance.author(context, it, message) }
+    val recall = remember(chatId, message.sentAt) {
+        chatId?.let { com.ai.assistance.operit.core.experience.RecallEvidence(context).read(it, message.sentAt, author) }
+    }
+    val diagnostics = remember(chatId, message.sentAt) {
+        chatId?.let { com.ai.assistance.operit.core.experience.RequestDiagnostics(context).read(it, message.sentAt) }
+    }
     val unavailable = stringResource(R.string.message_info_unavailable)
     val dateFormatter = remember {
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
@@ -69,6 +78,14 @@ fun MessageInfoDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (!diagnostics.isNullOrBlank()) MessageInfoCard {
+                    Text("本轮工具链与记忆返回", style = MaterialTheme.typography.titleSmall)
+                    Text(diagnostics, style = MaterialTheme.typography.bodySmall)
+                }
+                if (recall != null) MessageInfoCard {
+                    Text("本轮记忆证据", style = MaterialTheme.typography.titleSmall)
+                    Text(recall, style = MaterialTheme.typography.bodySmall)
+                }
                 MessageInfoCard {
                     MessageInfoTwoColumnRow(
                         leftLabel = stringResource(R.string.message_info_sender),
