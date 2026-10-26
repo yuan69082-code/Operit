@@ -23,7 +23,8 @@ import org.json.JSONObject
 
 internal enum class AssistantSpacePage(val title: String) {
     OVERVIEW("助手空间"), CONTACT("主动联系"), PLANS("私人打算"), EMOTION("XC 连接与同步"),
-    ACTIVITY("唤醒与记录"), PHONE("手机感知"), SOFTWARE("软件感知"), EXPLORATION("自主探索")
+    ACTIVITY("唤醒与记录"), PHONE("手机感知"), SOFTWARE("软件感知"), EXPLORATION("自主探索"),
+    ENGINE("引擎连接")
 }
 
 @Composable
@@ -72,7 +73,7 @@ internal fun CompanionSettingsDialog(
                 if (page == AssistantSpacePage.OVERVIEW) {
                     AssistantTargetPicker(role, true, showExplanation = false) { role = it; error = "" }
                 }
-                if (page in setOf(AssistantSpacePage.PLANS, AssistantSpacePage.EMOTION, AssistantSpacePage.ACTIVITY, AssistantSpacePage.EXPLORATION)) {
+                if (page in setOf(AssistantSpacePage.PLANS, AssistantSpacePage.EMOTION, AssistantSpacePage.ACTIVITY, AssistantSpacePage.EXPLORATION, AssistantSpacePage.ENGINE)) {
                     Text(roleName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
                 key(role, page, overviewRevision) {
@@ -85,6 +86,11 @@ internal fun CompanionSettingsDialog(
                             AssistantSpacePage.CONTACT -> CompanionContactPanel()
                             AssistantSpacePage.PHONE -> PhoneAwarenessPanel()
                             AssistantSpacePage.SOFTWARE -> SoftwareAwarenessPanel()
+                            AssistantSpacePage.ENGINE -> if (selected == null) {
+                                Text("先在助手空间选择一位助手，再关联引擎主体。")
+                            } else {
+                                EngineWindowPanel(selected)
+                            }
                             else -> if (selected == null) {
                                 Text("先在助手空间选择一位助手，再查看他的资料与活动。")
                             } else when (page) {
@@ -150,6 +156,9 @@ private fun AssistantSpaceOverview(role: String?, navigate: (AssistantSpacePage)
         onClick = { navigate(AssistantSpacePage.PHONE) })
     SpaceLinkCard("软件感知", "软件内的变更、访问与事件记录", Icons.Default.Visibility,
         onClick = { navigate(AssistantSpacePage.SOFTWARE) })
+    SpaceSectionTitle("主体连接", "连接独立运行的连续性引擎；软件只作为现实接口。")
+    SpaceLinkCard("引擎连接", "关联主体、授权事件类型并查看投递记录", Icons.Default.Hub,
+        enabled = role != null, onClick = { navigate(AssistantSpacePage.ENGINE) })
 }
 
 @Composable
