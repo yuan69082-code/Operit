@@ -53,6 +53,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -274,6 +275,16 @@ fun ChatArea(
     var viewportHeightPx by remember { mutableStateOf(0) }
     val messageAnchors = remember(currentChatId) { mutableStateMapOf<Long, ChatScrollMessageAnchor>() }
     var pendingJumpToMessageTimestamp by remember(currentChatId) { mutableStateOf<Long?>(null) }
+    val collectionJump by com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.pending.collectAsState()
+    LaunchedEffect(currentChatId, collectionJump) {
+        val jump = collectionJump ?: return@LaunchedEffect
+        if (jump.first == currentChatId) {
+            onAutoScrollToBottomChange?.invoke(false)
+            onRevealMessageForLocator?.invoke(jump.second)
+            pendingJumpToMessageTimestamp = jump.second
+            com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.pending.value = null
+        }
+    }
     val lastMessage = chatHistory.lastOrNull()
     val pendingTargetAnchor =
         pendingJumpToMessageTimestamp?.let { targetTimestamp -> messageAnchors[targetTimestamp] }
@@ -402,6 +413,7 @@ fun ChatArea(
                     .background(Color.Transparent)
                     .padding(top = topPadding, bottom = bottomPadding),
         ) {
+            ThemePreviewNotice(currentChatId)
             if (hasOlderDisplayHistory) {
                 Text(
                     text = stringResource(id = R.string.load_more_history),
@@ -1147,6 +1159,24 @@ private fun MessageItem(
                     )
                 },
                 modifier = Modifier.height(36.dp)
+            )
+
+            if (isActionable && message.contentStream == null) DropdownMenuItem(
+                text = { Text("保存为收藏卡") },
+                onClick = {
+                    showContextMenu = false
+                    coroutineScope.launch {
+                        try {
+                            val metadata = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(currentChatId)
+                            val role = metadata?.characterCardId ?: com.ai.assistance.operit.data.preferences.ActivePromptManager.getInstance(context).resolveActiveCardIdForSend()
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.ai.assistance.operit.core.experience.CollectionStore(context).create(role, currentChatId, message)
+                            }
+                            android.widget.Toast.makeText(context, "已保存，可在助手空间的布置页打开收藏与项目", android.widget.Toast.LENGTH_LONG).show()
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { android.widget.Toast.makeText(context, "收藏失败：" + e.message, android.widget.Toast.LENGTH_LONG).show() }
+                    }
+                },
             )
 
             // 信息

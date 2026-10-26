@@ -23,6 +23,18 @@ class ThemeStudio(private val context: Context) {
         is ActivePrompt.CharacterGroup -> "group:${target.id}"
     }
 
+    suspend fun generatePreview(target: ActivePrompt, family: String, hue: Float, seed: Int, name: String,
+        colorCount: Int = 3, mood: Float = .5f, starOpacity: Float = 0f, starSize: Float = 3f, starGlow: Float = 8f, warmth: Float = .5f): JSONObject {
+        val patch = generate(family, hue, seed)
+        val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ThemeTexture.create(context, family, hue, seed, colorCount, mood, starOpacity, starSize, starGlow, warmth)
+        }
+        patch.getJSONObject("strings").put("background_image_uri", uri).put("background_media_type", "image")
+        patch.getJSONObject("booleans").put("use_background_image", true)
+        patch.getJSONObject("floats").put("background_image_opacity", 1f)
+        return preview(target, patch, name)
+    }
+
     suspend fun current(target: ActivePrompt): ThemePreferenceValues = when (target) {
         is ActivePrompt.CharacterCard -> preferences.resolveThemePreferenceSnapshot(characterCardId = target.id).values
         is ActivePrompt.CharacterGroup -> preferences.resolveThemePreferenceSnapshot(characterGroupId = target.id).values
@@ -32,14 +44,23 @@ class ThemeStudio(private val context: Context) {
 
     private fun save(target: ActivePrompt, state: JSONObject) {
         check(storage.edit().putString(key(target), state.toString()).commit()) { "主题库保存失败" }
+        revision.value++
     }
 
-    suspend fun preview(target: ActivePrompt, patch: JSONObject, name: String): JSONObject = mutex.withLock {
+    suspend fun preview(target: ActivePrompt, changes: JSONObject, name: String): JSONObject = mutex.withLock {
         val before = current(target)
-        val next = patch(before, patch)
+        val next = patch(before, changes)
         val state = library(target)
         if (!state.has("preview")) state.put("preview", JSONObject().put("original", encode(before)))
-        state.getJSONObject("preview").put("name", name).put("proposed", encode(next))
+        val sessions = state.optJSONArray("sessions") ?: JSONArray()
+        if (state.getJSONObject("preview").has("id")) {
+            val previousId = state.getJSONObject("preview").getString("id")
+            for (i in 0 until sessions.length()) if (sessions.getJSONObject(i).getString("id") == previousId) sessions.getJSONObject(i).put("status", "superseded")
+        }
+        val id = UUID.randomUUID().toString()
+        sessions.put(JSONObject().put("id", id).put("name", name).put("status", "preview").put("time", System.currentTimeMillis()))
+        state.put("sessions", sessions)
+        state.getJSONObject("preview").put("id", id).put("name", name).put("proposed", encode(next))
         // Persist original before applying so an interrupted process does not lose the cancel target.
         save(target, state)
         active.commitThemeDraft(target, next)
@@ -57,6 +78,11 @@ class ThemeStudio(private val context: Context) {
             state.put("history", history)
         } else {
             active.commitThemeDraft(target, decode(preview.getJSONObject("original")))
+        }
+        val sessions = state.optJSONArray("sessions")
+        if (sessions != null) for (i in 0 until sessions.length()) {
+            val session = sessions.getJSONObject(i)
+            if (session.getString("id") == preview.optString("id")) session.put("status", if (accept) "applied" else "cancelled")
         }
         state.remove("preview")
         save(target, state)
@@ -83,36 +109,59 @@ class ThemeStudio(private val context: Context) {
     suspend fun importSkin(target: ActivePrompt, text: String): JSONObject {
         val document = JSONObject(text)
         require(document.getInt("schema") == 1) { "不支持的皮肤格式" }
-        return preview(target, document.getJSONObject("values"), document.getString("name"))
+        val values = document.getJSONObject("values")
+        val assets = document.optJSONObject("assets")
+        if (assets != null) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            for (field in assets.keys()) {
+                require(field in setOf("background_image_uri", "bubble_user_image_uri", "bubble_ai_image_uri"))
+                val bytes = android.util.Base64.decode(assets.getString(field), android.util.Base64.DEFAULT)
+                require(bytes.size <= 8_000_000) { "皮肤图片过大" }
+                val bitmap = requireNotNull(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)) { "皮肤图片无效" }
+                try {
+                    val folder = java.io.File(context.filesDir, "theme_studio_assets").apply { mkdirs() }
+                    val file = java.io.File(folder, UUID.randomUUID().toString() + ".png")
+                    file.outputStream().use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
+                    values.getJSONObject("strings").put(field, android.net.Uri.fromFile(file).toString())
+                } finally { bitmap.recycle() }
+            }
+        }
+        return preview(target, values, document.getString("name"))
     }
 
-    suspend fun exportSkin(target: ActivePrompt, name: String): String = JSONObject()
-        .put("schema", 1).put("name", name).put("values", encode(current(target))).toString(2)
+    suspend fun exportSkin(target: ActivePrompt, name: String): String {
+        val values = current(target)
+        val assets = JSONObject()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            for (field in listOf("background_image_uri", "bubble_user_image_uri", "bubble_ai_image_uri")) {
+                val uri = values.string(field)?.takeIf { it.isNotBlank() } ?: continue
+                val bytes = requireNotNull(context.contentResolver.openInputStream(android.net.Uri.parse(uri))).use { it.readBytes() }
+                require(bytes.size <= 8_000_000) { "皮肤图片过大" }
+                assets.put(field, android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+            }
+        }
+        return JSONObject().put("schema", 1).put("name", name).put("values", encode(values)).put("assets", assets).toString(2)
+    }
 
-    fun rename(target: ActivePrompt, id: String, name: String) {
+    suspend fun rename(target: ActivePrompt, id: String, name: String) = mutex.withLock {
         require(name.isNotBlank())
-        synchronized(storageLock) {
             val state = library(target)
             val rows = state.getJSONArray("skins")
             (0 until rows.length()).map { rows.getJSONObject(it) }.first { it.getString("id") == id }.put("name", name)
             save(target, state)
-        }
     }
 
-    fun delete(target: ActivePrompt, id: String) {
-        synchronized(storageLock) {
+    suspend fun delete(target: ActivePrompt, id: String) = mutex.withLock {
             val state = library(target)
             val rows = state.getJSONArray("skins")
             val kept = JSONArray()
             for (i in 0 until rows.length()) if (rows.getJSONObject(i).getString("id") != id) kept.put(rows.getJSONObject(i))
             state.put("skins", kept)
             save(target, state)
-        }
     }
 
     companion object {
+        val revision = kotlinx.coroutines.flow.MutableStateFlow(0L)
         private val mutex = Mutex()
-        private val storageLock = Any()
         val families = listOf("雾玻璃", "纸张", "糖果", "墨色", "织物", "暗夜")
         private fun record(name: String, values: JSONObject) = JSONObject().put("id", UUID.randomUUID().toString())
             .put("name", name).put("time", System.currentTimeMillis()).put("values", values)
@@ -138,7 +187,7 @@ class ThemeStudio(private val context: Context) {
         fun patch(base: ThemePreferenceValues, document: JSONObject): ThemePreferenceValues {
             val change = decode(document)
             val defaults = ThemePreferenceValues.defaultVisual()
-            require(change.strings.keys.all { it in defaults.strings || it in base.strings }) { "未知主题文字字段" }
+            require(change.strings.keys.all { it in defaults.strings || it in base.strings || it in setOf("background_image_uri", "bubble_user_image_uri", "bubble_ai_image_uri") }) { "未知主题文字字段" }
             require(change.booleans.keys.all { it in defaults.booleans }) { "未知主题开关" }
             require(change.ints.keys.all { it in colors || it in base.ints }) { "未知主题数值字段" }
             require(change.floats.keys.all { it in defaults.floats }) { "未知主题尺寸字段" }

@@ -1936,7 +1936,7 @@ class MessageProcessingDelegate(
                     }
             }
 
-            val finalContent = resolveFinalContent(aiMessage)
+            val finalContent = transformFinalProse(chatId, aiMessage, resolveFinalContent(aiMessage))
             var turnInputTokens = 0L
             var turnOutputTokens = 0L
             var turnCachedInputTokens = 0L
@@ -2035,6 +2035,13 @@ class MessageProcessingDelegate(
             "回合完成: chatId=$activeChatId, nextWindow=$nextWindowSize, service=${service.javaClass.simpleName}"
         )
         onTurnComplete(activeChatId, service, nextWindowSize, turnOptions)
+    }
+
+    private suspend fun transformFinalProse(chatId: String?, message: ChatMessage, content: String): String {
+        if (chatId == null) return content
+        val role = com.ai.assistance.operit.core.group.GroupProvenance.author(context, chatId, message)
+            ?: com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.characterCardId
+        return if (role == null) content else com.ai.assistance.operit.core.experience.RoleRules(context).transform(role, content, "output")
     }
 
     private suspend fun finalizeMessageAndNotify(

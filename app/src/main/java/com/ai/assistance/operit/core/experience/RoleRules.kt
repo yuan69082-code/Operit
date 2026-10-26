@@ -11,6 +11,7 @@ class RoleRules(context: Context) {
         validate(value)
         check(prefs.edit().putString(role, value.toString()).commit()) { "角色规则保存失败" }
     }
+    fun transform(role: String, text: String, direction: String): String = TextTransforms.apply(text, read(role).optJSONArray("transforms") ?: JSONArray(), direction)
     fun context(role: String, history: List<String>, input: String): String {
         val rules = read(role)
         val tone = rules.optJSONArray("tone") ?: JSONArray()
@@ -20,6 +21,7 @@ class RoleRules(context: Context) {
                 (history.takeLast(item.optInt("depth", 6)) + input).joinToString("\n"))
         }.sortedByDescending { it.optInt("priority", 0) }
         return buildString {
+            if (tone.length() > 0 || matches.isNotEmpty()) append(CONTEXT_MARKER).append('\n')
             if (tone.length() > 0) {
                 append("\n[用户设置的表达偏好]\n")
                 for (i in 0 until tone.length()) append("- ").append(tone.getString(i)).append('\n')
@@ -31,7 +33,9 @@ class RoleRules(context: Context) {
         }
     }
     companion object {
+        const val CONTEXT_MARKER = "[Operit:role-expression-context:v1]"
         fun validate(value: JSONObject) {
+            TextTransforms.validate(value.optJSONArray("transforms") ?: JSONArray())
             val tone = value.optJSONArray("tone") ?: JSONArray()
             require(tone.length() <= 100)
             for (i in 0 until tone.length()) require(tone.getString(i).length in 1..2000)

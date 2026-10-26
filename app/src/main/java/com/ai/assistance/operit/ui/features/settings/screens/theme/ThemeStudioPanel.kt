@@ -35,6 +35,13 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
     var name by remember { mutableStateOf("我的皮肤") }
     var hue by remember { mutableFloatStateOf(210f) }
     var seed by remember { mutableIntStateOf(0) }
+    var colorCount by remember { mutableFloatStateOf(3f) }
+    var mood by remember { mutableFloatStateOf(.5f) }
+    var starOpacity by remember { mutableFloatStateOf(0f) }
+    var starSize by remember { mutableFloatStateOf(3f) }
+    var starGlow by remember { mutableFloatStateOf(8f) }
+    var warmth by remember { mutableFloatStateOf(.5f) }
+    var patchText by remember { mutableStateOf("{\"ints\":{\"custom_primary_color\":-12627531}}") }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var inspection by remember { mutableStateOf("") }
@@ -72,10 +79,17 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("皮肤名称") }, modifier = Modifier.fillMaxWidth())
                 Text("色相 ${hue.toInt()}°")
                 Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..359f, enabled = !busy)
+                Text("配色数量 "+colorCount.toInt()); Slider(colorCount, { colorCount = it }, valueRange = 1f..6f, steps = 4)
+                Text("氛围浓度"); Slider(mood, { mood = it })
+                Text("星光透明度"); Slider(starOpacity, { starOpacity = it })
+                Text("星光大小"); Slider(starSize, { starSize = it }, valueRange = 0f..10f)
+                Text("星光光晕"); Slider(starGlow, { starGlow = it }, valueRange = 0f..30f)
+                Text("星光暖度"); Slider(warmth, { warmth = it })
+                OutlinedTextField(seed.toString(), { it.toIntOrNull()?.let { n -> seed = n } }, label = { Text("生成种子（相同参数得到相同图案）") })
                 ThemeStudio.families.chunked(3).forEach { row ->
                     Row {
                         row.forEach { family -> TextButton(enabled = !busy, onClick = {
-                            run { studio.preview(target, ThemeStudio.generate(family, hue, seed++), family); status = "正在试穿 $family" }
+                            run { studio.generatePreview(target, family, hue, seed, name, colorCount.toInt(), mood, starOpacity, starSize, starGlow, warmth); status = "正在试穿 $family" }
                         }) { Text(family) } }
                     }
                 }
@@ -107,6 +121,9 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
                         }
                     }
                 }
+                OutlinedTextField(patchText, { patchText = it }, label = { Text("局部原生字段补丁 JSON") })
+                TextButton(enabled = !busy, onClick = { run { studio.preview(target, JSONObject(patchText), name); status = "已试穿局部修改" } }) { Text("试穿局部修改") }
+                Text("先检查参数，再修改对应背景、顶部栏、气泡、文字、输入区字段。未提供的字段保持当前值。")
                 TextButton(enabled = !busy, onClick = { run { inspection = ThemeStudio.encode(studio.current(target)).toString(2) } }) { Text("检查当前主题参数") }
                 if (inspection.isNotEmpty()) Text(inspection, style = MaterialTheme.typography.bodySmall)
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())

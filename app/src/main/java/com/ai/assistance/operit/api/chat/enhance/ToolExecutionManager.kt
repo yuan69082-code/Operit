@@ -528,6 +528,9 @@ object ToolExecutionManager {
         callerChatId: String? = null,
         callerCardId: String? = null
     ): ToolExecutionBatch = coroutineScope {
+        val trace = com.ai.assistance.operit.core.experience.RequestDiagnostics(context)
+        val traceKey = trace.active(callerChatId, callerCardId)
+        trace.append(traceKey, "模型选择的工具", invocations.joinToString("\n") { it.tool.name })
         val orderedResults = OrderedToolResults(invocations.size) { markup ->
             collector.emit(ensureOwnLine(markup))
         }
@@ -670,6 +673,7 @@ object ToolExecutionManager {
                     )
                 com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
                 com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success)
+                trace.tool(traceKey, result)
                 orderedResults.complete(index, result)
             }
         }
@@ -685,13 +689,16 @@ object ToolExecutionManager {
                 )
             com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
             com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success)
-            orderedResults.complete(index, result)
+            trace.tool(traceKey, result)
+                orderedResults.complete(index, result)
         }
 
         // 等待所有并行任务完成
         parallelJobs.awaitAll()
 
-        return@coroutineScope orderedResults.finish()
+        val batch = orderedResults.finish()
+        trace.append(traceKey, "工具结果已返回对话循环", "已按原始调用顺序组装返回；是否继续请求模型，以后续请求事件为准。")
+        return@coroutineScope batch
     }
 
     /**

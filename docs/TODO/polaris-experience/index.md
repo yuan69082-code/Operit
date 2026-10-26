@@ -24,3 +24,11 @@ User scope: integrate the previously reviewed non-cache capabilities with workin
 - [ ] Validate, integrate latest main, publish and confirm release workflow queued
 
 Existing equivalent features must be reused. Source presence alone does not satisfy completion. Each feature needs a visible entry, real persistence/execution, and checks. Platform work must not be represented as available through an Android APK.
+
+## Integration checkpoint (not acceptance)
+
+Draft PR: https://github.com/yuan69082-code/Operit/pull/21
+
+The current branch connects theme preview and procedural backgrounds, role/worldbook editing, text transformations, persona creation, collection/project editing and preview, voice design, QR recognition, and request evidence. These are implementation checkpoints, not device acceptance. No main merge or app-update release has occurred. Cache behavior is intentionally unchanged.
+
+Build verification runs on GitHub because this environment cannot download Gradle and has no Android SDK. The initial branch build is still running. Remaining compatibility, platform and migration work stays unchecked above.

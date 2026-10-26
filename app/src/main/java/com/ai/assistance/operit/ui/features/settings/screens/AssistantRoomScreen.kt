@@ -92,6 +92,8 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                             "书房" -> ReadingPanel(role, chat, name, revision, bookSection, { work(it) })
                             "布置" -> {
                                 RoleRulesEntry(role)
+                                PersonaWizardEntry()
+                                CollectionEntry(role, onDismiss)
                                 RoomOptions(room, data, { work(it) })
                             }
                         }
