@@ -213,6 +213,7 @@ private fun ProjectPreview(store: CollectionStore, id: String, onDismiss: () -> 
     val host = "$id.operit.invalid"
     var error by remember { mutableStateOf("") }
     var view by remember { mutableStateOf<WebView?>(null) }
+    var inspection by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) { onDispose { view?.removeJavascriptInterface("OperitPreview"); view?.destroy() } }
     fun closePreview() {
@@ -221,7 +222,8 @@ private fun ProjectPreview(store: CollectionStore, id: String, onDismiss: () -> 
     }
     Dialog(onDismissRequest = ::closePreview, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) { Column(Modifier.safeDrawingPadding()) {
-            Row { Text("项目预览", Modifier.weight(1f)); TextButton(onClick = ::closePreview) { Text("关闭") } }
+            Row { Text("项目预览", Modifier.weight(1f)); TextButton(onClick = { view?.evaluateJavascript("window.__operitPersistPreview ? window.__operitPersistPreview() : ({error: '页面尚未就绪'})") { result -> inspection = result } }) { Text("检查渲染") }; TextButton(onClick = ::closePreview) { Text("关闭") } }
+            if (inspection != null) AlertDialog(onDismissRequest = { inspection = null }, title = { Text("页面实际渲染") }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(inspection.orEmpty(), style = MaterialTheme.typography.bodySmall) } }, confirmButton = { TextButton(onClick = { inspection = null }) { Text("关闭") } })
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             AndroidView(modifier = Modifier.weight(1f).fillMaxWidth(), factory = { context -> WebView(context).apply {
                 view = this
@@ -237,8 +239,12 @@ private fun ProjectPreview(store: CollectionStore, id: String, onDismiss: () -> 
                         var text = files.getString(name)
                         if (name == "index.html") {
                             // Restore before project code runs. Every project has a distinct web origin.
-                            val state = JSONObject.quote(item.getJSONObject("previewState").toString()).replace("<", "\\u003c")
-                            text = "<script>(function(){const s=JSON.parse($state);for(const [k,v] of Object.entries(s.local||{}))localStorage.setItem(k,v);for(const [k,v] of Object.entries(s.session||{}))sessionStorage.setItem(k,v);window.addEventListener('DOMContentLoaded',()=>{const forms=Array.from(document.querySelectorAll('input,textarea,select'));forms.forEach((e,i)=>{const f=(s.forms||[])[i];if(f){e.value=f.value;e.checked=f.checked;}});const save=()=>{try{OperitPreview.save(JSON.stringify({local:{...localStorage},session:{...sessionStorage},forms:forms.map(e=>({value:e.value,checked:e.checked})),text:document.body.innerText.slice(0,20000),url:location.href}));}catch(e){console.error(e);}};window.__operitPersistPreview=save;document.addEventListener('input',save);document.addEventListener('change',save);setInterval(save,2000);save();});})();</script>" + text
+                            val script = "<script>" + com.ai.assistance.operit.core.experience.PreviewInspectionScript.create(item.getJSONObject("previewState")) + "</script>"
+                            // Preserve the document's standards mode; do not put scripts before its doctype.
+                            val head = Regex("(?i)<head(?:[^>]*)>").find(text)
+                            val doctype = Regex("(?i)<!doctype[^>]*>").find(text)
+                            val insertion = head?.range?.last?.plus(1) ?: doctype?.range?.last?.plus(1) ?: 0
+                            text = text.substring(0, insertion) + script + text.substring(insertion)
                         }
                         return WebResourceResponse(mime, "UTF-8", ByteArrayInputStream(text.toByteArray()))
                     }

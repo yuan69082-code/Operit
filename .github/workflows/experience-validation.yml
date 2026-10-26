@@ -6,6 +6,11 @@ on:
 permissions:
   contents: read
 jobs:
+  preview-inspection:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - run: node ci/test_preview_inspection.cjs
   android:
     permissions:
       contents: write

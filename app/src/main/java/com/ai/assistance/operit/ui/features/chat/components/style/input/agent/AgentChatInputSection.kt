@@ -984,7 +984,7 @@ fun AgentChatInputSection(
                                 modifier =
                                     Modifier
                                         .size(36.dp)
-                                        .inspectRender("send_button", com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
+                                        .inspectRender("send_button", com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), actionButtonIconTint, shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
                                         .background(com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
                                         .then(voiceMessageGesture)
                         .then(if (!showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
@@ -1281,7 +1281,7 @@ fun AgentChatInputSection(
                                     modifier =
                                         Modifier
                                             .size(36.dp)
-                                            .inspectRender("send_button", com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
+                                            .inspectRender("send_button", com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), actionButtonIconTint, shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
                                         .background(com.ai.assistance.operit.ui.theme.StudioComponents.color("send_button", actionButtonBackground), com.ai.assistance.operit.ui.theme.StudioComponents.shape("send_button", CircleShape))
                                             .then(voiceMessageGesture)
                         .then(if (!showQueueAction && !canSendMessage) Modifier else Modifier.clickable(
