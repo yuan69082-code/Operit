@@ -25,6 +25,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 object CollectionNavigation {
+    val workspace = MutableStateFlow<Pair<String, String>?>(null)
     val pending = MutableStateFlow<Pair<String, Long>?>(null)
 }
 
@@ -47,6 +48,9 @@ internal fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: ()
     var content by remember { mutableStateOf("") }; var path by remember { mutableStateOf("") }
     var fileText by remember { mutableStateOf("") }; var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }; var preview by remember { mutableStateOf(false) }
+    var referenceQuery by remember { mutableStateOf("") }
+    var choosingReference by remember { mutableStateOf(false) }
+    var confirmWorkspace by remember { mutableStateOf(false) }
     var exportDocument by remember { mutableStateOf<JSONObject?>(null) }
     fun work(block: suspend () -> Unit) { if (!busy) scope.launch {
         busy = true; error = ""
@@ -121,6 +125,65 @@ internal fun CollectionPanel(role: String, onDismiss: () -> Unit, onNavigate: ()
                     TextButton(enabled = !busy && path.isNotBlank(), onClick = { work {
                         selected = withContext(Dispatchers.IO) { store.saveFile(id, path, fileText, item.getLong("version")) }
                     } }) { Text("保存文件") }
+                    TextButton(enabled = !busy && path.isNotBlank() && files.has(path), onClick = { work {
+                        selected = withContext(Dispatchers.IO) { store.addReference(id, id, path, item.getLong("version")) }
+                    } }) { Text("将此文件固定为参考资料") }
+                    HorizontalDivider()
+                    Text("项目参考资料（保存引用时的副本，原文仍可追溯）")
+                    OutlinedTextField(referenceQuery, { referenceQuery = it }, label = { Text("搜索资料标题或正文") })
+                    TextButton(onClick = { choosingReference = !choosingReference }) { Text("从收藏添加参考资料") }
+                    if (choosingReference) entries.filter { it.getString("id") != id }.forEach { source ->
+                        TextButton(enabled = !busy, onClick = { work {
+                            selected = withContext(Dispatchers.IO) { store.addReference(id, source.getString("id"), null, item.getLong("version")) }
+                            choosingReference = false
+                        } }) { Text("引用：" + source.getString("title")) }
+                    }
+                    val references = item.optJSONArray("references") ?: org.json.JSONArray()
+                    for (i in 0 until references.length()) {
+                        val ref = references.getJSONObject(i)
+                        if (referenceQuery.isBlank() || (ref.getString("title") + ref.getString("content")).contains(referenceQuery, ignoreCase = true)) {
+                            Text(ref.getString("title"), style = MaterialTheme.typography.titleSmall)
+                            Text(ref.getString("content"), style = MaterialTheme.typography.bodySmall)
+                            Text("来源：" + ref.getString("sourceId") + " · 版本 " + ref.getLong("sourceVersion"))
+                            TextButton(onClick = { work {
+                                val source = withContext(Dispatchers.IO) { store.read(ref.getString("sourceId")) }
+                                check(source.getString("role") == role) { "来源不属于当前助手" }
+                                selected = source; title = source.getString("title"); tags = source.getString("tags"); content = source.getString("content"); path = ""; fileText = ""
+                            } }) { Text("打开来源收藏") }
+                            TextButton(enabled = !busy && path.isNotBlank(), onClick = { work {
+                                selected = withContext(Dispatchers.IO) { store.promoteReference(id, ref.getString("id"), path, item.getLong("version")) }
+                                fileText = ref.getString("content")
+                            } }) { Text("转成上方路径的新文件") }
+                            TextButton(enabled = !busy, onClick = { work {
+                                selected = withContext(Dispatchers.IO) { store.removeReference(id, ref.getString("id"), item.getLong("version")) }
+                            } }) { Text("移除此引用") }
+                        }
+                    }
+                    HorizontalDivider()
+                    Text("工作区编辑：导出到独立目录，原项目保留；编辑后回来回收修改。回收文件替换会关闭脚本调用权限。")
+                    TextButton(enabled = !busy && files.length() > 0, onClick = { confirmWorkspace = true }) { Text("导出并打开工作区") }
+                    val workspace = item.optJSONObject("workspace")
+                    if (workspace != null) {
+                        Text(workspace.getString("path"), style = MaterialTheme.typography.bodySmall)
+                        TextButton(enabled = !busy, onClick = { work {
+                            selected = withContext(Dispatchers.IO) { store.pullWorkspace(id, item.getLong("version")) }
+                            path = ""; fileText = ""
+                        } }) { Text("回收工作区修改") }
+                    }
+                    if (confirmWorkspace) AlertDialog(onDismissRequest = { confirmWorkspace = false }, title = { Text("打开收藏工作区") },
+                        text = { Text("会将原会话的工作区切换为此项目的新副本。原工作区目录不会删除。请先保存卡片和文件编辑。") },
+                        confirmButton = { TextButton(onClick = { confirmWorkspace = false; work {
+                            val chat = item.getString("chat")
+                            val metadata = requireNotNull(ChatHistoryManager.getInstance(context).getChatMetadata(chat)) { "原会话已删除，请在现有会话重新收藏后打开工作区" }
+                            val owner = metadata.characterGroupId?.let { "group:$it" } ?: metadata.characterCardId
+                            check(owner == role) { "原会话已更换助手，不能自动绑定" }
+                            val exported = withContext(Dispatchers.IO) { store.exportWorkspace(id, item.getLong("version")) }
+                            selected = exported
+                            CollectionNavigation.workspace.value = chat to exported.getJSONObject("workspace").getString("path")
+                            com.ai.assistance.operit.api.chat.ChatRuntimeHolder.getInstance(context)
+                                .getCore(com.ai.assistance.operit.api.chat.ChatRuntimeSlot.MAIN).switchChat(chat)
+                            onNavigate()
+                        } }) { Text("导出并切换") } }, dismissButton = { TextButton(onClick = { confirmWorkspace = false }) { Text("取消") } })
                     if (files.has("index.html")) TextButton(onClick = { preview = true }) { Text("打开项目预览") }
                     if (files.has("tool.js")) {
                         Text("tool.js 使用 input 参数与可写 state 对象，return 返回结果。成功后保存 state。启用后此助手可调用，脚本的工具操作仍遵守现有权限。")

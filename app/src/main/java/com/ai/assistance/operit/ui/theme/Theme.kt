@@ -345,7 +345,7 @@ fun OperitTheme(content: @Composable () -> Unit) {
             LocalWaterGlassState provides waterGlassState,
         ) {
             Box(
-                modifier = Modifier.fillMaxSize().layerBackdrop(liquidGlassBackdrop)
+                modifier = Modifier.fillMaxSize().inspectRender("app_background", if (darkTheme) Color.Black else Color.White, details = "backgroundMedia=" + backgroundImageUri + "; enabled=" + useBackgroundImage).layerBackdrop(liquidGlassBackdrop)
             ) {
                 Box(
                     modifier =

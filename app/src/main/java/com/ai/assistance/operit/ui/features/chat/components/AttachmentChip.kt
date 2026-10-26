@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.components
 
+import com.ai.assistance.operit.ui.theme.inspectRender
+
 import android.net.Uri
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -86,7 +88,7 @@ fun AttachmentChip(attachmentInfo: AttachmentInfo, onRemove: () -> Unit, onInser
     } else {
         Surface(
             modifier =
-                Modifier.height(26.dp)
+                Modifier.height(26.dp).inspectRender("attachment", com.ai.assistance.operit.ui.theme.StudioComponents.color("attachment", MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)), shape = chipShape)
                     .border(
                         width = 1.dp,
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),

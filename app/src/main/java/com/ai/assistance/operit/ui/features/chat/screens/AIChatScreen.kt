@@ -735,6 +735,18 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     // 收集WebView显示状态
     val showWebView by actualViewModel.showWebView.collectAsState()
+    val collectionWorkspace by com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.workspace.collectAsState()
+    LaunchedEffect(collectionWorkspace, currentChatId, currentChatView?.workspace, isCurrentScreen) {
+        val requested = collectionWorkspace ?: return@LaunchedEffect
+        if (!isFloatingMode && isCurrentScreen && currentChatId == requested.first) {
+            if (currentChatView?.workspace != requested.second) {
+                actualViewModel.bindChatToWorkspace(requested.first, requested.second)
+            } else {
+                if (!actualViewModel.showWebView.value) actualViewModel.onWorkspaceButtonClick()
+                com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.workspace.value = null
+            }
+        }
+    }
     // 收集AI电脑显示状态
     val showAiComputer by actualViewModel.showAiComputer.collectAsState()
     // AppContent owns the primary chat IME layout; embedded chat retains its local translation.

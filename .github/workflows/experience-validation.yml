@@ -1,7 +1,7 @@
 name: Experience integration validation
 on:
   push:
-    branches: [feat/polaris-experience]
+    branches: [feat/polaris-experience, feat/experience-links]
   workflow_dispatch:
 permissions:
   contents: read

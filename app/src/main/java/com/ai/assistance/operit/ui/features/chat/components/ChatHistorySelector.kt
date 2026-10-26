@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.components
 
+import com.ai.assistance.operit.ui.theme.inspectRender
+
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.AnimatedVisibility
@@ -1914,7 +1916,7 @@ fun ChatHistorySelector(
                         }
                     }
                 },
-                modifier = Modifier
+                modifier = Modifier.inspectRender("history_search", com.ai.assistance.operit.ui.theme.StudioComponents.color("history_search", Color.Transparent), shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("history_search", androidx.compose.foundation.shape.RoundedCornerShape(4.dp)))
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
                 singleLine = true

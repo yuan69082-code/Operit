@@ -13,7 +13,7 @@ object ExperienceTools {
     val names = CollectionTools.names + setOf("theme_studio")
     fun prompts() = CollectionTools.prompts() + listOf(ToolPrompt(
         name = "theme_studio",
-        description = "修改当前助手原生界面主题。action=inspect|generate|preview|accept|cancel|list|save|restore。inspect读取真实主题字段；generate按family与hue生成并试穿；preview传patch JSON（strings/booleans/ints/floats字段映射），仅修改提供字段。先inspect再局部改色，颜色为ARGB有符号整数。generate和preview立即可见，用户可在助手空间的主题工坊保留或取消；仅用户明确要求时accept/cancel。save保存皮肤；restore按id试穿。不要声称支持CSS或未返回的字段。",
+        description = "修改当前助手原生界面主题。action=inspect_render|inspect|generate|preview|accept|cancel|list|save|restore。inspect读取真实主题字段；inspect_render读取当前已挂载界面的实际边界、颜色、形状和未挂载区域，先打开目标界面再检查；generate按family与hue生成并试穿；preview传patch JSON（strings/booleans/ints/floats字段映射），仅修改提供字段。先inspect再局部改色，颜色为ARGB有符号整数。generate和preview立即可见，用户可在助手空间的主题工坊保留或取消；仅用户明确要求时accept/cancel。save保存皮肤；restore按id试穿。不要声称支持CSS或未返回的字段。",
         parametersStructured = listOf(
             param("action", true), param("family"), param("hue"), param("seed"), param("patch"), param("name"), param("id"), param("color_count"), param("mood"), param("star_opacity"), param("star_size"), param("star_glow"), param("warmth")
         )))
@@ -42,6 +42,7 @@ object ExperienceTools {
                     } ?: ActivePrompt.CharacterCard(role)
                     when (val action = value("action")) {
                         "inspect" -> ThemeStudio.encode(studio.current(target))
+                        "inspect_render" -> kotlinx.coroutines.withContext(Dispatchers.Main.immediate) { com.ai.assistance.operit.ui.theme.RenderInspection.inspect(com.ai.assistance.operit.ui.theme.RenderInspection.owner(target)) }
                         "list" -> studio.library(target)
                         "generate" -> studio.generatePreview(target, requireNotNull(value("family")), requireNotNull(value("hue")).toFloat(), value("seed")?.toInt() ?: 0, value("name") ?: "AI 主题",
                             value("color_count")?.toInt() ?: 3, value("mood")?.toFloat() ?: .5f, value("star_opacity")?.toFloat() ?: 0f,

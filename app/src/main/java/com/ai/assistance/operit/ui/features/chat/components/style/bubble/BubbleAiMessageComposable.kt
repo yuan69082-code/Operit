@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.components.style.bubble
 
+import com.ai.assistance.operit.ui.theme.inspectRender
+
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
@@ -365,6 +367,7 @@ fun BubbleAiMessageComposable(
                         Modifier
                             .widthIn(max = maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
+                            .inspectRender("ai_bubble", backgroundColor, textColor, bubbleShape, "image=" + (effectiveBubbleImageStyle != null) + "; waterGlass=" + waterGlassEnabled + "; liquidGlass=" + liquidGlassEnabled)
                             .studioSticker(user = false, background = backgroundColor)
                     val renderContent: @Composable () -> Unit = {
                         key(message.timestamp) {
@@ -567,6 +570,7 @@ fun BubbleAiMessageComposable(
                         Modifier
                             .widthIn(max = maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
+                            .inspectRender("ai_bubble", backgroundColor, textColor, bubbleShape, "image=" + (effectiveBubbleImageStyle != null) + "; waterGlass=" + waterGlassEnabled + "; liquidGlass=" + liquidGlassEnabled)
                             .studioSticker(user = false, background = backgroundColor)
                     val renderContent: @Composable () -> Unit = {
                         // 使用 message.timestamp 作为 key，确保在重组期间，
