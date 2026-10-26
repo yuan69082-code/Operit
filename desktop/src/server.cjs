@@ -7,6 +7,7 @@ const { Store } = require('./store.cjs');
 const { WorkspaceSync } = require('./workspace-sync.cjs');
 const { generate } = require('./model.cjs');
 const { createTools } = require('./tools.cjs');
+const { EngineWindow } = require('./engine/window.cjs');
 const theme = require('./theme.cjs');
 const release = require('../release.json');
 const root = path.resolve(__dirname, '../..');
@@ -30,6 +31,7 @@ function createSharedServer(options = {}) {
   const dataDir = options.dataDir || path.join(process.env.LOCALAPPDATA || os.homedir(), 'Operit', 'shared-data');
   const store = new Store(dataDir);
   const workspaceSync = new WorkspaceSync(dataDir);
+  const engine = new EngineWindow(dataDir, options.engineOptions);
   const busy = new Map();
   const tools = options.tools || createTools(dataDir);
   const transport = options.generate || generate;
@@ -47,6 +49,12 @@ function createSharedServer(options = {}) {
     return { active_prompt: { type: 'character_card', id: 'shared', name: config.name }, cards: [{ id: 'shared', name: config.name, description: '', created_at: 0, updated_at: 0 }], groups: [] };
   }
   function modelSelector() {
+    if (engine.binding('shared')) return {
+      current_config_id: 'engine', current_config_name: '由引擎管理', current_model_index: 0,
+      current_model_name: '', current_provider_type: '', locked_by_character_card: true,
+      thinking_quality_mapping: { mode: 'unsupported', parameter_label: '', options: [], reasoning_required: false },
+      configs: [],
+    };
     const model = store.state.config.model;
     return { current_config_id: 'shared', current_config_name: '共享模型', current_model_index: 0, current_model_name: model,
       current_provider_type: 'OPENAI', locked_by_character_card: false,
@@ -79,6 +87,7 @@ function createSharedServer(options = {}) {
     if (busy.has(chat.id)) fail('该会话正在回复，请稍后发送', 409);
     if (typeof input.message !== 'string') fail('消息必须为文字');
     if (!input.message.trim() && !input.attachment_ids?.length) fail('消息不能为空');
+    if (engine.binding('shared')) return await engineStream(res, chat, input);
     const config = { ...store.state.config };
     if (!config.endpoint || !config.apiKey || !config.model) fail('请先完成共享服务的模型配置');
     const ids = input.attachment_ids || [];
@@ -119,14 +128,40 @@ function createSharedServer(options = {}) {
       busy.delete(chat.id); res.off('close', disconnected); res.end();
     }
   }
+  async function engineStream(res, chat, input) {
+    if (input.attachment_ids?.length) fail('引擎附件协议尚未接通，请先保留附件', 409);
+    const binding = engine.binding('shared');
+    engine.requireEnabled(binding);
+    const event = engine.enqueue({
+      id: randomUUID(), bindingKey: 'shared', bindingId: binding.id, conversationId: chat.id,
+      kind: 'message.user', occurredAt: new Date().toISOString(), payload: { text: input.message },
+    });
+    const user = store.message(chat, 'user', input.message, { engine_event_id: event.id });
+    busy.set(chat.id, new AbortController());
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' });
+    const send = (name, fields = {}) => { if (!res.destroyed) res.write('event: ' + name + '\ndata: ' + JSON.stringify({ event: name, chat_id: chat.id, ...fields }) + '\n\n'); };
+    send('start'); send('user_message', { message: user });
+    try {
+      const result = await engine.process(event.id);
+      if (result.status === 'completed') {
+        if (result.finalExpression !== null) {
+          const message = store.message(chat, 'assistant', result.finalExpression, {
+            engine_event_id: event.id, role_name: store.state.config.name, model_name: '',
+          });
+          send('assistant_done', { message });
+        } else send('done');
+      } else send('error', { error: result.message + '。原话已保存，可在引擎连接页查看。' });
+    } finally { busy.delete(chat.id); res.end(); }
+  }
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
       if (url.pathname === '/workspace' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(fs.readFileSync(path.join(__dirname, '../workspace.html'))); return;
       }
-      if (url.pathname === '/setup' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(fs.readFileSync(path.join(__dirname, '../setup.html'))); return;
+      if (['/setup', '/engine'].includes(url.pathname) && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(fs.readFileSync(path.join(__dirname, url.pathname === '/engine' ? '../engine.html' : '../setup.html'))); return;
       }
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET') fail('Method not allowed', 405);
@@ -162,6 +197,28 @@ function createSharedServer(options = {}) {
         if (action === 'plan' && req.method === 'POST') return json(res, workspaceSync.plan(id, input.files, input.choices));
         if (action === 'apply' && req.method === 'POST') return json(res, workspaceSync.apply(id, input.files, input.choices, input.revision, input.fingerprint));
         fail('Method not allowed', 405);
+      }
+      if (url.pathname.startsWith('/api/shared/engine/')) {
+        const route = url.pathname.slice('/api/shared/engine/'.length);
+        if (route === 'config' && req.method === 'GET') return json(res, engine.publicConfig());
+        if (route === 'config' && req.method === 'POST') return json(res, engine.configure(input));
+        if (route === 'inspect' && req.method === 'POST') return json(res, await engine.inspect());
+        if (route === 'binding' && req.method === 'GET') return json(res, engine.binding(url.searchParams.get('key')));
+        if (route === 'binding' && req.method === 'POST') {
+          if (busy.size) fail('请先等待回复结束，再修改引擎关联', 409);
+          return json(res, engine.bind(input.key, input));
+        }
+        if (route === 'unbind' && req.method === 'POST') {
+          if (busy.size) fail('请先等待回复结束', 409);
+          engine.unbind(input.key); return json(res, { unbound: true });
+        }
+        if (route === 'events' && req.method === 'GET') return json(res, engine.list(url.searchParams.get('key')));
+        if (route === 'events' && req.method === 'POST') {
+          const event = engine.enqueue(input);
+          return json(res, await engine.process(event.id));
+        }
+        if (route === 'query' && req.method === 'POST') return json(res, await engine.process(input.id));
+        fail('引擎连接操作不存在', 404);
       }
       if (url.pathname === '/api/shared/config') {
         if (req.method === 'GET') return json(res, publicConfig());
@@ -304,6 +361,6 @@ function createSharedServer(options = {}) {
     }
   });
   server.on('close', () => { for (const abort of busy.values()) abort.abort(); });
-  return { server, store, busy };
+  return { server, store, busy, engine };
 }
 module.exports = { createSharedServer };
