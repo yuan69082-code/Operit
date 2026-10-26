@@ -10,7 +10,7 @@ import kotlinx.coroutines.CancellationException
 
 /** Module configuration selects an identity; its current conversation is resolved at dispatch. */
 @Composable
-internal fun AssistantTargetPicker(selected: String?, enabled: Boolean, onSelected: (String) -> Unit) {
+internal fun AssistantTargetPicker(selected: String?, enabled: Boolean, showExplanation: Boolean = true, onSelected: (String) -> Unit) {
     val context = LocalContext.current
     var cards by remember { mutableStateOf<List<CharacterCard>>(emptyList()) }
     var expanded by remember { mutableStateOf(false) }
@@ -31,6 +31,6 @@ internal fun AssistantTargetPicker(selected: String?, enabled: Boolean, onSelect
             }) }
         }
     }
-    Text("只绑定助手，执行时跟随这位助手最近活跃的私聊；换窗口无需重新设置。尚无私聊时等待建立私聊。")
+    if (showExplanation) Text("只绑定助手，执行时跟随这位助手最近活跃的私聊；换窗口无需重新设置。尚无私聊时等待建立私聊。")
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }

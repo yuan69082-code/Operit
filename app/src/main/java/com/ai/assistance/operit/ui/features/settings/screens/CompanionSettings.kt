@@ -1,11 +1,11 @@
 package com.ai.assistance.operit.ui.features.settings.screens
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -13,328 +13,237 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
-import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
-import com.ai.assistance.operit.core.companion.CompanionRuntime
-import com.ai.assistance.operit.core.companion.CompanionStore
-import com.ai.assistance.operit.core.companion.migrateMemory
-import com.ai.assistance.operit.core.companion.XcEmotionBridge
-import com.ai.assistance.operit.data.preferences.ActivePromptManager
+import com.ai.assistance.operit.core.companion.*
+import com.ai.assistance.operit.core.tasks.TaskBoard
 import com.ai.assistance.operit.data.model.ActivePrompt
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.ai.assistance.operit.data.preferences.ActivePromptManager
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
+import kotlinx.coroutines.*
 import org.json.JSONObject
+
+internal enum class AssistantSpacePage(val title: String) {
+    OVERVIEW("助手空间"), CONTACT("主动联系"), PLANS("私人打算"), EMOTION("情绪与状态"),
+    ACTIVITY("唤醒与记录"), PHONE("手机感知"), SOFTWARE("软件感知"), EXPLORATION("自主探索")
+}
 
 @Composable
 fun CompanionSettingsButton() {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }) { Text("状态延续、主动联系、手机感知与资料库") }
+    SpaceLinkCard("助手空间", "房间、书房、自主活动与感知权限", Icons.Default.AutoAwesome, onClick = { open = true })
     if (open) CompanionSettingsDialog { open = false }
 }
 
 @Composable
-internal fun CompanionSettingsDialog(onDismiss: () -> Unit) {
+internal fun CompanionSettingsDialog(
+    initialPage: AssistantSpacePage = AssistantSpacePage.OVERVIEW,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var page by remember { mutableStateOf(initialPage) }
+    var role by remember { mutableStateOf<String?>(null) }
+    var roomTab by remember { mutableStateOf<String?>(null) }
+    var chat by remember(role) { mutableStateOf<String?>(null) }
+    var roleName by remember(role) { mutableStateOf("") }
+    var overviewRevision by remember { mutableIntStateOf(0) }
+    var error by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        try {
+            AssistantWindowRouter.initialize(context)
+            role = (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { error = failure.message.orEmpty() }
+    }
+    LaunchedEffect(role) {
+        chat = null
+        try { role?.let {
+            roleName = CharacterCardManager.getInstance(context).getCharacterCard(it).name
+            chat = AssistantWindowRouter.chat(context, it)
+        } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { error = failure.message.orEmpty() }
+    }
+    fun back() { if (page == AssistantSpacePage.OVERVIEW) onDismiss() else page = AssistantSpacePage.OVERVIEW }
+    Dialog(onDismissRequest = { back() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BackHandler { back() }
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
+                SpaceHeader(page.title, { back() }, onDismiss)
+                if (page == AssistantSpacePage.OVERVIEW) {
+                    AssistantTargetPicker(role, true, showExplanation = false) { role = it; error = "" }
+                }
+                if (page in setOf(AssistantSpacePage.PLANS, AssistantSpacePage.EMOTION, AssistantSpacePage.ACTIVITY, AssistantSpacePage.EXPLORATION)) {
+                    Text(roleName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+                key(role, page, overviewRevision) {
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val selected = role
+                        when (page) {
+                            AssistantSpacePage.OVERVIEW -> AssistantSpaceOverview(selected,
+                                navigate = { page = it }, room = { roomTab = it })
+                            AssistantSpacePage.CONTACT -> CompanionContactPanel()
+                            AssistantSpacePage.PHONE -> PhoneAwarenessPanel()
+                            AssistantSpacePage.SOFTWARE -> SoftwareAwarenessPanel()
+                            else -> if (selected == null) {
+                                Text("先在助手空间选择一位助手，再查看他的资料与活动。")
+                            } else when (page) {
+                                AssistantSpacePage.PLANS -> CompanionTodoPanel(CompanionStore(context), "role:$selected")
+                                AssistantSpacePage.EMOTION -> CompanionEmotionPanel(selected)
+                                AssistantSpacePage.ACTIVITY -> CompanionActivityPanel(CompanionStore(context), selected)
+                                AssistantSpacePage.EXPLORATION -> ExplorationPanel(selected)
+                                else -> Unit
+                            }
+                        }
+                        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+    val selectedRole = role
+    val selectedTab = roomTab
+    if (selectedRole != null && selectedTab != null) {
+        AssistantRoomDialog(selectedRole, chat.orEmpty(), selectedTab) { roomTab = null; overviewRevision++ }
+    }
+}
+
+@Composable
+private fun AssistantSpaceOverview(role: String?, navigate: (AssistantSpacePage) -> Unit, room: (String) -> Unit) {
     val context = LocalContext.current
     val store = remember { CompanionStore(context) }
-    val scope = rememberCoroutineScope()
-    var emotion by remember { mutableStateOf(store.emotionEnabled) }
+    var counts by remember(role) { mutableStateOf<List<Int>?>(null) }
+    var error by remember(role) { mutableStateOf("") }
+    LaunchedEffect(role) {
+        if (role != null) try {
+            counts = withContext(Dispatchers.IO) { listOf(
+                AssistantRoom(context, role).diaries().size,
+                ReadingRoom(context, role).entries().size,
+                store.entries("role:$role").size,
+                TaskBoard(context, "role:$role", false).list().count { it.optString("status") !in setOf("done", "archived") }
+            ) }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { error = "概览读取失败：${failure.message}" }
+    }
+    SpaceSectionTitle("留下来的生活", "按助手分别保存，打开卡片继续查看。")
+    SpaceLinkCard("房间", "日记、纪念日和房间布置", Icons.Default.Home,
+        counts?.let { "${it[0]} 篇日记" }, enabled = role != null, onClick = { room("房间") })
+    SpaceLinkCard("书房", "书架、收藏资料与文件，共用一个入口", Icons.Default.MenuBook,
+        counts?.let { "${it[1]} 条待读 · ${it[2]} 份资料" }, enabled = role != null, onClick = { room("书房") })
+    SpaceLinkCard("私人打算", "想继续的事、进展和下一步", Icons.Default.Checklist,
+        counts?.let { "${it[3]} 件进行中的事" }, enabled = role != null, onClick = { navigate(AssistantSpacePage.PLANS) })
+    SpaceLinkCard("情绪与状态", "查看当前助手的 XC 记录与连接", Icons.Default.FavoriteBorder,
+        enabled = role != null, onClick = { navigate(AssistantSpacePage.EMOTION) })
+    if (role == null) Text("选择助手后，可打开房间、书房与私人打算。", style = MaterialTheme.typography.bodySmall)
+    if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    SpaceSectionTitle("自主活动", "联系、探索和唤醒记录各自管理。")
+    SpaceLinkCard("主动联系", "消息、来电与通话中的主动接话", Icons.Default.ChatBubbleOutline,
+        if (store.proactiveEnabled) "软件主动联系已开启" else "软件主动联系已关闭",
+        onClick = { navigate(AssistantSpacePage.CONTACT) })
+    SpaceLinkCard("自主探索", "阅读、旧日记与想继续了解的方向", Icons.Default.Explore,
+        enabled = role != null, onClick = { navigate(AssistantSpacePage.EXPLORATION) })
+    SpaceLinkCard("唤醒与记录", "下次安排和实际发生的活动", Icons.Default.History,
+        enabled = role != null, onClick = { navigate(AssistantSpacePage.ACTIVITY) })
+    SpaceSectionTitle("感知权限", "每项能力单独选择观察助手与授权范围。")
+    SpaceLinkCard("手机感知", "解锁、应用停留与已授权的内容", Icons.Default.PhoneAndroid,
+        onClick = { navigate(AssistantSpacePage.PHONE) })
+    SpaceLinkCard("软件感知", "软件内的变更、访问与事件记录", Icons.Default.Visibility,
+        onClick = { navigate(AssistantSpacePage.SOFTWARE) })
+}
+
+@Composable
+private fun CompanionContactPanel() {
+    val context = LocalContext.current
+    val store = remember { CompanionStore(context) }
     var proactive by remember { mutableStateOf(store.proactiveEnabled) }
     var silence by remember { mutableStateOf(store.silenceEnabled) }
     var seconds by remember { mutableStateOf(store.silenceSeconds.toString()) }
     var minutes by remember { mutableStateOf(store.proactiveMinutes.toString()) }
-    var chatId by remember { mutableStateOf<String?>(null) }
-    var roleId by remember { mutableStateOf<String?>(null) }
-    var identity by remember { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf("") }
-    var section by remember { mutableIntStateOf(0) }
-    var xcReceipt by remember { mutableStateOf(JSONObject()) }
-    var xcConnections by remember { mutableStateOf<List<XcEmotionBridge.Connection>>(emptyList()) }
-    var selectedXc by remember { mutableStateOf<String?>(null) }
-    var roleLabel by remember { mutableStateOf("当前会话") }
-    var entries by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    var categories by remember { mutableStateOf<List<String>>(emptyList()) }
-    var filter by remember { mutableStateOf("") }
-    var categoryFilter by remember { mutableStateOf<String?>(null) }
-    var kindFilter by remember { mutableStateOf<String?>(null) }
-    var page by remember { mutableIntStateOf(0) }
-    var id by remember { mutableStateOf<String?>(null) }
-    var editing by remember { mutableStateOf(false) }
-    var title by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf("knowledge") }
-    var content by remember { mutableStateOf("") }
-    var source by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf(store.proactiveRole) }
-
-    suspend fun refresh() {
-        val selected = identity ?: return
-        chatId?.let { withContext(Dispatchers.IO) { store.migrateMemory(it, selected) } }
-        withContext(Dispatchers.IO) {
-            Triple(XcEmotionBridge.receipt(context, selected), store.entries(selected), store.categories(selected))
-        }.let { (state, items, folders) -> xcReceipt = state; entries = items; categories = folders }
-        xcConnections = withContext(Dispatchers.IO) { XcEmotionBridge.connections(context) }
-        if (selectedXc == null) selectedXc = xcReceipt.optString("plugin").takeIf { it.isNotBlank() }
+    var feedback by remember { mutableStateOf("") }
+    SpaceSectionTitle("主动联系", "由助手决定发消息、来电或保持安静。")
+    RoomSwitch("开启软件主动联系", proactive) {
+        proactive = it
+        store.preferences.edit().putBoolean("proactive_enabled", it).apply()
+        com.ai.assistance.operit.api.chat.AIForegroundService.refreshBackgroundKeepAlive(context)
     }
+    AssistantTargetPicker(target, true) { target = it; store.preferences.edit().putString("target_role", it).apply() }
+    OutlinedTextField(minutes, { minutes = it }, label = { Text("首次等待，分钟（1–240）") },
+        singleLine = true, modifier = Modifier.fillMaxWidth())
+    Text("首次唤醒后由助手安排下次时间。需要软件后台服务运行；系统强制停止后无法继续。", style = MaterialTheme.typography.bodySmall)
+    SpaceSectionTitle("通话里的留白")
+    RoomSwitch("沉默时允许主动接话", silence) { silence = it; store.preferences.edit().putBoolean("silence_enabled", it).apply() }
+    OutlinedTextField(seconds, { seconds = it }, label = { Text("静默秒数（5–120）") },
+        singleLine = true, modifier = Modifier.fillMaxWidth())
+    Button(onClick = {
+        val s = seconds.toIntOrNull(); val m = minutes.toIntOrNull()
+        if (s == null || s !in 5..120 || m == null || m !in 1..240) feedback = "请填写范围内的整数"
+        else {
+            store.preferences.edit().putInt("silence_seconds", s).putInt("proactive_minutes", m).apply()
+            feedback = "间隔已保存"
+        }
+    }) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(8.dp)); Text("保存间隔") }
+    if (feedback.isNotBlank()) Text(feedback)
+    Text("额外判断会使用模型额度。手机事件唤醒在“手机感知”单独设置；群聊不作为主动联系目标。", style = MaterialTheme.typography.bodySmall)
+    Text(store.preferences.getString("last_status", "尚无主动判断记录").orEmpty(), style = MaterialTheme.typography.bodySmall)
+}
 
+@Composable
+private fun CompanionEmotionPanel(role: String) {
+    val context = LocalContext.current
+    val store = remember { CompanionStore(context) }
+    val scope = rememberCoroutineScope()
+    var emotion by remember { mutableStateOf(store.emotionEnabled) }
+    var receipt by remember(role) { mutableStateOf(JSONObject()) }
+    var connections by remember { mutableStateOf<List<XcEmotionBridge.Connection>>(emptyList()) }
+    var selected by remember(role) { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf("") }
+    suspend fun refresh() {
+        val result = withContext(Dispatchers.IO) { XcEmotionBridge.receipt(context, "role:$role") to XcEmotionBridge.connections(context) }
+        receipt = result.first; connections = result.second
+        selected = receipt.optString("plugin").takeIf { it.isNotBlank() }
+    }
     fun perform(action: suspend () -> Unit) {
         if (busy) return
         busy = true
         scope.launch {
-            try { error = ""; action(); refresh() }
-            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (failure: Exception) { error = failure.message.orEmpty() }
+            try { feedback = ""; action(); refresh() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { feedback = failure.message.orEmpty() }
             finally { busy = false }
         }
     }
-
-    LaunchedEffect(Unit) {
-        try {
-            com.ai.assistance.operit.core.companion.AssistantWindowRouter.initialize(context)
-            target = store.proactiveRole
-            val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
-            chatId = core.currentChatId.value
-            // The visible selector is authoritative even before this role's first message.
-            // Using the previous turn's receipt here could bind XC to the wrong role after a switch.
-            roleId = (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id
-            if (roleId == null) {
-                error = "请选择助手，再管理对应的 XC 和资料库。"
-                return@LaunchedEffect
-            }
-            identity = "role:${checkNotNull(roleId)}"
-            chatId = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, roleId)
-            roleLabel = roleId?.let { com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context).getCharacterCard(it)?.name }
-                ?: "当前会话（未绑定角色卡）"
-            refresh()
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
-        } catch (failure: Exception) { error = failure.message.orEmpty() }
-    }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) { source = uri.toString(); kind = "file" }
-    }
-
-    LaunchedEffect(filter, categoryFilter, kindFilter) { page = 0 }
-
-    Dialog(
-        onDismissRequest = { if (!busy) onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("状态与资料", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(vertical = 12.dp))
-                    TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") }
-                }
-                Text(roleLabel, style = MaterialTheme.typography.labelLarge)
-                AssistantTargetPicker(roleId, !busy && !editing) { selected -> perform {
-                    roleId = selected
-                    identity = "role:$selected"
-                    chatId = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, selected)
-                    roleLabel = com.ai.assistance.operit.data.preferences.CharacterCardManager.getInstance(context).getCharacterCard(selected).name
-                    selectedXc = null
-                } }
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("功能开关", "资料库", "待办", "XC 情绪", "唤醒与日志", "手机感知", "软件感知", "自主探索").forEachIndexed { index, label ->
-                        TextButton(onClick = { section = index }) { Text(label) }
-                    }
-                }
-                HorizontalDivider()
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (identity != null) TextButton(enabled = !busy, onClick = { perform { } }) { Text("重新读取当前数据") }
-                if (section == 0) {
-                    Text("情绪自动接续、主动联系和能力感知可分别开关，方便交由你的引擎接管。")
-                    CompanionToggle("自动接续 XC 情绪", emotion) {
-                        emotion = it; store.preferences.edit().putBoolean("emotion_enabled", it).apply()
-                    }
-                    TextButton(onClick = { section = 3 }) { Text("查看情绪与 XC 连接") }
-                    TextButton(onClick = { section = 6 }) { Text("软件感知：指定观察助手、开关与事件日志") }
-                    TextButton(onClick = { section = 7 }) { Text("自主探索：默认关闭，按助手分别开启") }
-                    CompanionToggle("通话沉默时允许 AI 主动接话", silence) {
-                        silence = it; store.preferences.edit().putBoolean("silence_enabled", it).apply()
-                    }
-                    OutlinedTextField(seconds, { seconds = it }, label = { Text("静默秒数（5–120）") }, singleLine = true)
-                    CompanionToggle("软件主动联系", proactive) {
-                        proactive = it; store.preferences.edit().putBoolean("proactive_enabled", it).apply()
-                        com.ai.assistance.operit.api.chat.AIForegroundService.refreshBackgroundKeepAlive(context)
-                    }
-                    Text("主动联系可以发消息或来电，也可决定保持安静，由 AI 安排下次时间，不需要另建定时工作流。解锁和进入应用的事件唤醒在“手机感知”中单独开启。需要软件后台服务运行，系统强制停止后无法继续。群聊暂不作为主动联系目标。")
-                    OutlinedTextField(minutes, { minutes = it }, label = { Text("首次唤醒等待，分钟（1–240）；之后由 AI 安排") }, singleLine = true)
-                    Text("主动联系助手")
-                    AssistantTargetPicker(target, !busy) { selected ->
-                        target = selected
-                        store.preferences.edit().putString("target_role", selected).apply()
-                    }
-                    TextButton(onClick = {
-                        val s = seconds.toIntOrNull()
-                        val m = minutes.toIntOrNull()
-                        if (s == null || s !in 5..120 || m == null || m !in 1..240) error = "请填写范围内的整数"
-                        else { store.preferences.edit().putInt("silence_seconds", s).putInt("proactive_minutes", m).apply(); error = "间隔已保存" }
-                    }) { Text("保存间隔") }
-                    Text("额外判断会使用配置的模型额度。没有接入心率数据源；不会依据沉默猜测健康状态。")
-                    Text(store.preferences.getString("last_status", "尚无主动判断记录").orEmpty())
-                } else if (section == 5) {
-                    PhoneAwarenessPanel()
-                } else if (section == 6) {
-                    SoftwareAwarenessPanel()
-                } else if (identity == null) {
-                    Text("请先选择助手，再管理对应的资料与记忆。")
-                } else if (section == 7) {
-                    ExplorationPanel(checkNotNull(roleId))
-                } else if (section == 3) {
-                    XcEmotionDashboard(xcReceipt, emotion)
-                    Text("连接设置", style = MaterialTheme.typography.titleMedium)
-                    Text("选择已在 MCP 管理中配置好的 XC。复用原有地址和授权；每个 XC 实例保存一套情绪，把多个角色绑定到同一实例会共享状态。")
-                    xcConnections.forEach { connection ->
-                        OutlinedCard(onClick = { selectedXc = connection.id }, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text((if (selectedXc == connection.id) "✓ " else "") + connection.name)
-                                Text(connection.address, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                    if (xcConnections.isEmpty()) Text("没有启用的远程 MCP 连接。请先在 MCP 管理中配置 XC，再返回此页重新读取。")
-                    Text("当前绑定：" + (xcConnections.firstOrNull { it.id == xcReceipt.optString("plugin") }?.name ?: "未绑定或连接不可用"))
-                    Row {
-                        TextButton(enabled = selectedXc != null && !busy, onClick = { perform {
-                            XcEmotionBridge.checkConnection(context, checkNotNull(selectedXc))
-                            error = "连接检查通过，未读取或签收 XC 状态。"
-                        } }) { Text("检查连接") }
-                        TextButton(enabled = selectedXc != null && !busy, onClick = { perform {
-                            withContext(Dispatchers.IO) { XcEmotionBridge.bind(context, checkNotNull(identity), checkNotNull(selectedXc)) }
-                            error = "已绑定。开启情绪接续后，下次对话自动同步。"
-                        } }) { Text("绑定当前角色") }
-                    }
-                    TextButton(enabled = xcReceipt.optString("plugin").isNotBlank() && !busy, onClick = { perform {
-                        withContext(Dispatchers.IO) { XcEmotionBridge.unbind(context, checkNotNull(identity)) }
-                        selectedXc = null
-                    } }) { Text("解除绑定") }
-                    Text("页面显示最近同步的结果，不主动领取 XC 的交接信号，也不改写情绪数值。切换窗口或模型后，对话会继续读取同一角色绑定的 XC。")
-                } else if (section == 1) {
-                    Text("AI 可自行保存、分类、检索、移动和删除资料。能力笔记只是知识记录，不会自动运行代码。")
-                    if (!editing) {
-                    Button(enabled = !busy, onClick = {
-                        id = null; title = ""; category = categoryFilter.orEmpty(); kind = "knowledge"; content = ""; source = null; editing = true
-                    }) { Text("新建资料或分类") }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LibraryCount("全部", entries.size, Modifier.weight(1f))
-                        LibraryCount("分类", categories.size, Modifier.weight(1f))
-                        LibraryCount("文件", entries.count { it.optString("file").isNotBlank() }, Modifier.weight(1f))
-                    }
-                    OutlinedTextField(filter, { filter = it }, label = { Text("检索标题、分类或内容") })
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = categoryFilter == null, onClick = { categoryFilter = null }, label = { Text("全部分类") })
-                        categories.forEach { folder ->
-                            FilterChip(selected = categoryFilter == folder, onClick = { categoryFilter = folder },
-                                label = { Text(folder + " · " + entries.count { it.optString("category") == folder }) })
-                        }
-                    }
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(null to "全部类型", "knowledge" to "知识", "skill" to "能力", "file" to "文件").forEach { (value, label) ->
-                            FilterChip(selected = kindFilter == value, onClick = { kindFilter = value }, label = { Text(label) })
-                        }
-                    }
-                    val found = entries.filter { item ->
-                        (categoryFilter == null || item.optString("category") == categoryFilter) &&
-                        (kindFilter == null || item.optString("kind") == kindFilter) &&
-                        listOf("title", "category", "content").any { item.optString(it).contains(filter, true) }
-                    }.sortedByDescending { it.optLong("updated") }
-                    val currentPage = page.coerceAtMost(((found.size - 1).coerceAtLeast(0)) / 20)
-                    if (found.isEmpty()) Text("这里还没有资料，可以新建或让 AI 在聊天中整理保存。")
-                    found.drop(currentPage * 20).take(20).forEach { item ->
-                        OutlinedCard(onClick = {
-                            id = item.getString("id"); title = item.getString("title"); category = item.getString("category")
-                            kind = item.getString("kind"); content = item.optString("content"); source = null; editing = true
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(item.getString("title"), style = MaterialTheme.typography.titleMedium)
-                                Text(item.getString("category") + " · " + when (item.getString("kind")) { "file" -> "文件"; "skill" -> "能力笔记"; else -> "知识" }, style = MaterialTheme.typography.labelMedium)
-                                Text(item.optString("content").take(120), maxLines = 3, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(enabled = currentPage > 0, onClick = { page = currentPage - 1 }) { Text("上一页") }
-                        Text("共 ${found.size} 项 · 第 ${currentPage + 1} 页", modifier = Modifier.padding(top = 12.dp))
-                        TextButton(enabled = (currentPage + 1) * 20 < found.size, onClick = { page = currentPage + 1 }) { Text("下一页") }
-                    }
-                    } else {
-                    TextButton(enabled = !busy, onClick = { editing = false }) { Text("返回资料库") }
-                    Text(if (id == null) "新建资料" else "资料详情", style = MaterialTheme.typography.titleLarge)
-                    OutlinedTextField(title, { title = it }, label = { Text("标题") })
-                    OutlinedTextField(category, { category = it }, label = { Text("分类，可用 / 分级") })
-                    Row {
-                        listOf("knowledge" to "知识", "skill" to "能力", "file" to "文件").forEach { (value, label) ->
-                            TextButton(onClick = { kind = value }) { Text(if (kind == value) "✓$label" else label) }
-                        }
-                    }
-                    OutlinedTextField(content, { content = it }, label = { Text("正文或文件说明") }, minLines = 3)
-                    TextButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text(if (source == null) "选择要保存的文件副本" else "已选文件，保存后复制") }
-                    val storedFile = entries.firstOrNull { it.optString("id") == id }?.optString("file").orEmpty()
-                    if (storedFile.isNotBlank()) TextButton(onClick = {
-                        try {
-                            val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", java.io.File(storedFile))
-                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW)
-                                .setDataAndType(uri, "*/*").addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                        } catch (failure: Exception) { error = "无法打开文件：" + failure.message.orEmpty() }
-                    }) { Text("打开保存的文件") }
-                    Row {
-                        TextButton(enabled = !busy, onClick = { perform {
-                            withContext(Dispatchers.IO) { store.createCategory(checkNotNull(identity), category) }
-                        } }) { Text("创建分类") }
-                        TextButton(enabled = !busy, onClick = { perform {
-                            withContext(Dispatchers.IO) { store.saveEntry(checkNotNull(identity), id, title, category, kind, content, source) }
-                            id = null; title = ""; content = ""; source = null; editing = false
-                            CompanionRuntime.publishEvent(context, "library", "用户更新了资料库，可自行决定是否需要联系用户。")
-                        } }) { Text("保存资料") }
-                    }
-                    Row {
-                        TextButton(onClick = { id = null; title = ""; content = ""; source = null; kind = "knowledge" }) { Text("新建") }
-                        TextButton(enabled = id != null && !busy, onClick = { confirmDelete = id }) { Text("删除选中资料") }
-                    }
-                    }
-                } else if (section == 2) {
-                    CompanionTodoPanel(store, checkNotNull(identity))
-                } else if (section == 4) {
-                    CompanionActivityPanel(store, checkNotNull(roleId))
-                }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (error.isNotBlank()) Text(error)
-                }
+    LaunchedEffect(role) { perform {} }
+    RoomSwitch("自动接续 XC 情绪", emotion) { emotion = it; store.preferences.edit().putBoolean("emotion_enabled", it).apply() }
+    Text("此开关作用于软件的 XC 自动接续；下面的绑定属于当前助手。", style = MaterialTheme.typography.bodySmall)
+    XcEmotionDashboard(receipt, emotion)
+    SpaceSectionTitle("连接", "复用 MCP 管理中的地址与授权。多个助手绑定同一 XC 实例会共享状态。")
+    connections.forEach { connection ->
+        OutlinedCard(onClick = { selected = connection.id }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(12.dp)) {
+                RadioButton(selected == connection.id, onClick = null)
+                Column(Modifier.padding(start = 8.dp)) { Text(connection.name); Text(connection.address, style = MaterialTheme.typography.bodySmall) }
             }
         }
     }
-    if (confirmDelete != null) AlertDialog(
-        onDismissRequest = { confirmDelete = null },
-        title = { Text("删除这份资料？") },
-        text = { Text("会删除资料条目及其保存的文件副本，原始附件不受影响。") },
-        confirmButton = { TextButton(onClick = {
-            val deleteId = checkNotNull(confirmDelete); confirmDelete = null
-            perform {
-                withContext(Dispatchers.IO) { store.deleteEntry(checkNotNull(identity), deleteId) }
-                id = null; title = ""; content = ""; source = null; editing = false
-            }
-        }) { Text("删除") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("取消") } }
-    )
-}
-
-@Composable
-private fun LibraryCount(label: String, count: Int, modifier: Modifier) {
-    ElevatedCard(modifier) {
-        Column(Modifier.padding(12.dp)) {
-            Text(count.toString(), style = MaterialTheme.typography.headlineSmall)
-            Text(label, style = MaterialTheme.typography.labelMedium)
-        }
+    if (connections.isEmpty()) Text("没有启用的远程 MCP 连接，请配置后刷新。")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(enabled = selected != null && !busy, onClick = {
+            val connection = checkNotNull(selected)
+            perform { XcEmotionBridge.checkConnection(context, connection); feedback = "连接检查通过" }
+        }) { Text("检查连接") }
+        Button(enabled = selected != null && !busy, onClick = {
+            val connection = checkNotNull(selected)
+            perform { withContext(Dispatchers.IO) { XcEmotionBridge.bind(context, "role:$role", connection) }; feedback = "已绑定" }
+        }) { Text("绑定助手") }
     }
-}
-
-@Composable
-private fun CompanionToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked, onCheckedChange = onChange)
+    Row {
+        IconButton(enabled = !busy, onClick = { perform {} }) { Icon(Icons.Default.Refresh, "刷新连接与状态") }
+        TextButton(enabled = receipt.optString("plugin").isNotBlank() && !busy, onClick = {
+            perform { withContext(Dispatchers.IO) { XcEmotionBridge.unbind(context, "role:$role") } }
+        }) { Text("解除绑定") }
     }
+    Text("页面只显示最近同步结果，不主动领取交接信号或改写情绪。", style = MaterialTheme.typography.bodySmall)
+    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    if (feedback.isNotBlank()) Text(feedback)
 }

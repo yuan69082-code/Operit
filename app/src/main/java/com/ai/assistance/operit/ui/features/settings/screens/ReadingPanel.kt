@@ -24,11 +24,11 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-internal fun ReadingPanel(role: String, chat: String, name: String, revision: Long, work: (suspend () -> Unit) -> Unit) {
+internal fun ReadingPanel(role: String, chat: String, name: String, revision: Long, initialSection: String = "书架", work: (suspend () -> Unit) -> Unit) {
     val context = LocalContext.current
     val reading = remember(role) { ReadingRoom(context, role) }
     val room = remember(role) { AssistantRoom(context, role) }
-    var tab by remember { mutableStateOf("书架") }
+    var tab by remember { mutableStateOf(initialSection) }
     var queued by remember { mutableStateOf(emptyList<JSONObject>()) }
     var history by remember { mutableStateOf(emptyList<JSONObject>()) }
     var diaries by remember { mutableStateOf(emptyList<JSONObject>()) }
@@ -59,8 +59,8 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
     ReadingTheme {
       Column(Modifier.fillMaxWidth().background(BookPaper), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, top = 10.dp)) {
-            Text("${name}的书架", Modifier.weight(1f).padding(top = 8.dp), fontFamily = FontFamily.Serif, fontSize = 27.sp, color = BookInk)
-            IconButton(onClick = { searching = !searching; if (!searching) filter = ""; tab = "书架" }) { Icon(Icons.Default.Search, "搜索书架") }
+            Text("${name}的书房", Modifier.weight(1f).padding(top = 8.dp), fontFamily = FontFamily.Serif, fontSize = 27.sp, color = BookInk)
+            IconButton(onClick = { searching = !searching; if (!searching) filter = "" }) { Icon(Icons.Default.Search, "搜索整个书房") }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "书架操作") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -69,22 +69,24 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
                 }
             }
         }
-        Text("想读的、读过的，和留下的话", Modifier.padding(horizontal = 18.dp), fontSize = 13.sp)
+        Text("想读的、读过的、收藏的，和留下的话", Modifier.padding(horizontal = 18.dp), fontSize = 13.sp)
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("书架", "关注来源", "自主探索").forEach { label -> FilterChip(tab == label, { tab = label }, label = { Text(label) }) }
+            listOf("书架", "资料", "关注来源").forEach { label -> FilterChip(tab == label, { tab = label }, label = { Text(label) }) }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (loadError.isNotBlank()) {
             Text(loadError, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 18.dp))
             TextButton(onClick = { reload++ }) { Text("重新载入") }
         }
-        when (tab) {
-          "自主探索" -> Column(Modifier.padding(16.dp)) { ExplorationPanel(role) }
+        if (searching) OutlinedTextField(filter, { filter = it }, label = { Text("搜索书名、来源、日记标题和资料") },
+            leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+        when (if (searching) "搜索" else tab) {
+          "资料" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { LibraryPanel(role, revision = revision) }
           "关注来源" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
               ReadingSources(reading, chat, sources, sourceId, { sourceId = it }, title, { title = it }, address, { address = it }, kind, { kind = it }, hours, { hours = it }, work)
           }
           else -> {
-            if (searching) OutlinedTextField(filter, { filter = it }, label = { Text("标题、来源或日记日期") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             if (add) {
                 var itemTitle by remember { mutableStateOf("") }; var url by remember { mutableStateOf("") }; var summary by remember { mutableStateOf("") }
                 Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -95,7 +97,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
                     TextButton(onClick = { add = false }) { Text("取消添加") }
                 }
             }
-            fun matching(items: List<JSONObject>) = items.filter { item -> listOf("title", "url", "date", "preview").any { item.optString(it).contains(filter, true) } }
+            fun matching(items: List<JSONObject>) = items.filter { item -> listOf("title", "url", "date", "preview", "summary", "body", "note", "user_note").any { item.optString(it).contains(filter, true) } }
             BookshelfLayer("日记", matching(diaries), if (filter.isBlank()) "还没有写下日记。想记的时候，这里会留一本书。" else "没有找到相符的日记", diary = true) { item ->
                 work { val record = room.diary(item.getString("id")); withContext(Dispatchers.Main) { diary = record } }
             }
@@ -104,6 +106,9 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
             }
             BookshelfLayer("已读", matching(history), if (filter.isBlank()) "读过的材料与保存过批注的书，会留在这一层。" else "没有找到相符的已读") { item ->
                 work { val record = reading.entry(item.getString("id")); withContext(Dispatchers.Main) { selected = record } }
+            }
+            if (searching) Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LibraryPanel(role, query = filter, revision = revision)
             }
             Text("点书脊打开 · 长书名也可以搜索", Modifier.padding(18.dp), style = MaterialTheme.typography.bodySmall)
           }

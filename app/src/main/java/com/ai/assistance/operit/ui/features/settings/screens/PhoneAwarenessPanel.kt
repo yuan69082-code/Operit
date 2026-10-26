@@ -3,6 +3,8 @@ package com.ai.assistance.operit.ui.features.settings.screens
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -83,7 +85,7 @@ fun PhoneAwarenessPanel() {
     }
     LaunchedEffect(query) { page = 0 }
 
-    Text("手机感知", style = MaterialTheme.typography.titleLarge)
+    SpaceSectionTitle("记录与权限")
     Text("本机记录亮灭屏、锁定/解锁，以及应用进入、离开和停留时间。应用事件约每2秒读取一次；不代表她一定在看或操作。服务被系统停止、强制退出或权限不足时会有记录缺口。")
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("记录手机状态", Modifier.weight(1f))
@@ -94,12 +96,12 @@ fun PhoneAwarenessPanel() {
         } })
     }
     Text("使用情况访问：" + if (hasUsage) "已授权" else "未授权，暂时只能记录亮灭屏和锁定")
-    TextButton(enabled = !busy, onClick = { perform {
+    FilledTonalButton(enabled = !busy, onClick = { perform {
         withContext(Dispatchers.IO) { PhoneAwareness.grantUsageWithShizuku(context) }
         hasUsage = PhoneAwareness.usageAccess(context)
-    } }) { Text("用已授权 Shizuku 开通使用情况访问") }
-    TextButton(onClick = { openSettings(Settings.ACTION_USAGE_ACCESS_SETTINGS) }) { Text("打开系统使用情况权限设置") }
-    Text("观察助手：$observer")
+    } }) { Icon(Icons.Default.Security, null); Spacer(Modifier.width(8.dp)); Text("通过 Shizuku 授权") }
+    SpaceLinkCard("系统使用情况权限", if (hasUsage) "已授权" else "前往系统设置授权", Icons.Default.Settings, onClick = { openSettings(Settings.ACTION_USAGE_ACCESS_SETTINGS) })
+    SpaceSectionTitle("观察与唤醒", "观察助手：$observer")
     AssistantTargetPicker(selectedRole, !busy) { role -> perform {
         CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "phone_awareness", true)
         store.preferences.edit().putString("phone_role", role).apply()
@@ -113,21 +115,21 @@ fun PhoneAwarenessPanel() {
         })
     }
     OutlinedTextField(interval, { interval = it }, label = { Text("两次事件判断至少间隔多少秒（5–600）") }, singleLine = true)
-    TextButton(enabled = !busy, onClick = { perform {
+    Button(enabled = !busy, onClick = { perform {
         val seconds = interval.toIntOrNull()
         require(seconds != null && seconds in 5..600) { "请填写5–600的整数秒数" }
         store.preferences.edit().putInt("phone_wake_seconds", seconds).apply()
-    } }) { Text("保存间隔") }
-    Text("每次状态变化先记在本机，密集切换合并成一次判断。对话或通话中延后；AI 工具运行期间及结束后5秒内的变化仅记录，避免操作自己触发自己。超过5分钟的待处理事件不再触发干预。判断会消耗所选助手的模型额度。内部事件不显示在聊天框，助手可以安静、使用工具或主动发消息。")
+    } }) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(8.dp)); Text("保存间隔") }
+    SpaceExplanation("事件何时交给助手", "每次状态变化先记在本机，密集切换合并成一次判断。对话或通话中延后；AI 工具运行期间及结束后5秒内的变化仅记录，避免操作自己触发自己。超过5分钟的待处理事件不再触发干预。判断会消耗所选助手的模型额度。内部事件不显示在聊天框，助手可以安静、使用工具或主动发消息。")
 
     HorizontalDivider()
     Text("应用与内容授权", style = MaterialTheme.typography.titleMedium)
     Text("默认记录所有应用的进出，不读取正文。每个应用可单独授权通知和已见页面缓存。取消记录会清除该应用已保存的观察数据；取消内容授权会清除页面缓存。查询不会偷偷打开应用。")
-    TextButton(onClick = { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }) { Text("通知读取权限") }
-    TextButton(onClick = { openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS) }) { Text("页面文字读取所需的无障碍权限") }
+    SpaceLinkCard("通知读取", if (notificationConnected) "通道已连接" else "前往系统设置授权", Icons.Default.NotificationsNone, onClick = { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) })
+    SpaceLinkCard("已见页面读取", if (accessibilityConnected) "无障碍通道已连接" else "前往系统无障碍设置", Icons.Default.AccessibilityNew, onClick = { openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS) })
     Text("通知读取通道：${if (notificationConnected) "已连接" else "未连接"}；页面读取通道：${if (accessibilityConnected) "已连接" else "未连接"}。内容授权与通道连接分别生效。")
-    Text("通知只能反映应用发出的内容；已见页面由无障碍服务在应用可见、解锁时最多每15秒缓存一次。未见过的页面、未显示的消息和应用私有数据库不会凭 Shizuku 自动变得可读。")
-    OutlinedTextField(query, { query = it }, label = { Text("搜索应用名称或包名") }, singleLine = true)
+    SpaceExplanation("哪些内容可以读取", "通知只能反映应用发出的内容；已见页面由无障碍服务在应用可见、解锁时最多每15秒缓存一次。未见过的页面、未显示的消息和应用私有数据库不会凭 Shizuku 自动变得可读。")
+    OutlinedTextField(query, { query = it }, label = { Text("搜索应用名称或包名") }, leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
     val found = apps.filter { it.first.contains(query, true) || it.second.contains(query, true) }
     found.drop(page * 12).take(12).forEach { (pkg, name) ->
         OutlinedCard(Modifier.fillMaxWidth()) {
@@ -158,7 +160,7 @@ fun PhoneAwarenessPanel() {
     HorizontalDivider()
     Text("最近观察", style = MaterialTheme.typography.titleMedium)
     Text(status.optString("status", "尚未开始"))
-    Text("最多保留7天、1500条事件及每个授权应用最近一次页面。时间是本机观察时间；灭屏不等于关机。助手具体的工具、安静或主动消息决定，可在“唤醒与日志”查看。")
+    Text("最多保留7天、1500条事件及每个授权应用最近一次页面。时间是本机观察时间；灭屏不等于关机。助手具体的工具、安静或主动消息决定，可在“唤醒与记录”查看。")
     val kinds = mapOf("screen_on" to "亮屏", "screen_off" to "灭屏", "lock" to "锁定", "unlock" to "解锁", "app_enter" to "进入应用", "app_leave" to "离开应用", "collection_started" to "采集开始（此前可能有缺口）", "usage_access_started" to "应用记录权限可用", "usage_access_unavailable" to "应用记录权限不可用")
     val dispatch = mapOf("pending" to "待判断", "running" to "判断中", "handled" to "已判断", "recorded" to "仅记录", "expired" to "已过时，仅记录", "failed" to "判断失败", "interrupted" to "判断中断", "cancelled" to "已取消判断")
     rows.forEach { row ->
@@ -168,7 +170,7 @@ fun PhoneAwarenessPanel() {
             (if (row.optBoolean("during_ai_work")) "（AI 活动期间）" else ""), style = MaterialTheme.typography.bodySmall)
         if (row.optString("result").isNotBlank()) Text(row.optString("result"), style = MaterialTheme.typography.bodySmall)
     }
-    TextButton(enabled = !busy, onClick = { clearConfirm = true }) { Text("清除手机观察记录与页面缓存") }
+    OutlinedButton(enabled = !busy, onClick = { clearConfirm = true }) { Icon(Icons.Default.DeleteOutline, null); Spacer(Modifier.width(8.dp)); Text("清除观察数据") }
     if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
     if (clearConfirm) AlertDialog(onDismissRequest = { clearConfirm = false }, title = { Text("清除观察数据？") },
         text = { Text("删除本机手机观察事件和已见页面缓存，取消尚未处理的事件。已发送的聊天消息保持不变。") },

@@ -3,6 +3,8 @@ package com.ai.assistance.operit.ui.features.chat.components
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +35,7 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
     var owner by remember(board.scope) { mutableStateOf("*") }
     var category by remember(board.scope) { mutableStateOf("") }
     var selected by remember(board.scope) { mutableStateOf(emptySet<String>()) }
+    var selecting by remember(board.scope) { mutableStateOf(false) }
     var deleting by remember(board.scope) { mutableStateOf<String?>(null) }
     var editing by remember(board.scope) { mutableStateOf<JSONObject?>(null) }
     var error by remember(board.scope) { mutableStateOf<String?>(null) }
@@ -71,11 +74,11 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
             FilterChip(owner == id, onClick = { owner = id }, label = { Text(label) })
         }
     }
-    OutlinedTextField(query, { query = it }, label = { Text("搜索标题、原话、材料或 ID") }, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(query, { query = it }, leadingIcon = { Icon(Icons.Default.Search, null) }, label = { Text("搜索标题、原话、材料或 ID") }, modifier = Modifier.fillMaxWidth())
     var showStatuses by remember { mutableStateOf(false) }
     FlowRow {
         Box {
-            TextButton(onClick = { showStatuses = true }) { Text(TaskRecords.statuses[stage] ?: "全部状态") }
+            OutlinedButton(onClick = { showStatuses = true }) { Icon(Icons.Default.FilterList, null); Spacer(Modifier.width(6.dp)); Text(TaskRecords.statuses[stage] ?: "全部状态") }
             DropdownMenu(showStatuses, onDismissRequest = { showStatuses = false }) {
                 (mapOf("" to "全部状态") + TaskRecords.statuses).forEach { (key, label) ->
                     DropdownMenuItem(text = { Text("$label (${rows.count { key.isBlank() || it.optString("status") == key }})") },
@@ -88,16 +91,24 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
             FilterChip(category == value, onClick = { category = value }, label = { Text(value) })
         }
     }
-    FlowRow {
-        TextButton(onClick = { selected = filtered.map { it.getString("id") }.toSet() }) { Text("选中当前列表") }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = { editing = JSONObject().put("assignee", privateOwner.orEmpty()).put("priority", "P2").put("status", "open").put("horizon", "short") }) {
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("新增打算")
+        }
+        Spacer(Modifier.weight(1f))
+        IconToggleButton(checked = selecting, onCheckedChange = { selecting = it; if (!it) selected = emptySet() }) {
+            Icon(Icons.Default.Checklist, if (selecting) "退出批量选择" else "批量选择")
+        }
+        IconButton(onClick = { refresh++ }) { Icon(Icons.Default.Refresh, "刷新待办") }
+    }
+    if (selecting) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        TextButton(onClick = { selected = filtered.map { it.getString("id") }.toSet() }) { Text("全选当前列表") }
         TextButton(onClick = { selected = emptySet() }) { Text("清空选择") }
-        TextButton(enabled = selected.isNotEmpty(), onClick = { work {
+        FilledTonalButton(enabled = selected.isNotEmpty(), onClick = { work {
             rows.filter { it.getString("id") in selected }.forEach {
                 board.save("user", it.getString("id"), JSONObject().put("status", "archived").put("expected_version", it.getInt("version")), members.keys)
             }; selected = emptySet()
-        } }) { Text("归档选中项") }
-        TextButton(onClick = { editing = JSONObject().put("assignee", privateOwner.orEmpty()).put("priority", "P2").put("status", "open").put("horizon", "short") }) { Text("新增") }
-        TextButton(onClick = { refresh++ }) { Text("刷新") }
+        } }) { Icon(Icons.Default.Archive, null); Spacer(Modifier.width(6.dp)); Text("归档 ${selected.size} 项") }
     }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     if (filtered.isEmpty()) Text("这一栏现在是空的。", style = MaterialTheme.typography.bodySmall)
@@ -108,7 +119,7 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
         OutlinedCard(onClick = { expanded = if (open) null else id }, modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Checkbox(id in selected, onCheckedChange = { selected = if (it) selected + id else selected - id })
+                    if (selecting) Checkbox(id in selected, onCheckedChange = { selected = if (it) selected + id else selected - id })
                     PriorityBadge(row.optString("priority"))
                     StatusBadge(tab, TaskRecords.statuses[row.optString("status")].orEmpty())
                     Text(row.optString("title"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
@@ -151,20 +162,20 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
                         }
                     }
                     FlowRow {
-                        TextButton(onClick = { editing = JSONObject(row.toString()) }) { Text("编辑／交接") }
-                        TextButton(enabled = row.optString("status") !in TaskRecords.inactiveStatuses && recipient(row) in members,
+                        OutlinedButton(onClick = { editing = JSONObject(row.toString()) }) { Icon(Icons.Default.Edit, null); Spacer(Modifier.width(6.dp)); Text("编辑／交接") }
+                        FilledTonalButton(enabled = row.optString("status") !in TaskRecords.inactiveStatuses && recipient(row) in members,
                             onClick = { work { submit(row) } }) { Text("安排接手人继续") }
-                        if (onFinish != null) TextButton(onClick = { deleting = id }) { Text("删除") }
+                        if (onFinish != null) IconButton(onClick = { deleting = id }) { Icon(Icons.Default.DeleteOutline, "删除待办") }
                     }
                     OutlinedTextField(note, { note = it }, label = { Text("我的批注（AI 的批注也会分别署名）") }, modifier = Modifier.fillMaxWidth())
                     val canNotify = row.optString("status") !in TaskRecords.inactiveStatuses && recipient(row) in members
                     Row { Checkbox(notify && canNotify, enabled = canNotify, onCheckedChange = { notify = it }); Text("保存后通知接手助手", Modifier.padding(top = 12.dp)) }
-                    TextButton(enabled = note.isNotBlank(), onClick = { work {
+                    Button(enabled = note.isNotBlank(), onClick = { work {
                         board.comment(id, "user", note); note = ""
                         if (notify && canNotify && row.optJSONObject("dispatch")?.optString("state") != "pending") submit(row)
-                    } }) { Text("保存批注") }
+                    } }) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(6.dp)); Text("保存批注") }
                     if (onFinish != null && row.optString("status") == "done") {
-                        TextButton(onClick = { work { onFinish(id, "distill", row.optString("completed").ifBlank { row.optString("conclusion") }) } }) { Text("将实际收获沉淀到资料库") }
+                        TextButton(onClick = { work { onFinish(id, "distill", row.optString("completed").ifBlank { row.optString("conclusion") }) } }) { Text("将实际收获存入书房") }
                     }
                     val history = row.optJSONArray("history") ?: JSONArray()
                     Text("处理历史与批注（最近80条）", style = MaterialTheme.typography.titleSmall)

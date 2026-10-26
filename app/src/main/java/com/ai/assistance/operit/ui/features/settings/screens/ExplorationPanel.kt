@@ -1,6 +1,8 @@
 package com.ai.assistance.operit.ui.features.settings.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -72,7 +74,7 @@ internal fun ExplorationPanel(initialRole: String) {
         }
     }
 
-    Text("自主探索", style = MaterialTheme.typography.titleLarge)
+    SpaceSectionTitle("探索权限")
     AssistantTargetPicker(role, !busy) { role = it }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween) {
@@ -95,8 +97,8 @@ internal fun ExplorationPanel(initialRole: String) {
     OutlinedTextField(limit, { limit = it }, enabled = loaded && !busy, singleLine = true,
         label = { Text("每天最多探索几轮（1–24）") })
     Text("默认每天最多4轮，每轮最多5分钟和12次工具调用；这些限制不是固定的 token 金额。资料按需查阅，不会把整库放进每轮聊天。")
-    TextButton(enabled = loaded && !busy && status.optBoolean("enabled"), onClick = { configure(true) }) {
-        Text("保存这位助手的设置")
+    Button(enabled = loaded && !busy && status.optBoolean("enabled"), onClick = { configure(true) }) {
+        Icon(Icons.Default.Check, null); Spacer(Modifier.width(8.dp)); Text("保存探索设置")
     }
     val chat = status.optString("chat")
     Text("今天已启动 ${status.optInt("used_today")} / ${status.optInt("daily_limit", 4)} 轮")
@@ -108,14 +110,14 @@ internal fun ExplorationPanel(initialRole: String) {
         else -> "下次计划：" + DateFormat.getDateTimeInstance().format(Date(at))
     })
     if (status.optBoolean("enabled") && status.optString("purpose").isNotBlank()) Text(status.optString("purpose"))
-    Row {
-        TextButton(enabled = loaded && !busy && status.optBoolean("enabled") && chat.isNotBlank(),
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(enabled = loaded && !busy && status.optBoolean("enabled") && chat.isNotBlank(),
             onClick = { perform { withContext(Dispatchers.IO) { store.schedule(role, chat, 15, "用户安排一次自主探索，可自己选择方向或安静。") } } }) {
-            Text("15分钟后探索一次")
+            Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text("15分钟后探索一次")
         }
-        TextButton(enabled = loaded && !busy && status.optBoolean("enabled"),
-            onClick = { perform { withContext(Dispatchers.IO) { store.pause(role) } } }) { Text("暂停后续预约") }
+        OutlinedButton(enabled = loaded && !busy && status.optBoolean("enabled"),
+            onClick = { perform { withContext(Dispatchers.IO) { store.pause(role) } } }) { Icon(Icons.Default.Pause, null); Spacer(Modifier.width(8.dp)); Text("暂停后续预约") }
     }
-    Text("首次开启安排在15分钟后；此后由 AI 决定继续的时间。需要后台服务运行，实际执行也取决于手机系统和当前对话是否空闲。达到每日上限后，预约等待下一天；关闭再开启不会重置当天次数。过程见“唤醒与日志”，收获见资料库和私人待办。")
+    SpaceExplanation("探索如何安排", "首次开启安排在15分钟后；此后由 AI 决定继续的时间。需要后台服务运行，实际执行也取决于手机系统和当前对话是否空闲。达到每日上限后，预约等待下一天；关闭再开启不会重置当天次数。过程见“唤醒与记录”，收获见书房资料和私人打算。")
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }
