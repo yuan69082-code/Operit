@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.components.style.bubble
 
+import com.ai.assistance.operit.ui.theme.inspectRender
+
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
@@ -403,6 +405,7 @@ fun BubbleUserMessageComposable(
                     Modifier
                         .widthIn(max = if (isHiddenPlaceholder) minOf(maxBubbleWidth, 320.dp) else maxBubbleWidth)
                         .defaultMinSize(minHeight = 44.dp)
+                            .inspectRender("user_bubble", effectiveBackgroundColor, effectiveTextColor, bubbleShape, "image=" + (effectiveBubbleImageStyle != null) + "; waterGlass=" + waterGlassEnabled + "; liquidGlass=" + liquidGlassEnabled)
                             .studioSticker(user = true, background = backgroundColor)
 
                 Row(
@@ -547,6 +550,7 @@ fun BubbleUserMessageComposable(
                         Modifier
                             .widthIn(max = if (isHiddenPlaceholder) minOf(maxBubbleWidth, 320.dp) else maxBubbleWidth)
                             .defaultMinSize(minHeight = 44.dp)
+                            .inspectRender("user_bubble", effectiveBackgroundColor, effectiveTextColor, bubbleShape, "image=" + (effectiveBubbleImageStyle != null) + "; waterGlass=" + waterGlassEnabled + "; liquidGlass=" + liquidGlassEnabled)
                             .studioSticker(user = true, background = backgroundColor)
 
                     if (effectiveBubbleImageStyle != null) {

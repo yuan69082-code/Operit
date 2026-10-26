@@ -34,3 +34,5 @@ The current branch connects theme preview and procedural backgrounds, role/world
 Build verification runs on GitHub because this environment cannot download Gradle and has no Android SDK. The initial branch build is still running. Remaining compatibility, platform and migration work stays unchecked above.
 
 Further checkpoint: local chat commands, bounded Kelivo import, ownership/resource diagnostics, native bubble tails/corners/stickers, portable theme images, and Windows workspace sync are now implemented. See [native experience](01-native-experience.md) and [migration and sync](02-migration-and-sync.md). Device rendering and final integration acceptance are still pending. iOS distribution and arbitrary CSS selectors remain unimplemented; Electron packaging is under Windows CI validation; do not describe this branch as the entirety of the prior audit.
+
+Follow-up scope confirmed by user: defer remaining Kelivo conversion, arbitrary CSS and iOS. PR #22 connects measured rendering and collection/reference/workspace operations; see [follow-up](03-render-and-reference-links.md).

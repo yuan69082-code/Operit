@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.ui.features.chat.components.part
 
+import com.ai.assistance.operit.ui.theme.inspectRender
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -138,7 +140,7 @@ private fun ToolResultDetailDialog(
             properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
     ) {
         Card(
-                modifier = cardModifier,
+                modifier = cardModifier.inspectRender("tool_receipt", com.ai.assistance.operit.ui.theme.StudioComponents.color("tool_receipt", MaterialTheme.colorScheme.surface), shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("tool_receipt", RoundedCornerShape(16.dp))),
                 shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("tool_receipt", RoundedCornerShape(16.dp)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                 colors = CardDefaults.cardColors(containerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("tool_receipt", MaterialTheme.colorScheme.surface))

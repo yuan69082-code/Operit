@@ -100,6 +100,74 @@ class CollectionStore(private val context: Context) {
             response
         }
     }
+    fun references(id: String, query: String = ""): JSONArray = synchronized(lock) {
+        val item = read(id)
+        val rows = item.optJSONArray("references") ?: JSONArray()
+        val result = JSONArray()
+        for (i in 0 until rows.length()) {
+            val ref = rows.getJSONObject(i)
+            if (query.isBlank() || (ref.getString("title") + "\n" + ref.getString("content")).contains(query, ignoreCase = true)) result.put(ref)
+        }
+        result
+    }
+    fun addReference(id: String, sourceId: String, path: String?, expectedVersion: Long): JSONObject = synchronized(lock) {
+        val item = read(id); val source = read(sourceId)
+        check(item.getLong("version") == expectedVersion) { "项目已变化，请重新打开" }
+        check(item.getString("role") == source.getString("role")) { "不能引用其他助手的收藏" }
+        if (path != null) validatePath(path)
+        val content = if (path == null) source.getString("content") else source.getJSONObject("files").getString(path)
+        val ref = JSONObject().put("id", UUID.randomUUID().toString())
+            .put("title", if (path == null) source.getString("title") else path).put("content", content)
+            .put("sourceId", sourceId).put("sourcePath", path ?: JSONObject.NULL)
+            .put("sourceVersion", source.getLong("version")).put("chat", source.getString("chat"))
+            .put("message", source.getLong("message")).put("capturedAt", System.currentTimeMillis())
+        val refs = item.optJSONArray("references") ?: JSONArray()
+        refs.put(ref); write(item.put("references", refs))
+    }
+    fun removeReference(id: String, referenceId: String, expectedVersion: Long): JSONObject = synchronized(lock) {
+        val item = read(id); check(item.getLong("version") == expectedVersion) { "项目已变化，请重新打开" }
+        val refs = references(id); val kept = JSONArray()
+        for (i in 0 until refs.length()) if (refs.getJSONObject(i).getString("id") != referenceId) kept.put(refs.getJSONObject(i))
+        write(item.put("references", kept))
+    }
+    fun promoteReference(id: String, referenceId: String, path: String, expectedVersion: Long): JSONObject = synchronized(lock) {
+        validatePath(path)
+        val item = read(id); check(item.getLong("version") == expectedVersion) { "项目已变化，请重新打开" }
+        check(!item.getJSONObject("files").has(path)) { "目标文件已存在，请填写新路径，避免覆盖" }
+        val refs = references(id)
+        val ref = (0 until refs.length()).map { refs.getJSONObject(it) }.single { it.getString("id") == referenceId }
+        item.getJSONObject("files").put(path, ref.getString("content"))
+        write(item)
+    }
+    fun exportWorkspace(id: String, expectedVersion: Long): JSONObject = synchronized(lock) {
+        val item = read(id); check(item.getLong("version") == expectedVersion) { "项目已变化，请重新打开" }
+        check(item.getJSONObject("files").length() > 0) { "请先添加项目文件" }
+        val directory = File(context.filesDir, "collection_workspaces/$id/" + UUID.randomUUID().toString())
+        check(directory.mkdirs()) { "无法创建工作区" }
+        try {
+            val files = item.getJSONObject("files")
+            for (path in files.keys()) {
+                validatePath(path)
+                val file = File(directory, path); file.parentFile!!.mkdirs(); file.writeText(files.getString(path))
+            }
+            write(item.put("workspace", JSONObject().put("path", directory.absolutePath)
+                .put("baseFiles", JSONObject(files.toString())).put("exportedAt", System.currentTimeMillis())))
+        } catch (e: Exception) { directory.deleteRecursively(); throw e }
+    }
+    fun pullWorkspace(id: String, expectedVersion: Long): JSONObject = synchronized(lock) {
+        val item = read(id); check(item.getLong("version") == expectedVersion) { "项目已变化，请重新打开" }
+        val binding = item.getJSONObject("workspace")
+        val directory = File(binding.getString("path"))
+        val ownedRoot = File(context.filesDir, "collection_workspaces/$id").canonicalFile
+        check(directory.canonicalFile.parentFile == ownedRoot && directory.isDirectory) { "工作区已移走或不可访问" }
+        check(WorkspaceTransfer.sameFiles(item.getJSONObject("files"), binding.getJSONObject("baseFiles"))) {
+            "收藏文件与导出时不同，停止回收以免覆盖。请导出收藏的新副本，再手动合并两边修改。"
+        }
+        val files = WorkspaceTransfer.read(directory)
+        // Replacing executable text revokes the old approval. The original directory remains intact.
+        binding.put("baseFiles", JSONObject(files.toString())).put("pulledAt", System.currentTimeMillis())
+        write(item.put("files", files).put("toolEnabled", false))
+    }
     fun delete(id: String) = synchronized(lock) { AtomicFile(file(id)).delete(); revision.value++ }
     private fun write(item: JSONObject): JSONObject {
         item.put("updatedAt", System.currentTimeMillis()).put("version", item.optLong("version") + 1)

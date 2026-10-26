@@ -153,6 +153,7 @@ private fun ThemeStudioDialog(target: ActivePrompt, close: () -> Unit) {
                 TextButton(enabled = !busy, onClick = { run { studio.preview(target, JSONObject(patchText), name); status = "已试穿局部修改" } }) { Text("试穿局部修改") }
                 Text("先检查参数，再修改对应背景、顶部栏、气泡、文字、输入区字段。未提供的字段保持当前值。")
                 TextButton(enabled = !busy, onClick = { run { inspection = ThemeStudio.encode(studio.current(target)).toString(2) } }) { Text("检查当前主题参数") }
+                TextButton(enabled = !busy, onClick = { inspection = com.ai.assistance.operit.ui.theme.RenderInspection.inspect(com.ai.assistance.operit.ui.theme.RenderInspection.owner(target)).toString(2) }) { Text("检查实际渲染（已挂载区域）") }
                 if (inspection.isNotEmpty()) Text(inspection, style = MaterialTheme.typography.bodySmall)
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (status.isNotEmpty()) Text(status)

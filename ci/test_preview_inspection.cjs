@@ -1,0 +1,14 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('app/src/main/java/com/ai/assistance/operit/core/experience/PreviewInspectionScript.kt','utf8');
+const script=source.split('return """')[1].split('""".trimIndent()')[0].replace('$state',JSON.stringify('{}'));
+const callbacks={},styles={color:'rgb(1, 2, 3)',display:'block',visibility:'visible'};
+let saved;let fields=[];
+const node={tagName:'BUTTON',id:'send',className:'send',getBoundingClientRect:()=>({x:3,y:4,width:80,height:24})};
+const storage=()=>({clear(){},setItem(){}});
+const context={window:{addEventListener:(name,fn)=>callbacks[name]=fn},document:{querySelectorAll:selector=>selector==='input,textarea,select'?fields:[node],body:{innerText:'Preview'},addEventListener(){}},localStorage:storage(),sessionStorage:storage(),OperitPreview:{save:value=>saved=JSON.parse(value)},getComputedStyle:()=>styles,innerWidth:320,innerHeight:640,devicePixelRatio:2,location:{href:'https://project.operit.invalid/index.html'},setInterval(){},console};
+vm.runInNewContext(script,context);callbacks.DOMContentLoaded();
+assert.equal(saved.render.nodes[0].color,'rgb(1, 2, 3)');assert.deepEqual(saved.render.nodes[0].boundsPx,[3,4,80,24]);
+fields=[{type:'text',value:'new dynamic field',checked:false},{type:'password',value:'private',checked:false}];
+callbacks.unhandledrejection({reason:'broken script'});context.window.__operitPersistPreview();
+assert.equal(saved.forms[0].value,'new dynamic field');assert.equal(saved.forms[1].value,'');assert.equal(saved.render.errors[0],'broken script');
+console.log('PASS: computed style/bounds, dynamic forms, password omission and runtime errors');
