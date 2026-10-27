@@ -762,20 +762,40 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     fun switchActiveCharacterTarget(target: CharacterSelectorTarget) {
         viewModelScope.launch {
             try {
-            when (target) {
-                is CharacterSelectorTarget.CharacterCardTarget -> {
-                    activePromptManager.setActivePrompt(ActivePrompt.CharacterCard(target.id))
+                when (target) {
+                    is CharacterSelectorTarget.CharacterCardTarget -> {
+                        activePromptManager.setActivePrompt(ActivePrompt.CharacterCard(target.id))
+                    }
+                    is CharacterSelectorTarget.CharacterGroupTarget -> {
+                        activePromptManager.setActivePrompt(ActivePrompt.CharacterGroup(target.id))
+                    }
                 }
-                is CharacterSelectorTarget.CharacterGroupTarget -> {
-                    activePromptManager.setActivePrompt(ActivePrompt.CharacterGroup(target.id))
-                }
-            }
-
-            // ActivePromptManager switches to the target's own session for every entry point.
+                // ActivePromptManager switches to the target's own session for every entry point.
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 AppLogger.e(TAG, "切换助手失败", failure)
                 uiStateDelegate.showErrorMessage(failure.message ?: "切换助手失败")
+            }
+        }
+    }
+
+    fun openDirectoryTarget(
+        target: ActivePrompt,
+        onOpened: () -> Unit,
+        onError: (String) -> Unit,
+        onFinished: () -> Unit,
+    ) {
+        viewModelScope.launch {
+            try {
+                activePromptManager.setActivePrompt(target)
+                onOpened()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                AppLogger.e(TAG, "从好友/群列表打开会话失败", failure)
+                onError(failure.message ?: "无法打开对应会话")
+            } finally {
+                onFinished()
             }
         }
     }
