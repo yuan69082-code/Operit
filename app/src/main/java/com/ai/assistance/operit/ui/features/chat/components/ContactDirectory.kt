@@ -53,9 +53,9 @@ fun ContactDirectory(
         error = ""
         onSelectTarget(
             target,
-            onOpened = onOpen,
-            onError = { message -> error = "打开失败：$message" },
-            onFinished = { busy = false },
+            onOpen,
+            { message -> error = "打开失败：$message" },
+            { busy = false },
         )
     }
     val sorted = when (sort.value) {
