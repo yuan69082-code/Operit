@@ -893,8 +893,13 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             0f
         }
     val chatViewportTranslationYPx = inputBarTranslationYPx
+    val showConversationSurface =
+        com.ai.assistance.operit.ui.main.layout.conversationSurfaceVisible(
+            directoryVisible = chatNavigation?.directoryVisible == true,
+            floatingMode = isFloatingMode,
+        )
     Box(modifier = Modifier.fillMaxSize()) {
-        CustomScaffold(
+        if (showConversationSurface) CustomScaffold(
                 containerColor = Color.Transparent,
                 snackbarHost = { SnackbarHost(snackbarHostState) },
         ) { paddingValues ->
@@ -1215,7 +1220,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             }
         }
 
-        MentionSuggestionOverlay(
+        if (showConversationSurface) MentionSuggestionOverlay(
             actualViewModel = actualViewModel,
             bottomBarHeightPx = bottomBarHeightPx,
             inputBarTranslationYPx = inputBarTranslationYPx,
@@ -1229,7 +1234,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                 ),
         )
 
-        val isWorkspaceVisible = !embedded && showWebView
+        val isWorkspaceVisible = showConversationSurface && !embedded && showWebView
         val workspaceOverlayModifier =
             if (isWorkspaceVisible) {
                 Modifier
@@ -1282,7 +1287,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         // AI电脑模式作为浮层：关闭时完全移出组合，确保 SurfaceView 被释放，避免机型相关残影
-        if (!embedded && showAiComputer) {
+        if (showConversationSurface && !embedded && showAiComputer) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1293,7 +1298,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         AnimatedVisibility(
-            visible = !embedded && isWorkspacePreparing,
+            visible = showConversationSurface && !embedded && isWorkspacePreparing,
             enter = fadeIn(animationSpec = tween(180)),
             exit = fadeOut(animationSpec = tween(120))
         ) {
@@ -1329,7 +1334,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         // 导出平台选择对话框
-        if (showExportPlatformDialog) {
+        if (showConversationSurface && showExportPlatformDialog) {
             ExportPlatformDialog(
                     onDismiss = { showExportPlatformDialog = false },
                     onSelectAndroid = {
@@ -1344,7 +1349,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         // Android导出设置对话框
-        if (showAndroidExportDialog && webContentDir != null) {
+        if (showConversationSurface && showAndroidExportDialog && webContentDir != null) {
             AndroidExportDialog(
                     workDir = webContentDir!!,
                     onDismiss = { showAndroidExportDialog = false },
@@ -1382,7 +1387,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         // Windows导出设置对话框
-        if (showWindowsExportDialog && webContentDir != null) {
+        if (showConversationSurface && showWindowsExportDialog && webContentDir != null) {
             WindowsExportDialog(
                     workDir = webContentDir!!,
                     onDismiss = { showWindowsExportDialog = false },
@@ -1417,7 +1422,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         // 导出进度对话框
-        if (showExportProgressDialog) {
+        if (showConversationSurface && showExportProgressDialog) {
             ExportProgressDialog(
                     progress = exportProgress,
                     status = exportStatus,
@@ -1429,7 +1434,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         }
 
         // 导出完成对话框
-        if (showExportCompleteDialog) {
+        if (showConversationSurface && showExportCompleteDialog) {
             ExportCompleteDialog(
                     success = exportSuccess,
                     filePath = exportFilePath,
