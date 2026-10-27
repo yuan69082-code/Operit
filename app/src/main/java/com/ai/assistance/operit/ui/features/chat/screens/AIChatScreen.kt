@@ -1466,6 +1466,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             com.ai.assistance.operit.ui.features.chat.components.ContactDirectory(
                 onOpen = { chatNavigation.openConversation() },
                 onEdit = onNavigateToModelPrompts,
+                onSelectTarget = actualViewModel::openDirectoryTarget,
             )
         }
     }
