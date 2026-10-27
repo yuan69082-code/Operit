@@ -5,6 +5,9 @@ import androidx.compose.runtime.saveable.Saver
 
 /** This state changes presentation only; the chat service continues running when the list is shown. */
 @Stable
+internal fun conversationSurfaceVisible(directoryVisible: Boolean, floatingMode: Boolean): Boolean =
+    floatingMode || !directoryVisible
+
 class ChatNavigationState(initialDirectory: Boolean = true) {
     var directoryVisible by mutableStateOf(initialDirectory)
         private set
