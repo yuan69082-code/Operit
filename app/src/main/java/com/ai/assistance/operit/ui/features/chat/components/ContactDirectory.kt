@@ -15,13 +15,16 @@ import com.ai.assistance.operit.data.model.*
 import com.ai.assistance.operit.data.preferences.*
 import com.ai.assistance.operit.ui.common.rememberLocal
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 
 /** Uses the same stable identities, sort preference and activation path as the original selector. */
 @Composable
-fun ContactDirectory(onOpen: () -> Unit, onEdit: () -> Unit) {
+fun ContactDirectory(
+    onOpen: () -> Unit,
+    onEdit: () -> Unit,
+    onSelectTarget: (ActivePrompt, onOpened: () -> Unit, onError: (String) -> Unit, onFinished: () -> Unit) -> Unit,
+) {
     val context = LocalContext.current
     val cardsManager = remember { CharacterCardManager.getInstance(context) }
     val groupsManager = remember { CharacterGroupCardManager.getInstance(context) }
@@ -37,7 +40,6 @@ fun ContactDirectory(onOpen: () -> Unit, onEdit: () -> Unit) {
     var createGroup by remember { mutableStateOf(false) }
     var sortOpen by remember { mutableStateOf(false) }
     val sort = rememberLocal("ModelPromptsSettingsScreen.CharacterCardTab.sortOption", "DEFAULT")
-    val scope = rememberCoroutineScope()
     LaunchedEffect(ids) {
         if (ids.isEmpty()) { cards = emptyList(); return@LaunchedEffect }
         try {
@@ -48,9 +50,13 @@ fun ContactDirectory(onOpen: () -> Unit, onEdit: () -> Unit) {
     fun select(target: ActivePrompt) {
         if (busy) return
         busy = true
-        scope.launch {
-            try { activeManager.setActivePrompt(target); onOpen() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = "打开失败：${e.message}" } finally { busy = false }
-        }
+        error = ""
+        onSelectTarget(
+            target,
+            onOpened = onOpen,
+            onError = { message -> error = "打开失败：$message" },
+            onFinished = { busy = false },
+        )
     }
     val sorted = when (sort.value) {
         "NAME_ASC" -> cards.sortedBy { it.name.lowercase() }
