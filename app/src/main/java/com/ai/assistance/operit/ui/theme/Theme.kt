@@ -503,33 +503,33 @@ fun OperitTheme(sharedOutsideChat: Boolean = false, content: @Composable () -> U
                 }
             }
 
-            if (useBackgroundImage && backgroundImageUri != null) {
-                MaterialTheme(
-                    colorScheme =
-                        colorScheme.copy(
-                            surface = colorScheme.surface.copy(alpha = 1f),
-                            surfaceVariant = colorScheme.surfaceVariant.copy(alpha = 1f),
-                            background = colorScheme.background.copy(alpha = 1f),
-                            surfaceContainer = colorScheme.surfaceContainer.copy(alpha = 1f),
-                            surfaceContainerHigh =
-                                colorScheme.surfaceContainerHigh.copy(alpha = 1f),
-                            surfaceContainerHighest =
-                                colorScheme.surfaceContainerHighest.copy(alpha = 1f),
-                            surfaceContainerLow =
-                                colorScheme.surfaceContainerLow.copy(alpha = 1f),
-                            surfaceContainerLowest =
-                                colorScheme.surfaceContainerLowest.copy(alpha = 1f),
-                        ),
-                    typography = customTypography,
-                    content = content,
-                )
-            } else {
-                MaterialTheme(
-                    colorScheme = colorScheme,
-                    typography = customTypography,
-                    content = content,
-                )
-            }
+            // The app content must keep one composition identity when switching between
+            // the directory's shared appearance and a character/group background. Separate
+            // MaterialTheme branches dispose OperitApp and reset its chat navigation state.
+            val contentColorScheme =
+                if (useBackgroundImage && backgroundImageUri != null) {
+                    colorScheme.copy(
+                        surface = colorScheme.surface.copy(alpha = 1f),
+                        surfaceVariant = colorScheme.surfaceVariant.copy(alpha = 1f),
+                        background = colorScheme.background.copy(alpha = 1f),
+                        surfaceContainer = colorScheme.surfaceContainer.copy(alpha = 1f),
+                        surfaceContainerHigh =
+                            colorScheme.surfaceContainerHigh.copy(alpha = 1f),
+                        surfaceContainerHighest =
+                            colorScheme.surfaceContainerHighest.copy(alpha = 1f),
+                        surfaceContainerLow =
+                            colorScheme.surfaceContainerLow.copy(alpha = 1f),
+                        surfaceContainerLowest =
+                            colorScheme.surfaceContainerLowest.copy(alpha = 1f),
+                    )
+                } else {
+                    colorScheme
+                }
+            MaterialTheme(
+                colorScheme = contentColorScheme,
+                typography = customTypography,
+                content = content,
+            )
         }
     }
 }
