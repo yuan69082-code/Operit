@@ -2,6 +2,8 @@ name: Shared desktop preview
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main, feat/desktop-shared-chat, feat/polaris-experience]
 
@@ -68,7 +70,7 @@ jobs:
     name: Publish both clients after checks
     # GitHub's built-in token cannot publish targets with workflow changes relative to main.
     # Development branches produce paired artifacts; main publishes the paired update.
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [windows, android]
     runs-on: ubuntu-24.04
     steps:
