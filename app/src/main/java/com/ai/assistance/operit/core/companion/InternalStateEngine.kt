@@ -12,8 +12,8 @@ object InternalStateEngine {
     val sources = setOf("user_message", "assistant_reply", "assistant_action", "tool_success", "tool_failure",
         "reading", "exploration", "todo_progress", "todo_failed", "todo_completed", "wake", "time")
     val actions = listOf("contact", "explore", "todo", "tool", "reply", "defer", "drop", "rest")
-    val kinds = setOf("drive", "sentiment", "emotion")
-    internal val subjectiveFields = listOf("reason", "object_ref", "unresolved", "desire", "choice", "evidence", "report_frame_id", "experience_at")
+    val kinds = setOf("drive", "sentiment", "emotion", "psychology")
+    internal val subjectiveFields = listOf("reason", "object_ref", "unresolved", "desire", "choice", "evidence", "report_frame_id", "experience_at", "time_conditions")
     fun rows(data: JSONObject, key: String): List<JSONObject> = data.optJSONArray(key)?.let { a ->
         (0 until a.length()).map { a.getJSONObject(it) }
     }.orEmpty()
@@ -30,11 +30,11 @@ object InternalStateEngine {
 
     fun validate(d: JSONObject) {
         val allowed = setOf("id", "name", "description", "baseline", "min", "max", "maxDelta", "halfLifeHours",
-            "scope", "private", "share", "participates", "triggers", "effects", "kind", "object_ref")
+            "scope", "private", "share", "participates", "triggers", "effects", "kind", "object_ref", "time_rules")
         require(d.keys().asSequence().all { it in allowed }) { "定义包含未知字段；不能写入 value、version 或 active" }
         require(text(d, "id", 64).matches(Regex("[a-zA-Z0-9_-]+"))) { "id 仅允许字母、数字、下划线、连字符" }
         text(d, "name", 80); text(d, "description", 1000)
-        if (d.has("kind")) require(d.get("kind") is String && d.getString("kind") in kinds) { "kind 必须为 drive、sentiment 或 emotion" }
+        if (d.has("kind")) require(d.get("kind") is String && d.getString("kind") in kinds) { "kind 必须为 drive、sentiment、emotion 或 psychology" }
         if (d.has("object_ref")) {
             require(d.get("object_ref") is String)
             text(d, "object_ref", 160)
@@ -42,19 +42,30 @@ object InternalStateEngine {
         val min = number(d, "min"); val max = number(d, "max")
         require(min < max && max - min <= 1e9 && abs(min) <= 1e9 && abs(max) <= 1e9)
         require(number(d, "baseline") in min..max)
-        require(number(d, "maxDelta") > 0 && d.getDouble("maxDelta") <= max - min)
-        require(number(d, "halfLifeHours") == 0.0 || d.getDouble("halfLifeHours") in 0.01..87600.0)
+        val conditionalTime = InternalStateTimeRules.isDefined(d)
+        if (!conditionalTime) {
+            require(number(d, "maxDelta") > 0 && d.getDouble("maxDelta") <= max - min)
+            require(number(d, "halfLifeHours") == 0.0 || d.getDouble("halfLifeHours") in 0.01..87600.0)
+            d.getJSONArray("triggers")
+        } else {
+            // Kept old fields describe prior versions only; they do not run beside the new rules.
+            listOf("maxDelta", "halfLifeHours").filter { d.has(it) }.forEach { number(d, it) }
+            InternalStateTimeRules.validate(d)
+        }
         require(d.getString("scope") in setOf("global", "session"))
         listOf("private", "share", "participates").forEach { require(d.get(it) is Boolean) }
-        require(d.getJSONArray("triggers").length() <= 32 && d.getJSONArray("effects").length() <= 24)
+        if (d.has("triggers")) require(d.getJSONArray("triggers").length() <= 32)
+        require(d.getJSONArray("effects").length() <= 24)
         rows(d, "triggers").forEach { rule ->
             require(rule.keys().asSequence().all { it in setOf("source", "delta", "contains") })
             require(rule.getString("source") in sources)
-            require(abs(number(rule, "delta")) <= d.getDouble("maxDelta"))
+            val delta = number(rule, "delta")
+            if (!conditionalTime) require(abs(delta) <= d.getDouble("maxDelta"))
             require(rule.optString("contains").length <= 120)
             require(rule.getString("source") != "time" || rule.optString("contains").isEmpty())
         }
-        require(abs(rows(d, "triggers").filter { it.getString("source") == "time" }.sumOf { it.getDouble("delta") }) <= d.getDouble("maxDelta"))
+        if (!conditionalTime) require(abs(rows(d, "triggers").filter { it.getString("source") == "time" }
+            .sumOf { it.getDouble("delta") }) <= d.getDouble("maxDelta"))
         rows(d, "effects").forEach { effect ->
             require(effect.keys().asSequence().all { it in setOf("action", "weight", "cue", "target") })
             require(effect.getString("action") in actions)
@@ -73,6 +84,7 @@ object InternalStateEngine {
     }
 
     internal fun change(d: JSONObject, state: JSONObject, value: Double, now: Long): JSONObject? {
+        val from = state.getLong("at")
         val before = state.getDouble("value")
         val after = value.coerceIn(d.getDouble("min"), d.getDouble("max"))
         val baseline = d.getDouble("baseline")
@@ -80,28 +92,64 @@ object InternalStateEngine {
         state.put("value", after).put("at", maxOf(now, state.getLong("at")))
         if (before == after) return null
         return JSONObject().put("dimension", d.getString("id")).put("scope", state.getString("scope"))
-            .put("version", d.getInt("version")).put("before", before).put("after", after)
+            .put("version", d.getInt("version")).put("before", before).put("after", after).put("from_at", from)
     }
 
     /** Exact linear recovery + time drift; splitting an interval does not amplify changes. */
     fun advance(data: JSONObject, chat: String, now: Long) {
         val changes = JSONArray()
         definitions(data).filter { it.getBoolean("active") }.forEach { d ->
-            val state = instance(data, d, chat, now)
-            val hours = ((now - state.getLong("at")).coerceAtLeast(0)) / 3600000.0
-            if (hours > 0) {
-                val half = d.getDouble("halfLifeHours")
-                val rate = rows(d, "triggers").filter { it.getString("source") == "time" }.sumOf { it.getDouble("delta") }
-                val old = state.getDouble("value")
-                val next = if (half == 0.0) old + rate * hours else {
-                    val k = ln(2.0) / half
-                    val equilibrium = d.getDouble("baseline") + rate / k
-                    equilibrium + (old - equilibrium) * exp(-k * hours)
-                }
-                change(d, state, next, now)?.let { changes.put(it) }
-            }
+            advanceInstance(data, d, instance(data, d, chat, now), chat, now, changes)
         }
         if (changes.length() > 0) record(data, "time:${data.optLong("sequence") + 1}", "time", chat, "经过时间：恢复与持续触发", changes, now)
+    }
+
+    /** Settle only the state being edited; unrelated instances keep their own time anchors. */
+    fun advanceDimension(data: JSONObject, definition: JSONObject, chat: String, now: Long, allScopes: Boolean = false) {
+        val changes = JSONArray()
+        val current = instance(data, definition, chat, now)
+        val instances = if (allScopes) rows(data, "instances").filter {
+            it.getString("dimension") == definition.getString("id")
+        } else listOf(current)
+        instances.forEach { state ->
+            val sourceChat = if (state.getString("scope") == "global") chat else state.getString("scope")
+            advanceInstance(data, definition, state, sourceChat, now, changes)
+        }
+        if (changes.length() > 0) record(data, "time:${data.optLong("sequence") + 1}", "time", chat, "状态规则切换前结算经过时间", changes, now)
+    }
+
+    private fun advanceInstance(data: JSONObject, definition: JSONObject, state: JSONObject, chat: String, now: Long, changes: JSONArray) {
+        val from = state.getLong("at")
+        if (now <= from) return
+        if (InternalStateTimeRules.isDefined(definition)) {
+            InternalStateTimeRules.steps(data, definition, state, chat, now).forEach { step ->
+                change(definition, state, step.value, step.at)?.let { change ->
+                    changes.put(change.put("interval_start", step.from).put("interval_end", step.at)
+                        .put("time_reasons", JSONArray(step.reasons)))
+                    val origins = JSONObject()
+                    step.activeDirections.filter { direction ->
+                        definition.getJSONObject("time_rules").getJSONObject(direction).getString("condition") == "custom"
+                    }.forEach { direction ->
+                        val version = state.optJSONObject("time_condition_versions")?.opt(direction)
+                        origins.put(direction, version ?: JSONObject.NULL)
+                    }
+                    if (origins.length() > 0) change.put("time_condition_origins", origins)
+                }
+            }
+        } else {
+            val hours = (now.toDouble() - from.toDouble()) / 3600000.0
+            val half = definition.getDouble("halfLifeHours")
+            val rate = rows(definition, "triggers").filter { it.getString("source") == "time" }.sumOf { it.getDouble("delta") }
+            val old = state.getDouble("value")
+            val next = if (half == 0.0) old + rate * hours else {
+                val k = ln(2.0) / half
+                val equilibrium = definition.getDouble("baseline") + rate / k
+                equilibrium + (old - equilibrium) * exp(-k * hours)
+            }
+            change(definition, state, next, now)?.let {
+                changes.put(it.put("interval_start", from).put("interval_end", now))
+            }
+        }
     }
 
     internal fun record(data: JSONObject, id: String, source: String, chat: String, detail: String, changes: JSONArray, now: Long) {
@@ -111,20 +159,28 @@ object InternalStateEngine {
             .put("source", source).put("chat", chat).put("detail", detail.take(240)).put("changes", changes))
     }
 
-    fun event(data: JSONObject, id: String, source: String, chat: String, detail: String, now: Long, applyTriggers: Boolean = true) {
+    fun event(data: JSONObject, id: String, source: String, chat: String, detail: String, now: Long,
+              applyTriggers: Boolean = true, contactAt: Long? = null) {
         require(source in sources && source != "time")
+        require(contactAt == null || source == "user_message" && contactAt >= 0 && contactAt <= now) { "联系时间必须来自已收到的真实用户消息" }
         // Persisted event IDs make message upserts/retries idempotent, including across restarts.
         if (rows(data, "events").any { it.getString("id") == id }) return
-        advance(data, chat, now)
         val changes = JSONArray()
-        definitions(data).filter { applyTriggers && it.getBoolean("active") }.forEach { d ->
+        // Register the real contact boundary before settling elapsed time. A delayed persistence
+        // never replays time already settled, but still switches the remaining interval correctly.
+        val contact = if (contactAt != null) {
+            record(data, id, source, chat, detail, changes, now)
+            rows(data, "events").last().also { it.put("contact_at", contactAt) }
+        } else null
+        advance(data, chat, now)
+        definitions(data).filter { applyTriggers && it.getBoolean("active") && !InternalStateTimeRules.isDefined(it) }.forEach { d ->
             val delta = rows(d, "triggers").filter { it.getString("source") == source &&
                 (it.optString("contains").isEmpty() || detail.contains(it.getString("contains"), ignoreCase = true)) }
                 .sumOf { it.getDouble("delta") }.coerceIn(-d.getDouble("maxDelta"), d.getDouble("maxDelta"))
             val state = instance(data, d, chat, now)
             change(d, state, state.getDouble("value") + delta, now)?.let { changes.put(it) }
         }
-        record(data, id, source, chat, detail, changes, now)
+        if (contact == null) record(data, id, source, chat, detail, changes, now)
     }
 
     /** Optimistic revision, explicit reason and real event references; previous definitions are immutable. */
@@ -144,6 +200,7 @@ object InternalStateEngine {
             requireNotNull(definition); validate(definition)
             require(definition.getString("id") == id)
             if (old != null) {
+                require(!InternalStateTimeRules.isDefined(old) || InternalStateTimeRules.isDefined(definition)) { "已定义的条件时间规则不能改回未定义" }
                 require(old.getString("scope") == definition.getString("scope")) { "作用域不可改写；请新建维度保留历史" }
                 if (old.has("object_ref")) {
                     require(definition.has("object_ref") && old.getString("object_ref") == definition.getString("object_ref")) { "明确对象不能通过规则修订更换或清除" }
@@ -164,6 +221,9 @@ object InternalStateEngine {
             .distinct().forEach { advance(data, it, now) }
         // Rule revision cannot reset a value. New dimensions start only at the published baseline.
         next.put("version", expected + 1)
+        if (old != null && operation == "revise") rows(data, "instances")
+            .filter { it.getString("dimension") == id }
+            .forEach { InternalStateTimeRules.clearChangedConditions(it, old, next) }
         val changes = JSONArray()
         if (destination != null) {
             rows(data, "instances").filter { it.getString("dimension") == id }.forEach { source ->
@@ -192,6 +252,8 @@ object InternalStateEngine {
         val state = instance(data, d, chat, now)
         val range = d.getDouble("max") - d.getDouble("min")
         JSONObject(d.toString()).put("kind", kind(d)).put("value", state.getDouble("value")).put("at", state.getLong("at"))
+            .put("time_rules_status", if (InternalStateTimeRules.isDefined(d)) "defined" else "undefined")
+            .put("time_activity", InternalStateTimeRules.activity(data, d, state, chat, now))
             .put("instance_scope", state.getString("scope"))
             .put("intensity", (state.getDouble("value") - d.getDouble("baseline")) / range)
             .put("sustained_hours", ((now - state.getLong("since")).coerceAtLeast(0)) / 3600000.0)
@@ -212,7 +274,7 @@ object InternalStateEngine {
         }
         val versions = instance?.optJSONObject("semantic_versions")
         val fields = JSONObject()
-        subjectiveFields.filter { state.has(it) }.forEach { field ->
+        subjectiveFields.filter { it != "time_conditions" && state.has(it) }.forEach { field ->
             val version = when {
                 versions != null && versions.has(field) -> versions.getInt(field)
                 field == "object_ref" && origin != null && origin.has("object_ref") &&
@@ -221,6 +283,14 @@ object InternalStateEngine {
             }
             fields.put(field, disclosurePolicy(listOf(current, origin, version?.let { definitionVersion(data, id, it) }))
                 .put("origin_version", version ?: JSONObject.NULL))
+        }
+        state.optJSONObject("time_conditions")?.let { conditions ->
+            fields.put("time_conditions", conditionDisclosure(data, id, current, origin, conditions,
+                instance?.optJSONObject("time_condition_versions")))
+        }
+        state.optJSONObject("time_activity")?.let { activity ->
+            fields.put("time_activity", conditionDisclosure(data, id, current, origin, activity,
+                instance?.optJSONObject("time_condition_versions"), includeBuiltins = true))
         }
         return disclosurePolicy(listOf(current, origin)).put("fields", fields)
     }
@@ -231,18 +301,46 @@ object InternalStateEngine {
         val origin = definitionVersion(data, id, experience.getInt("version"))
         val versions = experience.optJSONObject("field_versions")
         val fields = JSONObject()
-        subjectiveFields.filter { experience.has(it) }.forEach { field ->
+        subjectiveFields.filter { it != "time_conditions" && experience.has(it) }.forEach { field ->
             val version = if (versions != null && versions.has(field)) versions.getInt(field) else null
             fields.put(field, disclosurePolicy(listOf(current, origin, version?.let { definitionVersion(data, id, it) }))
                 .put("origin_version", version ?: JSONObject.NULL))
         }
+        experience.optJSONObject("time_conditions")?.let { conditions ->
+            fields.put("time_conditions", conditionDisclosure(data, id, current, origin, conditions,
+                experience.optJSONObject("time_condition_versions")))
+        }
         return disclosurePolicy(listOf(current, origin)).put("fields", fields)
+    }
+
+    private fun conditionDisclosure(data: JSONObject, id: String, current: JSONObject?, origin: JSONObject?,
+                                    values: JSONObject, origins: JSONObject?, includeBuiltins: Boolean = false): JSONObject {
+        val fields = JSONObject()
+        values.keys().forEach { direction ->
+            val builtin = includeBuiltins && origin?.optJSONObject("time_rules")?.optJSONObject(direction)
+                ?.optString("condition")?.let { it != "custom" } == true
+            val version = if (builtin) origin?.getInt("version") else origins?.let {
+                if (it.has(direction)) it.getInt(direction) else null
+            }
+            fields.put(direction, disclosurePolicy(listOf(current, origin, version?.let { definitionVersion(data, id, it) }))
+                .put("origin_version", version ?: JSONObject.NULL))
+        }
+        val policies = fields.keys().asSequence().map { fields.getJSONObject(it) }.toList()
+        return disclosurePolicy(listOf(current, origin))
+            .put("private", policies.any { it.getBoolean("private") })
+            .put("share", policies.all { it.getBoolean("share") })
+            .put("provenance_verified", policies.all { it.getBoolean("provenance_verified") })
+            .put("fields", fields)
     }
 
     fun changeDisclosure(data: JSONObject, change: JSONObject): JSONObject {
         val id = change.getString("dimension")
+        val conditions = change.optJSONObject("time_condition_origins")
+        val conditionDefinitions = conditions?.keys()?.asSequence()?.map { direction ->
+            if (conditions.isNull(direction)) null else definitionVersion(data, id, conditions.getInt(direction))
+        }?.toList().orEmpty()
         return disclosurePolicy(listOf(definitions(data).firstOrNull { it.getString("id") == id },
-            definitionVersion(data, id, change.getInt("version"))))
+            definitionVersion(data, id, change.getInt("version"))) + conditionDefinitions)
             .put("origin_version", change.getInt("version"))
     }
 
@@ -288,17 +386,43 @@ object InternalStateEngine {
             return historical != null && visible(historical, reveal)
         }
         fun observable(change: JSONObject): Boolean {
-            return change.getString("dimension") in allowed && change.getString("scope") in setOf("global", chat) &&
-                visibleVersion(change.getString("dimension"), change.getInt("version"))
+            val dimension = change.getString("dimension")
+            val conditions = change.optJSONObject("time_condition_origins")
+            val visibleConditions = conditions == null || conditions.keys().asSequence().all { direction ->
+                !conditions.isNull(direction) && visibleVersion(dimension, conditions.getInt(direction))
+            }
+            return dimension in allowed && change.getString("scope") in setOf("global", chat) &&
+                visibleVersion(dimension, change.getInt("version")) && visibleConditions
         }
         fun redactSubjective(target: JSONObject, source: JSONObject, dimension: String, versionsKey: String) {
             val fieldVersions = source.optJSONObject(versionsKey)
-            subjectiveFields.filter { source.has(it) }.forEach { key ->
+            subjectiveFields.filter { it != "time_conditions" && source.has(it) }.forEach { key ->
                 if (fieldVersions == null || !fieldVersions.has(key) || !visibleVersion(dimension, fieldVersions.getInt(key))) target.remove(key)
             }
+            val conditionVersions = source.optJSONObject("time_condition_versions")
+            val definition = definitions(data).first { it.getString("id") == dimension }
+            listOf("time_conditions", "time_activity").forEach { key ->
+                val original = target.optJSONObject(key) ?: return@forEach
+                val filtered = JSONObject(original.toString())
+                original.keys().forEach { direction ->
+                    val builtin = key == "time_activity" && definition.optJSONObject("time_rules")
+                        ?.optJSONObject(direction)?.optString("condition")?.let { it != "custom" } == true
+                    if (!builtin && (conditionVersions == null || !conditionVersions.has(direction) ||
+                            !visibleVersion(dimension, conditionVersions.getInt(direction)))) filtered.remove(direction)
+                }
+                if (filtered.length() == 0) target.remove(key) else target.put(key, filtered)
+            }
+            target.remove("time_condition_versions")
         }
+        val previousVisible = mutableMapOf<Pair<String, String>, Boolean>()
         val events = rows(data, "events").mapNotNull { e ->
-            val changes = rows(e, "changes").filter { observable(it) }
+            val changes = rows(e, "changes").mapNotNull { change ->
+                val key = change.getString("dimension") to change.getString("scope")
+                val visible = observable(change)
+                val continuous = previousVisible[key] == true
+                previousVisible[key] = visible
+                if (visible) JSONObject(change.toString()).put("continuous_from_previous", continuous) else null
+            }
             if (changes.isEmpty()) null else JSONObject(e.toString()).put("changes", JSONArray(changes)).also {
                 // A multi-dimension trigger/revision reason may reveal a hidden state. Display provenance only.
                 it.remove("detail")

@@ -1,19 +1,24 @@
 package com.ai.assistance.operit.core.companion
 
 import org.json.JSONArray
-import org.json.JSONException
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
 class InternalStateReportsTest {
     private val hour = 3600000L
+    private fun timeRules(increase: String = "always", decrease: String = "always", amount: Double = 0.0) = JSONObject()
+        .put("increase", JSONObject().put("condition", increase).put("reason", "自己确定的增长原因")
+            .put("interval_minutes", 1).put("amount", amount))
+        .put("decrease", JSONObject().put("condition", decrease).put("reason", "自己确定的下降原因")
+            .put("interval_minutes", 1).put("amount", 0))
+        .put("floor", 0)
     private fun definition(id: String = "existing", kind: String? = null, scope: String = "global") = JSONObject()
         .put("id", id).put("name", id).put("description", "由实际体验形成的测试维度")
         .put("baseline", 50).put("min", 0).put("max", 100).put("maxDelta", 20).put("halfLifeHours", 2)
         .put("scope", scope).put("private", false).put("share", false).put("participates", true)
         .put("triggers", JSONArray().put(JSONObject().put("source", "reading").put("delta", 20)))
-        .put("effects", JSONArray()).also { if (kind != null) it.put("kind", kind) }
+        .put("effects", JSONArray()).also { if (kind != null) it.put("kind", kind).put("time_rules", timeRules()) }
 
     private fun data(vararg definitions: JSONObject): JSONObject = JSONObject().also { data ->
         InternalStateEngine.event(data, "input", "user_message", "chat", "本轮原文", 0, applyTriggers = false)
@@ -190,18 +195,155 @@ class InternalStateReportsTest {
         assertFalse(data.has("semantic_reports"))
     }
 
-    @Test fun creationRequiresClassificationAndExplicitExistingTimeParameters() {
+    @Test fun creationRequiresOneOfTheFourCategoriesAndExplicitConditionalTimeRules() {
         val data = data()
         val frame = frame(data)
         val before = data.toString()
         assertThrows(IllegalArgumentException::class.java) {
             InternalStateReports.apply(data, frame, report(frame, creates = listOf(create(definition("new_state")))), 0)
         }
-        val missingTime = definition("new_state", "drive").also { it.remove("halfLifeHours") }
-        assertThrows(JSONException::class.java) {
+        val missingTime = definition("new_state", "drive").also { it.remove("time_rules") }
+        assertThrows(IllegalArgumentException::class.java) {
             InternalStateReports.apply(data, frame, report(frame, creates = listOf(create(missingTime))), 0)
         }
+        assertThrows(IllegalArgumentException::class.java) {
+            InternalStateReports.apply(data, frame, report(frame, creates = listOf(create(definition("new_state", "custom")))), 0)
+        }
         assertEquals(before, data.toString())
+    }
+
+    @Test fun newPsychologyStateNeedsNoObsoleteHalfLifeOrTriggerParameters() {
+        val data = data()
+        val frame = frame(data)
+        val definition = definition("new_state", "psychology").apply {
+            remove("maxDelta"); remove("halfLifeHours"); remove("triggers")
+            getJSONObject("time_rules").getJSONObject("increase").put("interval_minutes", 0).put("amount", 1000)
+        }
+        InternalStateReports.apply(data, frame, report(frame, creates = listOf(create(definition, 17.0))), 0)
+        InternalStateEngine.advance(data, "chat", hour)
+        val current = state(data, "new_state")
+        assertEquals("psychology", current.getString("kind"))
+        assertEquals(17.0, current.getDouble("value"), 0.0)
+        assertEquals(0.0, current.getJSONObject("time_rules").getDouble("floor"), 0.0)
+    }
+
+    private fun revise(id: String = "existing", expected: Int = 1, changes: JSONObject) = JSONObject()
+        .put("id", id).put("expected_version", expected).put("changes", changes).put("reason", "这次经历支持调整定义")
+
+    @Test fun renameDescriptionCategoryAndExperienceCommitInOneFrameWithoutLosingHistory() {
+        val data = data(definition())
+        val frame = frame(data)
+        val payload = report(frame, listOf(update(value = 64.0))).put("revise", JSONArray().put(revise(changes = JSONObject()
+            .put("name", "新的名字").put("description", "更准确的简介").put("kind", "psychology").put("time_rules", timeRules()))))
+        val receipt = InternalStateReports.apply(data, frame, payload, 0)
+        val current = state(data)
+        assertEquals("existing", current.getString("id"))
+        assertEquals("新的名字", current.getString("name"))
+        assertEquals("更准确的简介", current.getString("description"))
+        assertEquals("psychology", current.getString("kind"))
+        assertEquals(64.0, current.getDouble("value"), 0.0)
+        assertEquals(2, current.getInt("version"))
+        assertEquals(2, InternalStateEngine.rows(data, "versions").size)
+        assertEquals(2, InternalStateEngine.rows(data, "experiences").single().getInt("version"))
+        assertEquals("existing", receipt.getJSONArray("revised").getString(0))
+        assertEquals(frame.revision + 1, receipt.getLong("revision"))
+        val beforeRetry = data.toString()
+        InternalStateReports.apply(data, frame, payload, hour)
+        assertEquals(beforeRetry, data.toString())
+    }
+
+    @Test fun invalidRevisionRejectsOtherValidWritesAtomically() {
+        val data = data(definition())
+        val frame = frame(data)
+        val before = data.toString()
+        val badPatches = listOf(
+            JSONObject().put("id", "new_identity"),
+            JSONObject().put("kind", "自定义模块"),
+            JSONObject().put("time_rules", JSONObject().put("floor", 30)),
+            JSONObject().put("time_rules", JSONObject.NULL)
+        )
+        badPatches.forEach { patch ->
+            try {
+                InternalStateReports.apply(data, frame, report(frame, listOf(update())).put("revise", JSONArray()
+                    .put(revise(changes = patch))), 0)
+                fail("invalid metadata patch must be rejected")
+            } catch (expected: IllegalArgumentException) {
+                assertEquals(before, data.toString())
+            } catch (expected: org.json.JSONException) {
+                assertEquals(before, data.toString())
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            InternalStateReports.apply(data, frame, report(frame).put("revise", JSONArray()
+                .put(revise(expected = 99, changes = JSONObject().put("name", "过期改名")))), 0)
+        }
+        assertEquals(before, data.toString())
+    }
+
+    @Test fun conditionOnlyUpdateSettlesOldConditionThenChangesFutureTiming() {
+        val data = data(definition(kind = "sentiment").put("time_rules", timeRules(increase = "custom", amount = 1.0)))
+        val first = frame(data)
+        InternalStateReports.apply(data, first, report(first, listOf(JSONObject().put("id", "existing")
+            .put("reason", "已出现这个增长原因").put("time_conditions", JSONObject().put("increase", true)))), 0)
+        val second = frame(data, "end_condition", hour / 2)
+        InternalStateReports.apply(data, second, report(second, listOf(JSONObject().put("id", "existing")
+            .put("reason", "这个原因已经结束").put("time_conditions", JSONObject().put("increase", false)))), hour / 2)
+        assertEquals(80.0, state(data).getDouble("value"), 1e-9)
+        InternalStateEngine.advance(data, "chat", hour)
+        assertEquals(80.0, state(data).getDouble("value"), 1e-9)
+        assertFalse(state(data).getJSONObject("time_conditions").getBoolean("increase"))
+    }
+
+    @Test fun modelCannotOverrideHostContactConditionOrSubmitTextAsBoolean() {
+        val rules = timeRules(increase = "not_contacted").put("contact_window_minutes", 0)
+        val data = data(definition(kind = "drive").put("time_rules", rules))
+        val frame = frame(data)
+        val before = data.toString()
+        for (value in listOf(true, "true")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                InternalStateReports.apply(data, frame, report(frame, listOf(update()
+                    .put("time_conditions", JSONObject().put("increase", value)))), 0)
+            }
+        }
+        assertEquals(before, data.toString())
+    }
+
+    @Test fun renamedCustomConditionKeepsItsMeaningButNewReasonNeedsFreshConfirmation() {
+        val rules = timeRules(increase = "custom")
+        val data = data(definition(kind = "sentiment").put("time_rules", rules))
+        val first = frame(data)
+        InternalStateReports.apply(data, first, report(first, listOf(update().put("time_conditions", JSONObject().put("increase", true)))), 0)
+        val renameFrame = frame(data, "rename")
+        InternalStateReports.apply(data, renameFrame, report(renameFrame).put("revise", JSONArray()
+            .put(revise(changes = JSONObject().put("name", "依然同一状态")))), 0)
+        assertTrue(state(data).getJSONObject("time_conditions").getBoolean("increase"))
+        val newMeaning = JSONObject(rules.toString()).apply { getJSONObject("increase").put("reason", "另一个原因") }
+        val ruleFrame = frame(data, "new_rule")
+        InternalStateReports.apply(data, ruleFrame, report(ruleFrame).put("revise", JSONArray()
+            .put(revise(expected = 2, changes = JSONObject().put("time_rules", newMeaning)))), 0)
+        assertFalse(state(data).has("time_conditions"))
+        assertEquals(80.0, state(data).getDouble("value"), 0.0)
+    }
+
+    @Test fun partialPublicConditionReportDoesNotPublishTheOtherPrivateDirection() {
+        val rules = timeRules(increase = "custom", decrease = "custom")
+        val privateDefinition = definition(kind = "emotion").put("time_rules", rules).put("private", true)
+        val data = data(privateDefinition)
+        val first = frame(data)
+        InternalStateReports.apply(data, first, report(first, listOf(update().put("time_conditions", JSONObject()
+            .put("increase", true).put("decrease", false)))), 0)
+        InternalStateEngine.evolve(data, "revise", "existing", 1,
+            JSONObject(privateDefinition.toString()).put("private", false), null, "从此愿意公开", listOf("input"), "chat", 0)
+        val second = frame(data, "public_condition")
+        InternalStateReports.apply(data, second, report(second, listOf(update().put("time_conditions", JSONObject().put("increase", false)))), 0)
+        val current = InternalStateEngine.rows(data, "instances").single()
+        assertEquals(2, current.getJSONObject("time_condition_versions").getInt("increase"))
+        assertEquals(1, current.getJSONObject("time_condition_versions").getInt("decrease"))
+        val visible = InternalStateEngine.observation(data, "chat", 0, false).getJSONArray("states").getJSONObject(0)
+        assertFalse(visible.getJSONObject("time_conditions").getBoolean("increase"))
+        assertFalse(visible.getJSONObject("time_conditions").has("decrease"))
+        val latest = InternalStateEngine.rows(data, "experiences").last()
+        assertEquals(1, latest.getJSONObject("time_condition_versions").getInt("decrease"))
     }
 
     @Test fun duplicateIdentifiersOrWrongValueTypeCannotMutateData() {

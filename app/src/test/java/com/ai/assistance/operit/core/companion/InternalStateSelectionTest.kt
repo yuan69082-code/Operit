@@ -29,6 +29,7 @@ class InternalStateSelectionTest {
         assertEquals(12L, selected.nextCursor)
         val identity = selected.payload.getJSONArray("state_catalog").getJSONObject(0)
         assertEquals("unclassified", identity.getString("kind"))
+        assertEquals("undefined", identity.getString("time_rules_status"))
         assertEquals(3, identity.getInt("version"))
         assertTrue(identity.getBoolean("private"))
         assertFalse(identity.getBoolean("share"))

@@ -58,6 +58,7 @@ object InternalStateSelection {
             JSONObject().put("id", definition.getString("id"))
                 .put("name", definition.getString("name"))
                 .put("kind", InternalStateEngine.kind(definition))
+                .put("time_rules_status", if (InternalStateTimeRules.isDefined(definition)) "defined" else "undefined")
                 .put("version", definition.getInt("version"))
                 .put("min", definition.getDouble("min"))
                 .put("max", definition.getDouble("max"))
