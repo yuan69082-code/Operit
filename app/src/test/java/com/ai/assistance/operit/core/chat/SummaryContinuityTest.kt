@@ -11,6 +11,31 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SummaryContinuityTest {
+    private fun minimumTail(messages: List<ChatMessage>) =
+        SummaryContextSlice.plan(messages, retainedCharBudget = 0)
+
+    @Test fun shortRecentDiscussionSurvivesCompressionBeyondTwoTurns() {
+        val history = (1..12).flatMap(::turn)
+        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        assertEquals((5..12).flatMap(::turn), slice.retained)
+        assertEquals(history, slice.source + slice.retained)
+    }
+
+    @Test fun extraHistoryStopsAtBudgetWithoutSkippingInterveningTurns() {
+        val history = (1..8).flatMap(::turn)
+        val budget = (6..8).flatMap(::turn).sumOf { it.content.length.toLong() }
+        val slice = requireNotNull(SummaryContextSlice.plan(history, retainedCharBudget = budget))
+        assertEquals((6..8).flatMap(::turn), slice.retained)
+        assertEquals(history, slice.source + slice.retained)
+    }
+
+    @Test fun oversizedLatestToolChainRemainsWhole() {
+        val latest = turn(8) + ChatMessage("ai", "tool result ".repeat(2000), timestamp = 820)
+        val history = (1..7).flatMap(::turn) + latest
+        val slice = requireNotNull(SummaryContextSlice.plan(history, retainedCharBudget = 100))
+        assertEquals(turn(7) + latest, slice.retained)
+    }
+
     private fun turn(index: Int) = listOf(
         ChatMessage("user", "user $index", timestamp = index * 100L),
         ChatMessage("ai", "answer $index", timestamp = index * 100L + 10)
@@ -18,7 +43,7 @@ class SummaryContinuityTest {
 
     @Test fun summaryKeepsTwoRecentWholeTurnsVerbatim() {
         val history = (1..5).flatMap(::turn)
-        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        val slice = requireNotNull(minimumTail(history))
         assertEquals(history.take(6), slice.source)
         assertEquals(history.takeLast(4), slice.retained)
         assertEquals(history, slice.source + slice.retained)
@@ -35,7 +60,7 @@ class SummaryContinuityTest {
             ChatMessage("ai", "<tool_result name=\"ob:hold\" status=\"success\">已完成</tool_result>记好了。", timestamp = 340)
         )
         val history = turn(1) + turn(2) + recent
-        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        val slice = requireNotNull(minimumTail(history))
         val summary = ChatMessage("summary", "较早的约定", timestamp = slice.beforeTimestamp + 1)
         val nextUser = ChatMessage("user", "错了错了，和你聊，你要怎么聊", timestamp = 400)
         // Same active-history selector used by the model request. Covered messages disappear;
@@ -48,23 +73,23 @@ class SummaryContinuityTest {
     @Test fun oldSummaryIsIncludedWhenPreparingTheNextOne() {
         val old = ChatMessage("summary", "上周的约定不能丢", timestamp = 50)
         val history = listOf(ChatMessage("ai", "已经被概括的旧话", timestamp = 10), old) + (1..4).flatMap(::turn)
-        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        val slice = requireNotNull(minimumTail(history))
         assertEquals(old, slice.source.first())
         assertFalse(slice.source.any { it.timestamp == 10L })
         assertEquals(turn(3) + turn(4), slice.retained)
     }
 
     @Test fun shortHistoryKeepsAtLeastOneWholeTurn() {
-        val slice = requireNotNull(SummaryContextSlice.plan(turn(1) + turn(2)))
+        val slice = requireNotNull(minimumTail(turn(1) + turn(2)))
         assertEquals(turn(1), slice.source)
         assertEquals(turn(2), slice.retained)
-        assertNull(SummaryContextSlice.plan(turn(1)))
-        assertNull(SummaryContextSlice.plan(emptyList()))
+        assertNull(minimumTail(turn(1)))
+        assertNull(minimumTail(emptyList()))
     }
 
     @Test fun newUserInputStaysOutsideTheCompressedPrefix() {
         val pending = ChatMessage("user", "还没回答的问题", timestamp = 400)
-        val slice = requireNotNull(SummaryContextSlice.plan((1..3).flatMap(::turn) + pending))
+        val slice = requireNotNull(minimumTail((1..3).flatMap(::turn) + pending))
         assertEquals(turn(3) + pending, slice.retained)
         assertFalse(slice.source.contains(pending))
     }
@@ -75,12 +100,12 @@ class SummaryContinuityTest {
             ChatMessage("ai", "A 的结论", timestamp = 210, roleName = "A"),
             ChatMessage("ai", "B 的回应", timestamp = 220, roleName = "B")
         )
-        assertEquals(members, requireNotNull(SummaryContextSlice.plan(turn(1) + members)).retained)
+        assertEquals(members, requireNotNull(minimumTail(turn(1) + members)).retained)
     }
 
     @Test fun reviewedSourceIsASnapshotNotMutableLiveMessages() {
         val history = (1..3).flatMap(::turn)
-        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        val slice = requireNotNull(minimumTail(history))
         history.first().content = "改过的内容"
         assertEquals("user 1", slice.source.first().content)
         assertFalse(SummaryReview.canCommit(slice.source, history, slice.beforeTimestamp, slice.afterTimestamp))
@@ -92,7 +117,7 @@ class SummaryContinuityTest {
                 ChatMessage("ai", "member $i tool call", timestamp = i * 100L, sentAt = i * 100L),
                 ChatMessage("ai", "member $i tool result and reply", timestamp = i * 100L + 10, sentAt = i * 100L)
             ) }
-        val slice = requireNotNull(SummaryContextSlice.plan(history))
+        val slice = requireNotNull(minimumTail(history))
         assertEquals(history.take(5), slice.source)
         assertEquals(history.takeLast(4), slice.retained)
     }
@@ -101,12 +126,12 @@ class SummaryContinuityTest {
         val latest = listOf(ChatMessage("user", "逗你", timestamp = 300)) + (1..4).map {
             ChatMessage("ai", "fragment $it", timestamp = 300L + it * 10, sentAt = 300)
         }
-        val slice = requireNotNull(SummaryContextSlice.plan(turn(1) + turn(2) + latest))
+        val slice = requireNotNull(minimumTail(turn(1) + turn(2) + latest))
         assertEquals(turn(2) + latest, slice.retained)
     }
 
     @Test fun commitRejectsAMarkerThatWouldHideUnsummarizedMessages() {
-        val slice = requireNotNull(SummaryContextSlice.plan((1..4).flatMap(::turn)))
+        val slice = requireNotNull(minimumTail((1..4).flatMap(::turn)))
         assertTrue(SummaryReview.canCommit(slice.source, slice.source + slice.retained, slice.beforeTimestamp, slice.afterTimestamp))
         assertFalse(SummaryReview.canCommit(slice.source, slice.source + slice.retained, slice.retained.last().timestamp, null))
         assertFalse(SummaryReview.canCommit(slice.source, slice.source, slice.beforeTimestamp, slice.beforeTimestamp))
@@ -208,7 +233,7 @@ class SummaryContinuityTest {
 
     @Test fun quietWakesCanCompressWithoutAnyNewHumanOrVisibleAssistantMessage() {
         val wakes = (1..6).map(::quietWake)
-        val slice = requireNotNull(SummaryContextSlice.plan(wakes))
+        val slice = requireNotNull(minimumTail(wakes))
         assertEquals(wakes.take(4), slice.source)
         assertEquals(wakes.takeLast(2), slice.retained)
         assertEquals(wakes, slice.source + slice.retained)
@@ -217,7 +242,7 @@ class SummaryContinuityTest {
     @Test fun repeatedQuietWakeCompressionKeepsPriorSummaryAndRecentChoices() {
         val summary = ChatMessage("summary", "我选择了先研究这个问题，因为资料中仍有矛盾。", timestamp = 50)
         val wakes = (1..5).map(::quietWake)
-        val slice = requireNotNull(SummaryContextSlice.plan(listOf(summary) + wakes))
+        val slice = requireNotNull(minimumTail(listOf(summary) + wakes))
         assertEquals(summary, slice.source.first())
         assertEquals(listOf(summary) + wakes.take(3), slice.source)
         assertEquals(wakes.takeLast(2), slice.retained)
@@ -226,13 +251,13 @@ class SummaryContinuityTest {
 
     @Test fun ordinaryUnansweredHumanMessagesStillCannotBeCompressed() {
         val unanswered = (1..5).map { ChatMessage("user", "human $it", timestamp = it * 100L) }
-        assertNull(SummaryContextSlice.plan(unanswered))
+        assertNull(minimumTail(unanswered))
     }
 
     @Test fun quietWakeFollowedBySpokenReplyStaysInTheSameRetainedTurn() {
         val wakes = (1..5).map(::quietWake)
         val reply = ChatMessage("ai", "我找到了一条线索，想和你说说。", timestamp = 510)
-        val slice = requireNotNull(SummaryContextSlice.plan(wakes + reply))
+        val slice = requireNotNull(minimumTail(wakes + reply))
         assertEquals(wakes.take(3), slice.source)
         assertEquals(wakes.takeLast(2) + reply, slice.retained)
     }
