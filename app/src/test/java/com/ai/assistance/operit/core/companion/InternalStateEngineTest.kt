@@ -26,6 +26,28 @@ class InternalStateEngineTest {
         JSONObject().put("action", it).put("id", it).put("available", true)
     }
 
+    @Test fun promptProjectionPreservesDecisionAndDoesNotMutateStoredDefinitions() {
+        val data = data()
+        InternalStateEngine.event(data, "read", "reading", "a", "read", 0)
+        val decision = InternalStateEngine.decision(data, "a", 0, candidates())
+            .put("thoughts", JSONArray().put(JSONObject().put("id", "t").put("text", "想继续的问题")))
+        val before = decision.toString()
+        val compact = InternalStateEngine.promptPayload(decision)
+        assertEquals(before, decision.toString())
+        assertEquals(decision.getJSONArray("candidates").toString(), compact.getJSONArray("candidates").toString())
+        assertEquals(decision.getJSONArray("important_changes").toString(), compact.getJSONArray("important_changes").toString())
+        assertEquals(decision.getJSONArray("thoughts").toString(), compact.getJSONArray("thoughts").toString())
+        val original = decision.getJSONArray("states").getJSONObject(0)
+        val state = compact.getJSONArray("states").getJSONObject(0)
+        for (key in original.keys()) {
+            if (key in setOf("triggers", "maxDelta", "halfLifeHours")) assertFalse(state.has(key))
+            else assertEquals(key, original.get(key).toString(), state.get(key).toString())
+        }
+        assertTrue(original.has("triggers"))
+        assertTrue(compact.toString().length < before.length)
+        assertTrue(InternalStateEngine.prompt(decision).contains(compact.toString()))
+    }
+
     @Test fun arbitraryDimensionsAndNoFixedEmotionEnumeration() {
         val data = data(definition("unfinished_question"))
         create(data, definition("creative_tension"))
