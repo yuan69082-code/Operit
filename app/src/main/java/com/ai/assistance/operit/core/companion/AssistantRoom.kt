@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.companion
 
+import com.ai.assistance.operit.core.chat.RuntimeContextSections
 import android.content.Context
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
@@ -103,12 +104,25 @@ class AssistantRoom(private val context: Context, val role: String) {
     fun prompt(): String {
         val data = read()
         return buildString {
-            if (data.optBoolean("ai_decorate")) append("你可以用 companion_room 查看并布置自己的房间和聊天外观；用户锁定的项目保持不变。\n")
-            if (data.optBoolean("ai_diary")) append("你可以用 companion_diary 写自己的日记或回看某日，不要求每天写，也不必写任务汇报。先看已有条目，避免重复。记录实际经历、当时想法与未证实的猜测时分清来源；查看他人记录不等于亲历。\n")
+            if (data.optBoolean("ai_decorate")) append(DECORATE_INSTRUCTIONS)
+            if (data.optBoolean("ai_diary")) append(DIARY_INSTRUCTIONS)
         }
     }
 
+    fun promptSections(): RuntimeContextSections {
+        val data = read()
+        return RuntimeContextSections(
+            instructions = "本轮房间授权 ai_decorate=true 时：" + DECORATE_INSTRUCTIONS +
+                "本轮房间授权 ai_diary=true 时：" + DIARY_INSTRUCTIONS,
+            state = "\n[房间授权]\n" + JSONObject()
+                .put("ai_decorate", data.optBoolean("ai_decorate"))
+                .put("ai_diary", data.optBoolean("ai_diary")).toString() + "\n"
+        )
+    }
+
     companion object {
+        private const val DECORATE_INSTRUCTIONS = "你可以用 companion_room 查看并布置自己的房间和聊天外观；用户锁定的项目保持不变。\n"
+        private const val DIARY_INSTRUCTIONS = "你可以用 companion_diary 写自己的日记或回看某日，不要求每天写，也不必写任务汇报。先看已有条目，避免重复。记录实际经历、当时想法与未证实的猜测时分清来源；查看他人记录不等于亲历。\n"
         private val mutex = Mutex()
         val revision = MutableStateFlow(0L)
     }
@@ -148,3 +162,4 @@ object RoomTheme {
             i.keys().asSequence().associateWith { i.getInt(it) }, f.keys().asSequence().associateWith { f.getDouble(it).toFloat() })
     }
 }
+

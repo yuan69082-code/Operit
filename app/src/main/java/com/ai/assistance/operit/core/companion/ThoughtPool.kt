@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.companion
 
+import com.ai.assistance.operit.core.chat.RuntimeContextSections
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
@@ -61,11 +62,17 @@ object ThoughtPool {
     }
 
     /** 唤醒和聊天里提醒自己：有念头浮上来了。只列开头，不替我决定。 */
-    fun prompt(items: List<JSONObject>, now: Long): String {
+    fun prompt(items: List<JSONObject>, now: Long): String = promptSections(items, now).let {
+        if (it.state.isEmpty()) "" else it.asText()
+    }
+
+    fun promptSections(items: List<JSONObject>, now: Long): RuntimeContextSections {
         val up = surfaced(items, now)
-        if (up.isEmpty()) return ""
-        return "【念头池：有${up.size}个沉着的念头浮上来了】\n" + up.take(5).joinToString("\n") {
+        return RuntimeContextSections(
+            instructions = "\n念头池中浮现的念头，追、讲还是扔，你自己定。用 companion_todo action=thought id=… choice=now/sink/drop 处理；还没想好就再 sink 一阵。\n",
+            state = if (up.isEmpty()) "" else "【念头池：有${up.size}个沉着的念头浮上来了】\n" + up.take(5).joinToString("\n") {
             "- ${it.getString("id")}：${it.optString("text").take(80)}"
-        } + "\n追、讲还是扔，你自己定。用 companion_todo action=thought id=… choice=now/sink/drop 处理；还没想好就再 sink 一阵。\n"
+            } + "\n"
+        )
     }
 }

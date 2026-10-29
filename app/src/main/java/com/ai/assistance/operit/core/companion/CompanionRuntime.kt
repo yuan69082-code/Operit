@@ -389,7 +389,9 @@ object CompanionRuntime {
 
         val activities = if (explorationWork != null) ExplorationPolicy.choices(ExplorationStore(context).read(roleId))
             .mapNotNull { ExplorationPolicy.activities[it] }.joinToString("、") else ""
-        val selfContinuity = if (explorationWork == null && !internalEnabled) "" else buildString {
+        // The enabled internal-state selector reads every todo/source before budgeting. Repeating
+        // a newest-five list here would bypass that choice and also bias its current-input query.
+        val selfContinuity = if (internalEnabled || explorationWork == null) "" else buildString {
             val openTodos = store.todos(store.scope(chatId, roleId))
                 .filter { it.optString("status") !in setOf("done", "archived") }
                 .sortedByDescending { it.optLong("updated") }
@@ -427,7 +429,7 @@ object CompanionRuntime {
                 "这些只是候选材料，不要求从中找题目，也不比你已经持续的兴趣、念头或私人事项更优先。只有它确实让你产生了想继续的问题时，才用 companion_reading save_source 存成 kind=topic 的来源，题目自己写、写泛一点，details 里 parent=chat:那天的日期（例如 chat:2026-10-14）。" +
                 "搜索词里不放她的名字、称呼、坐标、她本人的身体和病情、你们哪次具体做了什么；泛的话题都可以。学到的东西不必预设为给她用，也不要求每次有产出；学了两回没意思就把那个来源 enabled=false 关掉。\n"
         }
-        val thoughtPrompt = ThoughtPool.prompt(ThoughtPool.all(context, roleId), System.currentTimeMillis())
+        val thoughtPrompt = if (internalEnabled) "" else ThoughtPool.prompt(ThoughtPool.all(context, roleId), System.currentTimeMillis())
             .let { if (it.isEmpty()) "" else "\n$it" }
         val focusInstruction = when {
             explorationWork != null ->
@@ -439,7 +441,7 @@ object CompanionRuntime {
             taskEvent ->
                 "本次处理已提交的私人事项，先处理事项本身；可按实际需要阅读、探索、整理并记录真实进展。是否联系她由事项的实际需要和你自己的判断决定，不把联系用户当默认收尾。"
             internalEnabled ->
-                "本次是自主注意力判断。先比较 Internal State 给出的候选分数、变化与持续性，再决定联系、推进私人事项、安排探索、使用必要工具、暂缓、放下或休息。用户关系只是多个注意力来源之一。可以选择低分候选，但在 companion_note 留下实际取舍。探索取材仍须用 companion_explore schedule 进入独立探索轮次，不能借普通唤醒绕过探索开关、间隔和每日预算；待办可按需 submit。联系不是默认收尾。"
+                "本次是自主注意力判断。结合 Internal State 本轮提供的状态、变化、未解决事项和自己的持续关注，再决定联系、推进私人事项、安排探索、使用必要工具、暂缓、放下或休息。选中和高分都不是行动命令，未注入的状态仍然存续；用户关系只是多个注意力来源之一。可以选择低分候选，在 companion_note 留下实际取舍。探索取材仍须用 companion_explore schedule 进入独立探索轮次，不能借普通唤醒绕过探索开关、间隔和每日预算；待办可按需 submit。联系不是默认收尾。"
             else ->
                 "本轮只做主动联系判断，不自行启动取材或学习。先问自己此刻是否真的想跟她说话：想就按真实理由联系，不必替她预先决定忙不忙或会不会烦；不想就安静。不要为了完成一次主动联系而制造理由，也不要原样重复上次的话；同一件事仍在意可以换个说法继续。即使旧计划提到学习，也交给独立的自主探索。"
         }
@@ -466,10 +468,10 @@ object CompanionRuntime {
             $focusInstruction
             未授权的操作仍需按正常权限执行。通话可使用正常的 request_voice_call 工具，拒接或无人应答后可自行决定是否再次拨打、发文字或不回复，已有来电或通话时须等其结束。
             本轮最多12次工具调用、${if (phoneRole != null || softwareRole != null) 3 else 5}分钟。$scheduleInstruction
-            先使用真正需要的工具；最后若决定发消息，用 <companion_message>这里仅写给她的新消息</companion_message>；若不发则只输出 <companion_quiet/>。
+            先使用真正需要的工具；最后的公开表达决定：若发消息，用 <companion_message>这里仅写给她的新消息</companion_message>；若不发，用 <companion_quiet/>。安静不省略另行要求的内部状态报告或私人随记。
             ${if (phoneRole != null || softwareRole != null) "关注档位由你自己定：觉得现在要更紧或可以松一点，就用 phone_awareness action=gear 调（level/hours/reason）；不想改就不用调用。底线在的时候往下降要写理由。\n            " else ""}$openInstruction
             无论发不发消息，都另用 <companion_note>…</companion_note> 写给下次的自己：这次醒来注意到了什么、此刻什么心情、真正想继续、转向或放下什么，以及为什么这样决定。若本轮涉及联系她，再写想不想开口及真实原因；不要为了给软件一个理由而编造动机。它会藏在你们的聊天里，只有你能看到，她看不到；用你自己的话写，不写流水账。
-            学习过程和内部状态写入资料或工具，不把计划、工具日志和控制标记直接发送给用户。${if (internalEnabled) "宿主会自动记录真实回复、工具和探索结果，不自行编造内部状态事件。" else "确实发生互动或完成学习时主动回传 XC，不能编造她的回应。"}
+            学习过程写入实际资料，不把计划、工具日志和控制标记直接发送给用户。${if (internalEnabled) "内部状态通过本轮 operit_state_report 回报，在公开表达决定前给出完整报告；安静时也可以报告状态变化，不需要另调用工具写当前值。宿主记录真实回复、工具和探索结果，不自行编造宿主事件。" else "确实发生互动或完成学习时主动回传 XC，不能编造她的回应。"}
         """.trimIndent()
         val result = CompletableDeferred<String>()
         if (explorationWork != null && (epoch != generation.get() ||

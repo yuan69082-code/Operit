@@ -719,23 +719,22 @@ open class ClaudeProvider(
             )
 
         val systemMessages = effectiveHistory.filter { it.kind == PromptTurnKind.SYSTEM }
-        val systemPrompt =
-            systemMessages
-                .takeIf { it.isNotEmpty() }
-                ?.joinToString("\n\n") { turn ->
-                    ChatUtils.stripOpenAiResponsesProtocolMarkup(turn.content)
-                }
+        // 保留系统指令各自的内容块边界，避免将稳定前缀重新拼成一个大块。
+        // 断点仍统一放在固定 system 序列末尾，不为每条指令增加缓存标记。
         val systemBlocks =
-            systemPrompt
-                ?.takeIf { it.isNotBlank() }
-                ?.let { prompt ->
-                    JSONArray().put(
-                        JSONObject().apply {
-                            put("type", "text")
-                            put("text", prompt)
-                        }
-                    )
+            JSONArray().apply {
+                systemMessages.forEach { turn ->
+                    val text = ChatUtils.stripOpenAiResponsesProtocolMarkup(turn.content)
+                    if (text.isNotBlank()) {
+                        put(
+                            JSONObject().apply {
+                                put("type", "text")
+                                put("text", text)
+                            }
+                        )
+                    }
                 }
+            }.takeIf { it.length() > 0 }
 
         val historyWithoutSystem = effectiveHistory.filter { it.kind != PromptTurnKind.SYSTEM }
         var queuedAssistantToolText: String? = null
@@ -2078,3 +2077,4 @@ open class ClaudeProvider(
         }
     }
 }
+
