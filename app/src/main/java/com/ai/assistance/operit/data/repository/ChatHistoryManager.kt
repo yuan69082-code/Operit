@@ -2514,7 +2514,9 @@ class ChatHistoryManager private constructor(private val context: Context) {
                 hydrateMessages(chatId, messageEntities)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "加载运行态聊天消息失败", e)
-                emptyList()
+                // A failed read is not an empty conversation. Abort this request instead of
+                // sending a reply without the user's preceding conversation.
+                throw e
             }
         }
     }

@@ -15,7 +15,12 @@ internal data class SummaryContextSlice(
         fun activeHistory(messages: List<ChatMessage>): List<ChatMessage> =
             messages.drop(messages.indexOfLast { it.sender == "summary" }.coerceAtLeast(0))
 
-        fun plan(messages: List<ChatMessage>): SummaryContextSlice? {
+        fun plan(
+            messages: List<ChatMessage>,
+            retainedCharBudget: Long = 16_384,
+            maxRetainedTurns: Int = 8,
+        ): SummaryContextSlice? {
+            require(retainedCharBudget >= 0 && maxRetainedTurns >= 2)
             val active = activeHistory(messages)
             val turnStarts = mutableListOf<Int>()
             var hasAssistant = false
@@ -37,7 +42,20 @@ internal data class SummaryContextSlice(
             }
             // Never cut between a user's message and its assistant/tool response chain.
             if (turnStarts.size < 2) return null
-            val retainedTurns = minOf(2, turnStarts.size - 1)
+            // Two whole turns remain the minimum. Spend available room on earlier turns
+            // so a short correction or reference is not lost merely because it is third-last.
+            // Never split a tool chain; an oversized minimum tail is kept verbatim.
+            var retainedTurns = minOf(2, turnStarts.size - 1)
+            var retainedChars = active.drop(turnStarts[turnStarts.size - retainedTurns])
+                .sumOf { it.content.length.toLong() }
+            while (retainedTurns < minOf(maxRetainedTurns, turnStarts.size - 1)) {
+                val candidate = turnStarts.size - retainedTurns - 1
+                val chars = active.subList(turnStarts[candidate], turnStarts[candidate + 1])
+                    .sumOf { it.content.length.toLong() }
+                if (retainedChars + chars > retainedCharBudget) break
+                retainedChars += chars
+                retainedTurns++
+            }
             val boundary = turnStarts[turnStarts.size - retainedTurns]
             val source = active.take(boundary)
             // A quiet wake can leave only the assistant's hidden note, with no visible reply.

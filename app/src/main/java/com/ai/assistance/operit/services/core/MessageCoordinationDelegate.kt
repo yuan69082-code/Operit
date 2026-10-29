@@ -1800,7 +1800,14 @@ class MessageCoordinationDelegate(
                 return false
             }
 
-            val slice = com.ai.assistance.operit.core.chat.SummaryContextSlice.plan(currentMessages)
+            val contextSettings = resolveChatContextSettingsForRequest(effectiveChatModelConfigIdOverride)
+            // Reserve at most a quarter of the configured context for extra verbatim history.
+            // Character count is a conservative text budget, not an exact provider token count.
+            val retainedCharBudget = (contextSettings.effectiveContextLength.toDouble() * 1024 / 4)
+                .toLong().coerceIn(0L, 16_384L)
+            val slice = com.ai.assistance.operit.core.chat.SummaryContextSlice.plan(
+                currentMessages, retainedCharBudget = retainedCharBudget,
+            )
                 ?: return false
             val beforeTimestamp = slice.beforeTimestamp
             val afterTimestamp = slice.afterTimestamp
