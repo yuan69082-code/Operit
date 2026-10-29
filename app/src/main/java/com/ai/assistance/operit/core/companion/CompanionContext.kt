@@ -40,7 +40,8 @@ object CompanionContext {
             CompanionRuntime.noteConversation(context, chatId, roleId)
         }
         val internal = InternalStateStore(context)
-        val xc = if (internal.enabled(roleId)) "" else XcEmotionBridge.prompt(context, chatId, roleId, actualSend = recordSnapshot)
+        val internalEnabled = internal.enabled(roleId)
+        val xc = if (internalEnabled) "" else XcEmotionBridge.prompt(context, chatId, roleId, actualSend = recordSnapshot)
         return buildString {
             append("\n<operit_state>\n")
             append("\n[软件状态，仅作为内部上下文，不复述或朗读字段名]\n")
@@ -85,9 +86,14 @@ object CompanionContext {
             append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；事件目录只放简短原话节选；完整感受用 group_chat feelings 按 chat_id/from/end 读取，没记就空着。\n")
             append("companion_todo 是你自己的待办与私人打算，可以自主创建、批注(comment)、安排继续(submit)、暂缓或完成，不必事事等用户审批。可保存优先级、结论、下一步、共同计划和参考；只有确实需要用户决定才填写 needs_decision。完成后可沉淀到资料库或归档。\n")
             val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
-            if (open.isNotEmpty()) append("你有${open.size}项未完成的私人事项，以下只是最近的候选，不自动获得优先级：" +
-                open.takeLast(3).joinToString("；") { it.optString("title") } + "。是否继续、暂缓或改方向由你结合当下判断。\n")
-            if (!roleId.isNullOrBlank()) append(ThoughtPool.prompt(ThoughtPool.all(context, roleId), System.currentTimeMillis()))
+            // Internal state already carries the newest 32 todo candidates. Keep any of
+            // the existing three reminders not covered there, instead of losing those IDs.
+            val candidateIds = if (internalEnabled) open.sortedByDescending { it.optLong("updated") }
+                .take(32).map { it.getString("id") }.toSet() else emptySet()
+            val reminders = open.takeLast(3).filter { it.getString("id") !in candidateIds }
+            if (reminders.isNotEmpty()) append("你有${open.size}项未完成的私人事项，以下只是最近的候选，不自动获得优先级：" +
+                reminders.joinToString("；") { it.optString("title") } + "。是否继续、暂缓或改方向由你结合当下判断。\n")
+            if (!internalEnabled && !roleId.isNullOrBlank()) append(ThoughtPool.prompt(ThoughtPool.all(context, roleId), System.currentTimeMillis()))
             if (store.proactiveEnabled && store.proactiveRole == roleId && roleId != null) {
                 append("你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。当前安排：")
                 append(store.read(store.scheduleKey(roleId)).toString())

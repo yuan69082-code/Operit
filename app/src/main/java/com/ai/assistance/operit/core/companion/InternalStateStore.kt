@@ -124,8 +124,14 @@ class InternalStateStore(private val context: Context) {
         val now = System.currentTimeMillis()
         val decision = InternalStateEngine.decision(data, chat, now, candidates)
             .put("thoughts", JSONArray(ThoughtPool.surfaced(ThoughtPool.all(context, actor), now)))
+        if (persist) {
+            val compact = InternalStateEngine.promptPayload(decision)
+            // Sizes only: do not log private state, thought text or candidate descriptions.
+            AppLogger.d("InternalState", "Request state JSON chars: full=${decision.toString().length}, compact=${compact.toString().length}, states=${compact.getJSONArray("states").length()}, candidates=${compact.getJSONArray("candidates").length()}, thoughts=${compact.getJSONArray("thoughts").length()}")
+        }
         return InternalStateEngine.prompt(decision) +
-            "维度不是预设枚举。需要时用 companion_internal_state get 查看真实事件和版本，再 create/revise/merge/deactivate；说明经过并引用事件ID。" +
+            "thoughts 是到期浮现的念头；追、讲还是扔由你决定。用 companion_todo action=thought id=… choice=now/sink/drop 处理；没想好可再 sink 一阵。\n" +
+            "维度不是预设枚举。需要时用 companion_internal_state get 查看完整状态定义、触发规则、计算参数、真实事件和版本，再 create/revise/merge/deactivate；说明经过并引用事件ID。" +
             "定义中 effects 用 action/weight/cue 和可选 target 指定影响方向；不参与决策的维度仅记录。不能直接改当前值或伪造触发事件。\n" +
             "内部状态开启时，它是唯一自动注入的状态源；XC 保留连接和记录，不叠加其状态提示。\n"
     }
