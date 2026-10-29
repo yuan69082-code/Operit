@@ -41,7 +41,10 @@ class InternalStateEngineTest {
         val state = compact.getJSONArray("states").getJSONObject(0)
         for (key in original.keys()) {
             if (key in setOf("triggers", "maxDelta", "halfLifeHours")) assertFalse(state.has(key))
-            else assertEquals(key, original.get(key).toString(), state.get(key).toString())
+            else if (original.get(key) is Number) {
+                // JSON round trips normalize 70.0 to 70; compare values, not formatting.
+                assertEquals(key, original.getDouble(key), state.getDouble(key), 0.0)
+            } else assertEquals(key, original.get(key).toString(), state.get(key).toString())
         }
         assertTrue(original.has("triggers"))
         assertTrue(compact.toString().length < before.length)

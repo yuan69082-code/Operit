@@ -209,24 +209,39 @@ internal object SegmentedSummary {
 
     /** 只收短实际模型输入，不修改数据库摘要或原聊天。 */
     fun forPrompt(summary: String): String {
-        if (!hasBlock(summary)) return summary
+        if (!hasBlock(summary)) return SummaryPromptBudget.project(summary, SummaryPromptBudget.MAX_CHARS)
         val parsed = parse(summary)
         val all = (parsed.closed + parsed.open).sortedBy { block ->
-            block.lines().firstNotNullOfOrNull { indexLine.find(it)?.groupValues?.get(2)?.toLongOrNull() } ?: 0L
+            index(block)?.to ?: 0L
         }
         val recent = all.takeLast(KEEP_FULL).toSet()
-        val selected = all.filter { it in recent || it.lineSequence().first().contains("悬着") }
         val oldHeader = summary.substringAfter(HEADER).substringBefore('\n')
         val total = Regex("存档事件共(\\d+)件").find(oldHeader)?.groupValues?.get(1)?.toInt() ?: all.size
-        val replacement = render(emptyList(), selected).replaceFirst(HEADER,
-            "$HEADER 存档事件共${total}件，本次显示${selected.size}件；其余用 group_chat events 查询。")
-        val start = summary.indexOf(HEADER)
-        val end = summary.indexOf(END, start) + END.length
-        return summary.substring(0, start) + replacement + summary.substring(end)
+        fun display(blocks: List<String>) = render(emptyList(), blocks).replaceFirst(HEADER,
+            "$HEADER 存档事件共${total}件，本次显示${blocks.size}件；其余用 group_chat events 查询，status=悬着 可查未决事项。未显示不代表已结束。")
+        // Recent activity gets detail first (including old events that were just continued).
+        // Unresolved events cannot bypass the total budget and grow every request forever.
+        val prioritized = (all.takeLast(4).asReversed() + parsed.open.sortedByDescending { index(it)?.to ?: 0L } +
+            all.filter { it in recent }.asReversed()).distinct()
+        val selected = mutableListOf<String>()
+        val abbreviated = mutableListOf<String>()
+        for (block in prioritized) {
+            val candidate = compact(block)
+            if (display(selected + candidate).length <= SummaryPromptBudget.EVENT_CHARS - 600) selected += candidate
+            else abbreviated += block
+        }
+        for (block in abbreviated) {
+            // Keep complete identifiers; never cut an index into an unusable tool argument.
+            val directoryEntry = brief(block).joinToString("\n")
+            if (display(selected + directoryEntry).length <= SummaryPromptBudget.EVENT_CHARS) selected += directoryEntry
+        }
+        val replacement = display(selected)
+        val body = SummaryPromptBudget.project(stripBlock(summary), SummaryPromptBudget.MAX_CHARS - replacement.length - 2)
+        return if (body.isBlank()) replacement else "$body\n\n$replacement"
     }
 
     fun promptTurns(turns: List<PromptTurn>): List<PromptTurn> = turns.map { turn ->
-        if (turn.kind == PromptTurnKind.SUMMARY && hasBlock(turn.content)) turn.copy(content = forPrompt(turn.content)) else turn
+        if (turn.kind == PromptTurnKind.SUMMARY) turn.copy(content = forPrompt(turn.content)) else turn
     }
 
     private fun brief(block: String) = block.lines().filter { it.startsWith("§") || it.startsWith("时间：") || it.startsWith("索引：") }
