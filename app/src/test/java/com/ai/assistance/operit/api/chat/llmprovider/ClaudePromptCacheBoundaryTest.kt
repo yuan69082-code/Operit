@@ -82,10 +82,17 @@ class ClaudePromptCacheBoundaryTest {
             assertEquals(before.system.toString(), after.system.toString())
             assertEquals(before.tools.toString(), after.tools.toString())
             assertEquals(5, before.messages.length())
+            // The subject observes live state after history and before the current input.
+            // Keep checking the provider's exact serialized text, not just tag presence.
             assertEquals(
-                input + "\n\n<operit_request_context source=\"host\" scope=\"current_turn\">\n" +
-                    "time=09:00; active_app=reader\n</operit_request_context>",
+                "<operit_request_context source=\"host\" scope=\"current_turn\">\n" +
+                    "time=09:00; active_app=reader\n</operit_request_context>\n\n" + input,
                 before.messages.getJSONObject(4).getJSONArray("content").getJSONObject(0).getString("text")
+            )
+            assertEquals(
+                "<operit_request_context source=\"host\" scope=\"current_turn\">\n" +
+                    "time=09:01; active_app=browser\n</operit_request_context>\n\n" + input,
+                after.messages.getJSONObject(4).getJSONArray("content").getJSONObject(0).getString("text")
             )
             for (index in 0 until 4) {
                 assertEquals(
