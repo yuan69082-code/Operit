@@ -16,9 +16,19 @@ object CompanionTools {
 
     fun prompts(): List<ToolPrompt> = com.ai.assistance.operit.core.experience.ExperienceTools.prompts() + RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_internal_state",
-            description = "Operit 自有内部状态。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件和版本，offset翻页。其余操作必须有id、expected_version（新建0）、reason（经历及区别）、evidence（get返回事件ID的JSON数组）。create/revise传完整definition JSON：id,name,description,baseline,min,max,maxDelta,halfLifeHours（0不恢复，否则按小时半衰期回归baseline）,scope=global|session,private,share（AI愿向本机公开）,participates,triggers=[{source,delta,contains可选}],effects=[{action,weight,cue,target可选}]。source=user_message|assistant_reply|assistant_action|tool_success|tool_failure|reading|exploration|todo_progress|todo_failed|todo_completed|wake|time；time的delta是每小时漂移量，其余是每事件增量，宿主限制总maxDelta。effects action=contact|explore|todo|tool|reply|defer|drop|rest，weight为-10..10的相对基准倾向，cue解释高低状态如何影响选择，target可为待办/阅读来源ID或工具名。merge用target指定同作用域现有目标，宿主平均归一化值并停用来源；旧历史保留。规则修订不重置当前值，不能自行报告事件或写当前值。状态不授予工具、探索或联系权限。",
+            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页。" +
+                "当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，未报告的维度保留。" +
+                "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
+                "create/revise传完整definition JSON：id,name,description,kind（drive驱力/sentiment情感/emotion情绪）,baseline,min,max,maxDelta,halfLifeHours,scope=global|session,private,share（AI愿向本机公开）,participates,triggers=[{source,delta,contains可选}],effects=[{action,weight,cue,target可选}]，可带object_ref绑定明确对象。" +
+                "新建必须明确kind；旧定义缺kind时以unclassified保留，不自动分类或套用统一速度。不同对象不要无声共用同一状态ID。" +
+                "每个维度单独定义时间：time触发的delta之和r是每小时漂移量；halfLifeHours=0时线性增加r×小时，大于0时k=ln(2)/halfLifeHours，向baseline+r/k这个平衡点指数恢复，再受min/max限制；没有漂移时平衡点才是baseline。" +
+                "客观source可用tool_success|tool_failure|reading|exploration|todo_progress|todo_failed|todo_completed，delta为每次事件增量、总量受maxDelta限制。" +
+                "旧定义可含user_message|assistant_reply|assistant_action|wake触发，但宿主只记录这些事实，不再按关键词增减主观状态；它们的意义由主生成状态报告判断。" +
+                "effects action=contact|explore|todo|tool|reply|defer|drop|rest，weight为-10..10的相对基准倾向，cue说明影响，target可为待办/阅读来源ID或工具名；选中或高分都不强制执行。" +
+                "merge用target指定同作用域现有目标，宿主平均归一化值并停用来源，旧历史保留；revise不重置当前值。" +
+                "任一定义操作会改变语义版本，同轮旧frame状态报告会被拒绝；下一业务轮才读取新版本，不能承诺先revise再用旧frame成功提交。状态不授予工具、探索或联系权限。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "维度稳定ID"),
-                param("definition", "完整维度定义JSON"), param("expected_version", "get读取的版本，新建0"),
+                param("definition", "完整维度定义JSON；新建须有kind及个体时间参数，不夹带value"), param("expected_version", "get读取的定义版本，新建0"),
                 param("reason", "演化经过与理由"), param("evidence", "真实事件ID的JSON数组"),
                 param("target", "merge目标维度ID"), param("offset", "历史分页起点"))),
         ToolPrompt(name = "companion_explore",

@@ -40,7 +40,7 @@ internal fun InternalStatePanel(role: String) {
             delay(3000)
         }
     }
-    SpaceSectionTitle("内部状态 · Internal State", "由助手定义，由真实事件和时间计算。这里是观察窗。")
+    SpaceSectionTitle("内部状态 · Internal State", "由助手定义和回报体验，不同状态按各自规则随时间变化。这里是观察窗。")
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("开启这位助手的内部状态")
         Switch(checked = enabled, enabled = !busy, onCheckedChange = { value ->
@@ -76,7 +76,13 @@ internal fun InternalStatePanel(role: String) {
                         Text(state.getString("name") + if (state.getBoolean("private")) " · 私密已许可" else " · 公开",
                             style = MaterialTheme.typography.titleMedium)
                         Text(state.getString("description"))
+                        Text(stateKindLabel(InternalStateEngine.kind(state)), style = MaterialTheme.typography.labelMedium)
+                        if (state.has("object_ref")) Text("对象：${state.getString("object_ref")}")
                         Text("${state.getDouble("value").display()} · 基准 ${state.getDouble("baseline").display()} · v${state.getInt("version")}")
+                        if (state.has("reason")) Text("最近体验：${state.getString("reason")}")
+                        if (state.optBoolean("unresolved")) Text("仍有未解决的部分", style = MaterialTheme.typography.bodySmall)
+                        if (state.optString("desire").isNotBlank()) Text("想要：${state.getString("desire")}")
+                        if (state.optString("choice").isNotBlank()) Text("当前选择：${state.getString("choice")}")
                         Text(if (state.getString("scope") == "global") "跨窗口持续" else "当前活跃会话局部",
                             style = MaterialTheme.typography.labelSmall)
                         val points = events.flatMap { event -> InternalStateEngine.rows(event, "changes")
@@ -117,8 +123,20 @@ internal fun InternalStatePanel(role: String) {
                         Text("经历依据：${version.getJSONArray("evidence")}")
                         val rule = version.getJSONObject("after")
                         Text(rule.getString("name") + "：" + rule.getString("description"))
+                        Text(stateKindLabel(InternalStateEngine.kind(rule)))
+                        if (rule.has("object_ref")) Text("对象：${rule.getString("object_ref")}")
                         Text("范围 ${rule.getDouble("min").display()}–${rule.getDouble("max").display()} · 基准 ${rule.getDouble("baseline").display()} · 单次上限 ${rule.getDouble("maxDelta").display()}")
-                        Text(if (rule.getDouble("halfLifeHours") == 0.0) "不自动回归基准" else "每 ${rule.getDouble("halfLifeHours").display()} 小时，偏离基准的部分恢复一半")
+                        val rate = InternalStateEngine.rows(rule, "triggers")
+                            .filter { it.getString("source") == "time" }.sumOf { it.getDouble("delta") }
+                        val half = rule.getDouble("halfLifeHours")
+                        Text(when {
+                            half == 0.0 && rate == 0.0 -> "自然保持，不随时间增减"
+                            half == 0.0 -> "按每小时 ${rate.display()} 变化，受数值范围限制"
+                            else -> {
+                                val target = rule.getDouble("baseline") + rate * half / kotlin.math.ln(2.0)
+                                "每 ${half.display()} 小时，与平衡水平 ${target.display()} 的差距缩小一半，受数值范围限制"
+                            }
+                        })
                         Text(if (rule.getBoolean("participates")) "参与意向和行动判断" else "只记录，不参与决策")
                         InternalStateEngine.rows(rule, "triggers").forEach { trigger ->
                             Text("${stateSourceLabel(trigger.getString("source"))}：${trigger.getDouble("delta").display()}" +
@@ -143,7 +161,15 @@ private fun Long.date() = DateFormat.getDateTimeInstance().format(Date(this))
 private fun stateSourceLabel(source: String) = mapOf("user_message" to "用户新消息", "assistant_reply" to "助手回复",
     "assistant_action" to "自主选择", "tool_success" to "工具成功", "tool_failure" to "工具失败", "reading" to "阅读",
     "exploration" to "探索结果", "todo_progress" to "待办推进", "todo_failed" to "待办失败", "todo_completed" to "待办完成",
-    "wake" to "主动唤醒", "time" to "时间流逝（漂移按每小时）", "merge" to "维度合并").getValue(source)
+    "wake" to "主动唤醒", "time" to "时间流逝（漂移按每小时）", "merge" to "维度合并",
+    "state_report" to "主体状态回报").getValue(source)
+private fun stateKindLabel(kind: String) = when (kind) {
+    "drive" -> "驱力"
+    "sentiment" -> "情感"
+    "emotion" -> "情绪"
+    "unclassified" -> "尚未分类 · 原有规则保持"
+    else -> error("未知状态类别")
+}
 private fun stateActionLabel(action: String) = mapOf("contact" to "联系", "explore" to "探索", "todo" to "待办",
     "tool" to "工具", "reply" to "表达", "defer" to "暂缓", "drop" to "放下", "rest" to "休息").getValue(action)
 

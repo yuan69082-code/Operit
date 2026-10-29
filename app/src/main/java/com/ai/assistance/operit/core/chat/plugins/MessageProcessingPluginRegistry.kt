@@ -51,7 +51,14 @@ object MessageProcessingPluginRegistry {
 
     suspend fun createExecutionIfMatched(
         params: MessageProcessingHookParams
+    ): MessageProcessingExecution? = createExecutionIfMatched(params, nativeWake = false)
+
+    /** The host supplies this flag; wake input text or a plugin cannot choose the subject route. */
+    internal suspend fun createExecutionIfMatched(
+        params: MessageProcessingHookParams,
+        nativeWake: Boolean
     ): MessageProcessingExecution? {
+        if (nativeWake) return null
         for (plugin in plugins) {
             val execution = plugin.createExecutionIfMatched(params)
             if (execution != null) {

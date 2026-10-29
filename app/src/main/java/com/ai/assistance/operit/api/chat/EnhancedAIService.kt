@@ -21,6 +21,9 @@ import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.core.chat.CurrentPerceptionContext
 import com.ai.assistance.operit.core.chat.CurrentRequestContext
 import com.ai.assistance.operit.core.chat.HistoricalPackageContext
+import com.ai.assistance.operit.core.companion.InternalStateFrame
+import com.ai.assistance.operit.core.companion.InternalStateReportStream
+import com.ai.assistance.operit.core.companion.InternalStateStore
 import com.ai.assistance.operit.core.chat.SegmentedSummary
 import com.ai.assistance.operit.core.chat.hooks.appendUserTurnIfMissing
 import com.ai.assistance.operit.core.chat.hooks.buildActivePromptHookMetadata
@@ -60,15 +63,19 @@ import com.ai.assistance.operit.R
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import org.json.JSONObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -434,7 +441,11 @@ class EnhancedAIService private constructor(private val context: Context) {
         val isConversationActive: AtomicBoolean = AtomicBoolean(true),
         val conversationHistory: MutableList<PromptTurn>,
         val eventChannel: MutableSharedStream<TextStreamEvent>,
-        var modelExecutionSnapshot: ModelExecutionSnapshot? = null
+        var modelExecutionSnapshot: ModelExecutionSnapshot? = null,
+        var internalStateFrame: InternalStateFrame? = null,
+        var pendingStateReport: JSONObject? = null,
+        var currentResponseHasStateReport: Boolean = false,
+        var stateReportCommitted: Boolean = false
     )
 
     private val activeExecutionContexts = ConcurrentHashMap<Int, MessageExecutionContext>()
@@ -497,6 +508,10 @@ class EnhancedAIService private constructor(private val context: Context) {
     private suspend fun startAssistantResponseRound(context: MessageExecutionContext) {
         context.roundManager.startNewRound()
         context.streamBuffer.clear()
+        // A tool can change both the facts and objective state values. A draft from before
+        // that tool must never overwrite them when the final response omits its own report.
+        context.pendingStateReport = null
+        context.currentResponseHasStateReport = false
     }
 
     // Coroutine management
@@ -1036,6 +1051,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     // 关键修复：用准备好的历史记录（包含了系统提示）去同步更新内部的 conversationHistory 状态
                     execContext.conversationHistory.clear()
                     execContext.conversationHistory.addAll(preparedHistory)
+                    execContext.internalStateFrame = CurrentRequestContext.internalStateFrame(preparedHistory)
 
                     // Update UI state to connecting
                     if (!isSubTask) {
@@ -1072,7 +1088,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                     AppLogger.d(TAG, "sendMessage本地耗时: getAvailableToolsForFunction=${tAfterGetTools - tAfterGetService}ms")
 
                     var finalProcessedInput = if (roleCardId.isNullOrBlank()) message else com.ai.assistance.operit.core.experience.RoleRules(context).transform(roleCardId, message, "input")
-                    var finalPreparedHistory = preparedHistory
+                    // Host bindings must not travel through JSON prompt-hook mutations.
+                    var finalPreparedHistory = CurrentRequestContext.withoutStateBinding(preparedHistory)
                     val beforeFinalizeContext =
                         applyPromptFinalizeHooks(
                             PromptHookContext(
@@ -1161,7 +1178,10 @@ class EnhancedAIService private constructor(private val context: Context) {
                     // 创建一个新的轮次来管理内容
                     startAssistantResponseRound(execContext)
                     val revisionTracker = TextStreamRevisionTracker()
+                    val stateReportStream = if (execContext.internalStateFrame != null) InternalStateReportStream() else null
                     val revisionMutex = Mutex()
+                    val revisionBarrier = revisableStream?.let { NativeResponseRevisionBarrier(it.eventChannel) }
+                    execContext.currentResponseHasStateReport = false
 
                     // 从原始stream收集内容并处理
                     var chunkCount = 0
@@ -1172,32 +1192,40 @@ class EnhancedAIService private constructor(private val context: Context) {
                     coroutineScope {
                         val revisionJob =
                             revisableStream?.let { carrier ->
-                                launch {
-                                    carrier.eventChannel.collect { event ->
-                                        execContext.eventChannel.emit(event)
-                                        when (event.eventType) {
-                                            TextStreamEventType.SAVEPOINT -> {
-                                                revisionMutex.withLock {
-                                                    revisionTracker.savepoint(event.id)
-                                                }
-                                            }
+                                launch(start = CoroutineStart.UNDISPATCHED) {
+                                    try {
+                                        carrier.eventChannel.collect { event ->
+                                            revisionMutex.withLock {
+                                                when (event.eventType) {
+                                                    TextStreamEventType.SAVEPOINT -> {
+                                                        revisionTracker.savepoint(event.id)
+                                                        stateReportStream?.savepoint(event.id)
+                                                    }
 
-                                            TextStreamEventType.ROLLBACK -> {
-                                                val snapshot =
-                                                    revisionMutex.withLock {
-                                                        revisionTracker.rollback(event.id)?.toString()
-                                                    } ?: return@collect
-                                                execContext.streamBuffer.clear()
-                                                execContext.streamBuffer.append(snapshot)
-                                                execContext.roundManager.updateContent(snapshot)
+                                                    TextStreamEventType.ROLLBACK -> {
+                                                        stateReportStream?.rollback(event.id)
+                                                        revisionTracker.rollback(event.id)?.let { snapshot ->
+                                                            execContext.streamBuffer.clear()
+                                                            execContext.streamBuffer.append(snapshot)
+                                                            execContext.roundManager.updateContent(snapshot.toString())
+                                                        }
+                                                    }
+                                                }
+                                                execContext.eventChannel.emit(event)
+                                                checkNotNull(revisionBarrier).acknowledge(event)
                                             }
                                         }
+                                    } finally {
+                                        checkNotNull(revisionBarrier).collectorFinished()
                                     }
                                 }
                             }
  
                         try {
                             responseStream.collect { content ->
+                                // Native providers append to full event replay before this cold
+                                // callback. Do not let a delayed SAVEPOINT land after its text.
+                                revisionBarrier?.awaitBeforeText()
                                 // 第一次收到响应，更新状态
                                 if (isFirstChunk) {
                                     if (!isSubTask) {
@@ -1226,19 +1254,34 @@ class EnhancedAIService private constructor(private val context: Context) {
                                 }
 
                                 revisionMutex.withLock {
-                                    revisionTracker.append(content)
+                                    val publicContent = if (stateReportStream == null) content else stateReportStream.appendDeferringFailure(content)
+                                    revisionTracker.append(publicContent)
+                                    // A rollback must observe the same private parser and public
+                                    // buffers; otherwise a withdrawn chunk could reappear afterward.
+                                    execContext.streamBuffer.append(publicContent)
+                                    execContext.roundManager.appendChunk(publicContent)
+                                    if (publicContent.isNotEmpty()) emit(publicContent)
                                 }
-
-                                // Keep both mutable accumulators synchronized without rebuilding
-                                // the complete response for every streamed chunk.
-                                execContext.streamBuffer.append(content)
-                                execContext.roundManager.appendChunk(content)
-
-                                // 发射当前内容片段
-                                emit(content)
                             }
+                            // A final ROLLBACK can arrive without another text chunk.
+                            revisionBarrier?.awaitPublished()
+                        } catch (abort: NativeResponseRevisionBarrier.LocalAbort) {
+                            // Local callback failures cross providers as cancellation, which they
+                            // must not retry. Restore the explicit error outside their boundary.
+                            throw abort.protocolFailure
                         } finally {
                             revisionJob?.cancelAndJoin()
+                        }
+                        // Only a normally completed provider response can publish its final
+                        // report draft. The revision collector must stop before finish().
+                        val tail = if (stateReportStream == null) "" else stateReportStream.finish()
+                        revisionTracker.append(tail)
+                        execContext.streamBuffer.append(tail)
+                        execContext.roundManager.appendChunk(tail)
+                        if (tail.isNotEmpty()) emit(tail)
+                        stateReportStream?.report?.let {
+                            execContext.pendingStateReport = it
+                            execContext.currentResponseHasStateReport = true
                         }
                     }
                     providerStreamCollectionStarted = false
@@ -1278,11 +1321,13 @@ class EnhancedAIService private constructor(private val context: Context) {
                     } else {
                         AppLogger.d(TAG, "Stream closed after execution context was invalidated.")
                     }
+                    invalidateExecutionContext(execContext, "sendMessage.collect.socketClosed")
                 } else {
                     hadFatalError = true
                     // Handle any exceptions
                     AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
-                    if (!providerStreamCollectionStarted) {
+                    if (!providerStreamCollectionStarted || e is InternalStateReportStream.ProtocolException ||
+                        e is NativeResponseRevisionBarrier.ProtocolException) {
                         withContext(Dispatchers.Main) {
                             _inputProcessingState.value =
                                     InputProcessingState.Error(message = context.getString(R.string.enhanced_error_with_message, e.message ?: ""))
@@ -1293,7 +1338,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                 // 发生无法处理的错误时，也应停止服务，但用户取消除外
                 if (!isSocketClosed) {
                     if (!isSubTask) stopAiService()
-                    if (!providerStreamCollectionStarted) {
+                    if (!providerStreamCollectionStarted || e is InternalStateReportStream.ProtocolException ||
+                        e is NativeResponseRevisionBarrier.ProtocolException) {
                         throw e
                     }
                 }
@@ -1776,7 +1822,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                     isSubTask = isSubTask,
                     chatId = chatId,
                     notifyReplyOverride = notifyReplyOverride,
-                    memorySpaceIdOverride = memorySpaceIdOverride
+                    memorySpaceIdOverride = memorySpaceIdOverride,
+                    commitStateReport = context.currentResponseHasStateReport
                 )
                 return
             }
@@ -1789,6 +1836,15 @@ class EnhancedAIService private constructor(private val context: Context) {
             // 禁止“纯思考输出”：移除 thinking 后正文为空时，发出专用告警并回传给 AI 继续生成
             val contentWithoutThinking = ChatUtils.removeThinkingContent(content)
             if (contentWithoutThinking.isEmpty()) {
+                // A completed state-only response is a valid quiet turn, not a reason to
+                // invoke the model again. The report is committed only at finalization.
+                if (context.currentResponseHasStateReport) {
+                    finalizeAssistantResponse(
+                        context, content, enableMemoryAutoUpdate, onNonFatalError, isSubTask,
+                        chatId, characterName, avatarUri, notifyReplyOverride, memorySpaceIdOverride
+                    )
+                    return
+                }
                 if (disableWarning) {
                     AppLogger.w(TAG, "检测到纯思考输出，disableWarning=true，直接结束本轮而不注入警告")
                     finalizeAssistantResponse(
@@ -1801,7 +1857,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                         characterName = characterName,
                         avatarUri = avatarUri,
                         notifyReplyOverride = notifyReplyOverride,
-                        memorySpaceIdOverride = memorySpaceIdOverride
+                        memorySpaceIdOverride = memorySpaceIdOverride,
+                        commitStateReport = false
                     )
                     return
                 }
@@ -1860,6 +1917,10 @@ class EnhancedAIService private constructor(private val context: Context) {
 
             // 截断修复仅追加缺失后缀，不撤回已经发出的内容
             if (truncatedToolRecovery != null) {
+                // A malformed tool round cannot contribute a draft to a later success.
+                // A subsequent successful model response may provide a fresh report.
+                context.pendingStateReport = null
+                context.currentResponseHasStateReport = false
                 val appendedSuffix = truncatedToolRecovery.appendedSuffix
                 if (appendedSuffix.isNotEmpty()) {
                     context.streamBuffer.append(appendedSuffix)
@@ -1919,7 +1980,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                         characterName = characterName,
                         avatarUri = avatarUri,
                         notifyReplyOverride = notifyReplyOverride,
-                        memorySpaceIdOverride = memorySpaceIdOverride
+                        memorySpaceIdOverride = memorySpaceIdOverride,
+                        commitStateReport = false
                     )
                     return
                 }
@@ -2018,6 +2080,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                 stage = "enhanced.processStreamCompletion.complete",
                 startTimeMs = startTime
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             // Catch any exceptions in the processing flow
             AppLogger.e(TAG, "处理流完成时发生错误", e)
@@ -2038,8 +2102,31 @@ class EnhancedAIService private constructor(private val context: Context) {
         characterName: String? = null,
         avatarUri: String? = null,
         notifyReplyOverride: Boolean? = null,
-        memorySpaceIdOverride: String? = null
+        memorySpaceIdOverride: String? = null,
+        commitStateReport: Boolean = true
     ) {
+        // UI finalization is also used for invalid/empty responses; only successful
+        // business turns (including explicit state-only quiet turns) may commit.
+        currentCoroutineContext().ensureActive()
+        val report = context.pendingStateReport
+        if (commitStateReport && report != null && !context.stateReportCommitted && context.isConversationActive.get()) {
+            val frame = context.internalStateFrame
+            if (frame == null) {
+                AppLogger.e(TAG, "STATE_REPORT_WITHOUT_HOST_FRAME")
+                onNonFatalError("内部状态未同步：本轮没有可写入的状态上下文。")
+            } else {
+                try {
+                    InternalStateStore(this@EnhancedAIService.context).submit(frame, report)
+                    context.stateReportCommitted = true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    // Report text, source text and arbitrary JSON exception messages are private.
+                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED type=${failure.javaClass.simpleName}")
+                    onNonFatalError("内部状态未同步：回报未通过来源、版本或格式检查，现有状态已保留。")
+                }
+            }
+        }
         // Mark conversation as complete
         context.isConversationActive.set(false)
 
@@ -2381,37 +2468,46 @@ class EnhancedAIService private constructor(private val context: Context) {
                 var isFirstChunk = true
                 val revisableStream = responseStream as? TextStreamEventCarrier
                 val revisionTracker = TextStreamRevisionTracker()
+                val stateReportStream = if (context.internalStateFrame != null) InternalStateReportStream() else null
                 val revisionMutex = Mutex()
+                val revisionBarrier = revisableStream?.let { NativeResponseRevisionBarrier(it.eventChannel) }
+                context.currentResponseHasStateReport = false
 
                 coroutineScope {
                     val revisionJob =
                         revisableStream?.let { carrier ->
-                            launch {
-                                carrier.eventChannel.collect { event ->
-                                    context.eventChannel.emit(event)
-                                    when (event.eventType) {
-                                        TextStreamEventType.SAVEPOINT -> {
-                                            revisionMutex.withLock {
-                                                revisionTracker.savepoint(event.id)
-                                            }
-                                        }
+                            launch(start = CoroutineStart.UNDISPATCHED) {
+                                try {
+                                    carrier.eventChannel.collect { event ->
+                                        revisionMutex.withLock {
+                                            when (event.eventType) {
+                                                TextStreamEventType.SAVEPOINT -> {
+                                                    revisionTracker.savepoint(event.id)
+                                                    stateReportStream?.savepoint(event.id)
+                                                }
 
-                                        TextStreamEventType.ROLLBACK -> {
-                                            val snapshot =
-                                                revisionMutex.withLock {
-                                                    revisionTracker.rollback(event.id)?.toString()
-                                                } ?: return@collect
-                                            context.streamBuffer.clear()
-                                            context.streamBuffer.append(snapshot)
-                                            context.roundManager.updateContent(snapshot)
+                                                TextStreamEventType.ROLLBACK -> {
+                                                    stateReportStream?.rollback(event.id)
+                                                    revisionTracker.rollback(event.id)?.let { snapshot ->
+                                                        context.streamBuffer.clear()
+                                                        context.streamBuffer.append(snapshot)
+                                                        context.roundManager.updateContent(snapshot.toString())
+                                                    }
+                                                }
+                                            }
+                                            context.eventChannel.emit(event)
+                                            checkNotNull(revisionBarrier).acknowledge(event)
                                         }
                                     }
+                                } finally {
+                                    checkNotNull(revisionBarrier).collectorFinished()
                                 }
                             }
                         }
 
                     try {
                         responseStream.collect { content ->
+                            revisionBarrier?.awaitBeforeText()
                             if (isFirstChunk) {
                                 isFirstChunk = false
                                 logMessageTiming(
@@ -2422,12 +2518,12 @@ class EnhancedAIService private constructor(private val context: Context) {
                             }
 
                             revisionMutex.withLock {
-                                revisionTracker.append(content)
+                                val publicContent = if (stateReportStream == null) content else stateReportStream.appendDeferringFailure(content)
+                                revisionTracker.append(publicContent)
+                                context.streamBuffer.append(publicContent)
+                                context.roundManager.appendChunk(publicContent)
+                                if (publicContent.isNotEmpty()) collector.emit(publicContent)
                             }
-
-                            // 更新streamBuffer
-                            context.streamBuffer.append(content)
-                            context.roundManager.appendChunk(content)
 
                             // 累计统计
                             chunkCount++
@@ -2439,11 +2535,21 @@ class EnhancedAIService private constructor(private val context: Context) {
                                 lastLogTime = currentTime
                             }
 
-                            // 通过收集器将内容发射出去，让UI可以接收到
-                            collector.emit(content)
                         }
+                        revisionBarrier?.awaitPublished()
+                    } catch (abort: NativeResponseRevisionBarrier.LocalAbort) {
+                        throw abort.protocolFailure
                     } finally {
                         revisionJob?.cancelAndJoin()
+                    }
+                    val tail = if (stateReportStream == null) "" else stateReportStream.finish()
+                    revisionTracker.append(tail)
+                    context.streamBuffer.append(tail)
+                    context.roundManager.appendChunk(tail)
+                    if (tail.isNotEmpty()) collector.emit(tail)
+                    stateReportStream?.report?.let {
+                        context.pendingStateReport = it
+                        context.currentResponseHasStateReport = true
                     }
                 }
 

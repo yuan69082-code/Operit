@@ -19,7 +19,8 @@ object CompanionContext {
         .put("app_version", BuildConfig.VERSION_NAME)
         .put("heart_rate_source", "not_connected")
 
-    suspend fun compose(context: Context, chatId: String, roleId: String?, capabilities: JSONObject, recordSnapshot: Boolean): RuntimeContextSections {
+    suspend fun compose(context: Context, chatId: String, roleId: String?, capabilities: JSONObject,
+                        recordSnapshot: Boolean, currentInput: String = ""): RuntimeContextSections {
         val store = CompanionStore(context)
         val scope = store.scope(chatId, roleId)
         if (recordSnapshot) store.migrateMemory(chatId, scope)
@@ -48,9 +49,14 @@ object CompanionContext {
         // Compose each source once so observing the state does not acknowledge events twice.
         val instructions = StringBuilder("\n[软件状态解读规则，仅作为内部上下文，不复述或朗读字段名]\n")
         val state = StringBuilder("\n<operit_state>\n")
+        var internalStateFrame: InternalStateFrame? = null
         fun appendSections(sections: RuntimeContextSections) {
             instructions.append(sections.instructions)
             state.append(sections.state)
+            sections.internalStateFrame?.let { frame ->
+                check(internalStateFrame == null || internalStateFrame == frame) { "一次请求不能混用内部状态帧" }
+                internalStateFrame = frame
+            }
         }
         if (facts != null && store.capabilitiesEnabled) {
             instructions.append("能力状态以本次快照为准。能力列出不表示操作已执行；权限、网络和服务仍可能限制实际调用。未接入的传感器数据不可推测。\n")
@@ -63,7 +69,6 @@ object CompanionContext {
                 .put("direct_video", capabilities.optBoolean("direct_video")).toString()).append("\n")
         }
         appendSections(xc)
-        appendSections(internal.promptSections(roleId, chatId, recordSnapshot, CompanionRuntime.isWake(chatId), capabilities))
         appendSections(com.ai.assistance.operit.core.awareness.SoftwareAwareness.promptSections(context, chatId, roleId, recordSnapshot))
         val phone = com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(context)
         if (phone.enabled && phone.role != null && phone.role == roleId &&
@@ -91,14 +96,13 @@ object CompanionContext {
         }
         instructions.append("聊天中有了想留住的感受或心情，顺手用 companion_todo action=feel 记一两句原话；事件目录只放简短原话节选；完整感受用 group_chat feelings 按 chat_id/from/end 读取，没记就空着。\n")
         instructions.append("companion_todo 是你自己的待办与私人打算，可以自主创建、批注(comment)、安排继续(submit)、暂缓或完成，不必事事等用户审批。可保存优先级、结论、下一步、共同计划和参考；只有确实需要用户决定才填写 needs_decision。完成后可沉淀到资料库或归档。\n")
-        val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
-        // Internal state already carries the newest 32 candidates. Preserve the remaining reminder IDs.
-        val candidateIds = if (internalEnabled) open.sortedByDescending { it.optLong("updated") }
-            .take(32).map { it.getString("id") }.toSet() else emptySet()
-        val reminders = open.takeLast(3).filter { it.getString("id") !in candidateIds }
-        instructions.append("未完成私人事项简报只是最近的候选，不自动获得优先级；是否继续、暂缓或改方向由你结合当下判断。\n")
-        if (reminders.isNotEmpty()) state.append("你有${open.size}项未完成的私人事项，最近的候选：" +
-            reminders.joinToString("；") { it.optString("title") } + "。\n")
+        if (!internalEnabled) {
+            val open = store.todos(scope).filter { it.optString("status") !in setOf("done", "archived") }
+            val reminders = open.takeLast(3)
+            instructions.append("未完成私人事项简报只是最近的候选，不自动获得优先级；是否继续、暂缓或改方向由你结合当下判断。\n")
+            if (reminders.isNotEmpty()) state.append("你有${open.size}项未完成的私人事项，最近的候选：" +
+                reminders.joinToString("；") { it.optString("title") } + "。\n")
+        }
         if (!internalEnabled && !roleId.isNullOrBlank()) {
             appendSections(ThoughtPool.promptSections(ThoughtPool.all(context, roleId), System.currentTimeMillis()))
         }
@@ -106,8 +110,12 @@ object CompanionContext {
             instructions.append("你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。\n")
             state.append("当前主动唤醒安排：").append(store.read(store.scheduleKey(roleId)).toString()).append("\n")
         }
+        // Internal state owns todo/thought selection when enabled. Do not reinsert the newest
+        // fixed-count reminders after selection, and keep this request's live catalogue at the tail.
+        appendSections(internal.promptSections(roleId, chatId, recordSnapshot, CompanionRuntime.isWake(chatId),
+            capabilities, currentInput))
         state.append("\n</operit_state>\n")
-        return RuntimeContextSections(instructions.toString(), state.toString())
+        return RuntimeContextSections(instructions.toString(), state.toString(), internalStateFrame)
     }
 
     fun related(context: Context, chatId: String, roleId: String?, query: String): String {

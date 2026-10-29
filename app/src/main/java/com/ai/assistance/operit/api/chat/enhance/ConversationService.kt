@@ -677,12 +677,14 @@ class ConversationService(
                         .put("allowed_packages", org.json.JSONArray(roleCardToolAccess.allowedPackageNames.sorted()))
                         .put("allowed_skills", org.json.JSONArray(roleCardToolAccess.allowedSkillNames.sorted()))
                         .put("allowed_mcp_servers", org.json.JSONArray(roleCardToolAccess.allowedMcpServerNames.sorted())),
-                    recordSnapshot = recordCompanionSnapshot
+                    recordSnapshot = recordCompanionSnapshot,
+                    currentInput = processedInput
                 )
                 val aiName = activeCard?.name ?: context.getString(R.string.app_name)
                 runtimeSections = RuntimeContextSections(
                     instructions = replacePromptPlaceholders(sections.instructions, aiName),
-                    state = replacePromptPlaceholders(sections.state, aiName)
+                    state = replacePromptPlaceholders(sections.state, aiName),
+                    internalStateFrame = sections.internalStateFrame
                 )
             }
 
@@ -733,7 +735,8 @@ class ConversationService(
             )
             runtimeSections = RuntimeContextSections(
                 instructions = runtimeSections.instructions + roleContext.instructions,
-                state = runtimeSections.state + roleContext.state
+                state = runtimeSections.state + roleContext.state,
+                internalStateFrame = runtimeSections.internalStateFrame
             )
         }
         val historyWithRuntimeContext =
@@ -745,10 +748,12 @@ class ConversationService(
                 beforeContext.copy(
                     stage = "after_prepare_history",
                     useEnglish = resolvedUseEnglish,
-                    preparedHistory = historyWithRuntimeContext
+                    // The host frame is a typed identity, not plugin-editable JSON metadata.
+                    // Hooks may edit prompt content; they cannot serialize/recreate its authority.
+                    preparedHistory = CurrentRequestContext.withoutStateBinding(historyWithRuntimeContext)
                 )
             )
-        return afterContext.preparedHistory
+        return CurrentRequestContext.bindInternalStateFrame(afterContext.preparedHistory, runtimeSections.internalStateFrame)
     }
 
     /**

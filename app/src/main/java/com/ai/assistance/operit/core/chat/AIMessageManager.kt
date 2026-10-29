@@ -11,6 +11,7 @@ import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkBuilder
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
+import com.ai.assistance.operit.core.companion.CompanionRuntime
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingController
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingHookParams
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPluginRegistry
@@ -440,6 +441,9 @@ object AIMessageManager {
 
             val matchPluginStartTime = messageTimingNow()
             val pluginExecution = MessageProcessingPluginRegistry.createExecutionIfMatched(
+                // An owned wake is the assistant's own turn, including phone perception and
+                // exploration. A generic planning plugin cannot become that turn's subject.
+                nativeWake = chatId != null && CompanionRuntime.isWake(chatId),
                 params = MessageProcessingHookParams(
                     context = context,
                     enhancedAIService = enhancedAiService,
@@ -460,6 +464,8 @@ object AIMessageManager {
             if (pluginExecution != null) {
                 activeMessageProcessingControllerByChatId[chatKey] = pluginExecution.controller
                 AppLogger.d(TAG, "消息处理插件已接管消息处理")
+                // Plugins receive their original question/history and no subject write frame.
+                // Their plain text, including protocol examples, is not a state-report channel.
                 val pluginStream = pluginExecution.stream.share(
                     scope = scope,
                     replay = Int.MAX_VALUE,

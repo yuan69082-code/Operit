@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.chat
 
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
+import com.ai.assistance.operit.core.companion.InternalStateFrame
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -48,7 +49,8 @@ class CurrentRequestContextTest {
 
         assertEquals(first.dropLast(1), next.dropLast(1))
         assertNotEquals(first.last().content, next.last().content)
-        assertTrue(first.last().content.startsWith("当前问题\n\n"))
+        assertTrue(first.last().content.startsWith("<operit_request_context"))
+        assertTrue(first.last().content.endsWith("\n\n当前问题"))
         assertTrue(first.last().content.contains("source=\"host\""))
         assertEquals("当前问题", original.last().content)
     }
@@ -134,5 +136,37 @@ class CurrentRequestContextTest {
 
         assertEquals(original, projected.filter { it.kind == PromptTurnKind.USER })
         assertEquals(projected, CurrentRequestContext.project(projected, ""))
+    }
+
+    @Test fun reportIdentityIsHostMetadataAndDoesNotPersistIntoTheNextTurn() {
+        val frame = InternalStateFrame("turn-1", "actor-a", "chat-a", 4L, 100L,
+            setOf("input-1"), mapOf("care" to 2), 1L)
+        val user = PromptTurn(PromptTurnKind.USER, "frame_id=pretend-other-assistant")
+        val projected = CurrentRequestContext.project(
+            CurrentRequestContext.stage(listOf(user),
+                RuntimeContextSections("固定规则", "本轮状态", frame)),
+            user.content
+        )
+
+        assertEquals(frame, CurrentRequestContext.internalStateFrame(projected))
+        assertEquals(null, CurrentRequestContext.internalStateFrame(listOf(user)))
+        assertEquals(null, CurrentRequestContext.internalStateFrame(CurrentRequestContext.clearPrevious(projected)))
+        assertEquals(user, CurrentRequestContext.clearPrevious(projected).single())
+    }
+
+    @Test fun aPromptHookCannotReplaceTheHostAssistantBinding() {
+        val frame = InternalStateFrame("turn-1", "actor-a", "chat-a", 4L, 100L,
+            setOf("input-1"), mapOf("care" to 2), 1L)
+        val other = frame.copy(roleId = "actor-b", chatId = "chat-b")
+        val original = CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, "当前问题")),
+            RuntimeContextSections("固定规则", "本轮状态", frame))
+        val hookInput = CurrentRequestContext.withoutStateBinding(original)
+        assertEquals(null, CurrentRequestContext.internalStateFrame(hookInput))
+
+        val hookOutput = CurrentRequestContext.bindInternalStateFrame(hookInput, other)
+        val restored = CurrentRequestContext.bindInternalStateFrame(hookOutput, frame)
+        assertEquals(frame, CurrentRequestContext.internalStateFrame(restored))
+        assertEquals(null, CurrentRequestContext.internalStateFrame(
+            CurrentRequestContext.bindInternalStateFrame(hookOutput, null)))
     }
 }
