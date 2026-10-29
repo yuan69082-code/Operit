@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.group
 
+import com.ai.assistance.operit.core.chat.RuntimeContextSections
 import android.content.Context
 import com.google.gson.Gson
 import org.json.JSONArray
@@ -98,12 +99,26 @@ class GroupGames(context: Context) {
         }
         return result
     }
-    fun prompt(chat: String, actor: String): String {
-        val game = state(chat) ?: return ""
-        if (game.phase == "ended") return "\n本群上一局游戏已结束。游戏身份不再适用；只能作为一起玩过的经历，不改变日常身份。\n"
-        if (actor !in game.players) return "\n本群正在游戏，你是观众，不可读取玩家私密信息。\n"
-        return "\n[本局游戏的个人可见状态，仅供你使用，不要复述私密身份或手牌。不是日常身份；不把虚构剧情当作普通聊天事实存入记忆。只通过 group_game 行动，不借其他工具获取隐藏答案。]\n" +
-            view(chat, actor).toString() + "\n轮到你时使用 group_game act 提交行动；狼人杀 discussion 用 text 发表推理，night/vote 用 target 或 skip。" +
-            "没有轮到你或已提交则用 group_chat quiet，不重复行动。斗地主不要 invent 牌ID，使用 your_hand 中的整数ID。\n"
+    fun prompt(chat: String, actor: String): String = promptSections(chat, actor).let {
+        if (it.state.isEmpty()) "" else it.asText()
+    }
+
+    fun promptSections(chat: String, actor: String): RuntimeContextSections {
+        val game = state(chat)
+        val visibleState = when {
+            game == null -> ""
+            game.phase == "ended" -> "\n本群上一局游戏已结束。\n"
+            actor !in game.players -> "\n本群正在游戏，你是观众。\n"
+            else -> "\n[本局游戏的个人可见状态]\n" + view(chat, actor).toString() + "\n"
+        }
+        return RuntimeContextSections(
+            instructions = "\n以下游戏行动规则仅适用于本轮正在进行的游戏，不限制普通群聊。观众不可读取玩家私密信息；参与者的个人可见状态仅供本人使用，不要复述私密身份或手牌。" +
+                "游戏身份不是日常身份；不把虚构剧情当作普通聊天事实存入记忆。只通过 group_game 行动，不借其他工具获取隐藏答案。" +
+                "轮到你时使用 group_game act 提交行动；狼人杀 discussion 用 text 发表推理，night/vote 用 target 或 skip。" +
+                "没有轮到你或已提交则用 group_chat quiet，不重复行动。斗地主不要 invent 牌ID，使用 your_hand 中的整数ID。" +
+                "游戏结束后游戏身份不再适用；只能作为一起玩过的经历，不改变日常身份。\n",
+            state = visibleState
+        )
     }
 }
+

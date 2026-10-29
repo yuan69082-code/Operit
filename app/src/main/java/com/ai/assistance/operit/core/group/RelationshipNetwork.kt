@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.group
 
+import com.ai.assistance.operit.core.chat.RuntimeContextSections
 import android.content.Context
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import org.json.JSONArray
@@ -36,11 +37,16 @@ class RelationshipNetwork(private val context: Context) {
         store.update("relationships") { it.remove("$from:$to") }
         store.log("relationship_audit", "删除", "$from → $to", caller ?: "user")
     }
-    fun prompt(actor: String): String {
+    fun prompt(actor: String): String = promptSections(actor).asText()
+
+    fun promptSections(actor: String): RuntimeContextSections {
         val own = all().filter { it.optString("from") == actor }.sortedByDescending { it.optLong("updated_at") }.take(4)
-        return "\n[关系网] 可用 assistant_relationship 查看或维护你的关系、看法、进展和共同经历。各人的观点分别保存，阅读不等于亲历。" +
-            if (own.isEmpty()) "\n" else "以下仅是你写下的关系预览，详细记录按需读取：\n" + JSONArray(own.map {
+        return RuntimeContextSections(
+            instructions = "\n[关系网] 可用 assistant_relationship 查看或维护你的关系、看法、进展和共同经历。各人的观点分别保存，阅读不等于亲历。详细记录按需读取。\n",
+            state = if (own.isEmpty()) "" else "以下仅是你写下的关系预览：\n" + JSONArray(own.map {
                 JSONObject().put("from", actor).put("to", it.getString("to")).put("relation", it.getString("relation")).put("progress", it.optString("progress").take(180))
-            }).toString()
+            }).toString() + "\n"
+        )
     }
 }
+

@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.awareness
 
+import com.ai.assistance.operit.core.chat.RuntimeContextSections
 import android.content.Context
 import android.os.SystemClock
 import com.ai.assistance.operit.core.companion.CompanionRuntime
@@ -207,23 +208,30 @@ object SoftwareAwareness {
         return result
     }
 
-    suspend fun prompt(context: Context, chat: String, role: String?, actualSend: Boolean): String {
+    suspend fun prompt(context: Context, chat: String, role: String?, actualSend: Boolean): String =
+        promptSections(context, chat, role, actualSend).asText()
+
+    suspend fun promptSections(context: Context, chat: String, role: String?, actualSend: Boolean): RuntimeContextSections {
         val store = SoftwareAwarenessStore(context)
         val revision = store.revision
-        if (!store.enabled || role != store.role) return ""
+        if (!store.enabled || role != store.role) return RuntimeContextSections()
         val target = ChatHistoryManager.getInstance(context).getChatMetadata(chat)
-        if (target == null || !target.characterGroupId.isNullOrBlank() || target.characterCardId != role) return ""
+        if (target == null || !target.characterGroupId.isNullOrBlank() || target.characterCardId != role) return RuntimeContextSections()
         if (actualSend) flush()
         val companion = CompanionStore(context)
         val receipt = "software_receipt:$role:$chat"
         val cursor = companion.read(receipt).optLong("injected_through")
         val rows = store.rows().filter { it.getLong("sequence") > cursor }
-        if (!store.enabled || role != store.role || store.revision != revision) return ""
+        if (!store.enabled || role != store.role || store.revision != revision) return RuntimeContextSections()
         if (actualSend && rows.isNotEmpty()) companion.update(receipt) { it.put("injected_through", rows.last().getLong("sequence")) }
-        return "你是用户指定的软件观察助手。software_awareness 可查询软件设置变更、模型增删、助手变动、前后台及聊天访问/发送记录；只有你在私聊可用。观察他人不等于自己经历。\n" +
-            if (rows.isEmpty()) "" else "自上次提供后共${rows.size}条记录，以下最多8条简报。更多用 events after=$cursor 查询；时间与来源须保留。事件不是用户新发言；软件变化不能一律断言是用户操作。\n" +
+        return RuntimeContextSections(
+            instructions = "你是用户指定的软件观察助手。software_awareness 可查询软件设置变更、模型增删、助手变动、前后台及聊天访问/发送记录；只有你在私聊可用。观察他人不等于自己经历。\n" +
+                "软件事件简报最多8条，更多用 events 按本轮 after 游标查询；时间与来源须保留。事件不是用户新发言；软件变化不能一律断言是用户操作。\n",
+            state = if (rows.isEmpty()) "" else "自上次提供后共${rows.size}条软件记录；更多记录游标 after=$cursor。\n" +
                 JSONArray(rows.takeLast(8).map { row -> JSONObject().put("sequence", row.getLong("sequence"))
                     .put("at", row.getLong("at")).put("kind", row.getString("kind")).put("summary", row.getString("summary"))
                     .put("actor", row.getString("actor")) }) + "\n"
+        )
     }
 }
+

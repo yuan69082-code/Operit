@@ -19,6 +19,7 @@ import com.ai.assistance.operit.core.chat.hooks.PromptHookRegistry
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.core.chat.CurrentPerceptionContext
+import com.ai.assistance.operit.core.chat.CurrentRequestContext
 import com.ai.assistance.operit.core.chat.HistoricalPackageContext
 import com.ai.assistance.operit.core.chat.SegmentedSummary
 import com.ai.assistance.operit.core.chat.hooks.appendUserTurnIfMissing
@@ -901,7 +902,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 previous.kind == PromptTurnKind.USER &&
                     current.kind == PromptTurnKind.USER &&
                     previous.toolName == current.toolName
-            }
+            }.let { CurrentRequestContext.project(it, finalProcessedInput) }
 
         return estimatePreparedRequestWindow(
             serviceForFunction = serviceForFunction,
@@ -1120,7 +1121,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                             previous.kind == PromptTurnKind.USER &&
                                 current.kind == PromptTurnKind.USER &&
                                 previous.toolName == current.toolName
-                        }
+                        }.let { CurrentRequestContext.project(it, finalProcessedInput) }
                     execContext.conversationHistory.clear()
                     execContext.conversationHistory.addAll(requestHistory)
                     estimatePreparedRequestWindow(
@@ -3251,4 +3252,5 @@ class EnhancedAIService private constructor(private val context: Context) {
         return conversationService.analyzeVideoWithIntent(videoPath, userIntent, multiServiceManager)
     }
 }
+
 
