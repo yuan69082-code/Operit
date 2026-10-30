@@ -138,7 +138,9 @@ class VoiceCallAudioAnalysis(context: Context) {
                         429 -> "请求限流或额度不足"
                         else -> "音频服务未能完成请求"
                     }
-                    throw AnalysisFailure("音频分析失败：HTTP ${response.code}，$hint。")
+                    val detail = VoiceAnalysisServiceError.fromBody(response.peekBody(8192).string(), prefs.apiKey)
+                    throw AnalysisFailure("音频分析失败：HTTP ${response.code}，$hint。" +
+                        if (detail != null) "服务端原因：$detail" else "")
                 }
                 val source = checkNotNull(response.body).source()
                 val text = StringBuilder()
@@ -151,12 +153,22 @@ class VoiceCallAudioAnalysis(context: Context) {
                     if (data == "[DONE]") { complete = true; break }
                     if (data.isBlank()) continue
                     val chunk = JSONObject(data)
-                    check(!chunk.has("error")) { "音频分析接口返回错误" }
+                    VoiceAnalysisServiceError.describe(chunk, prefs.apiKey)?.let {
+                        throw AnalysisFailure("音频分析接口返回错误：$it")
+                    }
                     val choice = chunk.optJSONArray("choices")?.optJSONObject(0) ?: continue
                     val delta = choice.optJSONObject("delta")?.opt("content")
                     if (delta is String) text.append(delta)
                     if (!choice.isNull("finish_reason") && choice.has("finish_reason")) {
-                        check(choice.optString("finish_reason") == "stop") { "音频分析未完整完成" }
+                        val reason = choice.optString("finish_reason")
+                        if (reason != "stop") {
+                            val hint = when (reason) {
+                                "length" -> "分析输出达到服务端长度限制"
+                                "content_filter" -> "音频服务拒绝了本次内容"
+                                else -> "服务端未正常结束分析"
+                            }
+                            throw AnalysisFailure("音频分析未完成：$hint，录音已保留。")
+                        }
                         complete = true
                         break // Usage chunks after stop are irrelevant to the transcription.
                     }
