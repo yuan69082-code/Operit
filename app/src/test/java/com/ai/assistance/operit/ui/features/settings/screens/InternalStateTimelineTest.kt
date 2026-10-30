@@ -38,6 +38,18 @@ class InternalStateTimelineTest {
         assertEquals("想念的理由", result.single().experience!!.getString("reason"))
     }
 
+    @Test fun manualReasonChangeUsesItsUserEventWithoutRequiringAModelFrame() {
+        val observed = JSONObject().put("events", JSONArray().put(event("user_edit:one", "user_edit", 35,
+            change("longing", before = 20.0, after = 20.0))))
+            .put("experiences", JSONArray().put(JSONObject().put("dimension", "longing").put("scope", "global")
+                .put("source", "user_edit").put("event_id", "user_edit:one").put("reason", "园园修改了原因")))
+        val result = stateTimeline(observed, state()).single()
+        assertEquals("user_edit", result.source)
+        assertEquals("园园修改了原因", result.experience!!.getString("reason"))
+        assertEquals(20.0, result.before, 0.0)
+        assertEquals(20.0, result.after, 0.0)
+    }
+
     @Test fun splitTimeChangesKeepTheirOwnBoundaryAndDistinctMarker() {
         val first = change("longing").put("interval_start", 10).put("interval_end", 20).put("time_reasons", JSONArray().put("未联系"))
         val second = change("longing", before = 22.0, after = 21.0).put("interval_start", 20).put("interval_end", 30)

@@ -13,7 +13,8 @@ object InternalStateEngine {
         "reading", "exploration", "todo_progress", "todo_failed", "todo_completed", "wake", "time")
     val actions = listOf("contact", "explore", "todo", "tool", "reply", "defer", "drop", "rest")
     val kinds = setOf("drive", "sentiment", "emotion", "psychology")
-    internal val subjectiveFields = listOf("reason", "object_ref", "unresolved", "desire", "choice", "evidence", "report_frame_id", "experience_at", "time_conditions")
+    internal val subjectiveFields = listOf("reason", "object_ref", "unresolved", "desire", "choice", "evidence", "report_frame_id",
+        "experience_at", "experience_source", "experience_event_id", "time_conditions")
     fun rows(data: JSONObject, key: String): List<JSONObject> = data.optJSONArray(key)?.let { a ->
         (0 until a.length()).map { a.getJSONObject(it) }
     }.orEmpty()
@@ -21,6 +22,9 @@ object InternalStateEngine {
     /** Old definitions retain their numbers and timing; classification is a read-time annotation. */
     fun kind(definition: JSONObject): String = if (definition.has("kind")) definition.getString("kind") else "unclassified"
     fun semanticRevision(data: JSONObject): Long = if (data.has("semantic_revision")) data.getLong("semantic_revision") else 0L
+    /** Released model histories identify their event through frame_id; user edits have no model frame. */
+    fun experienceEventId(experience: JSONObject): String = if (experience.has("event_id")) experience.getString("event_id")
+        else "state_report:${experience.getString("frame_id")}"
     private fun array(data: JSONObject, key: String): JSONArray =
         data.optJSONArray(key) ?: JSONArray().also { data.put(key, it) }
     private fun number(d: JSONObject, key: String): Double = d.getDouble(key).also { require(it.isFinite()) { "$key 必须为有限数" } }
@@ -446,7 +450,7 @@ object InternalStateEngine {
                 it.remove("field_versions")
             }
         }
-        return JSONObject().put("states", JSONArray(states))
+        return JSONObject().put("semantic_revision", semanticRevision(data)).put("states", JSONArray(states))
             .put("events", JSONArray(events)).put("versions", JSONArray(versions))
             .put("experiences", JSONArray(experiences))
     }

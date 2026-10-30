@@ -25,7 +25,7 @@ internal fun stateTimeline(observation: JSONObject, state: JSONObject): List<Sta
     val scope = state.getString("instance_scope")
     val experiences = InternalStateEngine.rows(observation, "experiences")
         .filter { it.getString("dimension") == dimension && it.getString("scope") == scope }
-        .associateBy { "state_report:${it.getString("frame_id")}" }
+        .associateBy { InternalStateEngine.experienceEventId(it) }
     return InternalStateEngine.rows(observation, "events").flatMap { event ->
         InternalStateEngine.rows(event, "changes").mapIndexedNotNull { index, change ->
             if (change.getString("dimension") != dimension || change.getString("scope") != scope) {

@@ -252,11 +252,14 @@ object InternalStateReports {
         }
         state.put("reason", experience.getString("reason")).put("evidence", evidence(experience, frame))
             .put("report_frame_id", frame.id).put("experience_at", now)
-        listOf("reason", "evidence", "report_frame_id", "experience_at").forEach { fieldVersions.put(it, definition.getInt("version")) }
+            .put("experience_source", "state_report").put("experience_event_id", "state_report:${frame.id}")
+        listOf("reason", "evidence", "report_frame_id", "experience_at", "experience_source", "experience_event_id")
+            .forEach { fieldVersions.put(it, definition.getInt("version")) }
         val change = JSONObject().put("dimension", definition.getString("id")).put("scope", state.getString("scope"))
             .put("version", definition.getInt("version")).put("before", before).put("after", value).put("from_at", fromAt)
         changes.put(change)
         val record = JSONObject(change.toString()).put("frame_id", frame.id).put("at", now).put("value", value)
+            .put("source", "state_report").put("event_id", "state_report:${frame.id}")
             .put("reason", state.getString("reason")).put("evidence", JSONArray(state.getJSONArray("evidence").toString()))
             .put("field_versions", JSONObject(fieldVersions.toString()))
         optionalFields.filter { state.has(it) }.forEach { record.put(it, state.get(it)) }

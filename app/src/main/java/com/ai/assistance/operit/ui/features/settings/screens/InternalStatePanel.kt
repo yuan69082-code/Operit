@@ -40,6 +40,8 @@ import java.math.BigDecimal
 import java.text.DateFormat
 import java.util.Date
 
+private data class StateEditTarget(val state: JSONObject, val chat: String, val revision: Long)
+
 @Composable
 internal fun InternalStatePanel(role: String) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -49,15 +51,19 @@ internal fun InternalStatePanel(role: String) {
     var reveal by remember(role) { mutableStateOf(false) }
     var category by remember(role) { mutableStateOf("drive") }
     var selectedId by remember(role, reveal) { mutableStateOf<String?>(null) }
+    var editing by remember(role, reveal) { mutableStateOf<StateEditTarget?>(null) }
     var data by remember(role, reveal) { mutableStateOf(JSONObject()) }
     var error by remember(role) { mutableStateOf("") }
     var busy by remember(role) { mutableStateOf(false) }
-    LaunchedEffect(role, reveal, enabled) {
+    LaunchedEffect(role, reveal, enabled, editing) {
+        // Keep the displayed chat, definition version and draft stable until save or cancel.
+        if (editing != null) return@LaunchedEffect
         while (isActive) {
             try {
                 data = withContext(Dispatchers.IO) {
                     val chat = AssistantWindowRouter.chat(context, role).orEmpty()
                     InternalStateEngine.observation(store.snapshot(role, chat, false), chat, System.currentTimeMillis(), reveal)
+                        .put("chat_id", chat)
                 }
                 error = ""
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -69,7 +75,7 @@ internal fun InternalStatePanel(role: String) {
             delay(3000)
         }
     }
-    SpaceSectionTitle("内部状态 · Internal State", "由助手定义和回报，点开一个状态查看它自己的变化。")
+    SpaceSectionTitle("内部状态 · Internal State", "点开状态查看变化，也可编辑数值、原因、分类和时间规则。")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("开启这位助手的内部状态", Modifier.weight(1f))
         Switch(checked = enabled, enabled = !busy, onCheckedChange = { value ->
@@ -108,7 +114,7 @@ internal fun InternalStatePanel(role: String) {
     val pending = states.filter { InternalStateEngine.kind(it) == "unclassified" }
     if (pending.isNotEmpty()) {
         Text("待分类 · ${pending.size}", style = MaterialTheme.typography.titleSmall)
-        Text("这些已有状态尚未归入四个模块，可让助手补充分类和新时间规则。", style = MaterialTheme.typography.bodySmall)
+        Text("这些已有状态尚未归入四个模块，点开可编辑分类，也可由助手补充。", style = MaterialTheme.typography.bodySmall)
         pending.forEach { state ->
             key(state.getString("id"), state.getString("instance_scope")) {
                 StateCompactCard(state, stateTimeline(data, state)) { selectedId = state.getString("id") }
@@ -118,8 +124,27 @@ internal fun InternalStatePanel(role: String) {
     if (states.isEmpty()) Text("开启后，助手可以根据经历新增状态，无需你填写数值。", style = MaterialTheme.typography.bodySmall)
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     val selected = states.firstOrNull { it.getString("id") == selectedId }
-    if (selected != null) {
-        key(selected.getString("id"), selected.getString("instance_scope")) { StateDetailDialog(selected, data) { selectedId = null } }
+    if (selected != null && editing == null) {
+        key(selected.getString("id"), selected.getString("instance_scope")) {
+            StateDetailDialog(selected, data, editable = !busy && data.optString("chat_id").isNotBlank(),
+                edit = {
+                    editing = StateEditTarget(JSONObject(selected.toString()), data.getString("chat_id"),
+                        data.getLong("semantic_revision"))
+                }, close = { selectedId = null })
+        }
+    }
+    val target = editing
+    if (target != null) {
+        InternalStateEditDialog(target.state, save = { submission ->
+            val refreshed = withContext(Dispatchers.IO) {
+                store.updateFromUser(role, target.chat, target.state.getString("id"),
+                    target.state.getInt("version"), target.revision, submission.changes, submission.reason, reveal)
+            }
+            data = refreshed.put("chat_id", target.chat)
+            val updated = InternalStateEngine.rows(data, "states").firstOrNull { it.getString("id") == target.state.getString("id") }
+            if (updated != null && InternalStateEngine.kind(updated) in InternalStateEngine.kinds) category = InternalStateEngine.kind(updated)
+            error = ""
+        }, close = { editing = null })
     }
 }
 
@@ -153,7 +178,7 @@ private fun StateCompactCard(state: JSONObject, timeline: List<StateTimelineEntr
 }
 
 @Composable
-private fun StateDetailDialog(state: JSONObject, observation: JSONObject, close: () -> Unit) {
+private fun StateDetailDialog(state: JSONObject, observation: JSONObject, editable: Boolean, edit: () -> Unit, close: () -> Unit) {
     val timeline = stateTimeline(observation, state)
     val versions = InternalStateEngine.rows(observation, "versions").filter { it.getString("dimension") == state.getString("id") }.asReversed()
     var limit by remember { mutableIntStateOf(60) }
@@ -165,6 +190,7 @@ private fun StateDetailDialog(state: JSONObject, observation: JSONObject, close:
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(state.getString("name"), Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+                    OutlinedButton(enabled = editable, onClick = edit) { Text("编辑") }
                     TextButton(onClick = close) { Text("关闭") }
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -174,7 +200,7 @@ private fun StateDetailDialog(state: JSONObject, observation: JSONObject, close:
                     Text("基准 ${state.getDouble("baseline").number()} · 范围 ${state.getDouble("min").number()}–${state.getDouble("max").number()}", style = MaterialTheme.typography.bodySmall)
                     Text(if (state.getString("scope") == "global") "跨窗口持续" else "当前会话独立", style = MaterialTheme.typography.labelSmall)
                     if (state.has("object_ref")) Text("对象：${state.getString("object_ref")}")
-                    if (state.has("reason")) Text("最近体验：${state.getString("reason")}")
+                    if (state.has("reason")) Text((if (state.optString("experience_source") == "user_edit") "用户修改：" else "最近体验：") + state.getString("reason"))
                     if (state.optBoolean("unresolved")) Text("仍有未解决的部分")
                     if (state.optString("desire").isNotBlank()) Text("想要：${state.getString("desire")}")
                     if (state.optString("choice").isNotBlank()) Text("当前选择：${state.getString("choice")}")
@@ -202,6 +228,7 @@ private fun StateDetailDialog(state: JSONObject, observation: JSONObject, close:
                             key(version.getInt("version")) {
                                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                     Text("v${version.getInt("version")} · ${stateOperationLabel(version.getString("operation"))} · ${version.getLong("at").date()}", style = MaterialTheme.typography.titleSmall)
+                                    if (version.optString("source") == "user_edit") Text("用户修改", style = MaterialTheme.typography.labelSmall)
                                     Text(version.getString("reason"))
                                     Text("经历依据：${version.getJSONArray("evidence")}", style = MaterialTheme.typography.bodySmall)
                                     StateFold("查看此版完整定义") {
@@ -375,7 +402,7 @@ private fun Long.date() = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateF
 private fun stateSourceLabel(source: String) = mapOf("user_message" to "用户新消息", "assistant_reply" to "助手回复",
     "assistant_action" to "自主选择", "tool_success" to "工具成功", "tool_failure" to "工具失败", "reading" to "阅读",
     "exploration" to "探索结果", "todo_progress" to "待办推进", "todo_failed" to "待办失败", "todo_completed" to "待办完成",
-    "wake" to "主动唤醒", "time" to "时间涨落", "merge" to "状态合并", "state_report" to "主体状态回报").getValue(source)
+    "wake" to "主动唤醒", "time" to "时间涨落", "merge" to "状态合并", "state_report" to "主体状态回报", "user_edit" to "用户修改").getValue(source)
 private fun stateKindLabel(kind: String) = when (kind) {
     "drive" -> "驱力"
     "sentiment" -> "情感"

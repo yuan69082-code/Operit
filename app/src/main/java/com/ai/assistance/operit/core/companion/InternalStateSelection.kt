@@ -109,10 +109,18 @@ object InternalStateSelection {
             it.getString("scope") in setOf("global", chat) && it.getLong("at") <= now
         }.forEach { experience ->
             val current = byId[experience.getString("dimension")]
-            val currentExperience = current?.optString("report_frame_id") == experience.getString("frame_id")
+            val experienceEvent = InternalStateEngine.experienceEventId(experience)
+            // Published model reports used frame_id; user edits have a real event ID and must
+            // never acquire a fabricated model frame merely to fit the selection pipeline.
+            val currentEvent = if (current?.has("experience_event_id") == true) {
+                current.getString("experience_event_id")
+            } else if (current?.has("report_frame_id") == true) {
+                "state_report:${current.getString("report_frame_id")}"
+            } else null
+            val currentExperience = currentEvent == experienceEvent
             val value = JSONObject(experience.toString()).put("current_experience", currentExperience)
                 .put("disclosure", InternalStateEngine.experienceDisclosure(view, experience))
-            items += Item("experience:${experience.getString("frame_id")}:${experience.getString("dimension")}",
+            items += Item("experience:$experienceEvent:${experience.getString("dimension")}",
                 "experiences", value, relevance(experience), experience.getLong("at"),
                 currentExperience && hasUnresolved(experience),
                 currentExperience && (hasText(experience, "desire") || hasText(experience, "choice")), false)

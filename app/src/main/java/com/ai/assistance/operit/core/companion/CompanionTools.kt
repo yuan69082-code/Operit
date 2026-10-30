@@ -24,7 +24,7 @@ object CompanionTools {
                 "time_rules={increase:{condition,reason,interval_minutes,amount},decrease:{condition,reason,interval_minutes,amount},floor}，condition只能always（任何）/not_contacted（未联系）/custom（自定义）；reason可自由填写具体原因。任一方向为not_contacted时另须contact_window_minutes，由实际用户消息时间判断，重试和唤醒不刷新联系。" +
                 "数字选项0至30或自定义；自定义仅限有限数字，不限于0至30且可为小数。interval_minutes<=0暂停该方向，amount=0不变化，负amount反向变化；contact_window_minutes<=0表示无等待窗口。floor由模型自行确定，30不是默认值，且须在状态总范围内；它只限时间下降，不限制有来源的主观反馈。" +
                 "custom由主生成报告updates.time_conditions={increase:true/false,decrease:true/false}确认成立或结束，只写自定义方向；允许只报条件与reason而不填写value。未确认条件不计时，已确认条件保留至明确变更。" +
-                "明确time_rules后事件值完全由模型回报，旧maxDelta/halfLifeHours/triggers不再参与计算；新定义不需要这些旧字段。未迁移旧定义仍按原半衰期/时间漂移和客观事件规则计算，主观消息与唤醒不按旧关键词增减。" +
+                "明确time_rules后日常事件值由模型回报，用户也可在本机状态详情手动修改并留下user_edit来源；旧maxDelta/halfLifeHours/triggers不再参与计算，新定义不需要这些旧字段。未迁移旧定义仍按原半衰期/时间漂移和客观事件规则计算，主观消息与唤醒不按旧关键词增减。" +
                 "effects action=contact|explore|todo|tool|reply|defer|drop|rest，weight为-10..10的相对基准倾向，cue说明影响，target可为待办/阅读来源ID或工具名；选中或高分都不强制执行。" +
                 "merge用target指定同作用域现有目标，宿主平均归一化值并停用来源，旧历史保留；revise不重置当前值。" +
                 "本工具的定义操作会改变语义版本，同轮旧frame状态报告会被拒绝；同轮改名、简介、分类、时间规则应使用最终报告revise:[{id,expected_version,changes:{要改的name/description/kind/time_rules},reason,evidence可选}]，可与updates原子保存。稳定ID不变，规则修改不重算过去。状态不授予工具、探索或联系权限。",

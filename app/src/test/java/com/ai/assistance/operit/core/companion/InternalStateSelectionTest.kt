@@ -163,4 +163,62 @@ class InternalStateSelectionTest {
         assertEquals(listOf("related"), InternalStateEngine.rows(selected.payload, "thoughts").map { it.getString("id") })
         assertEquals(before, JSONArray(thoughts).toString())
     }
+
+    @Test fun userEditAndPublishedModelHistoryKeepTheirOriginsInTheNextRequest() {
+        val definition = definition("missing").put("private", false).put("share", true)
+        val data = JSONObject().put("definitions", JSONArray().put(definition))
+        val state = InternalStateEngine.instance(data, definition, "chat", 100)
+            .put("value", 60).put("reason", "用户填写的原因").put("experience_at", 100)
+            .put("experience_source", "user_edit").put("experience_event_id", "user_edit:one")
+            .put("semantic_versions", JSONObject().put("reason", 3).put("experience_at", 3)
+                .put("experience_source", 3).put("experience_event_id", 3))
+        val old = JSONObject().put("dimension", "missing").put("scope", "global").put("version", 3)
+            .put("frame_id", "old-frame").put("at", 50).put("reason", "先前的模型报告").put("value", 50)
+            .put("field_versions", JSONObject().put("reason", 3))
+        val manual = JSONObject().put("dimension", "missing").put("scope", "global").put("version", 3)
+            .put("source", "user_edit").put("event_id", "user_edit:one").put("at", 100)
+            .put("reason", state.getString("reason")).put("value", 60)
+            .put("evidence", JSONArray().put("user_edit:one"))
+            .put("field_versions", JSONObject().put("reason", 3))
+        data.put("experiences", JSONArray().put(old).put(manual))
+        InternalStateEngine.record(data, "user_edit:one", "user_edit", "chat", "用户修改状态", JSONArray()
+            .put(JSONObject().put("dimension", "missing").put("scope", "global").put("version", 3)
+                .put("before", 50).put("after", 60).put("from_at", 50)), 100)
+        val before = data.toString()
+
+        val selected = InternalStateSelection.select(data, "chat", 100, "查看状态", emptyList(), emptyList(),
+            detailCharacters = 20000)
+        val experiences = InternalStateEngine.rows(selected.payload, "experiences")
+            .associateBy { InternalStateEngine.experienceEventId(it) }
+
+        assertEquals(before, data.toString())
+        assertEquals(setOf("state_report:old-frame", "user_edit:one"), experiences.keys)
+        assertFalse(experiences.getValue("state_report:old-frame").getBoolean("current_experience"))
+        assertTrue(experiences.getValue("user_edit:one").getBoolean("current_experience"))
+        assertFalse(experiences.getValue("user_edit:one").has("frame_id"))
+        assertEquals("user_edit", experiences.getValue("user_edit:one").getString("source"))
+        assertEquals("用户填写的原因", experiences.getValue("user_edit:one").getString("reason"))
+        assertTrue("user_edit:one" in selected.eventIds)
+        val current = InternalStateEngine.rows(selected.payload, "states").single()
+        assertEquals("user_edit", current.getString("experience_source"))
+        assertEquals(60.0, current.getDouble("value"), 0.0)
+    }
+
+    @Test fun publishedFrameOnlyExperienceRemainsRecognizedAsCurrent() {
+        val definition = definition("missing")
+        val data = JSONObject().put("definitions", JSONArray().put(definition))
+        InternalStateEngine.instance(data, definition, "chat", 100)
+            .put("report_frame_id", "published-frame").put("experience_at", 100)
+        data.put("experiences", JSONArray().put(JSONObject().put("dimension", "missing")
+            .put("scope", "global").put("version", 3).put("frame_id", "published-frame")
+            .put("at", 100).put("value", 50).put("reason", "原来保存的报告")))
+
+        val selected = InternalStateSelection.select(data, "chat", 100, "", emptyList(), emptyList(),
+            detailCharacters = 20000)
+
+        val experience = InternalStateEngine.rows(selected.payload, "experiences").single()
+        assertTrue(experience.getBoolean("current_experience"))
+        assertEquals("published-frame", experience.getString("frame_id"))
+        assertFalse(experience.has("event_id"))
+    }
 }
