@@ -7,6 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,13 +26,26 @@ fun VoiceMessageOutboxRows(viewModel: ChatViewModel, chatId: String?) {
     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(horizontal = 12.dp),
         horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(pending, key = { it.id }) { item ->
+            var detailsExpanded by remember(item.id, item.status) { mutableStateOf(false) }
             Surface(shape = RoundedCornerShape(16.dp),
                 color = if (item.failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
                 modifier = Modifier.fillMaxWidth(.88f).clickable(enabled = item.failed && !item.interrupted && (!item.analysisFailed || item.sendWithoutAnalysis)) { viewModel.retryVoiceMessage(item.id) }) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("[语音条] ${item.durationMillis / 1000} 秒 · ${item.status}",
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("[语音条] ${item.durationMillis / 1000} 秒",
+                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                        if (item.failed) IconButton(onClick = { viewModel.dismissFailedVoiceMessage(item.id) }) {
+                            Icon(Icons.Default.Close, contentDescription = "取消发送并移除语音条")
+                        }
+                    }
+                    Text(item.status,
                         color = if (item.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSecondaryContainer,
-                        style = MaterialTheme.typography.bodyMedium)
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = if (detailsExpanded) Int.MAX_VALUE else 3,
+                        overflow = TextOverflow.Ellipsis)
+                    if (item.failed) TextButton(onClick = { detailsExpanded = !detailsExpanded }) {
+                        Text(if (detailsExpanded) "收起错误详情" else "展开错误详情")
+                    }
                     if (item.interrupted) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = { viewModel.discardInterruptedVoiceMessage(item.id) }) { Text("重录") }

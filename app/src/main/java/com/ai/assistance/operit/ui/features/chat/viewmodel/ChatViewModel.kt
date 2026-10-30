@@ -1548,6 +1548,20 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         showToast("已放弃中断录音，请按住麦克风重新录制")
     }
 
+    fun dismissFailedVoiceMessage(id: Long) {
+        if (voiceOutbox.items.value.none { it.id == id && it.failed }) return
+        val job = voiceJobs[id]
+        // Wait for the failed attempt to stop before deleting its persisted outbox entry,
+        // otherwise its final status write could resurrect the dismissed card.
+        job?.cancel()
+        viewModelScope.launch {
+            job?.join()
+            voiceOutbox.dismissFailed(id)
+            if (voiceJobs[id] === job) voiceJobs.remove(id)
+            showToast("已取消这条语音发送，原始录音仍保留")
+        }
+    }
+
     fun sendVoiceMessageWithoutAnalysis(id: Long) {
         if (voiceJobs[id]?.isActive == true) return
         val item = voiceOutbox.items.value.firstOrNull { it.id == id } ?: return
