@@ -74,6 +74,13 @@ class VoiceMessageOutbox(context: Context) {
         state.value = state.value.filterNot { it.id == id }
         file.delete()
     }
+    /** Dismiss the failed send persistently; keep both original and archived audio. */
+    @Synchronized fun dismissFailed(id: Long) {
+        if (state.value.none { it.id == id && it.failed }) return
+        AtomicFile(File(directory, "$id.json")).delete()
+        state.value = state.value.filterNot { it.id == id }
+    }
+
     @Synchronized fun sent(id: Long) {
         AtomicFile(File(directory, "$id.json")).delete()
         state.value = state.value.filterNot { it.id == id }
