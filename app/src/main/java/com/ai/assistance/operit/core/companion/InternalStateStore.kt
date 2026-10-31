@@ -106,10 +106,10 @@ class InternalStateStore(private val context: Context) {
     /** The frame comes from host request metadata, never from role/chat fields in model output. */
     fun submit(frame: InternalStateFrame, report: JSONObject): JSONObject {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
-        check(enabled(frame.roleId)) { "内部状态已关闭，不能提交本轮报告" }
+        requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         lateinit var receipt: JSONObject
         store.update(key(frame.roleId)) { data ->
-            check(enabled(frame.roleId)) { "内部状态已关闭，不能提交本轮报告" }
+            requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
         return receipt

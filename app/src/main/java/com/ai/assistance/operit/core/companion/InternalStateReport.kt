@@ -25,9 +25,9 @@ object InternalStateReports {
     fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long): JSONObject {
         require(frame.id.isNotBlank() && frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         require(frame.revision >= 0 && frame.at >= 0 && now >= frame.at) { "状态报告时间早于本轮快照" }
-        require(frame.eventSequence >= 0 && frame.eventSequence <= data.optLong("sequence")) { "本轮事件边界无效" }
+        requireStateReport(frame.eventSequence >= 0 && frame.eventSequence <= data.optLong("sequence"), InternalStateReportFailure.SOURCE)
         require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise") }) { "状态报告包含未知字段" }
-        require(string(report, "frame_id", 160) == frame.id) { "状态报告不属于当前请求" }
+        requireStateReport(string(report, "frame_id", 160) == frame.id, InternalStateReportFailure.FRAME)
         val reportDigest = digest(report)
         val frameDigest = digest(JSONObject().put("id", frame.id).put("role", frame.roleId).put("chat", frame.chatId)
             .put("revision", frame.revision).put("at", frame.at).put("events", JSONArray(frame.eventIds.sorted()))
@@ -37,21 +37,21 @@ object InternalStateReports {
         // report with the same frame is a conflicting write, not another interpretation to append.
         val applied = InternalStateEngine.rows(data, "semantic_reports").firstOrNull { it.getString("frame_id") == frame.id }
         if (applied != null) {
-            require(applied.getString("role_id") == frame.roleId && applied.getString("chat_id") == frame.chatId &&
-                applied.getLong("frame_revision") == frame.revision && applied.getLong("frame_at") == frame.at) { "状态报告请求身份不一致" }
-            require(applied.getString("digest") == reportDigest) { "同一请求已提交了不同的状态报告" }
-            require(applied.getString("frame_digest") == frameDigest) { "本轮来源或定义名录已被替换" }
+            requireStateReport(applied.getString("role_id") == frame.roleId && applied.getString("chat_id") == frame.chatId &&
+                applied.getLong("frame_revision") == frame.revision && applied.getLong("frame_at") == frame.at, InternalStateReportFailure.FRAME)
+            requireStateReport(applied.getString("digest") == reportDigest, InternalStateReportFailure.CONFLICT)
+            requireStateReport(applied.getString("frame_digest") == frameDigest, InternalStateReportFailure.SOURCE)
             return JSONObject(applied.getJSONObject("receipt").toString())
         }
 
         val revision = InternalStateEngine.semanticRevision(data)
-        require(revision == frame.revision && revision < Long.MAX_VALUE) { "内部状态已变化，旧快照不能覆盖新报告" }
-        require(frame.eventIds.isNotEmpty()) { "本轮缺少真实来源事件" }
+        requireStateReport(revision == frame.revision && revision < Long.MAX_VALUE, InternalStateReportFailure.REVISION)
+        requireStateReport(frame.eventIds.isNotEmpty(), InternalStateReportFailure.SOURCE)
         val events = InternalStateEngine.rows(data, "events").associateBy { it.getString("id") }
         frame.eventIds.forEach { id ->
-            val event = requireNotNull(events[id]) { "本轮来源事件不存在" }
-            require(event.getLong("at") <= frame.at) { "来源事件晚于本轮快照" }
-            require(event.getLong("sequence") <= frame.eventSequence) { "来源事件超出本轮已观察边界" }
+            val event = events[id] ?: throw InternalStateReportRejected(InternalStateReportFailure.SOURCE)
+            requireStateReport(event.getLong("at") <= frame.at, InternalStateReportFailure.SOURCE)
+            requireStateReport(event.getLong("sequence") <= frame.eventSequence, InternalStateReportFailure.SOURCE)
         }
 
         // All validation and writes happen on a detached copy. Rejection cannot leave a definition
@@ -71,8 +71,8 @@ object InternalStateReports {
             val old = requireNotNull(definitions[id]) { "待修订维度不存在" }
             require(old.getBoolean("active")) { "待修订维度已停用" }
             val expected = revision.get("expected_version")
-            require(expected is Number && expected.toDouble() == old.getInt("version").toDouble() &&
-                frame.definitionVersions[id] == old.getInt("version")) { "维度定义已变化或不属于本轮完整名录" }
+            requireStateReport(expected is Number && expected.toDouble() == old.getInt("version").toDouble() &&
+                frame.definitionVersions[id] == old.getInt("version"), InternalStateReportFailure.DEFINITION)
             require(old.getInt("version") < Int.MAX_VALUE) { "维度版本已达上限" }
             string(revision, "reason", 1500)
             evidence(revision, frame)
@@ -101,7 +101,7 @@ object InternalStateReports {
             val old = requireNotNull(definitions[id]) { "待更新维度不存在" }
             val definition = effectiveDefinitions.getValue(id)
             require(old.getBoolean("active")) { "待更新维度已停用" }
-            require(frame.definitionVersions[id] == old.getInt("version")) { "维度定义已变化或不属于本轮完整名录" }
+            requireStateReport(frame.definitionVersions[id] == old.getInt("version"), InternalStateReportFailure.DEFINITION)
             validateExperience(update, definition, frame, allowConditionOnly = true)
             val state = InternalStateEngine.instance(next, definition, frame.chatId, now)
             require(state.getLong("at") <= now) { "状态时间晚于本次报告" }
@@ -135,7 +135,7 @@ object InternalStateReports {
                     (change.getString("dimension") to change.getString("scope")) in targets
                 }
         }
-        require(!unseenChange) { "本轮后目标状态已有新的客观变化；保留新值，下一业务轮重新观察" }
+        requireStateReport(!unseenChange, InternalStateReportFailure.CONFLICT)
 
         revisions.forEach { revision ->
             val id = revision.getString("id")
@@ -273,12 +273,12 @@ object InternalStateReports {
     private fun evidence(experience: JSONObject, frame: InternalStateFrame): JSONArray {
         if (!experience.has("evidence")) return JSONArray(frame.eventIds.sorted())
         val evidence = experience.getJSONArray("evidence")
-        require(evidence.length() > 0) { "体验必须保留本轮来源" }
+        requireStateReport(evidence.length() > 0, InternalStateReportFailure.SOURCE)
         val ids = (0 until evidence.length()).map { index ->
             require(evidence.get(index) is String)
             evidence.getString(index)
         }
-        require(ids.distinct().size == ids.size && ids.all { it in frame.eventIds }) { "体验只能引用本轮绑定的真实来源" }
+        requireStateReport(ids.distinct().size == ids.size && ids.all { it in frame.eventIds }, InternalStateReportFailure.SOURCE)
         return JSONArray(ids)
     }
 

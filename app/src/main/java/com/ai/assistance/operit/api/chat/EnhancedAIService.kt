@@ -23,6 +23,7 @@ import com.ai.assistance.operit.core.chat.CurrentRequestContext
 import com.ai.assistance.operit.core.chat.HistoricalPackageContext
 import com.ai.assistance.operit.core.companion.InternalStateFrame
 import com.ai.assistance.operit.core.companion.InternalStateReportStream
+import com.ai.assistance.operit.core.companion.InternalStateReportFailure
 import com.ai.assistance.operit.core.companion.InternalStateStore
 import com.ai.assistance.operit.core.chat.SegmentedSummary
 import com.ai.assistance.operit.core.chat.hooks.appendUserTurnIfMissing
@@ -2113,7 +2114,9 @@ class EnhancedAIService private constructor(private val context: Context) {
             val frame = context.internalStateFrame
             if (frame == null) {
                 AppLogger.e(TAG, "STATE_REPORT_WITHOUT_HOST_FRAME")
-                onNonFatalError("内部状态未同步：本轮没有可写入的状态上下文。")
+                val reason = InternalStateReportFailure.NO_FRAME
+                onNonFatalError(this@EnhancedAIService.context.getString(
+                        R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes), reason.code))
             } else {
                 try {
                     InternalStateStore(this@EnhancedAIService.context).submit(frame, report)
@@ -2122,8 +2125,10 @@ class EnhancedAIService private constructor(private val context: Context) {
                     throw cancelled
                 } catch (failure: Exception) {
                     // Report text, source text and arbitrary JSON exception messages are private.
-                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED type=${failure.javaClass.simpleName}")
-                    onNonFatalError("内部状态未同步：回报未通过来源、版本或格式检查，现有状态已保留。")
+                    val reason = InternalStateReportFailure.classify(failure)
+                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED code=${reason.code} type=${failure.javaClass.simpleName}")
+                    onNonFatalError(this@EnhancedAIService.context.getString(
+                        R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes), reason.code))
                 }
             }
         }
