@@ -12,6 +12,11 @@
 
 #include "operit_quickjs.h"
 
+#if defined(__ANDROID__) && defined(JS_PTR64)
+// A compact value would discard Android heap pointer tags before deallocation.
+static_assert(sizeof(JSValue) == 16, "Android 64-bit QuickJS must preserve full pointers");
+#endif
+
 namespace {
 
 std::string EscapeJson(const std::string& input) {

@@ -5,12 +5,29 @@ project(quickjsjni)
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/operit_git_source.cmake")
 
 operit_prepare_git_source(
-    QUICKJS_DIR
+    QUICKJS_UPSTREAM_DIR
     OPERIT_QUICKJS_BINARY_DIR
     quickjs
     "https://github.com/bellard/quickjs.git"
-    "master"
+    "e621135dc542e000e31038bedc52944aa0adaf1a"
 )
+
+# Android's allocator tags the top byte of 64-bit heap pointers. Upstream
+# 47-bit NaN boxing drops that byte, aborting in malloc_usable_size/free.
+# Patch an ABI-local copy so all C sources and the JNI bridge share the same
+# full-pointer JSValue layout without racing other ABI configurations.
+set(QUICKJS_DIR "${CMAKE_CURRENT_BINARY_DIR}/quickjs-android")
+file(COPY "${QUICKJS_UPSTREAM_DIR}/" DESTINATION "${QUICKJS_DIR}")
+file(READ "${QUICKJS_DIR}/quickjs.h" QUICKJS_HEADER)
+set(QUICKJS_BOXING_CONDITION "#elif defined(__x86_64__) || defined(__aarch64__) || defined(__riscv)")
+string(FIND "${QUICKJS_HEADER}" "${QUICKJS_BOXING_CONDITION}" QUICKJS_BOXING_OFFSET)
+if(QUICKJS_BOXING_OFFSET EQUAL -1)
+    message(FATAL_ERROR "QuickJS value layout changed; review Android pointer-tag preservation")
+endif()
+string(REPLACE "${QUICKJS_BOXING_CONDITION}"
+    "#elif !defined(__ANDROID__) && (defined(__x86_64__) || defined(__aarch64__) || defined(__riscv))"
+    QUICKJS_HEADER "${QUICKJS_HEADER}")
+file(WRITE "${QUICKJS_DIR}/quickjs.h" "${QUICKJS_HEADER}")
 
 file(READ "${QUICKJS_DIR}/VERSION" QUICKJS_VERSION_RAW)
 string(STRIP "${QUICKJS_VERSION_RAW}" QUICKJS_VERSION)
