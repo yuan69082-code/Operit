@@ -25,15 +25,18 @@ object LogcatExportHelper {
 
     suspend fun exportLogs(context: Context): LogcatExportResult = withContext(Dispatchers.IO) {
         try {
-            val logFile = AppLogger.getLogFile()
-            if (logFile == null || !logFile.exists() || logFile.length() == 0L) {
+            val logFiles = listOfNotNull(
+                AppLogger.getLogFile(),
+                File(context.filesDir, "logs/last-crash.txt")
+            ).filter { it.isFile && it.length() > 0L }
+            if (logFiles.isEmpty()) {
                 return@withContext LogcatExportResult(
                     message = context.getString(R.string.logcat_no_logs_to_save),
                     success = false
                 )
             }
 
-            val logLineCount = countExportableLogLines(logFile)
+            val logLineCount = logFiles.sumOf { countExportableLogLines(it) }
             if (logLineCount == 0L) {
                 return@withContext LogcatExportResult(
                     message = context.getString(R.string.logcat_no_logs_to_save),
@@ -44,9 +47,9 @@ object LogcatExportHelper {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "operit_log_$timestamp.txt"
             val filePath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                saveUsingMediaStore(context, fileName, logFile, logLineCount)
+                saveUsingMediaStore(context, fileName, logFiles, logLineCount)
             } else {
-                saveUsingFileSystem(context, fileName, logFile, logLineCount)
+                saveUsingFileSystem(context, fileName, logFiles, logLineCount)
             }
 
             LogcatExportResult(
@@ -79,7 +82,7 @@ object LogcatExportHelper {
     private fun writeLogContent(
         context: Context,
         writer: Writer,
-        logFile: File,
+        logFiles: List<File>,
         logLineCount: Long
     ) {
         val exportTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
@@ -89,10 +92,14 @@ object LogcatExportHelper {
         writer.appendLine("===================================")
         writer.appendLine()
 
-        logFile.bufferedReader().useLines { lines ->
-            lines.forEach { line ->
-                if (line.isNotBlank()) {
-                    writer.appendLine(line)
+        // Keep the persisted exception separate: it can belong to an earlier launch.
+        for (logFile in logFiles) {
+            writer.appendLine("--- ${logFile.name} ---")
+            logFile.bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    if (line.isNotBlank()) {
+                        writer.appendLine(line)
+                    }
                 }
             }
         }
@@ -102,7 +109,7 @@ object LogcatExportHelper {
     private fun saveUsingMediaStore(
         context: Context,
         fileName: String,
-        logFile: File,
+        logFiles: List<File>,
         logLineCount: Long
     ): String {
         try {
@@ -118,7 +125,7 @@ object LogcatExportHelper {
 
             context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                 outputStream.bufferedWriter().use { writer ->
-                    writeLogContent(context, writer, logFile, logLineCount)
+                    writeLogContent(context, writer, logFiles, logLineCount)
                 }
             } ?: throw Exception(context.getString(R.string.logcat_cannot_open_output_stream))
 
@@ -133,7 +140,7 @@ object LogcatExportHelper {
     private fun saveUsingFileSystem(
         context: Context,
         fileName: String,
-        logFile: File,
+        logFiles: List<File>,
         logLineCount: Long
     ): String {
         try {
@@ -148,7 +155,7 @@ object LogcatExportHelper {
             }
             val file = File(operitDir, fileName)
             FileWriter(file).use { writer ->
-                writeLogContent(context, writer, logFile, logLineCount)
+                writeLogContent(context, writer, logFiles, logLineCount)
             }
             if (!file.exists() || file.length() == 0L) {
                 throw Exception(context.getString(R.string.logcat_file_create_failed))

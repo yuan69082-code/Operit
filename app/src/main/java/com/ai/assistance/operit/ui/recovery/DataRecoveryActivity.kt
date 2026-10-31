@@ -133,6 +133,19 @@ private fun DataRecoveryScreen() {
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
 
+            // Recovery runs independently of the failing main screen, so logs must be
+            // exportable here without asking users to install a separate file manager.
+            item {
+                OutlinedButton(
+                    onClick = { viewModel.exportApplicationLogs() },
+                    enabled = !state.isRunning
+                ) {
+                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.crash_report_export_logs_button))
+                }
+            }
+
             item {
                 StatusPanel(
                     isRunning = state.isRunning,
