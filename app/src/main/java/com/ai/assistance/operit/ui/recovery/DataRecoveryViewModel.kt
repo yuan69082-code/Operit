@@ -13,6 +13,7 @@ import com.ai.assistance.operit.data.recovery.PreferencesHealthManager
 import com.ai.assistance.operit.data.recovery.RoomDatabaseHealthManager
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.LocaleUtils
+import com.ai.assistance.operit.ui.features.toolbox.screens.logcat.LogcatExportHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +46,22 @@ class DataRecoveryViewModel(private val context: Context) : ViewModel() {
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+
+    fun exportApplicationLogs() {
+        if (_state.value.isRunning) return
+        _state.value = _state.value.copy(isRunning = true, error = null, status = null)
+        viewModelScope.launch {
+            try {
+                val result = LogcatExportHelper.exportLogs(context)
+                _state.value = _state.value.copy(
+                    status = if (result.success) result.message else null,
+                    error = if (result.success) null else result.message
+                )
+            } finally {
+                _state.value = _state.value.copy(isRunning = false)
+            }
+        }
+    }
 
     fun setSqlText(sql: String) {
         _state.value = _state.value.copy(sqlText = sql)
