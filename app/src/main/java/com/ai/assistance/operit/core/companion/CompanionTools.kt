@@ -196,12 +196,12 @@ object CompanionTools {
                                     val minutes = required(tool, "minutes").toIntOrNull() ?: error("minutes 须为整数")
                                     val purpose = required(tool, "purpose")
                                     require(purpose.length <= 500) { "目的最多500字。" }
-                                    store.update(scheduleKey) { it.put("at", CompanionPolicy.wakeAt(System.currentTimeMillis(), minutes))
+                                    store.update(scheduleKey) { CompanionSchedule.supersede(it); it.put("at", CompanionPolicy.wakeAt(System.currentTimeMillis(), minutes))
                                         .put("purpose", purpose).put("owner", "ai").put("paused", false) }
                                     store.log(chatId, "安排", "${minutes}分钟后：$purpose")
                                 }
                                 "cancel" -> {
-                                    store.update(scheduleKey) { it.put("paused", true) }
+                                    store.update(scheduleKey) { CompanionSchedule.supersede(it); it.put("paused", true) }
                                     store.log(chatId, "安排", "AI 暂停了下一次唤醒")
                                 }
                                 else -> error("未知唤醒操作")

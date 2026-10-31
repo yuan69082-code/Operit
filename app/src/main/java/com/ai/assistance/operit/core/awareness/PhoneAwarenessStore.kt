@@ -82,8 +82,8 @@ class PhoneAwarenessStore(context: Context) {
             .forEach { it.put("dispatch", "interrupted").put("result", "服务曾中断，未重试工具操作") }
     }
 
-    fun discardPending() = store.update(key) { data ->
-        data.optJSONArray("events").rows().filter { it.optString("dispatch") in setOf("running", "pending", "coalesced") }
+    fun discardPending(before: Long = Long.MAX_VALUE) = store.update(key) { data ->
+        data.optJSONArray("events").rows().filter { it.optLong("at") < before && it.optString("dispatch") in setOf("running", "pending", "coalesced") }
             .forEach { it.put("dispatch", "cancelled") }
     }
 

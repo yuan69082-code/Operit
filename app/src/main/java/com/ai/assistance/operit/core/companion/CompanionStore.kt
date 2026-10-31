@@ -11,6 +11,7 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /** Role state belongs to the role, not a provider or the currently visible window. */
 class CompanionStore(context: Context) {
@@ -35,13 +36,17 @@ class CompanionStore(context: Context) {
 
     private fun file(scope: String) = AtomicFile(File(root, key(scope) + ".json"))
 
-    fun read(scope: String): JSONObject = synchronized(lock) {
+    // Different files must not block each other (especially UI reads behind state projection).
+    // Share locks across store instances; AtomicFile alone does not serialize read/modify/write.
+    private fun lock(scope: String) = locks.computeIfAbsent(File(root, key(scope)).absolutePath) { Any() }
+
+    fun read(scope: String): JSONObject = synchronized(lock(scope)) {
         val source = file(scope)
         if (!source.baseFile.exists() && !File(source.baseFile.path + ".bak").exists()) JSONObject()
         else JSONObject(source.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
     }
 
-    fun update(scope: String, change: (JSONObject) -> Unit): JSONObject = synchronized(lock) {
+    fun update(scope: String, change: (JSONObject) -> Unit): JSONObject = synchronized(lock(scope)) {
         val data = read(scope)
         change(data)
         val target = file(scope)
@@ -194,5 +199,5 @@ class CompanionStore(context: Context) {
         check(!target.exists() || target.delete()) { "资料已更新，但旧文件清理失败。" }
     }
 
-    companion object { private val lock = Any() }
+    companion object { private val locks = ConcurrentHashMap<String, Any>() }
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gemini_retry_wait_seconds">，等待 %1$d 秒后重试</string>
+    <string name="gemini_response_no_output">服务已结束响应，但没有返回正文、工具调用或图片</string>
+</resources>

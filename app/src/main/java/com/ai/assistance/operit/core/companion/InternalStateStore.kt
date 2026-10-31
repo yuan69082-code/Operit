@@ -106,10 +106,10 @@ class InternalStateStore(private val context: Context) {
     /** The frame comes from host request metadata, never from role/chat fields in model output. */
     fun submit(frame: InternalStateFrame, report: JSONObject): JSONObject {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
-        check(enabled(frame.roleId)) { "内部状态已关闭，不能提交本轮报告" }
+        requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         lateinit var receipt: JSONObject
         store.update(key(frame.roleId)) { data ->
-            check(enabled(frame.roleId)) { "内部状态已关闭，不能提交本轮报告" }
+            requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
         return receipt
@@ -245,7 +245,7 @@ class InternalStateStore(private val context: Context) {
             "condition 只能选择 always（任何）、not_contacted（未联系）、custom（自定义），没有其他选项。reason 是具体原因文本，自定义可自由描述任何原因；interval_minutes 是每多少分钟，amount 是这段时间涨/降多少。" +
             "数字提供0至30或自定义，自定义不限于这些值并支持小数；JSON中只能填写有限数字而非字符串。interval_minutes为0或负数时暂停该方向，amount=0也不变化；负amount按其符号反向变化。floor由你填写任何有限数值，30只是用户举例，绝不是默认值；它只限制被动时间下降，不重置初值，也不限制主观value低于它，实际状态仍受min/max约束。" +
             "联系窗口以这位助手实际收到的用户消息时间为准；global 跨该助手窗口，session 只算当前窗口。超过contact_window_minutes没有新联系时not_contacted成立；窗口为0或负数表示没有等待窗口。没有实际联系记录时条件未知，不凭空认定用户离开。模型重试、旧消息重新生成、系统或感知唤醒不会刷新联系时间。" +
-            "custom 条件由你在 time_conditions:{increase:true/false,decrease:true/false} 中报告成立或结束；只写对应 custom 方向，不能覆盖宿主的联系事实。未知条件不计时，省略已报告方向保持原状。可仅更新条件：{id,reason,time_conditions}，不用编造当前 value。" +
+            "每个 state_catalog 条目的 reportable_time_conditions 列出允许回报的 custom 方向。只可在 time_conditions 中写这些方向及布尔值；列表为空就省略整个 time_conditions 字段，不能把 always 或 not_contacted 写成 false，也不能覆盖宿主联系事实。未知条件不计时，省略已报告方向保持原状。可仅更新条件：{id,reason,time_conditions}，不用编造当前 value。" +
             "时间变化按真实经过时长在本地结算，不为计时额外唤醒模型。两个条件同时成立时按涨减速率合并；未满足的方向不计时。" +
             "state_catalog.time_rules_status=undefined 表示旧状态的新规则未定义；旧半衰期与触发逻辑在明确修订前继续，系统不会替你填数字或分类。定义 time_rules 后旧 halfLifeHours/maxDelta/triggers 不再参与计算。" +
             "kind只能是drive/sentiment/emotion/psychology四类，不允许自定义类别；每类中的状态名称和简介可自主定义，类别不自动指定快慢。不能把别人的感受、资料内容或未执行计划记成自己的亲历。\n" +

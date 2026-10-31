@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InternalStateSelectionTest {
+    @Test fun catalogueDeclaresOnlyModelReportableConditionsEvenWithoutDetails() {
+        fun rule(condition: String) = JSONObject().put("condition", condition)
+            .put("reason", "private rule reason").put("interval_minutes", 10).put("amount", 1)
+        val definition = definition("timed").put("time_rules", JSONObject()
+            .put("increase", rule("custom")).put("decrease", rule("always")).put("floor", 0))
+        val data = JSONObject().put("definitions", JSONArray().put(definition))
+        val selection = InternalStateSelection.select(data, "chat", 100, "", emptyList(), emptyList(), detailCharacters = 0)
+        val identity = selection.payload.getJSONArray("state_catalog").getJSONObject(0)
+        assertEquals("[\"increase\"]", identity.getJSONArray("reportable_time_conditions").toString())
+        assertFalse(identity.toString().contains("private rule reason"))
+        assertThrows(IllegalArgumentException::class.java) {
+            InternalStateTimeRules.validateConditions(definition, JSONObject().put("decrease", false))
+        }
+    }
+
     private fun definition(id: String) = JSONObject()
         .put("id", id).put("name", "自己定义的$id").put("description", "保留原来的具体含义")
         .put("min", 0).put("max", 100).put("baseline", 50).put("maxDelta", 20).put("halfLifeHours", 17)

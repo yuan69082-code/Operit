@@ -22,7 +22,7 @@ object CompanionContext {
         .put("heart_rate_source", "not_connected")
 
     suspend fun compose(context: Context, chatId: String, roleId: String?, capabilities: JSONObject,
-                        recordSnapshot: Boolean, currentInput: String = ""): RuntimeContextSections {
+                        recordSnapshot: Boolean, currentInput: String = ""): RuntimeContextSections = withContext(Dispatchers.IO) {
         val store = CompanionStore(context)
         val scope = store.scope(chatId, roleId)
         if (recordSnapshot) store.migrateMemory(chatId, scope)
@@ -122,7 +122,7 @@ object CompanionContext {
         }
         appendSections(internalSections)
         state.append("\n</operit_state>\n")
-        return RuntimeContextSections(instructions.toString(), state.toString(), internalStateFrame)
+        RuntimeContextSections(instructions.toString(), state.toString(), internalStateFrame)
     }
 
     fun related(context: Context, chatId: String, roleId: String?, query: String): String {

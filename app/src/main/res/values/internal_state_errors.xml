@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="state_report_failure">内部状态未同步：%1$s。现有状态已保留。[%2$s]</string>
+    <string name="state_report_frame">本轮请求标识不匹配</string>
+    <string name="state_report_source">回报引用的来源不属于本轮或已失效</string>
+    <string name="state_report_revision">状态已被更新，本轮旧回报未写入</string>
+    <string name="state_report_definition">状态定义版本不匹配</string>
+    <string name="state_report_conflict">本轮已有不同回报或新的客观变化</string>
+    <string name="state_report_format">回报字段、类型或取值不符合要求</string>
+    <string name="state_report_condition">回报包含不允许由模型确认的时间条件，或条件值不是布尔值</string>
+    <string name="state_report_disabled">内部状态功能已关闭</string>
+    <string name="state_report_storage">保存失败，请检查存储空间或权限</string>
+    <string name="state_report_internal">发生内部错误，请提供诊断码和日志</string>
+    <string name="state_report_no_frame">本轮缺少状态上下文</string>
+</resources>

@@ -59,6 +59,9 @@ object InternalStateSelection {
                 .put("name", definition.getString("name"))
                 .put("kind", InternalStateEngine.kind(definition))
                 .put("time_rules_status", if (InternalStateTimeRules.isDefined(definition)) "defined" else "undefined")
+                .put("reportable_time_conditions", JSONArray(InternalStateTimeRules.directions.filter {
+                    definition.optJSONObject("time_rules")?.optJSONObject(it)?.optString("condition") == "custom"
+                }))
                 .put("version", definition.getInt("version"))
                 .put("min", definition.getDouble("min"))
                 .put("max", definition.getDouble("max"))
