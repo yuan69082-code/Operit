@@ -942,6 +942,16 @@ open class GeminiProvider(
 
         flushOpenFunctionCallsAsUnmatched("history_end")
 
+        // Vertex rejects mixed tool-result turns whose last part is an image/text,
+        // misleadingly reporting a model-ending request. Preserve every part and the
+        // positional order of parallel responses, but finish these turns with results.
+        for (index in 0 until contentsArray.length()) {
+            val turn = contentsArray.getJSONObject(index)
+            if (turn.optString("role") == "user") {
+                turn.put("parts", orderGeminiToolResultParts(turn.getJSONArray("parts")))
+            }
+        }
+
         return Pair(Pair(contentsArray, systemInstruction), tokenCount)
     }
 
@@ -1127,6 +1137,11 @@ open class GeminiProvider(
             throw exception
         }
         if (exception is PromptBlockedException) {
+            throw exception
+        }
+        // Replaying an unchanged invalid request cannot repair its arguments and
+        // previously hid HTTP 400 behind a misleading connection-timeout message.
+        if (exception is HttpStatusException && exception.statusCode == 400) {
             throw exception
         }
         if (isManuallyCancelled) {
