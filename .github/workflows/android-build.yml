@@ -3,6 +3,9 @@ name: Android Build
 on:
   workflow_call:
     inputs:
+      source_ref:
+        type: string
+        default: ""
       gradle_task:
         required: false
         default: assembleDebug
@@ -52,7 +55,7 @@ on:
       - web-chat/**
 
 concurrency:
-  group: android-build-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: android-build-${{ github.workflow }}-${{ github.event_name }}-${{ inputs.source_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -81,7 +84,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 1
           persist-credentials: false
           submodules: false
