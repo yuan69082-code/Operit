@@ -6,6 +6,39 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class VertexAiEndpointTest {
+    @Test fun explicitGlobalLocationIsPreservedForBothRequestModes() {
+        for (version in listOf("v1", "v1beta1")) {
+            val base = "https://aiplatform.googleapis.com/$version/projects/test-project/locations/global"
+            for (suffix in listOf("", "/publishers/google", "/publishers/google/models/")) {
+                for (streaming in listOf(false, true)) {
+                    val method = if (streaming) "streamGenerateContent?alt=sse" else "generateContent"
+                    assertEquals(
+                        "$base/publishers/google/models/gemini-4-argon:$method",
+                        VertexAiEndpoint.requestUrl("$base$suffix", "gemini-4-argon", streaming).toString()
+                    )
+                }
+            }
+        }
+    }
+
+    @Test fun explicitRegionalLocationAndNumericProjectArePreserved() {
+        val base = "https://us-central1-aiplatform.googleapis.com/v1/projects/123456/locations/us-central1"
+        assertEquals(
+            "$base/publishers/google/models/gemini-2.5-flash:generateContent",
+            VertexAiEndpoint.requestUrl(base, "gemini-2.5-flash", false).toString()
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun incompleteProjectPathIsRejected() {
+        VertexAiEndpoint.requestUrl("https://aiplatform.googleapis.com/v1/projects/test-project", "gemini-4-argon", false)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun projectEndpointCannotSupplyCredentialsInQuery() {
+        VertexAiEndpoint.requestUrl("https://aiplatform.googleapis.com/v1/projects/test-project/locations/global?key=secret", "gemini-4-argon", false)
+    }
+
     @Test fun defaultProviderUsesVertexPublisherRoute() {
         val endpoint = EndpointCompleter.completeEndpoint(
             ApiProviderConfigs.getDefaultApiEndpoint(ApiProviderType.VERTEX_AI),
