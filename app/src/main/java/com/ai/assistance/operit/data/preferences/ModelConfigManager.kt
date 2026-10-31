@@ -36,7 +36,7 @@ import org.json.JSONObject
 private val Context.modelConfigDataStore: DataStore<Preferences> by
         versionedPreferencesDataStore(
                 name = "model_configs",
-                currentVersion = 4,
+                currentVersion = 5,
         ) { appContext ->
             preferenceSchemaMigration { version, preferences ->
                 when (version) {
@@ -44,6 +44,7 @@ private val Context.modelConfigDataStore: DataStore<Preferences> by
                     1 -> ModelConfigManager.migratePreferencesFromVersionOne(preferences)
                     2 -> ModelConfigManager.migratePreferencesFromVersionTwo(preferences)
                     3 -> ModelConfigManager.migratePreferencesFromVersionThree(preferences)
+                    4 -> ModelConfigManager.migratePreferencesFromVersionFour(preferences)
                     else -> missingPreferencesSchemaMigration(version)
                 }
             }
@@ -411,13 +412,48 @@ class ModelConfigManager(
                 providerTypeId: String,
                 modelName: String,
                 apiEndpoint: String = ""
-        ): String =
-                // Keep a model's choice while editing it; built-in defaults apply only on provider changes.
-                if (current.apiProviderTypeId == providerTypeId) {
-                    current.thinkingOptionId
-                } else {
-                    firstThinkingOptionIdForModel(providerTypeId, modelName, apiEndpoint)
+        ): String {
+            if (current.apiProviderTypeId != providerTypeId) {
+                return firstThinkingOptionIdForModel(providerTypeId, modelName, apiEndpoint)
+            }
+            val oldMapping = ThinkingQualityMappingRegistry.resolve(
+                    providerTypeId, current.modelName, current.apiEndpoint, current.thinkingConfigurations)
+            val rules = nextThinkingRulesForProvider(current, providerTypeId, apiEndpoint)
+            val newMapping = ThinkingQualityMappingRegistry.resolve(providerTypeId, modelName, apiEndpoint, rules)
+            // Model/endpoint edits can switch between budget and level controls. Initialize the
+            // new control at save time; request execution must not silently reinterpret bad values.
+            if (oldMapping != newMapping && newMapping.optionFor(current.thinkingOptionId) == null) {
+                if (providerTypeId == ApiProviderType.VERTEX_AI.name &&
+                        rules == thinkingRulesForProvider(providerTypeId) && newMapping.parameterLabel == "thinkingLevel") {
+                    return "LOW"
                 }
+                return newMapping.options.firstOrNull()?.id.orEmpty()
+            }
+            return current.thinkingOptionId
+        }
+
+        internal fun migratePreferencesFromVersionFour(preferences: MutablePreferences) {
+            val configIds = preferences[CONFIG_LIST_KEY]?.let { json.decodeFromString<List<String>>(it) }
+                    ?: emptyList()
+            configIds.forEach { id ->
+                val key = stringPreferencesKey("config_$id")
+                val stored = preferences[key] ?: return@forEach
+                val config = json.decodeFromString<ModelConfigData>(stored)
+                if (config.apiProviderTypeId != ApiProviderType.VERTEX_AI.name) return@forEach
+                // Repair only the shipped built-in Vertex rules; preserve user-authored rules.
+                if (config.thinkingConfigurations != thinkingRulesForProvider(ApiProviderType.VERTEX_AI.name)) return@forEach
+                val mapping = ThinkingQualityMappingRegistry.resolve(
+                        config.apiProviderTypeId, config.modelName, config.apiEndpoint, config.thinkingConfigurations)
+                val staleBudget = mapping.parameterLabel == "thinkingLevel" &&
+                        config.thinkingOptionId in setOf("1024", "4096", "8192", "16384", "32768")
+                val staleLevel = mapping.parameterLabel == "thinkingBudget" &&
+                        config.thinkingOptionId in setOf("MINIMAL", "LOW", "MEDIUM", "HIGH")
+                if (staleBudget || staleLevel) {
+                    preferences[key] = json.encodeToString(config.copy(thinkingOptionId = if (staleBudget) "LOW" else "1024"))
+                }
+            }
+        }
+
     }
 
     // Json解析器，支持宽松模式
@@ -669,7 +705,10 @@ class ModelConfigManager(
             modelName: String
     ): ModelConfigData {
         return updateConfigInternal(configId) {
-            it.copy(apiKey = apiKey, apiEndpoint = apiEndpoint, modelName = modelName)
+            it.copy(
+                    apiKey = apiKey, apiEndpoint = apiEndpoint, modelName = modelName,
+                    thinkingOptionId = nextThinkingOptionIdForProvider(it, it.apiProviderTypeId, modelName, apiEndpoint)
+            )
         }
     }
 

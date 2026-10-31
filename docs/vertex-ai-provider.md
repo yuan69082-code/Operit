@@ -11,3 +11,9 @@ Express API 不提供模型列表接口，因此请手动填写模型 ID。点�
 实现依据：[Google Cloud Express REST API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/express-mode/api-reference)。
 
 新增 `VertexAiEndpointTest` 覆盖请求路径、流式 SSE、完整模型名与错误输入。遵循仓库 AGENTS.md，本次未执行编译、构建或测试命令，也未使用真实 API Key 实测。
+
+## 思考配置切换修复
+
+同一提供商内更换模型或端点时，若思考控制发生变化且旧选项不属于新控制，保存时初始化新控制。Vertex 内置 thinkingLevel 控制初始化为 LOW；同一控制下有效的用户选择保持不变。请求执行仍严格校验，不吞掉非法参数。
+
+配置版本 5 只迁移使用原始内置规则的 Vertex 配置：残留数字预算迁移到 LOW，反向残留等级迁移到 1024。自定义规则和有效档位不变。新增 VertexThinkingSelectionTest 覆盖跨模型保存、请求构造和旧配置迁移。
