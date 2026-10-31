@@ -6,7 +6,15 @@
 
 Express API 不提供模型列表接口，因此请手动填写模型 ID。点击获取模型列表会显示说明，不会向 Gemini Developer API 发送请求。
 
-此提供商接入 Express API Key 模式，不处理标准 Vertex AI 的项目、地区、服务账号 JSON 或 OAuth Token 刷新。原有 Google 和 Gemini 通用配置保持不变；新增配置使用独立的 `VERTEX_AI` 标识。思考配置、工具调用、多模态输入和 Google Search 使用现有 Gemini 请求及响应处理。
+此提供商使用 API Key 认证，支持 Express 地址和显式指定项目、地区的 publisher 地址，不处理服务账号 JSON 或 OAuth Token 刷新。原有 Google 和 Gemini 通用配置保持不变；新增配置使用独立的 `VERTEX_AI` 标识。思考配置、工具调用、多模态输入和 Google Search 使用现有 Gemini 请求及响应处理。
+
+## 显式指定模型地区
+
+需要固定到全球端点时，可将 API 端点填写为 `https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global`，将 `PROJECT_ID` 替换为实际项目 ID。也接受结尾带 `/publishers/google` 或 `/publishers/google/models` 的地址，以及 `v1beta1` 版本。程序追加模型和请求方法，保留用户指定的项目、地区和版本；不会自动更换地区或改写已有配置。
+
+此模式仍通过 `x-goog-api-key` 使用绑定服务账号的授权密钥，项目和模型访问权限需由 Google 验证。普通未绑定服务账号的密钥不能视为等价凭据。参见 [Google 授权密钥说明](https://docs.cloud.google.com/docs/authentication/api-keys)。
+
+诊断边界：Cloud Shell 成功而手机返回 `us-central1` 的 404，并不能单凭错误文本证明代理修改了请求。本修复解决客户端拒绝显式全球地址的限制；不代表已经在用户手机上验证成功。路径测试覆盖全球、区域、两种 API 版本、流式和非流式请求，以及不完整路径和查询参数拒绝。
 
 实现依据：[Google Cloud Express REST API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/express-mode/api-reference)。
 
