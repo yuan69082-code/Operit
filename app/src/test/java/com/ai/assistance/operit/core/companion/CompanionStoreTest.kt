@@ -11,6 +11,42 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 
 class CompanionStoreTest {
+    @Test fun unrelatedFilesRemainReadableDuringSlowWrite() {
+        val root = temporary.newFolder()
+        val writer = store(root)
+        val reader = store(root)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val write = pool.submit {
+                writer.update("large-state") {
+                    entered.countDown()
+                    check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                    it.put("value", 1)
+                }
+            }
+            assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            val read = pool.submit<org.json.JSONObject> { reader.read("schedule") }
+            assertEquals(0, read.get(2, java.util.concurrent.TimeUnit.SECONDS).length())
+            release.countDown()
+            write.get(2, java.util.concurrent.TimeUnit.SECONDS)
+        } finally { release.countDown(); pool.shutdownNow() }
+    }
+
+    @Test fun concurrentStoresDoNotLoseUpdatesToSameFile() {
+        val root = temporary.newFolder()
+        val stores = listOf(store(root), store(root))
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val writes = stores.map { target -> pool.submit {
+                repeat(20) { target.update("shared") { it.put("count", it.optInt("count") + 1) } }
+            } }
+            writes.forEach { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+            assertEquals(40, store(root).read("shared").getInt("count"))
+        } finally { pool.shutdownNow() }
+    }
+
     @Test fun legacyMemoryMigratesOnceWithoutDailyInjectionOrLoss() {
         val library = store(temporary.newFolder())
         library.setMemory("c", "pin", "原文", "字".repeat(13000))

@@ -178,7 +178,7 @@ internal suspend fun buildSelectedMessagesPlainText(
 ): String {
     return messages
         .filter { message -> message.sender == "user" || message.sender == "ai" }
-        .filterNot(::isHiddenUserPlaceholder)
+        .filterNot(::isHiddenPlaceholder)
         .mapNotNull { message ->
             markdownToPlainText(cleanMessageContentForCopy(message.content))
                 .trim()
@@ -187,9 +187,8 @@ internal suspend fun buildSelectedMessagesPlainText(
         .joinToString("\n\n")
 }
 
-private fun isHiddenUserPlaceholder(message: ChatMessage): Boolean {
-    return message.sender == "user" &&
-        message.displayMode == ChatMessageDisplayMode.HIDDEN_PLACEHOLDER
+private fun isHiddenPlaceholder(message: ChatMessage): Boolean {
+    return message.displayMode == ChatMessageDisplayMode.HIDDEN_PLACEHOLDER
 }
 
 enum class ChatStyle {
@@ -437,7 +436,7 @@ fun ChatArea(
             val timestampKeyOccurrences = mutableMapOf<Long, Int>()
             chatHistory.forEachIndexed { actualIndex, message ->
                 // 隐藏的用户消息（自动触发/唤醒留痕）不在界面上画分隔线，只留给模型
-                if (isHiddenUserPlaceholder(message)) return@forEachIndexed
+                if (isHiddenPlaceholder(message)) return@forEachIndexed
                 val isLastAiMessage = actualIndex == messagesCount - 1 && message.sender == "ai"
                 val shouldHide = shouldHideLastAiMessage && isLastAiMessage
                 val timestampKeyOccurrence = timestampKeyOccurrences[message.timestamp] ?: 0
@@ -696,7 +695,7 @@ private fun MessageItem(
     }
     // 只有用户和AI的消息才能被操作
     val isActionable = message.sender == "user" || message.sender == "ai"
-    val isHiddenUserMessage = isHiddenUserPlaceholder(message)
+    val isHiddenUserMessage = isHiddenPlaceholder(message)
     var pluginMenuItems by remember(currentChatId, message.timestamp) {
         mutableStateOf<List<ChatMessageMenuItemDefinition>>(emptyList())
     }

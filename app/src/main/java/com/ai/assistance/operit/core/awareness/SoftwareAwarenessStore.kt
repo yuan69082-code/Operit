@@ -58,8 +58,8 @@ class SoftwareAwarenessStore(context: Context) {
     fun recover() = store.update(key) { data ->
         SoftwareEventPolicy.rows(data).filter { it.optString("dispatch") == "running" }.forEach { it.put("dispatch", "interrupted") }
     }
-    fun revokePending() = store.update(key) { data ->
-        SoftwareEventPolicy.rows(data).filter { it.optString("dispatch") in setOf("running", "pending") }
+    fun revokePending(before: Long = Long.MAX_VALUE) = store.update(key) { data ->
+        SoftwareEventPolicy.rows(data).filter { it.optLong("at") < before && it.optString("dispatch") in setOf("running", "pending") }
             .forEach { it.put("dispatch", "cancelled") }
     }
     fun clear() {

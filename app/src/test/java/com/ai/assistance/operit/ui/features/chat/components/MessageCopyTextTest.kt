@@ -95,6 +95,8 @@ class MessageCopyTextTest {
                 ),
                 ChatMessage(sender = "ai", content = "<think>empty</think>", timestamp = 4L),
                 ChatMessage(sender = "ai", content = "reply", timestamp = 5L),
+                ChatMessage(sender = "ai", content = "private wake record", timestamp = 6L,
+                    displayMode = ChatMessageDisplayMode.HIDDEN_PLACEHOLDER),
             )
 
         val result =

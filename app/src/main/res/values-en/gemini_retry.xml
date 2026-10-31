@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gemini_retry_wait_seconds">, retrying in %1$d seconds</string>
+</resources>

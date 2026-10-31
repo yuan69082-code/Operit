@@ -37,6 +37,10 @@ import java.net.UnknownHostException
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -187,6 +191,7 @@ open class GeminiProvider(
     class HttpStatusException(
         message: String,
         override val statusCode: Int,
+        val retryAfterMs: Long? = null,
         cause: Throwable? = null
     ) : IOException(message, cause), HttpStatusCodeException
 
@@ -527,36 +532,9 @@ open class GeminiProvider(
     /**
      * 从结构化参数构建JSON Schema（Gemini格式）
      */
-    private fun buildSchemaFromStructured(params: List<com.ai.assistance.operit.data.model.ToolParameterSchema>): JSONObject {
-        val schema = JSONObject().apply {
-            put("type", "object")
-        }
-        
-        val properties = JSONObject()
-        val required = JSONArray()
-        
-        for (param in params) {
-            properties.put(param.name, JSONObject().apply {
-                put("type", param.type)
-                put("description", param.description)
-                if (param.default != null) {
-                    put("default", param.default)
-                }
-            })
-            
-            if (param.required) {
-                required.put(param.name)
-            }
-        }
-        
-        schema.put("properties", properties)
-        if (required.length() > 0) {
-            schema.put("required", required)
-        }
-        
-        return schema
-    }
-    
+    private fun buildSchemaFromStructured(params: List<com.ai.assistance.operit.data.model.ToolParameterSchema>): JSONObject =
+        GeminiToolSchema.parameters(params)
+
     /**
      * 构建包含文本和图片的parts数组
      */
@@ -942,6 +920,16 @@ open class GeminiProvider(
 
         flushOpenFunctionCallsAsUnmatched("history_end")
 
+        // Vertex rejects mixed tool-result turns whose last part is an image/text,
+        // misleadingly reporting a model-ending request. Preserve every part and the
+        // positional order of parallel responses, but finish these turns with results.
+        for (index in 0 until contentsArray.length()) {
+            val turn = contentsArray.getJSONObject(index)
+            if (turn.optString("role") == "user") {
+                turn.put("parts", orderGeminiToolResultParts(turn.getJSONArray("parts")))
+            }
+        }
+
         return Pair(Pair(contentsArray, systemInstruction), tokenCount)
     }
 
@@ -1129,6 +1117,11 @@ open class GeminiProvider(
         if (exception is PromptBlockedException) {
             throw exception
         }
+        // Replaying an unchanged invalid request cannot repair its arguments and
+        // previously hid HTTP 400 behind a misleading connection-timeout message.
+        if (exception is HttpStatusException && exception.statusCode in 400..499 && exception.statusCode !in setOf(408, 429)) {
+            throw exception
+        }
         if (isManuallyCancelled) {
             logError("请求被用户取消，停止重试。", exception)
             throw UserCancellationException(context.getString(R.string.gemini_error_request_cancelled), exception)
@@ -1151,10 +1144,13 @@ open class GeminiProvider(
 
         // A terminal failure must retain its streamed text; only a replacement request discards it.
         onRetryAccepted()
-        val retryDelayMs = LlmRetryPolicy.nextDelayMs(newRetryCount)
+        val retryDelayMs = if (exception is HttpStatusException && exception.statusCode == 429)
+            GeminiRetryDelay.delayMillis(newRetryCount, exception.retryAfterMs)
+        else LlmRetryPolicy.nextDelayMs(newRetryCount)
         AppLogger.w(TAG, "$errorText，将在 ${retryDelayMs}ms 后进行第 $newRetryCount 次重试...", exception)
         if (!shouldSuppressKeyPoolRateLimitNotice(apiKeyProvider, exception, TAG)) {
-            onNonFatalError(buildRetryMessage(errorText, newRetryCount))
+            onNonFatalError(buildRetryMessage(errorText, newRetryCount) +
+                context.getString(R.string.gemini_retry_wait_seconds, (retryDelayMs + 999) / 1000))
         }
         delay(retryDelayMs)
         return newRetryCount
@@ -1250,7 +1246,12 @@ open class GeminiProvider(
                 emitConnectionStatus(context.getString(R.string.gemini_connecting))
 
                 val startTime = System.currentTimeMillis()
-                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                coroutineScope {
+                    val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
+                        try { awaitCancellation() } finally { call.cancel() }
+                    }
+                    try {
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val response = call.execute()
                     activeResponse = response
                     try {
@@ -1266,7 +1267,8 @@ open class GeminiProvider(
                             if (response.code in 400..499) {
                                 throw HttpStatusException(
                                     context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody),
-                                    statusCode = response.code
+                                    statusCode = response.code,
+                                    retryAfterMs = GeminiRetryDelay.retryAfterMillis(response.header("Retry-After"), System.currentTimeMillis())
                                 )
                             }
                             throw IOException(context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody))
@@ -1303,6 +1305,12 @@ open class GeminiProvider(
                     } finally {
                         response.close()
                         AppLogger.d(TAG, "关闭响应连接")
+                    }
+                }
+
+                    } finally {
+                        cancellation.cancel()
+                        if (activeCall === call) { activeCall = null; activeResponse = null }
                     }
                 }
 
