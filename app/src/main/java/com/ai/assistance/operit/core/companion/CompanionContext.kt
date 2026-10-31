@@ -7,6 +7,8 @@ import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.chat.RuntimeContextSections
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 object CompanionContext {
@@ -112,8 +114,13 @@ object CompanionContext {
         }
         // Internal state owns todo/thought selection when enabled. Do not reinsert the newest
         // fixed-count reminders after selection, and keep this request's live catalogue at the tail.
-        appendSections(internal.promptSections(roleId, chatId, recordSnapshot, CompanionRuntime.isWake(chatId),
-            capabilities, currentInput))
+        val wake = CompanionRuntime.isWake(chatId)
+        // History previews can resume on Main after rollback. State projection reads storage
+        // and ranks the complete event history; doing it there freezes editing and scrolling.
+        val internalSections = withContext(Dispatchers.IO) {
+            internal.promptSections(roleId, chatId, recordSnapshot, wake, capabilities, currentInput)
+        }
+        appendSections(internalSections)
         state.append("\n</operit_state>\n")
         return RuntimeContextSections(instructions.toString(), state.toString(), internalStateFrame)
     }
