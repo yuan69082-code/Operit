@@ -7,6 +7,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.util.AppLogger
+import com.ai.assistance.operit.util.ProcessExitDiagnostics
 import java.io.File
 import java.io.FileWriter
 import java.io.Writer
@@ -27,7 +28,8 @@ object LogcatExportHelper {
         try {
             val logFiles = listOfNotNull(
                 AppLogger.getLogFile(),
-                File(context.filesDir, "logs/last-crash.txt")
+                File(context.filesDir, "logs/last-crash.txt"),
+                ProcessExitDiagnostics.capture(context)
             ).filter { it.isFile && it.length() > 0L }
             if (logFiles.isEmpty()) {
                 return@withContext LogcatExportResult(
