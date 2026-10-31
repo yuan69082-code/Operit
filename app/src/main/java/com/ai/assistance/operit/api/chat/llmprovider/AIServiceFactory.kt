@@ -416,6 +416,7 @@ object AIServiceFactory {
                 )
 
             // Gemini格式，支持Google Gemini系列及通用Gemini端点
+            ApiProviderType.VERTEX_AI,
             ApiProviderType.GOOGLE,
             ApiProviderType.GEMINI_GENERIC ->
                 GeminiProvider(

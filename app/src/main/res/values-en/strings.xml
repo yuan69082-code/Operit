@@ -8531,4 +8531,6 @@
     <string name="assistant_group_name">Group name</string>
     <string name="assistant_group_explanation">Select at least two assistants. The group has its own history; members use their own models, memories and tools.</string>
     <string name="assistant_create_and_open">Create and open</string>
+    <string name="provider_vertex_ai">Vertex AI (API Key)</string>
+    <string name="vertex_ai_manual_model">For Vertex AI (API Key), enter a model ID manually, such as gemini-2.5-flash. This API does not provide a model list.</string>
 </resources>

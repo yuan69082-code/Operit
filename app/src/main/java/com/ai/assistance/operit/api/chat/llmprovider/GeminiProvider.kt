@@ -1479,6 +1479,16 @@ open class GeminiProvider(
             isStreaming: Boolean,
             requestId: String
     ): Request {
+        // Keep Vertex authentication in a header and use its publisher resource path.
+        if (providerType == ApiProviderType.VERTEX_AI) {
+            return Request.Builder()
+                .url(VertexAiEndpoint.requestUrl(apiEndpoint, modelName, isStreaming))
+                .apply { customHeaders.forEach { (key, value) -> addHeader(key, value) } }
+                .header("x-goog-api-key", apiKeyProvider.getApiKey())
+                .header("Content-Type", "application/json")
+                .post(requestBody)
+                .build()
+        }
         // 确定请求URL
         val baseUrl = determineBaseUrl(apiEndpoint)
         val method = if (isStreaming) "streamGenerateContent" else "generateContent"
@@ -2207,7 +2217,7 @@ open class GeminiProvider(
             context = context,
             apiKey = apiKeyProvider.getApiKey(),
             apiEndpoint = apiEndpoint,
-            apiProviderType = ApiProviderType.GOOGLE
+            apiProviderType = providerType
         )
     }
 

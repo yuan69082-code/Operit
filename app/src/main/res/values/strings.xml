@@ -8517,4 +8517,6 @@
     <string name="assistant_group_name">群聊名称</string>
     <string name="assistant_group_explanation">选择至少两位助手。群聊另开一份记录，成员使用各自的模型、记忆和工具。</string>
     <string name="assistant_create_and_open">创建并进入</string>
+    <string name="provider_vertex_ai">Vertex AI (API Key)</string>
+    <string name="vertex_ai_manual_model">Vertex AI（API Key）请手动填写模型 ID，例如 gemini-2.5-flash；此接口不提供模型列表。</string>
 </resources>
