@@ -46,6 +46,39 @@ class InternalStateReportsTest {
     private fun state(data: JSONObject, id: String = "existing", chat: String = "chat") = InternalStateEngine.snapshot(data, chat, 0)
         .single { it.getString("id") == id }
 
+    @Test fun rejectionDiagnosticsPreserveStateAndDoNotExposeReportText() {
+        val original = data(definition())
+        val frame = frame(original)
+        val cases = listOf(
+            report(frame).put("frame_id", "private-wrong-id") to InternalStateReportFailure.FRAME,
+            report(frame, listOf(update().put("evidence", JSONArray().put("private-source")))) to InternalStateReportFailure.SOURCE,
+            report(frame, listOf(update(value = 999.0))) to InternalStateReportFailure.FORMAT
+        )
+        for ((report, expected) in cases) {
+            val copy = JSONObject(original.toString())
+            val before = copy.toString()
+            val failure = assertThrows(IllegalArgumentException::class.java) {
+                InternalStateReports.apply(copy, frame, report, 0)
+            }
+            assertEquals(expected, InternalStateReportFailure.classify(failure))
+            assertFalse(expected.code.contains("private"))
+            assertEquals(before, copy.toString())
+        }
+        val newer = JSONObject(original.toString()).put("semantic_revision", frame.revision + 1)
+        val before = newer.toString()
+        val failure = assertThrows(InternalStateReportRejected::class.java) {
+            InternalStateReports.apply(newer, frame, report(frame), 0)
+        }
+        assertEquals(InternalStateReportFailure.REVISION, failure.reason)
+        assertEquals(before, newer.toString())
+        assertEquals(InternalStateReportFailure.STORAGE,
+            InternalStateReportFailure.classify(java.io.IOException("private-path")))
+        assertEquals(InternalStateReportFailure.FORMAT,
+            InternalStateReportFailure.classify(org.json.JSONException("private-json")))
+        assertEquals(InternalStateReportFailure.INTERNAL,
+            InternalStateReportFailure.classify(IllegalStateException("private-state")))
+    }
+
     @Test fun legacyClassificationDoesNotMigrateNumbersTimesOrTimeRules() {
         val data = data(definition())
         InternalStateEngine.event(data, "read", "reading", "chat", "真实阅读", hour)

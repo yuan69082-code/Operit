@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="state_report_failure">Internal state was not synced: %1$s. Existing state is retained. [%2$s]</string>
+    <string name="state_report_frame">The request identity does not match</string>
+    <string name="state_report_source">Report evidence is missing or does not belong to this request</string>
+    <string name="state_report_revision">State changed after this request started</string>
+    <string name="state_report_definition">The state definition version does not match</string>
+    <string name="state_report_conflict">A conflicting report or newer objective change exists</string>
+    <string name="state_report_format">Report fields, types, or values are invalid</string>
+    <string name="state_report_disabled">Internal state is disabled</string>
+    <string name="state_report_storage">Saving failed; check storage space and permissions</string>
+    <string name="state_report_internal">An internal error occurred; provide the diagnostic code and logs</string>
+    <string name="state_report_no_frame">This request has no state context</string>
+</resources>
