@@ -1,11 +1,14 @@
 name: Android Tests
 
 on:
+  workflow_call:
+    inputs:
+      source_ref:
+        type: string
+        default: ""
   workflow_dispatch:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main, feat/assistant-workspaces, feat/group-continuity-games]
+    branches: [feat/assistant-workspaces, feat/group-continuity-games]
     paths:
       - .github/workflows/android-tests.yml
       - .gitmodules
@@ -37,7 +40,7 @@ on:
       - web-chat/**
 
 concurrency:
-  group: android-tests-${{ github.event_name }}-${{ github.ref }}
+  group: android-tests-${{ github.workflow }}-${{ inputs.source_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -62,7 +65,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 1
           persist-credentials: false
           submodules: false

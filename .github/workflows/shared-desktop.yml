@@ -2,24 +2,78 @@ name: Shared desktop preview
 
 on:
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR to rebuild and deliver; 0 builds main
+        type: string
+        default: "0"
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main, feat/desktop-shared-chat, feat/polaris-experience]
 
 permissions:
   contents: write
+  pull-requests: write
+  actions: write
 
 concurrency:
-  group: shared-desktop-${{ github.ref }}
+  group: shared-desktop-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      source: ${{ steps.candidate.outputs.source }}
+      head: ${{ steps.candidate.outputs.head }}
+      base: ${{ steps.candidate.outputs.base }}
+      pr: ${{ steps.candidate.outputs.pr }}
+      deliver: ${{ steps.candidate.outputs.deliver }}
+    steps:
+      - uses: actions/github-script@v7
+        id: candidate
+        env:
+          REQUESTED_PR: ${{ github.event.pull_request.number || inputs.pr_number || '0' }}
+        with:
+          script: |
+            const number = Number(process.env.REQUESTED_PR);
+            if (!Number.isSafeInteger(number) || number < 0) throw new Error('Invalid PR number');
+            if (!number) {
+              core.setOutput('source', context.sha);
+              core.setOutput('pr', '0');
+              core.setOutput('deliver', context.ref === 'refs/heads/main' ? 'true' : 'false');
+              return;
+            }
+            let pr;
+            for (let attempt = 0; attempt < 6; attempt++) {
+              pr = (await github.rest.pulls.get({...context.repo, pull_number: number})).data;
+              if (pr.mergeable !== null) break;
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            if (pr.state !== 'open' || !pr.mergeable || !pr.merge_commit_sha) throw new Error('PR has no current merge candidate');
+            const commit = (await github.rest.git.getCommit({...context.repo, commit_sha: pr.merge_commit_sha})).data;
+            if (commit.parents[0]?.sha !== pr.base.sha || commit.parents[1]?.sha !== pr.head.sha) throw new Error('Candidate changed; retry the run');
+            core.setOutput('source', pr.merge_commit_sha);
+            core.setOutput('head', pr.head.sha);
+            core.setOutput('base', pr.base.sha);
+            core.setOutput('pr', String(number));
+            core.setOutput('deliver', !pr.draft && pr.base.ref === 'main' && pr.user.login === context.repo.owner && pr.head.repo.full_name === process.env.GITHUB_REPOSITORY ? 'true' : 'false');
+  tests:
+    needs: prepare
+    uses: ./.github/workflows/android-tests.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.source }}
   windows:
+    needs: prepare
     name: Windows shared chat and checks
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: '22'
@@ -34,6 +88,8 @@ jobs:
       - name: Prepare verified Electron window runtime
         run: node desktop/scripts/package-electron.cjs
       - name: Package portable Windows client
+        env:
+          BUILD_COMMIT: ${{ needs.prepare.outputs.source }}
         shell: pwsh
         run: |
           $release = Get-Content desktop/release.json -Raw | ConvertFrom-Json
@@ -46,12 +102,12 @@ jobs:
           Copy-Item (Get-Command node).Source package/runtime/node.exe
           Copy-Item (Join-Path (Split-Path (Get-Command node).Source) 'LICENSE') package/runtime/LICENSE
           Copy-Item LICENSE package/LICENSE
-          @{version=$version; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content package/desktop/build-version.json -Encoding utf8NoBOM
+          @{version=$version; commit=$env:BUILD_COMMIT} | ConvertTo-Json | Set-Content package/desktop/build-version.json -Encoding utf8NoBOM
           Compress-Archive -Path package/* -DestinationPath operit-windows.zip
           Copy-Item docs/TODO/mobile-continuity/release-notes.md mobile-release-notes.md
           $tag = "shared-v$version"
           $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
-          @{version=$version; version_code=($release.android_version_base*100000+[int]$env:GITHUB_RUN_NUMBER); protocol=$release.protocol; channel=$release.channel; commit=$env:GITHUB_SHA; windows="$base/operit-windows.zip"; android="$base/app-debug.apk"} | ConvertTo-Json | Set-Content shared-release.json -Encoding utf8NoBOM
+          @{version=$version; version_code=($release.android_version_base*100000+[int]$env:GITHUB_RUN_NUMBER); protocol=$release.protocol; channel=$release.channel; commit=$env:BUILD_COMMIT; windows="$base/operit-windows.zip"; android="$base/app-debug.apk"} | ConvertTo-Json | Set-Content shared-release.json -Encoding utf8NoBOM
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: operit-windows-${{ github.run_number }}
@@ -61,19 +117,29 @@ jobs:
             mobile-release-notes.md
           if-no-files-found: error
   android:
+    needs: prepare
     name: Same-commit Android client
     uses: ./.github/workflows/android-build.yml
     secrets: inherit
     with:
       gradle_task: assembleDebug
+      source_ref: ${{ needs.prepare.outputs.source }}
   publish:
     name: Publish both clients after checks
-    # GitHub's built-in token cannot publish targets with workflow changes relative to main.
-    # Development branches produce paired artifacts; main publishes the paired update.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [windows, android]
+    # Keep merge and publication in this run; a token merge does not trigger another push build.
+    if: needs.prepare.outputs.deliver == 'true'
+    needs: [prepare, windows, android, tests]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22'
+      - name: Check delivery regression cases
+        run: node --test ci/test/verified_release.test.cjs
       - uses: actions/download-artifact@v4
         with:
           name: operit-windows-${{ github.run_number }}
@@ -82,9 +148,31 @@ jobs:
         with:
           name: operit-android-${{ github.run_number }}
           path: artifacts/android
+      - name: Verify release files exist before merging
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s artifacts/windows/operit-windows.zip
+          test -s artifacts/windows/shared-release.json
+          mapfile -t apks < <(find artifacts/android -name app-debug.apk -type f)
+          test "${#apks[@]}" -eq 1
+          test -s "${apks[0]}"
+      - name: Merge verified candidate and authorize publication
+        id: delivery
+        uses: actions/github-script@v7
+        env:
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.source }}
+          TESTED_HEAD: ${{ needs.prepare.outputs.head }}
+          TESTED_BASE: ${{ needs.prepare.outputs.base }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr }}
+        with:
+          script: |
+            await require('./ci/script/verified_release.cjs')({github, core, context});
       - name: Publish shared preview
+        if: steps.delivery.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TARGET: ${{ steps.delivery.outputs.target }}
         run: |
           set -euo pipefail
           apk=$(find artifacts/android -name app-debug.apk -type f)
@@ -93,6 +181,12 @@ jobs:
           version=$(python3 -c 'import json;print(json.load(open("artifacts/windows/shared-release.json"))["version"])')
           tag="shared-v$version"
           notes="$RUNNER_TEMP/shared-preview.md"
-          printf 'Windows共享聊天预览 %s\n\n同一提交构建的Windows便携包和安卓客户端。解压Windows包后运行desktop/Start-Operit-Window.cmd打开独立窗口，或Start-Operit.cmd使用浏览器。配置模型后在手机版外部HTTP设置中打开共享聊天。\n\n原生手机本地会话保持独立；旧文字记录需显式导入。本预览尚未包含跨端通话、完整历史附件迁移或原生桌面安装器。\n\n提交：%s\n' "$version" "$GITHUB_SHA" > "$notes"
+          printf 'Windows共享聊天预览 %s\n\n同一提交构建的Windows便携包和安卓客户端。解压Windows包后运行desktop/Start-Operit-Window.cmd打开独立窗口，或Start-Operit.cmd使用浏览器。配置模型后在手机版外部HTTP设置中打开共享聊天。\n\n原生手机本地会话保持独立；旧文字记录需显式导入。本预览尚未包含跨端通话、完整历史附件迁移或原生桌面安装器。\n\n提交：%s\n' "$version" "$RELEASE_TARGET" > "$notes"
           cat artifacts/windows/mobile-release-notes.md >> "$notes"
-          gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Operit 双端预览 $version" --notes-file "$notes" --prerelease --latest=false
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/existing-draft" 2>/dev/null; then
+            test "$(cat "$RUNNER_TEMP/existing-draft")" = true
+            gh release upload "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET" --title "Operit 双端预览 $version" --notes-file "$notes" --draft --prerelease --latest=false
+          fi
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
