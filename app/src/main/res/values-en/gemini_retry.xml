@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="gemini_retry_wait_seconds">, retrying in %1$d seconds</string>
+    <string name="gemini_response_no_output">The service ended its response without reply text, a tool call, or an image</string>
 </resources>

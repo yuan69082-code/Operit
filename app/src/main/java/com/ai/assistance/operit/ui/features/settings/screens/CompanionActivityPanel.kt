@@ -37,9 +37,9 @@ internal fun CompanionActivityPanel(store: CompanionStore, role: String) {
     Text(schedule.optString("purpose"))
     FilledTonalButton(enabled = store.proactiveEnabled && store.proactiveRole == role, onClick = {
         scope.launch(Dispatchers.IO) {
-        store.update(store.scheduleKey(role)) { CompanionSchedule.supersede(it); it.put("at", System.currentTimeMillis() + 60_000).put("paused", false)
-            .put("purpose", "用户要求唤醒一次，请检查当前情况，自行安排下一次。").put("owner", "user") }
-        chatId?.let { store.log(it, "安排", "用户安排一分钟后唤醒") }
+            store.update(store.scheduleKey(role)) { CompanionSchedule.supersede(it); it.put("at", System.currentTimeMillis() + 60_000).put("paused", false)
+                .put("purpose", "用户要求唤醒一次，请检查当前情况，自行安排下一次。").put("owner", "user") }
+            chatId?.let { store.log(it, "安排", "用户安排一分钟后唤醒") }
         }
     }) { Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text("一分钟后唤醒一次") }
     Text("活动日志（最近300条）", style = MaterialTheme.typography.titleMedium)

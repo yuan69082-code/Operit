@@ -110,12 +110,12 @@ object CompanionRuntime {
             }
             if (key in setOf("phone_enabled", "phone_wake_enabled", "phone_role",
                     "phone_excluded", "phone_content_apps", "phone_clear_revision")) {
-                if (phoneDecision) noteUserInteraction()
+                noteUserInteraction()
                 revokePhoneBefore.set(System.currentTimeMillis())
                 signalPhoneEvent()
             }
             if (key in setOf("capabilities_enabled", "software_role", "software_wake_enabled", "software_revision")) {
-                if (softwareDecision) noteUserInteraction()
+                noteUserInteraction()
                 revokeSoftwareBefore.set(System.currentTimeMillis())
                 signalSoftwareEvent()
             }
@@ -139,190 +139,190 @@ object CompanionRuntime {
                     gs.ids().any { taskHolder.getCore(ChatRuntimeSlot.MAIN).getMessageCoordinationDelegate().isGroupRunning(it) }
                 }
                 for (source in (0 until 5).map { (nextSource + it) % 5 }) {
-                if (source == 0 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
-                    VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
-                    val softwareStore = com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(app)
-                    if (softwareStore.wakeEnabled) com.ai.assistance.operit.core.awareness.SoftwareAwareness.flush()
-                    val batch = softwareStore.claim(System.currentTimeMillis())
-                    if (batch != null) {
+                    if (source == 0 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
+                        VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
+                        val softwareStore = com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(app)
+                        if (softwareStore.wakeEnabled) com.ai.assistance.operit.core.awareness.SoftwareAwareness.flush()
+                        val batch = softwareStore.claim(System.currentTimeMillis())
+                        if (batch != null) {
+                            val epoch = generation.get()
+                            softwareDecision = true
+                            decision = launch {
+                                try {
+                                    withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch,
+                                        softwareRole = batch.role, softwareRevision = batch.revision) }
+                                    softwareStore.finish(batch.id, "handled")
+                                } catch (timeout: TimeoutCancellationException) {
+                                    currentCoroutineContext().ensureActive()
+                                    softwareStore.finish(batch.id, "failed")
+                                    store.log(batch.chat, "软件感知超时", "判断超过3分钟")
+                                } catch (cancelled: CancellationException) {
+                                    softwareStore.finish(batch.id, "interrupted")
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    softwareStore.finish(batch.id, "failed")
+                                    store.log(batch.chat, "软件感知失败", failure.message.orEmpty().take(300))
+                                } finally {
+                                    releaseTurn(epoch)
+                                }
+                            }
+                            decision?.join()
+                            decision = null
+                            softwareDecision = false
+                            nextSource = (source + 1) % 5
+                            continue@dispatch
+                        }
+                    }
+                    // Device observations have their own target and switch. They never consume or
+                    // postpone the assistant's separately scheduled contact plan.
+                    if (source == 1 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
+                        VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
+                        val phoneStore = PhoneAwarenessStore(app)
+                        val batch = phoneStore.claim(System.currentTimeMillis())
+                        if (batch != null) {
+                            val epoch = generation.get()
+                            phoneDecision = true
+                            decision = launch {
+                                try {
+                                    withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch, phoneRole = batch.role) }
+                                    phoneStore.finish(batch.id, "handled", "助手已完成判断；具体决定见唤醒日志")
+                                } catch (timeout: TimeoutCancellationException) {
+                                    currentCoroutineContext().ensureActive()
+                                    phoneStore.finish(batch.id, "failed", "判断超过3分钟，已停止；未自动重试工具操作")
+                                    store.log(batch.chat, "手机感知超时", "判断超过3分钟")
+                                } catch (cancelled: CancellationException) {
+                                    phoneStore.finish(batch.id, "interrupted", "用户交互、设置变化或服务停止")
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    phoneStore.finish(batch.id, "failed", failure.message.orEmpty())
+                                    store.log(batch.chat, "手机感知失败", failure.message.orEmpty().take(300))
+                                } finally {
+                                    releaseTurn(epoch)
+                                }
+                            }
+                            decision?.join()
+                            decision = null
+                            phoneDecision = false
+                            nextSource = (source + 1) % 5
+                            continue@dispatch
+                        }
+                    }
+                    if (source == 2 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
+                        VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 10_000) {
+                        val work = com.ai.assistance.operit.core.tasks.TaskEvents.nextPrivate(app)
+                        if (work != null) {
+                            val current = work.board.claim(work.id, work.event) ?: continue
+                            val taskEpoch = generation.get()
+                            decision = launch {
+                                try {
+                                    withTimeout(300_000) { evaluate(app, work.chat, work.board.prompt(current), taskEpoch, taskEvent = true) }
+                                    work.board.dispatchState(work.id, work.event, "handled", "本次处理已结束，事项是否完成以状态和实际进展为准")
+                                } catch (cancelled: CancellationException) {
+                                    work.board.dispatchState(work.id, work.event, "interrupted", "执行已中断，请核对实际进展")
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    work.board.dispatchState(work.id, work.event, "failed", failure.message.orEmpty().take(600))
+                                } finally {
+                                    releaseTurn(taskEpoch)
+                                }
+                            }
+                            decision?.join()
+                            decision = null
+                            nextSource = (source + 1) % 5
+                            continue@dispatch
+                        }
+                    }
+                    // Explicit per-assistant opt-in, separate from proactive contact.
+                    if (source == 3 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
+                        VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 60_000) {
+                        val exploration = ExplorationStore(app)
                         val epoch = generation.get()
-                        softwareDecision = true
-                        decision = launch {
-                            try {
-                                withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch,
-                                    softwareRole = batch.role, softwareRevision = batch.revision) }
-                                softwareStore.finish(batch.id, "handled")
-                            } catch (timeout: TimeoutCancellationException) {
-                                currentCoroutineContext().ensureActive()
-                                softwareStore.finish(batch.id, "failed")
-                                store.log(batch.chat, "软件感知超时", "判断超过3分钟")
-                            } catch (cancelled: CancellationException) {
-                                softwareStore.finish(batch.id, "interrupted")
-                                throw cancelled
-                            } catch (failure: Exception) {
-                                softwareStore.finish(batch.id, "failed")
-                                store.log(batch.chat, "软件感知失败", failure.message.orEmpty().take(300))
-                            } finally {
-                                releaseTurn(epoch)
+                        val work = exploration.next()
+                        if (work != null) {
+                            explorationDecision = work
+                            decision = launch {
+                                var outcome = "failed"
+                                try {
+                                    withTimeout(300_000) { evaluate(app, work.chat, work.purpose, epoch, explorationWork = work) }
+                                    outcome = if (exploration.valid(work) && epoch == generation.get()) "completed" else "interrupted"
+                                } catch (timeout: TimeoutCancellationException) {
+                                    currentCoroutineContext().ensureActive()
+                                    store.log(work.chat, "探索超时", "本轮超过5分钟，已停止")
+                                } catch (cancelled: CancellationException) {
+                                    outcome = "interrupted"
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    store.log(work.chat, "探索失败", failure.message.orEmpty().take(300))
+                                } finally {
+                                    releaseTurn(epoch)
+                                    exploration.finish(work, outcome)
+                                    InternalStateStore(app).event(work.role, work.chat, "exploration:${work.ticket}", "exploration", outcome)
+                                }
                             }
+                            decision?.join()
+                            decision = null
+                            explorationDecision = null
+                            nextSource = (source + 1) % 5
+                            continue@dispatch
                         }
-                        decision?.join()
-                        decision = null
-                        softwareDecision = false
-                        nextSource = (source + 1) % 5
-                        continue@dispatch
                     }
-                }
-                // Device observations have their own target and switch. They never consume or
-                // postpone the assistant's separately scheduled contact plan.
-                if (source == 1 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
-                    VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
-                    val phoneStore = PhoneAwarenessStore(app)
-                    val batch = phoneStore.claim(System.currentTimeMillis())
-                    if (batch != null) {
-                        val epoch = generation.get()
-                        phoneDecision = true
-                        decision = launch {
-                            try {
-                                withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch, phoneRole = batch.role) }
-                                phoneStore.finish(batch.id, "handled", "助手已完成判断；具体决定见唤醒日志")
-                            } catch (timeout: TimeoutCancellationException) {
-                                currentCoroutineContext().ensureActive()
-                                phoneStore.finish(batch.id, "failed", "判断超过3分钟，已停止；未自动重试工具操作")
-                                store.log(batch.chat, "手机感知超时", "判断超过3分钟")
-                            } catch (cancelled: CancellationException) {
-                                phoneStore.finish(batch.id, "interrupted", "用户交互、设置变化或服务停止")
-                                throw cancelled
-                            } catch (failure: Exception) {
-                                phoneStore.finish(batch.id, "failed", failure.message.orEmpty())
-                                store.log(batch.chat, "手机感知失败", failure.message.orEmpty().take(300))
-                            } finally {
-                                releaseTurn(epoch)
-                            }
+                    if (source != 4) continue
+                    if (!store.proactiveEnabled) continue
+                    val targetRole = store.proactiveRole ?: continue
+                    val target = AssistantWindowRouter.chat(app, targetRole) ?: continue
+                    val scheduleKey = store.scheduleKey(targetRole)
+                    var schedule = store.read(scheduleKey)
+                    if (recoveredSchedules.add(scheduleKey) && schedule.has("running_ticket")) {
+                        schedule = store.update(scheduleKey) {
+                            if (it.has("running_ticket")) CompanionSchedule.finish(it, it.getString("running_ticket"), false, System.currentTimeMillis())
                         }
-                        decision?.join()
-                        decision = null
-                        phoneDecision = false
-                        nextSource = (source + 1) % 5
-                        continue@dispatch
                     }
-                }
-                if (source == 2 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
-                    VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 10_000) {
-                    val work = com.ai.assistance.operit.core.tasks.TaskEvents.nextPrivate(app)
-                    if (work != null) {
-                        val current = work.board.claim(work.id, work.event) ?: continue
-                        val taskEpoch = generation.get()
-                        decision = launch {
-                            try {
-                                withTimeout(300_000) { evaluate(app, work.chat, work.board.prompt(current), taskEpoch, taskEvent = true) }
-                                work.board.dispatchState(work.id, work.event, "handled", "本次处理已结束，事项是否完成以状态和实际进展为准")
-                            } catch (cancelled: CancellationException) {
-                                work.board.dispatchState(work.id, work.event, "interrupted", "执行已中断，请核对实际进展")
-                                throw cancelled
-                            } catch (failure: Exception) {
-                                work.board.dispatchState(work.id, work.event, "failed", failure.message.orEmpty().take(600))
-                            } finally {
-                                releaseTurn(taskEpoch)
-                            }
+                    if (!schedule.has("at") && !schedule.optBoolean("paused")) {
+                        schedule = store.update(scheduleKey) {
+                            it.put("at", System.currentTimeMillis() + store.proactiveMinutes * 60_000L)
+                                .put("purpose", "首次主动联系判断：看看自己是否真的想联系她，并自行安排下次判断。").put("owner", "initial")
                         }
-                        decision?.join()
-                        decision = null
-                        nextSource = (source + 1) % 5
-                        continue@dispatch
+                        store.log(target, "安排", "首次主动联系判断已安排；此后由 AI 决定时间")
                     }
-                }
-                // Explicit per-assistant opt-in, separate from proactive contact.
-                if (source == 3 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
-                    VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 60_000) {
-                    val exploration = ExplorationStore(app)
+                    if (schedule.optBoolean("paused") || schedule.optLong("at") > System.currentTimeMillis()) continue
+                    val holder = ChatRuntimeHolder.getInstance(app)
+                    if (holder.activeConversationCount.value > 0 || groupBusy || VoiceCallRuntime.controller != null ||
+                        VoiceCallIncoming.pending != null || SystemClock.elapsedRealtime() - lastInteraction < 60_000) {
+                        if (SystemClock.elapsedRealtime() - lastSkip > 60_000) {
+                            store.log(target, "延后", "正在对话、通话或刚收到用户消息；不插入重复回复，原计划等待空闲")
+                            lastSkip = SystemClock.elapsedRealtime()
+                        }
+                        continue
+                    }
                     val epoch = generation.get()
-                    val work = exploration.next()
-                    if (work != null) {
-                        explorationDecision = work
-                        decision = launch {
-                            var outcome = "failed"
-                            try {
-                                withTimeout(300_000) { evaluate(app, work.chat, work.purpose, epoch, explorationWork = work) }
-                                outcome = if (exploration.valid(work) && epoch == generation.get()) "completed" else "interrupted"
-                            } catch (timeout: TimeoutCancellationException) {
-                                currentCoroutineContext().ensureActive()
-                                store.log(work.chat, "探索超时", "本轮超过5分钟，已停止")
-                            } catch (cancelled: CancellationException) {
-                                outcome = "interrupted"
-                                throw cancelled
-                            } catch (failure: Exception) {
-                                store.log(work.chat, "探索失败", failure.message.orEmpty().take(300))
-                            } finally {
-                                releaseTurn(epoch)
-                                exploration.finish(work, outcome)
-                                InternalStateStore(app).event(work.role, work.chat, "exploration:${work.ticket}", "exploration", outcome)
-                            }
+                    val observation = schedule.optString("purpose") + "\n" + pendingEvent +
+                        if (schedule.optBoolean("interrupted")) "\n上次判断曾中断。先核对实际工具结果与进度，不重做已完成操作；重新决定是否继续。" else ""
+                    val ticket = java.util.UUID.randomUUID().toString()
+                    store.update(scheduleKey) { CompanionSchedule.claim(it, ticket, System.currentTimeMillis()); it.remove("interrupted") }
+                    decision = launch {
+                        var completed = false
+                        try {
+                            withTimeout(300_000) { evaluate(app, target, observation, epoch) }
+                            completed = epoch == generation.get()
+                        } catch (timeout: TimeoutCancellationException) {
+                            currentCoroutineContext().ensureActive()
+                            releaseTurn(epoch)
+                            store.log(target, "超时", "主动活动超过5分钟，已停止；查看下次安排")
+                        } catch (cancelled: CancellationException) {
+                            store.log(target, "取消", "用户开始对话、关闭功能或服务停止")
+                            throw cancelled
+                        } catch (error: Exception) {
+                            store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
+                        } finally {
+                            releaseTurn(epoch)
+                            store.update(scheduleKey) { CompanionSchedule.finish(it, ticket, completed, System.currentTimeMillis()) }
+                            if (store.read(scheduleKey).optBoolean("paused"))
+                                store.log(target, "暂停", "本次未安排下一次；可在聊天中让 AI 安排，或点击一分钟后唤醒")
                         }
-                        decision?.join()
-                        decision = null
-                        explorationDecision = null
-                        nextSource = (source + 1) % 5
-                        continue@dispatch
                     }
-                }
-                if (source != 4) continue
-                if (!store.proactiveEnabled) continue
-                val targetRole = store.proactiveRole ?: continue
-                val target = AssistantWindowRouter.chat(app, targetRole) ?: continue
-                val scheduleKey = store.scheduleKey(targetRole)
-                var schedule = store.read(scheduleKey)
-                if (recoveredSchedules.add(scheduleKey) && schedule.has("running_ticket")) {
-                    schedule = store.update(scheduleKey) {
-                        if (it.has("running_ticket")) CompanionSchedule.finish(it, it.getString("running_ticket"), false, System.currentTimeMillis())
-                    }
-                }
-                if (!schedule.has("at") && !schedule.optBoolean("paused")) {
-                    schedule = store.update(scheduleKey) {
-                        it.put("at", System.currentTimeMillis() + store.proactiveMinutes * 60_000L)
-                            .put("purpose", "首次主动联系判断：看看自己是否真的想联系她，并自行安排下次判断。").put("owner", "initial")
-                    }
-                    store.log(target, "安排", "首次主动联系判断已安排；此后由 AI 决定时间")
-                }
-                if (schedule.optBoolean("paused") || schedule.optLong("at") > System.currentTimeMillis()) continue
-                val holder = ChatRuntimeHolder.getInstance(app)
-                if (holder.activeConversationCount.value > 0 || groupBusy || VoiceCallRuntime.controller != null ||
-                    VoiceCallIncoming.pending != null || SystemClock.elapsedRealtime() - lastInteraction < 60_000) {
-                    if (SystemClock.elapsedRealtime() - lastSkip > 60_000) {
-                        store.log(target, "延后", "正在对话、通话或刚收到用户消息；不插入重复回复，原计划等待空闲")
-                        lastSkip = SystemClock.elapsedRealtime()
-                    }
-                    continue
-                }
-                val epoch = generation.get()
-                val observation = schedule.optString("purpose") + "\n" + pendingEvent +
-                    if (schedule.optBoolean("interrupted")) "\n上次判断曾中断。先核对实际工具结果与进度，不重做已完成操作；重新决定是否继续。" else ""
-                val ticket = java.util.UUID.randomUUID().toString()
-                store.update(scheduleKey) { CompanionSchedule.claim(it, ticket, System.currentTimeMillis()); it.remove("interrupted") }
-                decision = launch {
-                    var completed = false
-                    try {
-                        withTimeout(300_000) { evaluate(app, target, observation, epoch) }
-                        completed = epoch == generation.get()
-                    } catch (timeout: TimeoutCancellationException) {
-                        currentCoroutineContext().ensureActive()
-                        releaseTurn(epoch)
-                        store.log(target, "超时", "主动活动超过5分钟，已停止；查看下次安排")
-                    } catch (cancelled: CancellationException) {
-                        store.log(target, "取消", "用户开始对话、关闭功能或服务停止")
-                        throw cancelled
-                    } catch (error: Exception) {
-                        store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
-                    } finally {
-                        releaseTurn(epoch)
-                        store.update(scheduleKey) { CompanionSchedule.finish(it, ticket, completed, System.currentTimeMillis()) }
-                        if (store.read(scheduleKey).optBoolean("paused"))
-                            store.log(target, "暂停", "本次未安排下一次；可在聊天中让 AI 安排，或点击一分钟后唤醒")
-                    }
-                }
-                decision?.join()
-                decision = null
-                nextSource = 0
+                    decision?.join()
+                    decision = null
+                    nextSource = 0
                 }
             }
         } finally {

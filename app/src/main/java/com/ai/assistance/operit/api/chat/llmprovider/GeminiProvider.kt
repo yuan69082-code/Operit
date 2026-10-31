@@ -295,9 +295,9 @@ open class GeminiProvider(
                 null
             }
         }
-        
+
         val tools = JSONArray()
-        
+
         // 添加 Function Calling 工具
         val functionDeclarations = buildToolDefinitionsForGemini(availableTools)
         if (functionDeclarations.length() > 0) {
@@ -305,14 +305,14 @@ open class GeminiProvider(
                 put("function_declarations", functionDeclarations)
             })
         }
-        
+
         // 添加 Google Search grounding 工具（如果启用）
         if (enableGoogleSearch) {
             tools.put(JSONObject().apply {
                 put("googleSearch", JSONObject())
             })
         }
-        
+
         return if (tools.length() > 0) tools.toString() else null
     }
 
@@ -329,7 +329,7 @@ open class GeminiProvider(
                     .replace("\"", "&quot;")
                     .replace("'", "&apos;")
         }
-        
+
         fun unescape(text: String): String {
             return text.replace("&lt;", "<")
                     .replace("&gt;", ">")
@@ -359,6 +359,7 @@ open class GeminiProvider(
     /** Response parsing state must belong to one request, never to the shared provider instance. */
     private data class GeminiResponseState(
         var isInThinkingMode: Boolean = false,
+        var hasBusinessOutput: Boolean = false,
     )
 
     private fun encodeGeminiThoughtSignature(signature: String): String {
@@ -420,7 +421,7 @@ open class GeminiProvider(
         val thoughtSignaturePayload = extractGeminiThoughtSignaturePayload(content)
         val sanitizedContent = thoughtSignaturePayload.contentWithoutMeta
         val matches = ChatMarkupRegex.toolCallPattern.findAll(sanitizedContent).toList()
-        
+
         if (matches.isEmpty()) {
             return GeminiFunctionCallPayload(
                 textContent = sanitizedContent,
@@ -452,7 +453,7 @@ open class GeminiProvider(
         matches.forEach { match ->
             textContent = textContent.replace(match.value, "").trim()
         }
-        
+
         return GeminiFunctionCallPayload(
             textContent = textContent,
             functionCalls = functionCalls,
@@ -466,16 +467,16 @@ open class GeminiProvider(
      */
     private fun parseXmlToolResults(content: String): Pair<String, List<JSONObject>?> {
         if (!enableToolCall) return Pair(content, null)
-        
+
         val matches = ChatMarkupRegex.toolResultWithNameAnyPattern.findAll(content)
-        
+
         if (!matches.any()) {
             return Pair(content, null)
         }
-        
+
         val functionResponses = mutableListOf<JSONObject>()
         var textContent = content
-        
+
         matches.forEach { match ->
             val toolName = match.groupValues[2]
             val fullContent = match.groupValues[3].trim()
@@ -499,7 +500,7 @@ open class GeminiProvider(
             
             textContent = textContent.replace(match.value, "").trim()
         }
-        
+
         return Pair(textContent, functionResponses)
     }
     
@@ -508,7 +509,7 @@ open class GeminiProvider(
      */
     private fun buildToolDefinitionsForGemini(toolPrompts: List<ToolPrompt>): JSONArray {
         val functionDeclarations = JSONArray()
-        
+
         for (tool in toolPrompts) {
             functionDeclarations.put(JSONObject().apply {
                 put("name", tool.name)
@@ -525,7 +526,7 @@ open class GeminiProvider(
                 put("parameters", parametersSchema)
             })
         }
-        
+
         return functionDeclarations
     }
     
@@ -589,7 +590,7 @@ open class GeminiProvider(
                 put("text", text)
             })
         }
-        
+
         return partsArray
     }
 
@@ -1251,63 +1252,62 @@ open class GeminiProvider(
                         try { awaitCancellation() } finally { call.cancel() }
                     }
                     try {
-                    withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    val response = call.execute()
-                    activeResponse = response
-                    try {
-                        val duration = System.currentTimeMillis() - startTime
-                        AppLogger.d(TAG, "收到初始响应, 耗时: ${duration}ms, 状态码: ${response.code}")
+                        withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val response = call.execute()
+                            activeResponse = response
+                            try {
+                                val duration = System.currentTimeMillis() - startTime
+                                AppLogger.d(TAG, "收到初始响应, 耗时: ${duration}ms, 状态码: ${response.code}")
 
-                        emitConnectionStatus(context.getString(R.string.gemini_connected_success))
+                                emitConnectionStatus(context.getString(R.string.gemini_connected_success))
 
-                        if (!response.isSuccessful) {
-                            val errorBody = response.body?.string() ?: context.getString(R.string.gemini_error_no_error_details)
-                            logError("API请求失败: ${response.code}, $errorBody")
-                            // 状态码错误保留状态码信息，随后进入统一重试循环。
-                            if (response.code in 400..499) {
-                                throw HttpStatusException(
-                                    context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody),
-                                    statusCode = response.code,
-                                    retryAfterMs = GeminiRetryDelay.retryAfterMillis(response.header("Retry-After"), System.currentTimeMillis())
-                                )
+                                if (!response.isSuccessful) {
+                                    val errorBody = response.body?.string() ?: context.getString(R.string.gemini_error_no_error_details)
+                                    logError("API请求失败: ${response.code}, $errorBody")
+                                    // 状态码错误保留状态码信息，随后进入统一重试循环。
+                                    if (response.code in 400..499) {
+                                        throw HttpStatusException(
+                                            context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody),
+                                            statusCode = response.code,
+                                            retryAfterMs = GeminiRetryDelay.retryAfterMillis(response.header("Retry-After"), System.currentTimeMillis())
+                                        )
+                                    }
+                                    throw IOException(context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody))
+                                }
+
+                                // 根据stream参数处理响应
+                                if (stream) {
+                                    // 处理流式响应
+                                    processStreamingResponse(
+                                        context,
+                                        response,
+                                        streamCollector,
+                                        requestId,
+                                        onTokensUpdated,
+                                        receivedContent,
+                                        enableThinking,
+                                        onUsageReported,
+                                        retryCount + 1,
+                                    )
+                                } else {
+                                    // 处理非流式响应并转换为Stream
+                                    processNonStreamingResponse(
+                                        context,
+                                        response,
+                                        streamCollector,
+                                        requestId,
+                                        onTokensUpdated,
+                                        receivedContent,
+                                        enableThinking,
+                                        onUsageReported,
+                                        retryCount + 1,
+                                    )
+                                }
+                            } finally {
+                                response.close()
+                                AppLogger.d(TAG, "关闭响应连接")
                             }
-                            throw IOException(context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody))
                         }
-
-                        // 根据stream参数处理响应
-                        if (stream) {
-                            // 处理流式响应
-                            processStreamingResponse(
-                                context,
-                                response,
-                                streamCollector,
-                                requestId,
-                                onTokensUpdated,
-                                receivedContent,
-                                enableThinking,
-                                onUsageReported,
-                                retryCount + 1,
-                            )
-                        } else {
-                            // 处理非流式响应并转换为Stream
-                            processNonStreamingResponse(
-                                context,
-                                response,
-                                streamCollector,
-                                requestId,
-                                onTokensUpdated,
-                                receivedContent,
-                                enableThinking,
-                                onUsageReported,
-                                retryCount + 1,
-                            )
-                        }
-                    } finally {
-                        response.close()
-                        AppLogger.d(TAG, "关闭响应连接")
-                    }
-                }
-
                     } finally {
                         cancellation.cancel()
                         if (activeCall === call) { activeCall = null; activeResponse = null }
@@ -1365,7 +1365,7 @@ open class GeminiProvider(
         val json = JSONObject()
         // 添加工具定义
         val tools = JSONArray()
-        
+
         // 添加 Function Calling 工具（如果启用且有可用工具）
         if (enableToolCall && availableTools != null && availableTools.isNotEmpty()) {
             val functionDeclarations = buildToolDefinitionsForGemini(availableTools)
@@ -1376,7 +1376,7 @@ open class GeminiProvider(
                 logDebug("已添加 ${functionDeclarations.length()} 个 Function Declarations")
             }
         }
-        
+
         // 添加 Google Search grounding 工具（如果启用）
         if (enableGoogleSearch) {
             tools.put(JSONObject().apply {
@@ -1384,7 +1384,7 @@ open class GeminiProvider(
             })
             logDebug("已启用 Google Search Grounding")
         }
-        
+
         // 将 tools 添加到请求中，并保存用于token计算
         val toolsJson = if (tools.length() > 0) {
             json.put("tools", tools)
@@ -1543,7 +1543,7 @@ open class GeminiProvider(
     }
 
     /** 处理API流式响应 */
-    private suspend fun processStreamingResponse(
+    internal suspend fun processStreamingResponse(
             context: Context,
             response: Response,
             streamCollector: StreamCollector<String>,
@@ -1836,10 +1836,10 @@ open class GeminiProvider(
                 responseState.isInThinkingMode = false
             }
             
-            // 确保至少发送一次内容
-            if (contentCount == 0) {
-                logDebug("未检测到内容，发送空格")
-                streamCollector.emit(" ")
+            // A finished stream containing only metadata/thoughts is not a successful reply.
+            // Retry only this provider request; completed tools remain in its input history.
+            if (!responseState.hasBusinessOutput) {
+                throw IOException(context.getString(R.string.gemini_response_no_output))
             }
         } catch (e: CancellationException) {
             throw e
@@ -1852,7 +1852,7 @@ open class GeminiProvider(
     }
 
     /** 处理API非流式响应 */
-    private suspend fun processNonStreamingResponse(
+    internal suspend fun processNonStreamingResponse(
             context: Context,
             response: Response,
             streamCollector: StreamCollector<String>,
@@ -1870,7 +1870,7 @@ open class GeminiProvider(
         suspend fun reportUsage(usage: com.ai.assistance.operit.data.stats.ProviderUsageSnapshot?) {
             usage?.let { onUsageReported?.invoke(it, attemptNumber) }
         }
-        
+
         try {
             val responseText = responseBody.string()
             logDebug("收到完整响应，长度: ${responseText.length}")
@@ -1896,11 +1896,11 @@ open class GeminiProvider(
                 streamCollector.emit(content)
                 
                 logDebug("非流式响应处理完成，总长度: ${content.length}")
-            } else {
-                logDebug("未检测到内容，发送空格")
-                streamCollector.emit(" ")
             }
             reportUsage(extraction.usage)
+            if (!responseState.hasBusinessOutput) {
+                throw IOException(context.getString(R.string.gemini_response_no_output))
+            }
             
             // 确保思考模式正确结束
             if (responseState.isInThinkingMode) {
@@ -2102,6 +2102,7 @@ open class GeminiProvider(
                          if (bytes != null && bytes.isNotEmpty()) {
                              val uri = writeOutputImage(bytes, mimeType, "gemini_image_$i")
                              if (uri != null) {
+                                 responseState.hasBusinessOutput = true
                                  contentBuilder.append("\n![gemini_image_$i](${uri})\n")
                              }
                          }
@@ -2113,6 +2114,7 @@ open class GeminiProvider(
                 if (functionCall != null && enableToolCall) {
                     val toolName = functionCall.optString("name", "")
                     if (toolName.isNotEmpty()) {
+                        responseState.hasBusinessOutput = true
                         // 工具调用必须在思考模式之外，如果当前在思考中，先关闭
                         if (responseState.isInThinkingMode) {
                             contentBuilder.append("</think>")
@@ -2157,6 +2159,7 @@ open class GeminiProvider(
                 }
 
                 if (text.isNotEmpty()) {
+                    if (!isThought && text.isNotBlank()) responseState.hasBusinessOutput = true
                     // 处理思考模式状态切换
                     if (isThought && includeThoughtsInOutput && !responseState.isInThinkingMode) {
                         // 开始思考模式
