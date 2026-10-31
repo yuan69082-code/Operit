@@ -115,6 +115,7 @@ object EndpointCompleter {
                 return endpoint
             }
 
+            ApiProviderType.VERTEX_AI,
             ApiProviderType.GOOGLE,
             ApiProviderType.GEMINI_GENERIC,
             ApiProviderType.OPENCODE,

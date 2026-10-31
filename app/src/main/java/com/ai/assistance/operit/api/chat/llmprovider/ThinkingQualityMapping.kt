@@ -493,7 +493,7 @@ private fun JSONObject.toModelParameters(protocol: ApiProviderType): List<ModelP
 }
 
 private fun ApiProviderType.isGeminiProtocol(): Boolean =
-    this == ApiProviderType.GOOGLE || this == ApiProviderType.GEMINI_GENERIC
+    this == ApiProviderType.GOOGLE || this == ApiProviderType.GEMINI_GENERIC || this == ApiProviderType.VERTEX_AI
 
 private fun thinkingStringParameter(
     apiName: String,

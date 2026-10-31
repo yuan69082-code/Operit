@@ -60,6 +60,11 @@ object ApiProviderConfigs {
             defaultApiEndpoint = ""
         ),
         ProviderApiConfig(
+            providerType = ApiProviderType.VERTEX_AI,
+            defaultModelName = "gemini-2.5-flash",
+            defaultApiEndpoint = "https://aiplatform.googleapis.com"
+        ),
+        ProviderApiConfig(
             providerType = ApiProviderType.GOOGLE,
             defaultModelName = "gemini-2.0-flash",
             defaultApiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models"

@@ -94,6 +94,7 @@ internal fun providerRegionWarningType(providerType: ApiProviderType?): Provider
         ApiProviderType.FOUR_ROUTER -> ProviderRegionWarningType.INTERNATIONAL_PROXY
         ApiProviderType.OPENAI,
         ApiProviderType.XAI,
+        ApiProviderType.VERTEX_AI,
         ApiProviderType.GOOGLE,
         ApiProviderType.ANTHROPIC,
         ApiProviderType.MISTRAL,
@@ -765,6 +766,7 @@ fun ModelApiSettingsSection(
             SettingsTextField(
                     title = stringResource(R.string.model_name),
                     subtitle = when {
+                        selectedApiProvider == ApiProviderType.VERTEX_AI -> stringResource(R.string.vertex_ai_manual_model)
                         isMnnProvider -> stringResource(R.string.mnn_select_downloaded_model)
                         isLlamaProvider -> stringResource(R.string.llama_select_downloaded_model)
                         else -> stringResource(R.string.model_name_placeholder) + stringResource(R.string.model_name_multiple_hint)
@@ -895,7 +897,8 @@ fun ModelApiSettingsSection(
              }
             
             // Google Search Grounding 开关 (仅Gemini支持)
-            if (selectedApiProvider == ApiProviderType.GOOGLE ||
+            if (selectedApiProvider == ApiProviderType.VERTEX_AI ||
+                selectedApiProvider == ApiProviderType.GOOGLE ||
                 selectedApiProvider == ApiProviderType.GEMINI_GENERIC) {
                 SettingsSwitchRow(
                         title = stringResource(R.string.enable_google_search),
@@ -1429,6 +1432,7 @@ private fun getBuiltInProviderDisplayName(provider: ApiProviderType, context: an
         ApiProviderType.OPENAI_GENERIC -> context.getString(R.string.provider_openai_generic)
         ApiProviderType.ANTHROPIC -> context.getString(R.string.provider_anthropic)
         ApiProviderType.ANTHROPIC_GENERIC -> context.getString(R.string.provider_anthropic_generic)
+        ApiProviderType.VERTEX_AI -> context.getString(R.string.provider_vertex_ai)
         ApiProviderType.GOOGLE -> context.getString(R.string.provider_google)
         ApiProviderType.GEMINI_GENERIC -> context.getString(R.string.provider_gemini_generic)
         ApiProviderType.BAIDU -> context.getString(R.string.provider_baidu)
@@ -2163,6 +2167,7 @@ private fun getProviderColor(providerTypeId: String): androidx.compose.ui.graphi
         ApiProviderType.OPENAI_GENERIC -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
         ApiProviderType.ANTHROPIC -> MaterialTheme.colorScheme.tertiary
         ApiProviderType.ANTHROPIC_GENERIC -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f)
+        ApiProviderType.VERTEX_AI -> MaterialTheme.colorScheme.secondary
         ApiProviderType.GOOGLE -> MaterialTheme.colorScheme.secondary
         ApiProviderType.GEMINI_GENERIC -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.9f)
         ApiProviderType.BAIDU -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)

@@ -200,6 +200,10 @@ object ModelListFetcher {
     ): Result<List<ModelOption>> {
         AppLogger.d(TAG, "开始获取模型列表: 端点=${sanitizeUrlForLog(apiEndpoint, apiKey)}, 提供商=${apiProviderType.name}")
 
+        // Express exposes inference methods but no model-list API. Never query AI Studio here.
+        if (apiProviderType == ApiProviderType.VERTEX_AI) {
+            return Result.failure(UnsupportedOperationException(context.getString(R.string.vertex_ai_manual_model)))
+        }
         return withContext(Dispatchers.IO) {
             val maxRetries = 2
             var retryCount = 0
