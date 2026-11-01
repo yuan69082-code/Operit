@@ -47,7 +47,7 @@ class StudyStoreTest {
         val chapter = store.write(id, null, null, "第一章", "文".repeat(14000), JSONArray(), "user", false).getJSONArray("chapters").getJSONObject(0)
         assertEquals(0, store.book(id).getJSONArray("events").length())
         val read = store.readForAI(id, chapter.getString("version"), 6000)
-        assertEquals(6000, read.getString("text").length())
+        assertEquals(6000, read.getString("text").length)
         assertEquals(12000, read.getInt("next_offset"))
         assertEquals(14000, read.getInt("total_chars"))
         assertThrows(IllegalStateException::class.java) { store.chapter(id, "foreign-version") }
