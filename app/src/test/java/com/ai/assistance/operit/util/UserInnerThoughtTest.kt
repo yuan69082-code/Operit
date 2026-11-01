@@ -44,4 +44,31 @@ class UserInnerThoughtTest {
         assertEquals("第二个想法", rest.thought)
         assertEquals("第一句\n第二句", rest.spoken)
     }
+    @Test fun activeEmptyThoughtHasExplicitMarkerAndRemainsAnEmptyEditor() {
+        val encoded = UserInnerThought.encode("", "我回来了", includeEmpty = true)
+        assertTrue(encoded.contains("[人类思考链]"))
+        assertTrue(encoded.contains(UserInnerThought.EMPTY))
+        assertTrue(encoded.contains("【正文回复】"))
+        val parts = UserInnerThought.decode(encoded)
+        assertTrue(parts.present)
+        assertEquals("", parts.thought)
+        assertEquals("我回来了", parts.spoken)
+    }
+
+    @Test fun disabledProjectionRemovesAllThoughtBlocksIncludingMergedMessages() {
+        val source = UserInnerThought.encode("不发送甲", "正文甲") + "\n" +
+            UserInnerThought.encode("不发送乙", "正文乙")
+        assertEquals("正文甲\n正文乙", UserInnerThought.forModel(source, false))
+        assertEquals(source, UserInnerThought.forModel(source, true))
+    }
+
+    @Test fun legacyMessagesDisplayNormallyButModelReceivesNewExplanation() {
+        val old = "[用户双栏消息：心里话是用户未说出口的想法，AI可以理解，但不要当作用户已经说出口的话；正文才是实际说出的话。这不是AI的思考过程。]\n<user_inner_thought>想你</user_inner_thought>\n[正文／实际说出的话]\n你好"
+        assertEquals("想你", UserInnerThought.decode(old).thought)
+        assertEquals("你好", UserInnerThought.forModel(old, false))
+        val projected = UserInnerThought.forModel(old, true)
+        assertFalse(projected.contains("这不是AI"))
+        assertFalse(projected.contains("不要当作"))
+        assertEquals(UserInnerThought.encode("想你", "你好"), projected)
+    }
 }

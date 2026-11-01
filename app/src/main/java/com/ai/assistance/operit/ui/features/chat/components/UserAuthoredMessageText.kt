@@ -30,7 +30,7 @@ import com.ai.assistance.operit.util.UserInnerThought
 @Composable
 fun UserAuthoredMessageText(text: String, color: Color, style: TextStyle, modifier: Modifier = Modifier, enableDialogs: Boolean = true) {
     val parts = UserInnerThought.decode(text)
-    if (parts.thought.isEmpty()) {
+    if (!parts.present) {
         StickerMessageText(text, color, style, modifier, enableDialogs)
         return
     }
@@ -44,7 +44,7 @@ fun UserAuthoredMessageText(text: String, color: Color, style: TextStyle, modifi
             Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                 contentDescription = stringResource(if (expanded) R.string.user_inner_thought_collapse else R.string.user_inner_thought_expand), tint = color)
         }
-        if (expanded) Text(parts.thought, color = color.copy(alpha = 0.72f),
+        if (expanded) Text(if (parts.thought.isBlank()) UserInnerThought.EMPTY else parts.thought, color = color.copy(alpha = 0.72f),
             style = style.copy(fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic))
         // Merge-send may contain several separately authored two-part messages.
         if (parts.spoken.isNotBlank()) UserAuthoredMessageText(parts.spoken, color, style, enableDialogs = enableDialogs)

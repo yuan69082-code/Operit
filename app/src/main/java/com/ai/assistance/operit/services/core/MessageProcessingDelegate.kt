@@ -826,6 +826,23 @@ class MessageProcessingDelegate(
             )
             return
         }
+        val humanInput = !isAutoContinuation && !isGroupOrchestrationTurn &&
+            !turnOptions.proactiveWake && !turnOptions.hideUserMessage && !turnOptions.voiceCall &&
+            !turnOptions.voiceCallEnded && turnOptions.voiceMessageTimestamp == null && proxySenderNameOverride == null
+        val submittedText = try {
+            if (humanInput) {
+                val access = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context)
+                access.submit(rawMessageText, access.enabled(roleCardId))
+            } else rawMessageText
+        } catch (failure: IllegalArgumentException) {
+            reportNonFatalError(failure.message.orEmpty())
+            turnOptions.onUserMessageRejected?.invoke(failure.message.orEmpty())
+            return
+        }
+        if (humanInput && submittedText.isBlank() && attachments.isEmpty()) {
+            reportNonFatalError("请填写正文回复")
+            return
+        }
         val chatRuntime = runtimeFor(chatId)
         if (!claimTurn(chatId)) {
             turnOptions.onUserMessageRejected?.invoke("AI 正在处理消息，请稍后重试")
@@ -838,7 +855,7 @@ class MessageProcessingDelegate(
         val turnId = chatRuntime.turnSequence.incrementAndGet()
         chatRuntime.activeTurnId = turnId
 
-        val originalMessageText = rawMessageText.trim()
+        val originalMessageText = submittedText.trim()
         var messageText = originalMessageText
         
         if (messageTextOverride == null) {

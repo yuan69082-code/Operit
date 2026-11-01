@@ -2367,7 +2367,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         )
 
         val normalizedChatHistory =
-            conversationService.normalizeConversationHistoryForModel(context.conversationHistory)
+            conversationService.normalizeConversationHistoryForModel(context.conversationHistory, roleCardId)
         context.conversationHistory.clear()
         context.conversationHistory.addAll(normalizedChatHistory)
 

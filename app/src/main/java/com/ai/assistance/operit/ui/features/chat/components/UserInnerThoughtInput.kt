@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,41 +57,69 @@ class UserInnerThoughtDraft(
 
 @Composable
 fun UserInnerThoughtInput(draft: UserInnerThoughtDraft, enabled: Boolean, modifier: Modifier = Modifier) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val hasThought = draft.thought.isNotBlank()
-    // Reveal restored/queued thoughts so editing a message never silently hides its payload.
-    LaunchedEffect(hasThought) {
-        expanded = hasThought
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val access = androidx.compose.runtime.remember { com.ai.assistance.operit.core.companion.HumanThoughtAccess(context) }
+    var revision by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(access) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision++ }
+        access.preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { access.preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
+    val prompt by com.ai.assistance.operit.data.preferences.ActivePromptManager.getInstance(context)
+        .activePromptFlow.collectAsState(initial = null)
+    var active by androidx.compose.runtime.remember { mutableStateOf(false) }
+    LaunchedEffect(prompt, revision) {
+        active = prompt?.let { access.activeIn(context, it) } == true
+    }
+    var settings by rememberSaveable { mutableStateOf(false) }
+    var editedName by rememberSaveable { mutableStateOf("") }
+    var error by androidx.compose.runtime.remember { mutableStateOf("") }
+    // Read preferences after each listener notification; UI follows the assistant's tool choice.
+    val allowed = androidx.compose.runtime.remember(revision) { access.allowed }
+    val name = androidx.compose.runtime.remember(revision) { access.name }
     Column(modifier) {
         FilterChip(
-            selected = expanded,
-            onClick = { expanded = !expanded },
-            label = {
-                Text(stringResource(
-                    if (hasThought) R.string.user_inner_thought_toggle_filled
-                    else R.string.user_inner_thought_toggle
-                ))
-            },
+            selected = active,
+            onClick = { editedName = name; settings = true; error = "" },
+            label = { Text(if (!allowed) "人类思考链 · 未授权" else if (active) "人类思考链 · 已开启" else "人类思考链 · AI未开启") },
         )
-        if (expanded) {
+        if (active) {
             OutlinedTextField(
                 value = draft.thought,
                 onValueChange = draft::changeThought,
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.user_inner_thought_title)) },
-                placeholder = { Text(stringResource(R.string.user_inner_thought_hint)) },
+                label = { Text("人类思考链 · " + name) },
+                placeholder = { Text("未说出口的想法；可留空") },
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
                 ),
                 minLines = 1,
                 maxLines = 4,
             )
-            Text(stringResource(R.string.user_spoken_text_title),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 6.dp))
+            Text("正文回复 · 必填", style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
         }
     }
+    if (settings) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { settings = false },
+        title = { Text("人类思考链") },
+        text = {
+            Column {
+                androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("允许AI开启人类思考链", modifier = Modifier.weight(1f))
+                    androidx.compose.material3.Switch(checked = allowed, onCheckedChange = { access.authorize(it) })
+                }
+                Text("允许后，由每位AI选择开启或关闭。关闭总开关会撤销所有AI的开启状态。")
+                OutlinedTextField(value = editedName, onValueChange = { editedName = it },
+                    label = { Text("思考者称呼（你和AI都可以修改）") }, singleLine = true)
+                if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            try { access.rename(editedName); settings = false }
+            catch (failure: IllegalArgumentException) { error = failure.message.orEmpty() }
+        }) { Text("保存称呼") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { settings = false }) { Text("关闭") } },
+    )
 }
