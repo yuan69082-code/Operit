@@ -1,0 +1,7 @@
+<resources>
+    <string name="user_inner_thought_title">心里话 · 思考链</string>
+    <string name="user_inner_thought_hint">没有说出口的想法（AI 能看到）</string>
+    <string name="user_spoken_text_title">正文 · 实际说出的话</string>
+    <string name="user_inner_thought_collapse">收起心里话</string>
+    <string name="user_inner_thought_expand">展开心里话</string>
+</resources>

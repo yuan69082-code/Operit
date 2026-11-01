@@ -431,7 +431,7 @@ fun BubbleUserMessageComposable(
                                     subtitleColor = effectiveTextColor.copy(alpha = 0.72f),
                                 )
                             } else {
-                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                com.ai.assistance.operit.ui.features.chat.components.UserAuthoredMessageText(
                                     enableDialogs = enableDialogs,
                                     text = textContent,
                                     color = effectiveTextColor,
@@ -491,7 +491,7 @@ fun BubbleUserMessageComposable(
                                     )
                                 }
                             } else {
-                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                com.ai.assistance.operit.ui.features.chat.components.UserAuthoredMessageText(
                                     enableDialogs = enableDialogs,
                                     text = textContent,
                                     modifier =
@@ -572,7 +572,7 @@ fun BubbleUserMessageComposable(
                                     subtitleColor = effectiveTextColor.copy(alpha = 0.72f),
                                 )
                             } else {
-                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                com.ai.assistance.operit.ui.features.chat.components.UserAuthoredMessageText(
                                     enableDialogs = enableDialogs,
                                     text = textContent,
                                     color = effectiveTextColor,
@@ -632,7 +632,7 @@ fun BubbleUserMessageComposable(
                                     )
                                 }
                             } else {
-                                com.ai.assistance.operit.ui.features.chat.components.StickerMessageText(
+                                com.ai.assistance.operit.ui.features.chat.components.UserAuthoredMessageText(
                                     enableDialogs = enableDialogs,
                                     text = textContent,
                                     modifier =
