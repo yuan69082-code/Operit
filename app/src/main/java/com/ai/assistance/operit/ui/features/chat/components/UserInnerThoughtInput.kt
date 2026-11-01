@@ -4,9 +4,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
@@ -50,23 +56,41 @@ class UserInnerThoughtDraft(
 
 @Composable
 fun UserInnerThoughtInput(draft: UserInnerThoughtDraft, enabled: Boolean, modifier: Modifier = Modifier) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val hasThought = draft.thought.isNotBlank()
+    // Reveal restored/queued thoughts so editing a message never silently hides its payload.
+    LaunchedEffect(hasThought) {
+        expanded = hasThought
+    }
     Column(modifier) {
-        OutlinedTextField(
-            value = draft.thought,
-            onValueChange = draft::changeThought,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.user_inner_thought_title)) },
-            placeholder = { Text(stringResource(R.string.user_inner_thought_hint)) },
-            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
-            ),
-            minLines = 1,
-            maxLines = 4,
+        FilterChip(
+            selected = expanded,
+            onClick = { expanded = !expanded },
+            label = {
+                Text(stringResource(
+                    if (hasThought) R.string.user_inner_thought_toggle_filled
+                    else R.string.user_inner_thought_toggle
+                ))
+            },
         )
-        Text(stringResource(R.string.user_spoken_text_title),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 6.dp))
+        if (expanded) {
+            OutlinedTextField(
+                value = draft.thought,
+                onValueChange = draft::changeThought,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.user_inner_thought_title)) },
+                placeholder = { Text(stringResource(R.string.user_inner_thought_hint)) },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
+                ),
+                minLines = 1,
+                maxLines = 4,
+            )
+            Text(stringResource(R.string.user_spoken_text_title),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp))
+        }
     }
 }

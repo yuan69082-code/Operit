@@ -71,7 +71,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
         }
         Text("想读的、读过的、收藏的，和留下的话", Modifier.padding(horizontal = 18.dp), fontSize = 13.sp)
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("书架", "资料", "关注来源").forEach { label -> FilterChip(tab == label, { tab = label }, label = { Text(label) }) }
+            listOf("书架", "共读", "写作", "资料", "关注来源").forEach { label -> FilterChip(tab == label, { tab = label }, label = { Text(label) }) }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (loadError.isNotBlank()) {
@@ -82,6 +82,8 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
             leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         when (if (searching) "搜索" else tab) {
+          "共读" -> StudyPanel(role, name, "reading", revision)
+          "写作" -> StudyPanel(role, name, "writing", revision)
           "资料" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { LibraryPanel(role, revision = revision) }
           "关注来源" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
               ReadingSources(reading, chat, sources, sourceId, { sourceId = it }, title, { title = it }, address, { address = it }, kind, { kind = it }, hours, { hours = it }, work)
