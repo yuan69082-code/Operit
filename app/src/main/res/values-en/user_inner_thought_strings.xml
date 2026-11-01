@@ -1,4 +1,6 @@
 <resources>
+    <string name="user_inner_thought_toggle">Inner thoughts</string>
+    <string name="user_inner_thought_toggle_filled">Inner thoughts · Included when sending</string>
     <string name="user_inner_thought_title">Inner thoughts</string>
     <string name="user_inner_thought_hint">Unspoken thoughts (the AI can read these)</string>
     <string name="user_spoken_text_title">Spoken message</string>

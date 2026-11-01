@@ -122,7 +122,10 @@ class StudyStore(private val context: Context, val role: String) {
     fun retry(id: String) { store.update(bookKey(id)) { data -> data.getJSONArray("events").objects().filter { it.optString("state") == "failed" }.forEach { it.put("state", "pending") } }; changed() }
     private fun queue(data: JSONObject, event: JSONObject) {
         val events = data.getJSONArray("events").objects()
-        data.put("events", JSONArray(events.filter { it.optString("state") != "handled" }.plus(events.filter { it.optString("state") == "handled" }.takeLast(20)).put(event))
+        // Append to the JSON array after collecting retained events, not to the Kotlin list.
+        val retained = events.filter { it.optString("state") != "handled" } +
+            events.filter { it.optString("state") == "handled" }.takeLast(20)
+        data.put("events", JSONArray(retained).put(event))
     }
     fun finish(id: String, eventIds: Set<String>, state: String, error: String = "") {
         store.update(bookKey(id)) { data -> data.getJSONArray("events").objects().filter { it.getString("id") in eventIds }.forEach { it.put("state", state).put("error", error.take(500)) } }; changed()
