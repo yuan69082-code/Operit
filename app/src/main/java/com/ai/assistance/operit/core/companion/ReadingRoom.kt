@@ -195,7 +195,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
             open(id, "body", ai)
         }
     }
-    private fun download(address: String): Pair<String, String> {
+    internal fun download(address: String): Pair<String, String> {
         var url = address.toHttpUrl()
         repeat(5) {
             require(url.username.isEmpty() && url.password.isEmpty()) { "来源地址不能带账号密码" }
