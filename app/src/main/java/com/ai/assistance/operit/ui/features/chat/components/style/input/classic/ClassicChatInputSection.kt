@@ -1,5 +1,8 @@
 package com.ai.assistance.operit.ui.features.chat.components.style.input.classic
 
+import com.ai.assistance.operit.ui.features.chat.components.UserInnerThoughtDraft
+import com.ai.assistance.operit.ui.features.chat.components.UserInnerThoughtInput
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -119,6 +122,7 @@ fun ClassicChatInputSection(
     onEditPendingQueueMessage: (Long) -> Unit = {},
     onSendPendingQueueMessage: (Long) -> Unit = {}
 ) {
+    val innerThoughtDraft = UserInnerThoughtDraft(userMessage, onUserMessageChange)
     val showTokenLimitDialog = remember { mutableStateOf(false) }
     val showFullscreenInput = remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -179,7 +183,7 @@ fun ClassicChatInputSection(
             false
         }
 
-    val hasDraftText = userMessage.text.isNotBlank()
+    val hasDraftText = innerThoughtDraft.thought.isNotBlank() || innerThoughtDraft.spoken.text.isNotBlank()
     val canSendMessage = hasDraftText || attachments.isNotEmpty()
     val showQueueAction = isProcessing && hasDraftText
     val showCancelAction = isProcessing && !showQueueAction
@@ -480,6 +484,12 @@ fun ClassicChatInputSection(
                 }
             }
 
+            UserInnerThoughtInput(
+                draft = innerThoughtDraft,
+                enabled = !isProcessing || allowTextInputWhileProcessing,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+            )
+
             val classicInputRowHorizontalPadding = if (chatInputFloating) 14.dp else 22.dp
             val classicInputRowVerticalPadding = if (chatInputFloating) 6.dp else 8.dp
 
@@ -504,8 +514,8 @@ fun ClassicChatInputSection(
                     }
 
                 BasicTextField(
-                    value = userMessage,
-                    onValueChange = onUserMessageChange,
+                    value = innerThoughtDraft.spoken,
+                    onValueChange = innerThoughtDraft::changeSpoken,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 30.dp)
@@ -565,7 +575,7 @@ fun ClassicChatInputSection(
                                         .padding(end = 6.dp, top = 7.dp, bottom = 7.dp),
                                 contentAlignment = Alignment.CenterStart,
                             ) {
-                                if (userMessage.text.isEmpty()) {
+                                if (innerThoughtDraft.spoken.text.isEmpty()) {
                                     Text(
                                         text =
                                             if (isWorkspaceOpen) {
@@ -767,8 +777,8 @@ fun ClassicChatInputSection(
 
             if (showFullscreenInput.value) {
                 FullscreenInputDialog(
-                    value = userMessage,
-                    onValueChange = onUserMessageChange,
+                    value = innerThoughtDraft.spoken,
+                    onValueChange = innerThoughtDraft::changeSpoken,
                     onDismiss = { showFullscreenInput.value = false },
                     onConfirm = { showFullscreenInput.value = false }
                 )

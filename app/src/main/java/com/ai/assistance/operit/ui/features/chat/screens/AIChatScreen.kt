@@ -1640,7 +1640,10 @@ private fun ChatInputBottomBar(
         // keystroke makes Android show the "app read clipboard" toast and is unused
         // unless the insertion is already long enough to convert into an attachment.
         val insertedText =
-            if (convertLongPastedTextToFile && !currentChatId.isNullOrBlank()) {
+            // Thoughts must retain their attribution instead of becoming a generic pasted file.
+            if (convertLongPastedTextToFile && !currentChatId.isNullOrBlank() &&
+                com.ai.assistance.operit.util.UserInnerThought.decode(userMessage.text).thought ==
+                    com.ai.assistance.operit.util.UserInnerThought.decode(value.text).thought) {
                 extractInsertedText(userMessage, value)
             } else {
                 null

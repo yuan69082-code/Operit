@@ -118,8 +118,11 @@ fun PendingMessageQueuePanel(
                                     contentDescription = stringResource(R.string.edit),
                                     tint = actionIconTint
                                 )
+                                val parts = com.ai.assistance.operit.util.UserInnerThought.decode(item.text)
                                 Text(
-                                    text = item.text,
+                                    text = if (parts.thought.isEmpty()) item.text else
+                                        stringResource(R.string.user_inner_thought_title) + ": " + parts.thought +
+                                            " · " + stringResource(R.string.user_spoken_text_title) + ": " + parts.spoken,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,

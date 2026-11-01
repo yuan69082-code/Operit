@@ -1,5 +1,8 @@
 package com.ai.assistance.operit.ui.features.chat.components.style.input.agent
 
+import com.ai.assistance.operit.ui.features.chat.components.UserInnerThoughtDraft
+import com.ai.assistance.operit.ui.features.chat.components.UserInnerThoughtInput
+
 import com.ai.assistance.operit.ui.theme.inspectRender
 
 import android.net.Uri
@@ -235,6 +238,7 @@ fun AgentChatInputSection(
     onEditPendingQueueMessage: (Long) -> Unit = {},
     onSendPendingQueueMessage: (Long) -> Unit = {},
 ) {
+    val innerThoughtDraft = UserInnerThoughtDraft(userMessage, onUserMessageChange)
     val showTokenLimitDialog = remember { mutableStateOf(false) }
     val showFullscreenInput = remember { mutableStateOf(false) }
     val showModelSelectorPopup = remember { mutableStateOf(false) }
@@ -383,7 +387,7 @@ fun AgentChatInputSection(
             false
         }
 
-    val hasDraftText = userMessage.text.isNotBlank()
+    val hasDraftText = innerThoughtDraft.thought.isNotBlank() || innerThoughtDraft.spoken.text.isNotBlank()
     val canSendMessage = hasDraftText || attachments.isNotEmpty()
     val showQueueAction = isProcessing && hasDraftText
     val showCancelAction = isProcessing && !showQueueAction
@@ -780,9 +784,10 @@ fun AgentChatInputSection(
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
+                    UserInnerThoughtInput(innerThoughtDraft, !isProcessing || allowTextInputWhileProcessing)
                     OutlinedTextField(
-                        value = userMessage,
-                        onValueChange = onUserMessageChange,
+                        value = innerThoughtDraft.spoken,
+                        onValueChange = innerThoughtDraft::changeSpoken,
                         visualTransformation = mentionVisualTransformation,
                         placeholder = {
                             Text(
@@ -1077,9 +1082,10 @@ fun AgentChatInputSection(
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
+                        UserInnerThoughtInput(innerThoughtDraft, !isProcessing || allowTextInputWhileProcessing)
                         OutlinedTextField(
-                            value = userMessage,
-                            onValueChange = onUserMessageChange,
+                            value = innerThoughtDraft.spoken,
+                            onValueChange = innerThoughtDraft::changeSpoken,
                             visualTransformation = mentionVisualTransformation,
                             placeholder = {
                                 Text(
@@ -1412,8 +1418,8 @@ fun AgentChatInputSection(
 
             if (showFullscreenInput.value) {
                 FullscreenInputDialog(
-                    value = userMessage,
-                    onValueChange = onUserMessageChange,
+                    value = innerThoughtDraft.spoken,
+                    onValueChange = innerThoughtDraft::changeSpoken,
                     onDismiss = { showFullscreenInput.value = false },
                     onConfirm = { showFullscreenInput.value = false },
                 )
