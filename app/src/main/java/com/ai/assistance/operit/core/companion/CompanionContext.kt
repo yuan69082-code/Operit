@@ -70,6 +70,9 @@ object CompanionContext {
                 .put("direct_image", capabilities.optBoolean("direct_image"))
                 .put("direct_video", capabilities.optBoolean("direct_video")).toString()).append("\n")
         }
+        val humanThoughts = HumanThoughtAccess(context)
+        instructions.append("[人类思考链]是思考者未说出口的思考过程，【正文回复】是实际发出的正文；两者保持区分。你可以自行决定是否开启阅读，也可以自然谈及所读到的心里话。用 human_thought_chain status/enable/disable/rename 查看、选择或更改称呼；用户总授权只能由用户控制。\n")
+        state.append("人类思考链状态：").append(humanThoughts.status(roleId)).append("。这是").append(humanThoughts.name).append("未说出口的思考过程。\n")
         appendSections(xc)
         appendSections(com.ai.assistance.operit.core.awareness.SoftwareAwareness.promptSections(context, chatId, roleId, recordSnapshot))
         val phone = com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(context)

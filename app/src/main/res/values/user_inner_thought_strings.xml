@@ -1,9 +1,7 @@
 <resources>
-    <string name="user_inner_thought_toggle">心里话</string>
-    <string name="user_inner_thought_toggle_filled">心里话 · 已填写，会随正文发送</string>
-    <string name="user_inner_thought_title">心里话 · 思考链</string>
-    <string name="user_inner_thought_hint">没有说出口的想法（AI 能看到）</string>
-    <string name="user_spoken_text_title">正文 · 实际说出的话</string>
+    <string name="user_inner_thought_title">人类思考链</string>
+    <string name="user_inner_thought_hint">未说出口的想法；可留空</string>
+    <string name="user_spoken_text_title">正文回复</string>
     <string name="user_inner_thought_collapse">收起心里话</string>
     <string name="user_inner_thought_expand">展开心里话</string>
 </resources>

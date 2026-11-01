@@ -852,7 +852,9 @@ class MessageCoordinationDelegate(
             .getChatMetadata(chatId)?.characterGroupId
         check(existingBinding == group.id) { "群聊归属不一致，请重新打开群聊" }
 
-        val originalUserText = messageProcessingDelegate.userMessage.value.text.trim()
+        val thoughtAccess = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context)
+        val originalUserText = thoughtAccess.submit(messageProcessingDelegate.userMessage.value.text.trim(),
+            orderedMembers.any { thoughtAccess.enabled(it.characterCardId) })
         val hasAttachments = attachmentDelegate.attachments.value.isNotEmpty()
         val hasEngineMember = orderedMembers.any {
             com.ai.assistance.operit.core.engine.EngineWindow.associated(context, it.characterCardId)

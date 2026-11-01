@@ -1817,17 +1817,24 @@ private fun ChatInputBottomBar(
     }
 
     fun enqueueDraftToPendingQueue() {
-        val draftText = userMessage.text.trim()
-        if (draftText.isBlank()) return
+        val raw = userMessage.text.trim()
+        if (raw.isBlank()) return
         val chatId = currentChatId ?: return
-
-        actualViewModel.enqueuePendingQueueMessage(
-            chatId = chatId,
-            text = draftText,
-            isQueueBlocked = isQueueBlocked,
-        )
-        actualViewModel.updateUserMessage(TextFieldValue(""))
-        actualViewModel.showToast(context.getString(R.string.chat_queue_added))
+        coroutineScope.launch {
+            val access = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context)
+            val draftText = try { access.submit(raw, access.activeInComposer(context)) }
+            catch (failure: IllegalArgumentException) {
+                actualViewModel.showToast(failure.message.orEmpty())
+                return@launch
+            }
+            if (draftText.isBlank()) return@launch
+            actualViewModel.enqueuePendingQueueMessage(chatId, draftText, isQueueBlocked)
+            // Do not clear text typed or switched to while checking the current assistant.
+            if (actualViewModel.currentChatId.value == chatId && actualViewModel.userMessage.value.text.trim() == raw) {
+                actualViewModel.updateUserMessage(TextFieldValue(""))
+            }
+            actualViewModel.showToast(context.getString(R.string.chat_queue_added))
+        }
     }
 
     var commandReport by remember { mutableStateOf<String?>(null) }

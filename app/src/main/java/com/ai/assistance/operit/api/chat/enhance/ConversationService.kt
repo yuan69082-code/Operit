@@ -134,9 +134,16 @@ class ConversationService(
                     summaryConfig = summaryConfig
                 )
             if (groupSummary) systemPrompt = com.ai.assistance.operit.core.group.GroupProvenance.summaryInstructions(systemPrompt)
+            val summaryThoughtAccess = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context)
+            val summaryRole = com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
             val sanitizedMessages =
                 ChatUtils.stripOpenAiResponsesProtocolMarkupTurns(
-                    ChatUtils.stripGeminiThoughtSignatureMetaTurns(messages)
+                    ChatUtils.stripGeminiThoughtSignatureMetaTurns(messages.map { turn ->
+                        // Shared group summaries must not disclose one member's authorized thoughts to another.
+                        if (turn.kind == PromptTurnKind.USER) turn.copy(content =
+                            if (groupSummary) com.ai.assistance.operit.util.UserInnerThought.withoutThoughts(turn.content)
+                            else summaryThoughtAccess.project(turn.content, summaryRole)) else turn
+                    })
                 )
 
             // Get all model parameters from preferences (with enabled state)
@@ -481,6 +488,11 @@ class ConversationService(
             recordCompanionSnapshot: Boolean = false,
             companionModelLabel: String = ""
     ): List<PromptTurn> {
+        val thoughtAccess = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context)
+        val visibleInput = thoughtAccess.project(processedInput, roleCardId)
+        fun visibleHistory(turns: List<PromptTurn>) = turns.map { turn ->
+            if (turn.kind == PromptTurnKind.USER) turn.copy(content = thoughtAccess.project(turn.content, roleCardId)) else turn
+        }
         val activePromptMetadata = buildActivePromptHookMetadata(context, chatId, roleCardId)
         val beforeContext =
             dispatchHistoryHooks(
@@ -488,8 +500,8 @@ class ConversationService(
                     stage = "before_prepare_history",
                     chatId = chatId,
                     promptFunctionType = promptFunctionType.name,
-                    processedInput = processedInput,
-                    chatHistory = CurrentRequestContext.clearPrevious(chatHistory),
+                    processedInput = visibleInput,
+                    chatHistory = CurrentRequestContext.clearPrevious(visibleHistory(chatHistory)),
                     metadata =
                         mapOf(
                             "workspacePath" to workspacePath,
@@ -678,7 +690,7 @@ class ConversationService(
                         .put("allowed_skills", org.json.JSONArray(roleCardToolAccess.allowedSkillNames.sorted()))
                         .put("allowed_mcp_servers", org.json.JSONArray(roleCardToolAccess.allowedMcpServerNames.sorted())),
                     recordSnapshot = recordCompanionSnapshot,
-                    currentInput = processedInput
+                    currentInput = visibleInput
                 )
                 val aiName = activeCard?.name ?: context.getString(R.string.app_name)
                 runtimeSections = RuntimeContextSections(
@@ -731,7 +743,7 @@ class ConversationService(
             val roleContext = rules.contextSections(
                 roleCardId, effectiveChatHistory.filter {
                     it.kind == PromptTurnKind.USER || it.kind == PromptTurnKind.ASSISTANT
-                }.map { it.content }, processedInput,
+                }.map { it.content }, visibleInput,
             )
             runtimeSections = RuntimeContextSections(
                 instructions = runtimeSections.instructions + roleContext.instructions,
@@ -753,7 +765,7 @@ class ConversationService(
                     preparedHistory = CurrentRequestContext.withoutStateBinding(historyWithRuntimeContext)
                 )
             )
-        return CurrentRequestContext.bindInternalStateFrame(afterContext.preparedHistory, runtimeSections.internalStateFrame)
+        return CurrentRequestContext.bindInternalStateFrame(visibleHistory(afterContext.preparedHistory), runtimeSections.internalStateFrame)
     }
 
     /**
@@ -766,10 +778,12 @@ class ConversationService(
     }
 
     fun normalizeConversationHistoryForModel(
-        chatHistory: List<PromptTurn>
+        chatHistory: List<PromptTurn>,
+        roleCardId: String? = null,
     ): List<PromptTurn> {
         return chatHistory.map { turn ->
             when (turn.kind) {
+                PromptTurnKind.USER -> turn.copy(content = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context).project(turn.content, roleCardId))
                 PromptTurnKind.ASSISTANT,
                 PromptTurnKind.TOOL_CALL,
                 PromptTurnKind.TOOL_RESULT -> turn.copy(content = normalizeToolResultMarkupForModel(turn.content))
