@@ -28,7 +28,7 @@ internal object StudyImport {
         val start = Regex("(?m)^\\*\\*\\* START OF .+ \\*\\*\\*$").find(text) ?: error("书籍起始标记损坏")
         val end = Regex("(?m)^\\*\\*\\* END OF .+ \\*\\*\\*$").find(text) ?: error("书籍结束标记损坏")
         val body = text.substring(start.range.last + 1, end.range.first).trim()
-        val headings = Regex("(?m)^(?:第[一二三四五六七八九十百〇零0-9]+[卷回章][^\\n]{0,60}|CHAPTER [IVXLCDM]+:[^\\n]{1,100})$").findAll(body).toList()
+        val headings = Regex("(?m)^(?:第[一二三四五六七八九十百〇零0-9]+[卷回章][^\\n]{0,60}|〈[^〉\\n]{1,60}〉|CHAPTER [IVXLCDM]+:[^\\n]{1,100}|THE (?:GORGON'S HEAD|GOLDEN TOUCH|PARADISE OF CHILDREN|THREE GOLDEN APPLES|MIRACULOUS PITCHER|CHIMÆRA))$").findAll(body).toList()
         val sections = mutableListOf<Pair<String, String>>()
         if (headings.isEmpty()) sections.add("正文" to body)
         else {
