@@ -63,7 +63,7 @@ class StudyStore(private val context: Context, val role: String) {
         return result
     }
     fun annotate(id: String, version: String?, start: Int, end: Int, quote: String, text: String, font: String, color: String,
-                 lines: JSONArray, photos: JSONArray, author: String, operation: String): JSONObject {
+                 lines: JSONArray, photos: JSONArray, author: String, operation: String, replyTo: String? = null): JSONObject {
         require(operation.isNotBlank() && operation.length <= 100)
         require(text.length <= 10000 && (text.isNotBlank() || lines.length() > 0 || photos.length() > 0)) { "请写留言、放照片或画一笔" }
         StudyPolicy.style(font, color); StudyPolicy.drawing(lines); validatePhotos(photos)
@@ -72,10 +72,14 @@ class StudyStore(private val context: Context, val role: String) {
         val saved = store.update(bookKey(id)) { data ->
             check(data.has("id"))
             val notes = data.getJSONArray("notes")
+            if (replyTo != null) {
+                val parent = notes.objects().firstOrNull { it.getString("id") == replyTo } ?: error("被回复的批注不存在")
+                check(parent.optString("version") == version.orEmpty() && parent.optInt("start") == start && parent.optInt("end") == end && parent.optString("quote") == quote) { "回复必须保留原批注的位置" }
+            }
             if (notes.objects().any { it.getString("operation") == operation && it.getString("author") == author }) return@update
             val note = JSONObject().put("id", UUID.randomUUID().toString()).put("version", version).put("start", start).put("end", end)
                 .put("quote", quote).put("text", text).put("font", font).put("color", color).put("lines", lines).put("photos", photos)
-                .put("author", author).put("operation", operation).put("at", System.currentTimeMillis())
+                .put("author", author).put("operation", operation).put("at", System.currentTimeMillis()).put("reply_to", replyTo)
             if (lines.length() > 0) note.put("drawing_image", renderDrawing(lines, color))
             notes.put(note); added = true
             if (author == "user") queue(data, StudyPolicy.event(if (version == null) "用户写了读后感" else "用户留下原文批注", version, note.getString("id")))

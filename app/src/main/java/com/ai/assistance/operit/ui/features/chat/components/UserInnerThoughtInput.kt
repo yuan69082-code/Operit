@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,9 +68,16 @@ fun UserInnerThoughtInput(draft: UserInnerThoughtDraft, enabled: Boolean, modifi
     }
     val prompt by com.ai.assistance.operit.data.preferences.ActivePromptManager.getInstance(context)
         .activePromptFlow.collectAsState(initial = null)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var userActive by androidx.compose.runtime.remember { mutableStateOf(false) }
     var active by androidx.compose.runtime.remember { mutableStateOf(false) }
     LaunchedEffect(prompt, revision) {
         active = prompt?.let { access.activeIn(context, it) } == true
+        userActive = when (val target = prompt) {
+            is com.ai.assistance.operit.data.model.ActivePrompt.CharacterCard -> access.userEnabled(target.id)
+            is com.ai.assistance.operit.data.model.ActivePrompt.CharacterGroup -> com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(target.id)?.members?.any { access.userEnabled(it.characterCardId) } == true
+            null -> false
+        }
     }
     var settings by rememberSaveable { mutableStateOf(false) }
     var editedName by rememberSaveable { mutableStateOf("") }
@@ -81,7 +89,7 @@ fun UserInnerThoughtInput(draft: UserInnerThoughtDraft, enabled: Boolean, modifi
         FilterChip(
             selected = active,
             onClick = { editedName = name; settings = true; error = "" },
-            label = { Text(if (!allowed) "人类思考链 · 未授权" else if (active) "人类思考链 · 已开启" else "人类思考链 · AI未开启") },
+            label = { Text(if (!allowed) "人类思考链 · 点此开启" else if (active) "人类思考链 · 已开启" else "人类思考链 · 点此使用") },
         )
         if (active) {
             OutlinedTextField(
@@ -110,7 +118,20 @@ fun UserInnerThoughtInput(draft: UserInnerThoughtDraft, enabled: Boolean, modifi
                     Text("允许AI开启人类思考链", modifier = Modifier.weight(1f))
                     androidx.compose.material3.Switch(checked = allowed, onCheckedChange = { access.authorize(it) })
                 }
-                Text("允许后，由每位AI选择开启或关闭。关闭总开关会撤销所有AI的开启状态。")
+                androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("我主动使用", modifier = Modifier.weight(1f))
+                    androidx.compose.material3.Switch(checked = userActive, enabled = prompt != null, onCheckedChange = { value ->
+                        val target = prompt
+                        scope.launch {
+                            when (target) {
+                                is com.ai.assistance.operit.data.model.ActivePrompt.CharacterCard -> access.chooseByUser(target.id, value)
+                                is com.ai.assistance.operit.data.model.ActivePrompt.CharacterGroup -> com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context).getCharacterGroupCard(target.id)?.members?.forEach { access.chooseByUser(it.characterCardId, value) }
+                                null -> Unit
+                            }
+                        }
+                    })
+                }
+                Text("你主动使用或AI主动开启，任一开启即可使用。群聊的主动使用会对当前成员开启；关闭总授权会全部关闭。")
                 OutlinedTextField(value = editedName, onValueChange = { editedName = it },
                     label = { Text("思考者称呼（你和AI都可以修改）") }, singleLine = true)
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)

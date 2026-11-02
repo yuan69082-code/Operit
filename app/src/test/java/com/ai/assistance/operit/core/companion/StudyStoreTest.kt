@@ -52,4 +52,19 @@ class StudyStoreTest {
         assertEquals(14000, read.getInt("total_chars"))
         assertThrows(IllegalStateException::class.java) { store.chapter(id, "foreign-version") }
     }
+    @Test fun repliesRetainOldRevisionAnchorAndCannotMoveToAnotherPassage() {
+        val store = store(); val id = store.create("故事", "writing", "daily", "user").getString("id")
+        val first = store.write(id, null, null, "章节", "原文续文", JSONArray(), "user", false).getJSONArray("chapters").getJSONObject(0)
+        val version = first.getString("version")
+        store.annotate(id, version, 0, 2, "原文", "喜欢这里", "hand", "#123456", JSONArray(), JSONArray(), "user", "note")
+        val parent = store.book(id).getJSONArray("notes").getJSONObject(0).getString("id")
+        store.write(id, first.getString("id"), version, "章节", "新稿", JSONArray(), "user", false)
+        store.annotate(id, version, 0, 2, "原文", "回复", "hand", "#123456", JSONArray(), JSONArray(), "user", "reply", parent)
+        val reply = store.book(id).getJSONArray("notes").getJSONObject(1)
+        assertEquals(parent, reply.getString("reply_to"))
+        assertEquals(version, reply.getString("version"))
+        assertThrows(IllegalStateException::class.java) {
+            store.annotate(id, version, 2, 4, "续文", "错位回复", "hand", "#123456", JSONArray(), JSONArray(), "user", "bad-reply", parent)
+        }
+    }
 }

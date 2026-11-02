@@ -30,6 +30,7 @@ internal fun StudyPanel(role: String, name: String, section: String, revision: L
     var books by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
     var selectedId by rememberSaveable(role, section) { mutableStateOf<String?>(null) }
     var create by remember { mutableStateOf(false) }
+    var starterShelf by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var reload by remember { mutableIntStateOf(0) }
@@ -57,6 +58,7 @@ internal fun StudyPanel(role: String, name: String, section: String, revision: L
             TextButton(onClick = { create = true }, enabled = !busy) { Text(if (section == "reading") "导入共读" else "新建作品") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (section == "reading") TextButton(onClick = { starterShelf = true }, enabled = !busy, modifier = Modifier.padding(horizontal = 16.dp)) { Text("选本准备好的书 · 离线导入") }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
         val items = books.filter { it.getString("section") == section && it.getString("category") == category }
         val unread = items.sumOf { it.optInt("unread") }
@@ -69,6 +71,18 @@ internal fun StudyPanel(role: String, name: String, section: String, revision: L
         }
     }
     if (create) StudyCreateDialog(store, role, section, category, busy, error, run, { create = false }) { id -> create = false; selectedId = id }
+    if (starterShelf) AlertDialog(onDismissRequest = { if (!busy) starterShelf = false }, title = { Text("准备好的共读书包") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("已随应用下载，无需寻找文件。点击加入当前角色的日常书架；重复点击会打开已有书籍。中文为古文原版，神话英文书保留原文。")
+            StudyImport.starters.forEach { starter ->
+                OutlinedButton(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = { run {
+                    val added = StudyImport.starter(context, role, starter)
+                    withContext(Dispatchers.Main) { category = "daily"; selectedId = added.getString("id"); starterShelf = false }
+                } }) { Column { Text(starter.title); Text(starter.description, style = MaterialTheme.typography.bodySmall) } }
+            }
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        } }, confirmButton = { TextButton(enabled = !busy, onClick = { starterShelf = false }) { Text("关闭") } })
     val selected = books.firstOrNull { it.getString("id") == selectedId }
     if (selected != null) key(role, selected.getString("id")) {
         StudyBook(store, selected, name, busy, error, run) { selectedId = null }
@@ -114,77 +128,149 @@ private fun StudyCreateDialog(store: StudyStore, role: String, section: String, 
         } }) { Text(if (section == "reading") "导入链接并共读" else "创建") } })
 }
 
-private data class StudyAnchor(val version: String?, val start: Int = 0, val end: Int = 0, val quote: String = "")
+private data class StudyAnchor(val version: String?, val start: Int = 0, val end: Int = 0, val quote: String = "", val replyTo: String? = null)
 
 @Composable
 private fun StudyBook(store: StudyStore, book: JSONObject, name: String, busy: Boolean, error: String,
                       run: (suspend () -> Unit) -> Unit, dismiss: () -> Unit) {
     val id = book.getString("id")
     val chapters = studyObjects(book.getJSONArray("chapters"))
-    var chapterId by rememberSaveable { mutableStateOf<String?>(null) }
-    var oldVersion by rememberSaveable { mutableStateOf<String?>(null) }
-    val brief = chapters.firstOrNull { it.getString("id") == chapterId } ?: chapters.firstOrNull()
+    val notes = studyObjects(book.getJSONArray("notes"))
+    var screen by rememberSaveable(id) { mutableStateOf("contents") }
+    var chapterId by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    var oldVersion by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    var paged by rememberSaveable(id) { mutableStateOf(false) }
+    var page by rememberSaveable(id) { mutableIntStateOf(0) }
+    var target by remember { mutableStateOf<StudyAnchor?>(null) }
+    var jumpSequence by remember { mutableIntStateOf(0) }
+    val brief = chapters.firstOrNull { it.getString("id") == chapterId }
     val version = oldVersion ?: brief?.getString("version")
     var chapter by remember { mutableStateOf<JSONObject?>(null) }
     var loadingError by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf(false) }
     var newChapter by remember { mutableStateOf(false) }
     var annotation by remember { mutableStateOf<StudyAnchor?>(null) }
-    val notes = studyObjects(book.getJSONArray("notes"))
+    val body = chapter?.getString("text").orEmpty()
+    val pages = remember(body) { com.ai.assistance.operit.core.companion.StudyReaderPolicy.pages(body) }
+    val safePage = page.coerceIn(0, pages.lastIndex)
+    val span = pages[safePage]
+    fun openChapter(index: Int) {
+        chapterId = chapters[index].getString("id"); oldVersion = null
+        target = null; page = 0; screen = "chapter"; jumpSequence++
+    }
+    fun reply(note: JSONObject) {
+        annotation = StudyAnchor(if (note.isNull("version")) null else note.getString("version"),
+            note.getInt("start"), note.getInt("end"), note.getString("quote"), note.getString("id"))
+    }
+    fun locate(note: JSONObject) {
+        if (note.isNull("version")) return
+        val noteVersion = note.getString("version")
+        val owner = chapters.firstOrNull { item -> item.getString("version") == noteVersion ||
+            (0 until item.getJSONArray("history").length()).any { item.getJSONArray("history").getString(it) == noteVersion } }
+        if (owner == null) { loadingError = "找不到这条批注对应的原稿"; return }
+        chapterId = owner.getString("id")
+        oldVersion = if (owner.getString("version") == noteVersion) null else noteVersion
+        target = StudyAnchor(noteVersion, note.getInt("start"), note.getInt("end"), note.getString("quote"))
+        page = 0; screen = "chapter"; jumpSequence++
+    }
     LaunchedEffect(id, version) {
-        chapter = null
-        if (version != null) try { chapter = withContext(Dispatchers.IO) { store.chapter(id, version) }; loadingError = "" }
+        chapter = null; loadingError = ""
+        if (version != null) try { chapter = withContext(Dispatchers.IO) { store.chapter(id, version) } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { AppLogger.e("StudyBook", "章节读取失败", failure); loadingError = failure.message.orEmpty() }
     }
-    ReadingBookDialog(book.getString("title"), "${if (book.getString("section") == "reading") "共读" else "写作"} · ${if (book.getString("category") == "sex") "Sex" else "日常"}", dismiss) { size ->
-        if (book.optInt("unread") > 0) TextButton(enabled = !busy, onClick = { run { store.acknowledge(id) } }) { Text("已看过新留言（${book.optInt("unread")}）") }
+    LaunchedEffect(chapter, target, paged, jumpSequence) {
+        if (paged && target != null && chapter != null) page = com.ai.assistance.operit.core.companion.StudyReaderPolicy.pageAt(pages, target!!.start)
+    }
+    val index = chapters.indexOfFirst { it.getString("id") == chapterId }
+    ReadingBookDialog(book.getString("title"), "${if (book.getString("section") == "reading") "共读" else "写作"} · ${if (book.getString("category") == "sex") "Sex" else "日常"}", dismiss,
+        navigationKey = "$screen:$version:$paged:$safePage:$jumpSequence",
+        footer = {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                HorizontalDivider()
+                if (screen == "chapter" && paged && chapter != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(enabled = safePage > 0, onClick = { target = null; page = safePage - 1 }) { Text("上一页") }
+                    Text("${safePage + 1} / ${pages.size} 页", Modifier.padding(top = 12.dp))
+                    TextButton(enabled = safePage < pages.lastIndex, onClick = { target = null; page = safePage + 1 }) { Text("下一页") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    if (screen == "chapter") TextButton(enabled = index > 0, onClick = { openChapter(index - 1) }) { Text("上一章") }
+                    TextButton(onClick = { screen = "contents"; target = null }) { Text("目录") }
+                    TextButton(onClick = { screen = "notes"; target = null }) { Text("批注与回复") }
+                    if (screen == "chapter") TextButton(enabled = index >= 0 && index < chapters.lastIndex, onClick = { openChapter(index + 1) }) { Text("下一章") }
+                }
+            }
+        }) { size ->
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (loadingError.isNotBlank()) Text(loadingError, color = MaterialTheme.colorScheme.error)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        val failures = studyObjects(book.getJSONArray("events")).filter { it.optString("state") == "failed" }
-        if (failures.isNotEmpty()) {
-            Text("助手尚未处理完：${failures.last().optString("error")}", color = MaterialTheme.colorScheme.error)
-            TextButton(enabled = !busy, onClick = { run { store.retry(id) } }) { Text("重新提醒助手") }
-        }
-        val pending = studyObjects(book.getJSONArray("events")).count { it.optString("state") == "pending" }
-        if (pending > 0) Text("$pending 条书房消息等待助手空闲后处理", style = MaterialTheme.typography.labelSmall)
-        book.optJSONObject("ai_read")?.let { progress -> Text("助手阅读进度：本次已读至第 ${progress.optInt("offset")} 字", style = MaterialTheme.typography.labelSmall) }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            chapters.forEach { item -> FilterChip(brief?.getString("id") == item.getString("id"), { chapterId = item.getString("id"); oldVersion = null }, label = { Text(item.getString("title")) }) }
-        }
-        if (brief != null && brief.getJSONArray("history").length() > 0) {
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                FilterChip(oldVersion == null, { oldVersion = null }, label = { Text("当前稿") })
-                val history = brief.getJSONArray("history")
-                for (i in 0 until history.length()) FilterChip(oldVersion == history.getString(i), { oldVersion = history.getString(i) }, label = { Text("旧稿 ${i + 1}") })
+        when (screen) {
+            "contents" -> {
+                Text("目录 · ${chapters.size} 章", style = MaterialTheme.typography.titleLarge)
+                if (book.optInt("unread") > 0) TextButton(onClick = { screen = "notes" }) { Text("查看 ${book.optInt("unread")} 条更新与留言") }
+                chapters.forEachIndexed { i, item ->
+                    OutlinedButton(onClick = { openChapter(i) }, modifier = Modifier.fillMaxWidth()) { Text("${i + 1}. ${item.getString("title")}" + if (!item.optBoolean("published")) " · 草稿" else "") }
+                }
+                if (chapters.isEmpty()) Text("还没有章节，可以开始写第一篇。")
+                if (book.getString("section") == "writing") Button(enabled = !busy, onClick = { newChapter = true; editing = true }) { Text("写新章节／短篇") }
+                TextButton(enabled = !busy, onClick = { annotation = StudyAnchor(null) }) { Text("写读后感") }
+                TextButton(enabled = !busy, onClick = { run { store.userEvent(id, "用户邀请你继续共读或写作") } }) { Text("请 $name 来读／写") }
+                val failures = studyObjects(book.getJSONArray("events")).filter { it.optString("state") == "failed" }
+                if (failures.isNotEmpty()) {
+                    Text("助手尚未处理完：${failures.last().optString("error")}", color = MaterialTheme.colorScheme.error)
+                    TextButton(enabled = !busy, onClick = { run { store.retry(id) } }) { Text("重新提醒助手") }
+                }
+                val pending = studyObjects(book.getJSONArray("events")).count { it.optString("state") == "pending" }
+                if (pending > 0) Text("$pending 条消息等待助手处理")
+            }
+            "notes" -> {
+                Text("批注、回复与读后感 · ${notes.size} 条", style = MaterialTheme.typography.titleMedium)
+                if (book.optInt("unread") > 0) TextButton(enabled = !busy, onClick = { run { store.acknowledge(id) } }) { Text("标记已读") }
+                if (notes.isEmpty()) Text("还没有留言，读到有意思的地方可以划线。")
+                notes.sortedByDescending { it.optLong("at") }.forEach { note ->
+                    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
+                        val parent = notes.firstOrNull { it.getString("id") == note.optString("reply_to") }
+                        if (parent != null) Text("回复：${parent.optString("text").take(160)}", style = MaterialTheme.typography.labelMedium)
+                        if (note.optString("quote").isNotBlank()) Text("原文：${note.getString("quote").take(250)}", style = MaterialTheme.typography.bodySmall)
+                        StudyNote(note, name, ::reply)
+                        if (!note.isNull("version")) TextButton(onClick = { locate(note) }) { Text("回到原文这一段") }
+                        else Text("全书读后感", style = MaterialTheme.typography.labelSmall)
+                    } }
+                }
+            }
+            "chapter" -> {
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    FilterChip(!paged, { paged = false; page = 0 }, label = { Text("上下滚动") })
+                    FilterChip(paged, { paged = true; page = 0 }, label = { Text("分页阅读") })
+                }
+                if (brief != null && brief.getJSONArray("history").length() > 0) Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    FilterChip(oldVersion == null, { oldVersion = null; page = 0; target = null }, label = { Text("当前稿") })
+                    val history = brief.getJSONArray("history")
+                    for (i in 0 until history.length()) FilterChip(oldVersion == history.getString(i), { oldVersion = history.getString(i); page = 0; target = null }, label = { Text("旧稿 ${i + 1}") })
+                }
+                chapter?.let { record ->
+                    Text(record.getString("title"), style = MaterialTheme.typography.titleLarge)
+                    Text(when (record.getString("author")) { "source" -> "导入原文"; "user" -> "你写的"; else -> "$name 写的" }, style = MaterialTheme.typography.labelSmall)
+                    Text("长按选中文字可划线留言", style = MaterialTheme.typography.labelSmall)
+                    key(version, safePage, paged, jumpSequence) {
+                        StudyAnnotatedText(if (paged) body.substring(span.start, span.end) else body, record.getString("version"), notes, size, name,
+                            baseOffset = if (paged) span.start else 0, focusStart = target?.start, focusEnd = target?.end, reply = ::reply) { start, end, quote ->
+                            annotation = StudyAnchor(record.getString("version"), start, end, quote)
+                        }
+                    }
+                    if (!paged || safePage == pages.lastIndex) StudyPhotos(record.getJSONArray("photos"))
+                    Row {
+                        TextButton(enabled = !busy, onClick = { run { store.userEvent(id, "用户读完本章", record.getString("version")) } }) { Text("读完，告诉他") }
+                        if (book.getString("section") == "writing" && oldVersion == null) TextButton(enabled = !busy, onClick = { newChapter = false; editing = true }) { Text("编辑本章") }
+                    }
+                }
+                if (chapter == null && loadingError.isEmpty()) CircularProgressIndicator()
             }
         }
-        chapter?.let { record ->
-            Text(record.getString("title"), style = MaterialTheme.typography.titleLarge)
-            Text(when (record.getString("author")) { "source" -> "导入原文"; "user" -> "你写的"; else -> "$name 写的" } + if (!record.optBoolean("published")) " · 草稿" else "", style = MaterialTheme.typography.labelSmall)
-            Text("长按选择原文，即可划线留言", style = MaterialTheme.typography.labelSmall)
-            StudyAnnotatedText(record.getString("text"), record.getString("version"), notes, size, name) { start, end, quote ->
-                annotation = StudyAnchor(record.getString("version"), start, end, quote)
-            }
-            StudyPhotos(record.getJSONArray("photos"))
-            Row {
-                TextButton(enabled = !busy, onClick = { run { store.userEvent(id, "用户读完本章", record.getString("version")) } }) { Text("读完本章，告诉他") }
-                if (book.getString("section") == "writing" && oldVersion == null) TextButton(enabled = !busy, onClick = { newChapter = false; editing = true }) { Text("编辑这一章") }
-            }
-        }
-        if (book.getString("section") == "writing") Button(enabled = !busy, onClick = { newChapter = true; editing = true }) { Text("写新章节／短篇") }
-        Row {
-            TextButton(enabled = !busy, onClick = { annotation = StudyAnchor(null) }) { Text("写读后感") }
-            TextButton(enabled = !busy, onClick = { run { store.userEvent(id, "用户邀请你继续共读或写作", version) } }) { Text("请 $name 来读／写") }
-        }
-        HorizontalDivider()
-        Text("读后感", style = MaterialTheme.typography.titleMedium)
-        notes.filter { it.isNull("version") }.forEach { StudyNote(it, name) }
     }
     if (editing) StudyChapterEditor(store, id, if (newChapter) null else chapter, busy, error, run) { editing = false; oldVersion = null }
     annotation?.let { anchor -> key(anchor) {
-        StudyNoteEditor(store, id, anchor.version, anchor.start, anchor.end, anchor.quote, busy, error, run) { annotation = null }
+        StudyNoteEditor(store, id, anchor.version, anchor.start, anchor.end, anchor.quote, busy, error, run, replyTo = anchor.replyTo) { annotation = null }
     } }
 }
 

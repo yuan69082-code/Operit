@@ -26,11 +26,12 @@ class HumanThoughtAccessTest {
     }
     @Test fun revocationClearsEveryAssistantChoice() {
         val access = access()
-        whenever(preferences.all).thenReturn(mapOf("enabled:a" to true, "enabled:b" to true, "name" to "园园"))
+        whenever(preferences.all).thenReturn(mapOf("enabled:a" to true, "enabled:b" to true, "user_enabled:a" to true, "name" to "园园"))
         access.authorize(false)
         verify(editor).putBoolean("allowed", false)
         verify(editor).remove("enabled:a")
         verify(editor).remove("enabled:b")
+        verify(editor).remove("user_enabled:a")
         verify(editor, never()).remove("name")
         verify(editor).apply()
     }
@@ -48,5 +49,17 @@ class HumanThoughtAccessTest {
         assertThrows(IllegalArgumentException::class.java) { access.submit(UserInnerThought.encode("想法", ""), true) }
         assertTrue(access.submit("正文", true).contains(UserInnerThought.EMPTY))
         assertEquals("正文", access.submit(UserInnerThought.encode("想法", "正文"), false))
+    }
+    @Test fun humanCanEnableBeforeAssistantAndAssistantCannotRevokeHumanChoice() {
+        val access = access()
+        access.chooseByUser("a", true)
+        verify(editor).putBoolean("user_enabled:a", true)
+        verify(editor).putBoolean("allowed", true)
+        whenever(preferences.getBoolean("allowed", false)).thenReturn(true)
+        whenever(preferences.getBoolean("user_enabled:a", false)).thenReturn(true)
+        access.choose("a", false)
+        assertTrue(access.enabled("a"))
+        assertFalse(access.enabled("b"))
+        verify(editor, never()).putBoolean("user_enabled:a", false)
     }
 }

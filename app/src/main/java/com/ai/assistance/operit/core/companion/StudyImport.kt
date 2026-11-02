@@ -10,6 +10,37 @@ import java.io.File
 import java.util.zip.ZipFile
 
 internal object StudyImport {
+    data class Starter(val id: String, val title: String, val description: String) {
+        val source get() = "https://www.gutenberg.org/ebooks/$id"
+    }
+    val starters = listOf(
+        Starter("25362", "搜神记", "中文古文 · 中国神怪传说"),
+        Starter("51828", "聊斋志异", "中文古文 · 志怪、惊悚与爱情"),
+        Starter("25192", "浮生六记", "中文古文 · 夫妻情趣、日常温情与人生悲欢"),
+        Starter("32242", "A Wonder Book for Girls & Boys", "英文原著 · 霍桑改写的希腊神话"),
+        Starter("28497", "Myths of the Norsemen", "英文原著 · 北欧神话")
+    )
+    fun starter(context: Context, role: String, starter: Starter): JSONObject {
+        val store = StudyStore(context, role)
+        store.books().firstOrNull { it.optString("source") == starter.source }?.let { return it }
+        val text = java.util.zip.GZIPInputStream(context.assets.open("study-starter/${starter.id}.txt.gz"))
+            .bufferedReader(Charsets.UTF_8).use { it.readText() }.replace("\r\n", "\n")
+        val start = Regex("(?m)^\\*\\*\\* START OF .+ \\*\\*\\*$").find(text) ?: error("书籍起始标记损坏")
+        val end = Regex("(?m)^\\*\\*\\* END OF .+ \\*\\*\\*$").find(text) ?: error("书籍结束标记损坏")
+        val body = text.substring(start.range.last + 1, end.range.first).trim()
+        val headings = Regex("(?m)^(?:第[一二三四五六七八九十百〇零0-9]+[卷回章][^\\n]{0,60}|〈[^〉\\n]{1,60}〉|CHAPTER [IVXLCDM]+:[^\\n]{1,100}|THE (?:GORGON'S HEAD|GOLDEN TOUCH|PARADISE OF CHILDREN|THREE GOLDEN APPLES|MIRACULOUS PITCHER|CHIMÆRA))$").findAll(body).toList()
+        val sections = mutableListOf<Pair<String, String>>()
+        if (headings.isEmpty()) sections.add("正文" to body)
+        else {
+            if (headings.first().range.first > 0) sections.add("前言" to body.substring(0, headings.first().range.first))
+            headings.forEachIndexed { i, heading -> sections.add(heading.value.trim() to body.substring(heading.range.first, if (i == headings.lastIndex) body.length else headings[i + 1].range.first)) }
+        }
+        sections.add("来源与许可" to (starter.source + "\n\n" + text.substring(0, start.range.first) + text.substring(end.range.first)))
+        val chapters = sections.filter { it.second.isNotBlank() }.flatMap { (title, body) ->
+            StudyPolicy.split(body).mapIndexed { i, part -> (if (i == 0) title else "$title · 续${i + 1}") to part }
+        }
+        return save(store, starter.title, "daily", starter.source, chapters)
+    }
     private fun htmlText(html: String): String {
         val document = Jsoup.parse(html)
         document.select("script,style,nav,header,footer,aside,form,button,noscript").remove()
