@@ -2,6 +2,10 @@ package com.ai.assistance.operit.ui.features.settings.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -91,22 +95,36 @@ private fun drawingPoints(array: JSONArray): List<List<Offset>> = (0 until array
 }
 
 @Composable
-internal fun StudyNote(note: JSONObject, name: String) {
+internal fun StudyNote(note: JSONObject, name: String, reply: ((JSONObject) -> Unit)? = null) {
     val color = studyInk(note.getString("color"))
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(if (note.getString("author") == "user") "你留下的话" else "$name 留下的话", style = MaterialTheme.typography.labelSmall, color = color)
         if (note.getString("text").isNotEmpty()) Text(note.getString("text"), color = color, fontFamily = studyFont(note.getString("font")), fontSize = 19.sp)
         if (note.getJSONArray("lines").length() > 0) StudyDrawing(drawingPoints(note.getJSONArray("lines")), color)
         StudyPhotos(note.getJSONArray("photos"))
+        if (reply != null) TextButton(onClick = { reply(note) }) { Text("回复这条留言") }
     }
 }
 
 /** Each paragraph keeps its original UTF-16 offset; notes sit directly below their quoted text. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun StudyAnnotatedText(body: String, version: String, notes: List<JSONObject>, size: Int, name: String, annotate: (Int, Int, String) -> Unit) {
+internal fun StudyAnnotatedText(body: String, version: String, notes: List<JSONObject>, size: Int, name: String, baseOffset: Int = 0, focusStart: Int? = null, focusEnd: Int? = null, reply: ((JSONObject) -> Unit)? = null, annotate: (Int, Int, String) -> Unit) {
     val paragraphs = remember(body) { Regex("[^\\n]+(?:\\n|$)").findAll(body).toList() }
     paragraphs.forEach { paragraph -> key(version, paragraph.range.first) {
-        val start = paragraph.range.first
+        val start = baseOffset + paragraph.range.first
+        val requester = remember { BringIntoViewRequester() }
+        var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        var jumped by remember(version, focusStart, focusEnd, baseOffset) { mutableStateOf(false) }
+        LaunchedEffect(layout, focusStart) {
+            val target = focusStart
+            val measured = layout
+            if (!jumped && target != null && target >= start && target < start + paragraph.value.length && measured != null) {
+                withFrameNanos { }
+                requester.bringIntoView(measured.getCursorRect((target - start).coerceIn(0, paragraph.value.length)))
+                jumped = true
+            }
+        }
         val text = paragraph.value
         var selection by remember(version, start) { mutableStateOf(TextRange.Zero) }
         val active = notes.filter { it.optString("version") == version && it.getInt("start") < start + text.length && it.getInt("end") > start }
@@ -114,22 +132,25 @@ internal fun StudyAnnotatedText(body: String, version: String, notes: List<JSONO
             val builder = AnnotatedString.Builder(annotated)
             active.forEach { note -> builder.addStyle(SpanStyle(textDecoration = TextDecoration.Underline, color = studyInk(note.getString("color"))),
                 (note.getInt("start") - start).coerceIn(0, text.length), (note.getInt("end") - start).coerceIn(0, text.length)) }
+            if (focusStart != null && focusEnd != null && focusStart < start + text.length && focusEnd > start) {
+                builder.addStyle(SpanStyle(background = Color(0xFFFFE49B)), (focusStart - start).coerceIn(0, text.length), (focusEnd - start).coerceIn(0, text.length))
+            }
             TransformedText(builder.toAnnotatedString(), OffsetMapping.Identity)
         }
         BasicTextField(value = TextFieldValue(text, selection), onValueChange = { selection = it.selection }, readOnly = true,
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = BookInk, fontFamily = FontFamily.Serif, fontSize = size.sp, lineHeight = (size * 1.7f).sp),
-            modifier = Modifier.fillMaxWidth(), visualTransformation = transformation)
+            modifier = Modifier.fillMaxWidth().bringIntoViewRequester(requester), onTextLayout = { layout = it }, visualTransformation = transformation)
         if (!selection.collapsed) TextButton(onClick = {
             val from = minOf(selection.start, selection.end); val end = maxOf(selection.start, selection.end)
             annotate(start + from, start + end, text.substring(from, end))
         }) { Text("给选中文字划线留言") }
-        active.filter { it.getInt("end") <= start + text.length }.forEach { StudyNote(it, name) }
+        active.filter { it.getInt("end") <= start + text.length }.forEach { StudyNote(it, name, reply) }
     } }
 }
 
 @Composable
 internal fun StudyNoteEditor(store: StudyStore, book: String, version: String?, start: Int, end: Int, quote: String,
-                             busy: Boolean, error: String, run: (suspend () -> Unit) -> Unit, dismiss: () -> Unit) {
+                             busy: Boolean, error: String, run: (suspend () -> Unit) -> Unit, replyTo: String? = null, dismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var font by remember { mutableStateOf("hand") }
     var color by remember { mutableStateOf("#486B65") }
@@ -143,7 +164,7 @@ internal fun StudyNoteEditor(store: StudyStore, book: String, version: String?, 
     Dialog(onDismissRequest = { if (!busy) dismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         ReadingTheme { Surface(Modifier.fillMaxWidth().fillMaxHeight(.95f)) {
             Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (version == null) "写读后感" else "给原文留下批注", style = MaterialTheme.typography.titleLarge)
+                Text(if (replyTo != null) "回复留言" else if (version == null) "写读后感" else "给原文留下批注", style = MaterialTheme.typography.titleLarge)
                 if (quote.isNotBlank()) Text(quote.take(500), style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(text, { text = it }, enabled = !busy, label = { Text("想留下的话") }, modifier = Modifier.fillMaxWidth(), minLines = 3,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = studyFont(font), color = studyInk(color)))
@@ -167,7 +188,7 @@ internal fun StudyNoteEditor(store: StudyStore, book: String, version: String?, 
                 Row { TextButton(onClick = dismiss, enabled = !busy) { Text("取消") }
                     Button(enabled = !busy && (text.isNotBlank() || lines.isNotEmpty() || photos.isNotEmpty()), onClick = { run {
                         val strokes = JSONArray(lines.map { line -> JSONArray(line.map { JSONArray(listOf(it.x.toDouble(), it.y.toDouble())) }) })
-                        store.annotate(book, version, start, end, quote, text, font, color, strokes, JSONArray(photos), "user", operation)
+                        store.annotate(book, version, start, end, quote, text, font, color, strokes, JSONArray(photos), "user", operation, replyTo)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { dismiss() }
                     } }) { Text("保存并提醒他") } }
             }

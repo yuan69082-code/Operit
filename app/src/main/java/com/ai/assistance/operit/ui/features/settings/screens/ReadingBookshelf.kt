@@ -117,9 +117,10 @@ private fun BookSpine(entry: JSONObject, index: Int, diary: Boolean, open: () ->
 }
 
 @Composable
-internal fun ReadingBookDialog(title: String, subtitle: String, dismiss: () -> Unit, content: @Composable ColumnScope.(Int) -> Unit) {
+internal fun ReadingBookDialog(title: String, subtitle: String, dismiss: () -> Unit, navigationKey: Any = Unit, footer: @Composable () -> Unit = {}, content: @Composable ColumnScope.(Int) -> Unit) {
     var textSize by rememberSaveable { mutableIntStateOf(18) }
     var sizing by remember { mutableStateOf(false) }
+    val readerScroll = key(navigationKey) { rememberScrollState() }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         ReadingTheme {
             Surface(Modifier.fillMaxSize(), color = Color(0xFFE0D6C1)) {
@@ -137,12 +138,13 @@ internal fun ReadingBookDialog(title: String, subtitle: String, dismiss: () -> U
                             Text("${textSize}号", Modifier.weight(1f), textAlign = TextAlign.Center)
                             TextButton(onClick = { textSize += 2 }, enabled = textSize < 28) { Text("放大") }
                         }
-                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 23.dp).padding(top = 12.dp, bottom = 36.dp),
+                        Column(Modifier.weight(1f).verticalScroll(readerScroll).padding(horizontal = 23.dp).padding(top = 12.dp, bottom = 36.dp),
                             verticalArrangement = Arrangement.spacedBy(18.dp)) {
                             SelectionContainer { Text(title, fontFamily = FontFamily.Serif, fontSize = 30.sp, lineHeight = 39.sp, color = BookInk) }
                             Text(subtitle, color = Color(0xFF697366), fontSize = 12.sp, lineHeight = 19.sp)
                             content(textSize)
                         }
+                        footer()
                     }
                 }
             }

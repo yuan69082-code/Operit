@@ -31,6 +31,14 @@ internal object StudyTool {
                 val chapter = if (data.has("chapter")) chapters.first { it.getString("id") == data.getString("chapter") } else chapters.last()
                 JSONObject().put("saved", true).put("book", bookId()).put("chapter", chapter.getString("id")).put("version", chapter.getString("version"))
             }
+            "reply" -> {
+                val parent = store.book(bookId()).getJSONArray("notes").objects().firstOrNull { it.getString("id") == data.getString("reply_to") } ?: error("被回复的批注不存在")
+                store.annotate(bookId(), if (parent.isNull("version")) null else parent.getString("version"),
+                    parent.getInt("start"), parent.getInt("end"), parent.getString("quote"), data.optString("text"),
+                    data.optString("font", "hand"), data.optString("color", "#486B65"), data.optJSONArray("lines") ?: JSONArray(),
+                    data.optJSONArray("photos") ?: JSONArray(), role, data.getString("operation_id"), parent.getString("id"))
+                JSONObject().put("saved", true).put("user_unread", true)
+            }
             "annotate", "review" -> {
                 store.annotate(bookId(), if (action == "annotate") data.getString("version") else null,
                     data.optInt("start"), data.optInt("end"), data.optString("quote"), data.optString("text"),

@@ -7,17 +7,24 @@ import com.ai.assistance.operit.data.preferences.CharacterGroupCardManager
 import com.ai.assistance.operit.util.UserInnerThought
 import org.json.JSONObject
 
-/** Only the human controls authorization; each assistant controls its own reading state. */
+/** Human activation and assistant activation are independent; revocation clears both. */
 class HumanThoughtAccess(context: Context) {
     val preferences = context.applicationContext.getSharedPreferences("human_thought_access", Context.MODE_PRIVATE)
     val allowed get() = preferences.getBoolean("allowed", false)
     val name get() = preferences.getString("name", "园园")!!
-    fun enabled(role: String?) = allowed && !role.isNullOrBlank() && preferences.getBoolean("enabled:$role", false)
+    fun userEnabled(role: String?) = !role.isNullOrBlank() && preferences.getBoolean("user_enabled:$role", false)
+    fun enabled(role: String?) = allowed && !role.isNullOrBlank() && (userEnabled(role) || preferences.getBoolean("enabled:$role", false))
+    fun chooseByUser(role: String, value: Boolean) = synchronized(lock) {
+        require(role.isNotBlank())
+        val edit = preferences.edit().putBoolean("user_enabled:$role", value)
+        if (value) edit.putBoolean("allowed", true)
+        edit.apply()
+    }
 
     fun authorize(value: Boolean) = synchronized(lock) {
         val edit = preferences.edit().putBoolean("allowed", value)
-        // Revocation also removes old choices: reauthorizing requires a new assistant decision.
-        if (!value) preferences.all.keys.filter { it.startsWith("enabled:") }.forEach { edit.remove(it) }
+        // Reauthorization must not silently resurrect either actor's old activation.
+        if (!value) preferences.all.keys.filter { it.startsWith("enabled:") || it.startsWith("user_enabled:") }.forEach { edit.remove(it) }
         edit.apply()
     }
     fun choose(role: String, value: Boolean) = synchronized(lock) {
@@ -29,7 +36,7 @@ class HumanThoughtAccess(context: Context) {
         require(value.isNotBlank() && value.length <= 40 && '\n' !in value && '\r' !in value) { "称呼请填写1到40个字符，不能换行" }
         preferences.edit().putString("name", value.trim()).apply()
     }
-    fun status(role: String?) = JSONObject().put("allowed", allowed).put("enabled", enabled(role)).put("name", name)
+    fun status(role: String?) = JSONObject().put("allowed", allowed).put("enabled", enabled(role)).put("user_enabled", userEnabled(role)).put("ai_enabled", role != null && preferences.getBoolean("enabled:$role", false)).put("name", name)
     fun project(content: String, role: String?) = UserInnerThought.forModel(content, enabled(role))
     fun submit(content: String, active: Boolean): String {
         val parts = UserInnerThought.decode(content)
