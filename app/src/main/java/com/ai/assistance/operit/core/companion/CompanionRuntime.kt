@@ -577,7 +577,7 @@ object CompanionRuntime {
             }
             recordedExperience = recordedExperience || recording.isSuccess
             // 醒来这件事本身也会改变情绪：把实际发生的自主行动回传 XC，由 XC 判断类型
-            if (contactWake && store.emotionEnabled) {
+            if (contactWake && store.emotionEnabled && !internalEnabled) {
                 val unanswered = store.read("ledger:$chatId").optInt("unanswered") + if (sent != null) 1 else 0
                 val exchange = buildString {
                     append("自主行动（不是她说的话）：我被").append(event.take(200)).append("叫醒。")

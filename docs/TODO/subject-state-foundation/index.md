@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: implementing
+status: validating
 ---
 
 # 指定助手状态底座，第 1 批
@@ -27,4 +27,6 @@ status: implementing
 
 ## 验证与交接
 
-实施完成后补充实际提交、测试、构建和未验证范围；第 2 批从本底座继续，不重建归档或另一套身份。
+人格采用、偏好归属及完整六批后续范围见 [六批连续目标与偏好](2-six-batch-continuity-and-preferences.md)。本批不提前实现第二至第五批。
+
+实现及补充需求已纳入草稿 [PR #53](https://github.com/yuan69082-code/Operit/pull/53)。最终组合验证的提交、测试、构建结果和未验证范围在该 PR 更新，不能把测试代码存在当作已经通过。第 2 批从本底座继续，不重建归档或另一套身份。

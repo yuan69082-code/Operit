@@ -11,13 +11,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 import java.security.MessageDigest
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(OperitStorageTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28], application = Application::class)
 class InternalStateStorageIntegrationTest {
     @get:Rule val temporary = TemporaryFolder()

@@ -131,7 +131,10 @@ class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
     }
 
     fun savepoint(id: String) {
-        requireUsable()
+        // Keep a latched report failure local until finish(), just like the text callback.
+        // Throwing from the independent revision collector would cancel provider/reader jobs.
+        // A checkpoint after failure retains that failure; only rollback to a valid one clears it.
+        if (finished) fail(ErrorCode.STREAM_FINISHED)
         checkpoints[id] = Checkpoint(++checkpointSequence, snapshot())
     }
 

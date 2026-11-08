@@ -57,6 +57,8 @@ internal object SubjectStateBoundary {
             a.keys().asSequence().all { b.has(it) && same(a.get(it), b.get(it)) }
         a is org.json.JSONArray && b is org.json.JSONArray -> a.length() == b.length() &&
             (0 until a.length()).all { same(a.get(it), b.get(it)) }
+        // JSON has numbers, not Kotlin Int/Long subtypes. A detached parse narrows 0L to 0.
+        a is Number && b is Number -> a.toString().toBigDecimal().compareTo(b.toString().toBigDecimal()) == 0
         else -> a == b
     }
 }

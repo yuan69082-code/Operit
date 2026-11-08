@@ -17,14 +17,13 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.util.UUID
 
 /** Production state/message/tool adapters with real AtomicFile, SQLite and chat metadata.
  * Does not claim a live model, microphone or foreground UI was exercised. */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(OperitStorageTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28], application = Application::class)
 class InternalStateEntryPointsTest {
     private lateinit var context: Context
@@ -70,7 +69,7 @@ class InternalStateEntryPointsTest {
     private fun value(chat: String, id: String): Double = InternalStateEngine.snapshot(states.snapshot(role, chat, true), chat, System.currentTimeMillis())
         .single { it.getString("id") == id }.getDouble("value")
 
-    @Test fun normalPreparationAndCommitContinueAcrossWindowsWithoutMergingSessions() = runBlocking {
+    @Test fun normalPreparationAndCommitContinueAcrossWindowsWithoutMergingSessions(): Unit = runBlocking {
         assertFalse(states.requireRecipient(role, one))
         seed()
         assertEquals(63.0, value(two, "global"), 0.0)

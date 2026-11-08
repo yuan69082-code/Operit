@@ -316,4 +316,16 @@ class InternalStateReportStreamTest {
         assertEquals("", parser.finish())
         assertEquals("host-nonce", parser.report!!.getString("frame_id"))
     }
+
+    @Test fun revisionSavepointAfterFailureDoesNotThrowFromTheSideChannel() {
+        val parser = InternalStateReportStream()
+        parser.savepoint("valid")
+        parser.appendDeferringFailure("</operit_state_report>")
+        parser.savepoint("failed")
+        assertTrue(parser.rollback("failed"))
+        assertNull(parser.report)
+        error(InternalStateReportStream.ErrorCode.MALFORMED_REPORT_TAG) { parser.finish() }
+        assertTrue(parser.rollback("valid"))
+        assertEquals("正文", collect(parser, listOf(framed() + "正文")))
+    }
 }
