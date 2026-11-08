@@ -6,6 +6,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InternalStateTimeRulesTest {
+    @Test fun archivedContactBoundariesKeepTimeEvolutionAndSessionIsolation() {
+        val original = data(definition(rule("not_contacted", amount = 1.0), scope = "session"))
+        contact(original, "first", 0, chat = "a")
+        contact(original, "other", minute, chat = "b")
+        val compacted = JSONObject(original.toString())
+        val contacts = InternalStateEngine.rows(compacted, "events").filter { it.has("contact_at") }
+        compacted.put("archived_contacts", JSONArray(contacts.map {
+            JSONObject().put("chat", it.getString("chat")).put("at", it.getLong("contact_at"))
+        }))
+        compacted.put("events", JSONArray(InternalStateEngine.rows(compacted, "events").filterNot { it.has("contact_at") }))
+        InternalStateEngine.advance(original, "a", 10 * minute)
+        InternalStateEngine.advance(compacted, "a", 10 * minute)
+        assertEquals(value(original), value(compacted), 0.0)
+        assertEquals(58.0, value(compacted), 0.0)
+    }
+
     private val minute = 60000L
     private fun rule(condition: String = "always", amount: Double = 0.0, interval: Double = 1.0) = JSONObject()
         .put("condition", condition).put("reason", "由主体填写的原因")

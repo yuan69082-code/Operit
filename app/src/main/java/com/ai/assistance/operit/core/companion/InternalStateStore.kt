@@ -22,16 +22,20 @@ class InternalStateStore(private val context: Context) {
         require(role.isNotBlank())
         if (enable) CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "companion_internal_state", true)
         // Disabled time is paused. Turning back on must not replay the unobserved interval.
-        store.update(key(role)) { data ->
-            val now = System.currentTimeMillis()
-            InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            store.update(key(role)) { data ->
+                val now = System.currentTimeMillis()
+                InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+            }
+            check(store.preferences.edit().putBoolean("internal_state:$role", enable).commit())
         }
-        check(store.preferences.edit().putBoolean("internal_state:$role", enable).commit())
     }
 
     fun event(role: String?, chat: String, id: String, source: String, detail: String, contactAt: Long? = null) {
         if (!enabled(role)) return
         store.update(key(requireNotNull(role))) {
+            // Archived messages remain idempotent after compaction and process restart.
+            if (store.archivedStateRow(key(role), "events", id) != null) return@update
             // These facts are interpreted in the main generation. Replaying old keyword rules
             // here would assign a second, contradictory subjective meaning before that report.
             InternalStateEngine.event(it, id, source, chat, detail, System.currentTimeMillis(),
@@ -39,7 +43,12 @@ class InternalStateStore(private val context: Context) {
         }
     }
 
-    suspend fun message(chat: String, message: ChatMessage) {
+    // Persistence runs on the IO pool: these were called on the main looper and caused the ANRs
+    // in anr_reports (CompanionStore.read under InternalStateStore.message).
+    suspend fun message(chat: String, message: ChatMessage) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        messageNow(chat, message)
+    }
+    private suspend fun messageNow(chat: String, message: ChatMessage) {
         if (message.isVariantPreview || message.displayMode != ChatMessageDisplayMode.NORMAL || message.content.isBlank()) return
         if (message.sender !in setOf("user", "ai", "assistant")) return
         if (message.sender != "user" && message.contentStream != null) return
@@ -62,9 +71,15 @@ class InternalStateStore(private val context: Context) {
         }
     }
 
-    fun tool(role: String?, chat: String?, name: String, action: String?, status: String?, success: Boolean) {
+    suspend fun tool(role: String?, chat: String?, name: String, action: String?, status: String?, success: Boolean) {
         if (chat == null || !enabled(role) || name == "companion_internal_state") return
         val id = "tool:${UUID.randomUUID()}"
+        // Await persistence on IO: the next model round must see the completed tool's event.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            toolNow(role, chat, id, name, action, status, success)
+        }
+    }
+    private fun toolNow(role: String?, chat: String, id: String, name: String, action: String?, status: String?, success: Boolean) {
         event(role, chat, id, if (success) "tool_success" else "tool_failure", "$name/${action.orEmpty()}")
         val source = InternalStateEvents.toolSource(name, action, status, success)
         if (source != null) event(role, chat, "$id:$source", source, "$name/${action.orEmpty()}/${status.orEmpty()}")
@@ -87,6 +102,7 @@ class InternalStateStore(private val context: Context) {
             InternalStateTimeRules.requireDefined(definition)
         }
         store.update(key(role)) {
+            restoreEvidence(it, role, evidence)
             InternalStateEngine.evolve(it, operation, id, expected, definition, target, reason, evidence, chat, System.currentTimeMillis())
         }
     }
@@ -110,9 +126,27 @@ class InternalStateStore(private val context: Context) {
         lateinit var receipt: JSONObject
         store.update(key(frame.roleId)) { data ->
             requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
+            store.archivedStateRow(key(frame.roleId), "semantic_reports", frame.id)?.let {
+                val receipts = data.optJSONArray("semantic_reports") ?: JSONArray().also { rows -> data.put("semantic_reports", rows) }
+                if ((0 until receipts.length()).none { i -> receipts.getJSONObject(i).getString("frame_id") == frame.id }) receipts.put(it)
+            }
+            // Old receipts still use the original digest validation. A new report must not
+            // bypass conflict checks if intervening objective changes have already been archived.
+            val replay = InternalStateEngine.rows(data, "semantic_reports").any { it.getString("frame_id") == frame.id }
+            requireStateReport(replay || frame.eventSequence >= data.optLong("archived_event_sequence"), InternalStateReportFailure.CONFLICT)
+            restoreEvidence(data, frame.roleId, frame.eventIds.toList())
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
         return receipt
+    }
+
+    private fun restoreEvidence(data: JSONObject, role: String, ids: List<String>) {
+        val rows = InternalStateEngine.rows(data, "events")
+        val known = rows.map { it.getString("id") }.toSet()
+        val restored = ids.distinct().filter { it !in known }.mapNotNull {
+            store.archivedStateRow(key(role), "events", it)
+        }
+        if (restored.isNotEmpty()) data.put("events", JSONArray((rows + restored).sortedBy { it.getLong("sequence") }))
     }
 
     fun inspect(role: String, chat: String, offset: Int): JSONObject {
@@ -120,11 +154,14 @@ class InternalStateStore(private val context: Context) {
         val data = snapshot(role, chat, true)
         val events = InternalStateEngine.rows(data, "events").asReversed()
         val versions = InternalStateEngine.rows(data, "versions").asReversed()
+        val page = events.drop(offset).take(21).toMutableList()
+        if (page.size < 21) page.addAll(store.archivedStateEvents(key(role),
+            (offset - events.size).coerceAtLeast(0), 21 - page.size, events.map { it.getString("id") }.toSet()))
         return JSONObject().put("definitions", JSONArray(InternalStateEngine.definitions(data)))
             .put("states", JSONArray(InternalStateEngine.snapshot(data, chat, System.currentTimeMillis())))
-            .put("events", JSONArray(events.drop(offset).take(20))).put("versions", JSONArray(versions.drop(offset).take(20)))
+            .put("events", JSONArray(page.take(20))).put("versions", JSONArray(versions.drop(offset).take(20)))
             .put("last_selection", data.optJSONObject("last_selection") ?: JSONObject.NULL)
-            .put("next_offset", if (offset + 20 < maxOf(events.size, versions.size)) offset + 20 else JSONObject.NULL)
+            .put("next_offset", if (page.size > 20 || offset.toLong() + 20 < versions.size) offset + 20 else JSONObject.NULL)
     }
 
     fun prompt(role: String?, chat: String, persist: Boolean, wake: Boolean = false,
@@ -263,12 +300,13 @@ class InternalStateStore(private val context: Context) {
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) { AppLogger.e("InternalState", "消息状态记录失败", failure) }
         }
-        fun noteTool(context: Context, role: String?, chat: String?, tool: com.ai.assistance.operit.data.model.AITool, success: Boolean) {
+        suspend fun noteTool(context: Context, role: String?, chat: String?, tool: com.ai.assistance.operit.data.model.AITool, success: Boolean) {
             try {
                 fun param(key: String) = tool.parameters.firstOrNull { it.name == key }?.value
                 val status = param("status") ?: param("details")?.let { JSONObject(it).optString("status") }
                 InternalStateStore(context).tool(role, chat, tool.name, param("action"), status, success)
-            } catch (failure: Exception) { AppLogger.e("InternalState", "工具状态记录失败", failure) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { AppLogger.e("InternalState", "工具状态记录失败", failure) }
         }
     }
 }

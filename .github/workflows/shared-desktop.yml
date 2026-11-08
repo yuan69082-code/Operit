@@ -54,10 +54,13 @@ jobs:
             }
             if (pr.state !== 'open' || !pr.mergeable || !pr.merge_commit_sha) throw new Error('PR has no current merge candidate');
             const commit = (await github.rest.git.getCommit({...context.repo, commit_sha: pr.merge_commit_sha})).data;
-            if (commit.parents[0]?.sha !== pr.base.sha || commit.parents[1]?.sha !== pr.head.sha) throw new Error('Candidate changed; retry the run');
+            // PR base.sha can lag behind the branch used for GitHub's merge candidate.
+            // Validate against the live target branch so stale PR metadata cannot block builds.
+            const base = (await github.rest.git.getRef({...context.repo, ref: `heads/${pr.base.ref}`})).data.object.sha;
+            if (commit.parents[0]?.sha !== base || commit.parents[1]?.sha !== pr.head.sha) throw new Error('Candidate changed; retry the run');
             core.setOutput('source', pr.merge_commit_sha);
             core.setOutput('head', pr.head.sha);
-            core.setOutput('base', pr.base.sha);
+            core.setOutput('base', base);
             core.setOutput('pr', String(number));
             core.setOutput('deliver', !pr.draft && pr.base.ref === 'main' && pr.user.login === context.repo.owner && pr.head.repo.full_name === process.env.GITHUB_REPOSITORY ? 'true' : 'false');
   tests:
