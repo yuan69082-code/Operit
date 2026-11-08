@@ -6,6 +6,32 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InternalStateTimeRulesTest {
+    @Test fun pagedArchivedContactsMatchOriginalTimingAcrossSessionBoundaries() {
+        val original = data(definition(rule("not_contacted", amount = 2.0), scope = "session"))
+        contact(original, "first", 0)
+        contact(original, "second", 4 * minute)
+        contact(original, "foreign", 7 * minute, chat = "other-window")
+        val contacts = InternalStateEngine.rows(original, "events").filter { it.has("contact_at") }
+        val compacted = JSONObject(original.toString())
+        compacted.put("events", org.json.JSONArray(InternalStateEngine.rows(compacted, "events").filterNot { it.has("contact_at") }))
+        var lookups = 0
+        val document = InternalStateDocument(compacted, object : InternalStateHistoryAccess {
+            override fun definition(id: String, version: Int): JSONObject? = null
+            override fun latestContact(chat: String?, at: Long): Long? {
+                lookups++
+                return contacts.filter { (chat == null || it.getString("chat") == chat) && it.getLong("contact_at") <= at }
+                    .maxOfOrNull { it.getLong("contact_at") }
+            }
+            override fun contacts(chat: String?, after: Long, until: Long) = contacts.asSequence()
+                .filter { (chat == null || it.getString("chat") == chat) && it.getLong("contact_at") > after && it.getLong("contact_at") <= until }
+                .map { it.getLong("contact_at") }
+        })
+        InternalStateEngine.advance(original, "a", 10 * minute)
+        InternalStateEngine.advance(document, "a", 10 * minute)
+        assertEquals(value(original), value(document), 0.0)
+        assertTrue(lookups > 0)
+        assertFalse(document.has("archived_contacts"))
+    }
     @Test fun archivedContactBoundariesKeepTimeEvolutionAndSessionIsolation() {
         val original = data(definition(rule("not_contacted", amount = 1.0), scope = "session"))
         contact(original, "first", 0, chat = "a")

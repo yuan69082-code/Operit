@@ -113,12 +113,14 @@ class InternalStateStore(private val context: Context) {
             if (previous != null) {
                 require(previous.getString("source") == if (success) "tool_success" else "tool_failure") { "同一工具结果标识发生冲突" }
                 require(previous.getString("chat") == chat && previous.getString("detail") == "$name/${action.orEmpty()}".take(240)) { "工具结果来源发生冲突" }
+                require(previous.opt("tool_status") == (status ?: JSONObject.NULL)) { "工具结果状态发生冲突" }
                 return@update
             }
             InternalStateEngine.event(data, id, if (success) "tool_success" else "tool_failure",
                 chat, "$name/${action.orEmpty()}", System.currentTimeMillis())
             InternalStateEngine.rows(data, "events").last { it.getString("id") == id }
                 .put("recipient", role).put("author", role).put("source_chat", chat)
+                .put("tool_status", status ?: JSONObject.NULL)
             val source = InternalStateEvents.toolSource(name, action, status, success)
             if (source != null) InternalStateEngine.event(data, "$id:$source", source,
                 chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
@@ -347,6 +349,18 @@ class InternalStateStore(private val context: Context) {
             "effects 用 action/weight/cue 和可选 target 表达影响；不能伪造宿主事件。内部状态开启时它是唯一自动注入的状态源，XC 不叠加状态提示。\n"
 
         /** Observational write failure must be logged, not turn a successfully persisted message/tool into a failure. */
+        suspend fun noteEvent(context: Context, role: String, chat: String, id: String, source: String, detail: String) {
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val state = InternalStateStore(context)
+                    if (state.enabled(role)) {
+                        state.requireRecipient(role, chat)
+                        state.event(role, chat, id, source, detail)
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { AppLogger.e("InternalState", "后台事实状态记录失败；不重跑已完成活动", failure) }
+        }
         suspend fun noteMessage(context: Context, chat: String, message: ChatMessage) {
             try { InternalStateStore(context).message(chat, message) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

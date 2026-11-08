@@ -96,7 +96,7 @@ class InternalStateEntryPointsTest {
             val version = SubjectStateBoundary.revision(states.read(role))
             InternalStateStore.noteTool(context, role, one, tool, true, "host-call-1")
             assertEquals(version, SubjectStateBoundary.revision(states.read(role)))
-            states.event(role, two, "background-ticket", "wake", "已有后台事件")
+            InternalStateStore.noteEvent(context, role, two, "background-ticket", "wake", "已有后台事件")
         }
         val events = InternalStateEngine.rows(states.read(role), "events")
         assertEquals(1, events.count { it.optString("source") == "user_message" })
@@ -131,5 +131,37 @@ class InternalStateEntryPointsTest {
             assertEquals(24, InternalStateEngine.rows(states.read(role), "events").count { it.getString("id").startsWith("concurrent:") })
             assertEquals(24L, SubjectStateBoundary.revision(states.read(role)))
         } finally { pool.shutdownNow() }
+    }
+
+    @Test fun groupMessageAuthorsDoNotBecomeAnotherAssistantsExperience() = runBlocking {
+        // Existing group history remains attributable even when the group card is unavailable.
+        val group = ChatHistory(title = "已有群历史", messages = emptyList(), characterGroupId = "historical-group")
+        ChatHistoryManager.getInstance(context).saveChatHistory(group)
+        val a = ChatMessage(sender = "ai", content = "A的感受", roleName = "同名助手")
+        val b = ChatMessage(sender = "ai", content = "B的感受", roleName = "同名助手")
+        val unknown = ChatMessage(sender = "ai", content = "没有作者凭据", roleName = "同名助手")
+        com.ai.assistance.operit.core.group.GroupProvenance.record(context, group.id, a, role)
+        com.ai.assistance.operit.core.group.GroupProvenance.record(context, group.id, b, other)
+        states.message(group.id, a); states.message(group.id, b); states.message(group.id, unknown)
+        val own = InternalStateEngine.rows(states.read(role), "events")
+        val peers = InternalStateEngine.rows(states.read(other), "events")
+        assertEquals(1, own.size); assertEquals(1, peers.size)
+        assertEquals("A的感受", own.single().getString("detail"))
+        assertEquals(role, own.single().getString("author"))
+        assertEquals("B的感受", peers.single().getString("detail"))
+        assertEquals(other, peers.single().getString("author"))
+    }
+
+    @Test fun userEditKeepsItsSourceAndInvalidatesAnEarlierFrame() {
+        seed()
+        val old = frame()
+        states.updateFromUser(role, one, "global", 1, old.revision,
+            JSONObject().put("value", 12), "用户明确调整", false)
+        assertThrows(InternalStateReportRejected::class.java) { states.submit(old, report(old)) }
+        val saved = states.read(role)
+        val state = InternalStateEngine.rows(saved, "instances").single { it.getString("dimension") == "global" }
+        assertEquals(12.0, state.getDouble("value"), 0.0)
+        assertEquals("user_edit", state.getString("experience_source"))
+        assertEquals("user_edit", saved.getJSONObject(SubjectStateBoundary.FIELD).getString("last_source"))
     }
 }

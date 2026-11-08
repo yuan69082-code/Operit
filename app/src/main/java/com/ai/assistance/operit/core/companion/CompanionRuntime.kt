@@ -256,7 +256,7 @@ object CompanionRuntime {
                                 } finally {
                                     releaseTurn(epoch)
                                     exploration.finish(work, outcome)
-                                    InternalStateStore(app).event(work.role, work.chat, "exploration:${work.ticket}", "exploration", outcome)
+                                    InternalStateStore.noteEvent(app, work.role, work.chat, "exploration:${work.ticket}", "exploration", outcome)
                                 }
                             }
                             decision?.join()
@@ -427,7 +427,7 @@ object CompanionRuntime {
         val internalState = InternalStateStore(context)
         val internalEnabled = internalState.enabled(roleId)
         val wakeEventId = "wake:${java.util.UUID.randomUUID()}"
-        internalState.event(roleId, chatId, wakeEventId, "wake", event)
+        InternalStateStore.noteEvent(context, roleId, chatId, wakeEventId, "wake", event)
 
         // 联系账本只服务于“是否联系用户”的判断，不拿去给自主探索或私人事项定方向。
         val lastUserAt = history.lastOrNull { it.sender == "user" && it.displayMode != ChatMessageDisplayMode.HIDDEN_PLACEHOLDER }?.timestamp ?: 0L
