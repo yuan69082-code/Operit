@@ -80,9 +80,16 @@ class InternalStateStore(private val context: Context) {
         }
     }
     private fun toolNow(role: String?, chat: String, id: String, name: String, action: String?, status: String?, success: Boolean) {
-        event(role, chat, id, if (success) "tool_success" else "tool_failure", "$name/${action.orEmpty()}")
-        val source = InternalStateEvents.toolSource(name, action, status, success)
-        if (source != null) event(role, chat, "$id:$source", source, "$name/${action.orEmpty()}/${status.orEmpty()}")
+        if (!enabled(role)) return
+        // Both facts belong to one completed tool: one read/compact/write, preserving event order.
+        store.update(key(requireNotNull(role))) { data ->
+            InternalStateEngine.event(data, id, if (success) "tool_success" else "tool_failure",
+                chat, "$name/${action.orEmpty()}", System.currentTimeMillis())
+            val source = InternalStateEvents.toolSource(name, action, status, success)
+            if (source != null) InternalStateEngine.event(data, "$id:$source", source,
+                chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
+                applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"))
+        }
     }
 
     fun snapshot(role: String, chat: String, persist: Boolean): JSONObject {

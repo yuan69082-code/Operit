@@ -8,7 +8,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -58,7 +60,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -200,7 +203,7 @@ enum class ChatStyle {
 fun ChatArea(
     chatHistory: List<ChatMessage>,
     currentChatId: String,
-    scrollState: ScrollState,
+    scrollState: LazyListState,
     aiReferences: List<AiReference> = emptyList(),
     isLoading: Boolean,
     enableDialogs: Boolean = true,
@@ -272,7 +275,7 @@ fun ChatArea(
     val showMessageTokenSpeed = themeSnapshot.showMessageTokenSpeed
     val showMessageTimestamp = themeSnapshot.showMessageTimestamp
     var viewportHeightPx by remember { mutableStateOf(0) }
-    val messageAnchors = remember(currentChatId) { mutableStateMapOf<Long, ChatScrollMessageAnchor>() }
+
     var pendingJumpToMessageTimestamp by remember(currentChatId) { mutableStateOf<Long?>(null) }
     val collectionJump by com.ai.assistance.operit.ui.features.settings.screens.CollectionNavigation.pending.collectAsState()
     LaunchedEffect(currentChatId, collectionJump) {
@@ -285,8 +288,7 @@ fun ChatArea(
         }
     }
     val lastMessage = chatHistory.lastOrNull()
-    val pendingTargetAnchor =
-        pendingJumpToMessageTimestamp?.let { targetTimestamp -> messageAnchors[targetTimestamp] }
+
     var hasLastAiMessageStartedStreaming by remember(lastMessage?.timestamp) {
         mutableStateOf(lastMessage?.run { sender == "ai" && content.isNotBlank() } == true)
     }
@@ -323,8 +325,7 @@ fun ChatArea(
         messagesCount,
         chatHistory.firstOrNull()?.timestamp,
         chatHistory.lastOrNull()?.timestamp,
-        pendingTargetAnchor,
-        scrollState.maxValue,
+
     ) {
         val targetTimestamp = pendingJumpToMessageTimestamp ?: return@LaunchedEffect
         val targetIndex = chatHistory.indexOfFirst { it.timestamp == targetTimestamp }
@@ -332,17 +333,10 @@ fun ChatArea(
             return@LaunchedEffect
         }
 
-        val targetAnchor = pendingTargetAnchor ?: return@LaunchedEffect
         val isActualLatestMessage = targetIndex == messagesCount - 1 && !hasNewerDisplayHistory
         onAutoScrollToBottomChange?.invoke(isActualLatestMessage)
-
-        if (targetIndex == messagesCount - 1) {
-            scrollState.animateScrollTo(scrollState.maxValue)
-        } else {
-            val targetOffset =
-                targetAnchor.absoluteTopPx.roundToInt().coerceIn(0, scrollState.maxValue)
-            scrollState.animateScrollTo(targetOffset)
-        }
+        if (isActualLatestMessage) scrollState.animateScrollToEnd()
+        else scrollState.animateScrollToItem(targetIndex + 1) // Header is one lazy item.
         pendingJumpToMessageTimestamp = null
     }
 
@@ -366,16 +360,20 @@ fun ChatArea(
         }
     }
 
-    LaunchedEffect(
-        messagesCount,
-        chatHistory.firstOrNull()?.timestamp,
-        chatHistory.lastOrNull()?.timestamp,
-    ) {
-        val visibleTimestamps = chatHistory.mapTo(mutableSetOf()) { it.timestamp }
-        messageAnchors.keys
-            .toList()
-            .filterNot { it in visibleTimestamps }
-            .forEach(messageAnchors::remove)
+    // Image decoding and streamed Markdown can change height without replacing the message list.
+    // Follow only while the user has opted into the tail; an old-message jump disables this effect.
+    LaunchedEffect(scrollState, autoScrollToBottom, hasNewerDisplayHistory, isLoadingDisplayWindow) {
+        if (autoScrollToBottom && !hasNewerDisplayHistory && !isLoadingDisplayWindow) {
+            snapshotFlow {
+                scrollState.layoutInfo.let { info ->
+                    Triple(info.totalItemsCount, info.viewportEndOffset,
+                        info.visibleItemsInfo.map { it.key to it.size })
+                }
+            }.distinctUntilChanged().collect {
+                val last = scrollState.layoutInfo.totalItemsCount - 1
+                if (last >= 0 && !scrollState.isScrollInProgress) scrollState.scrollToItem(last)
+            }
+        }
     }
 
     val isLatestMessageVisible = messagesCount > 0 && !hasNewerDisplayHistory
@@ -403,15 +401,14 @@ fun ChatArea(
                     viewportHeightPx = coordinates.size.height
                 },
     ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = horizontalPadding)
-                    .verticalScroll(scrollState)
-                    .background(Color.Transparent)
-                    .padding(top = topPadding, bottom = bottomPadding),
-        ) {
+        ChatMessageLazyList(
+            messages = chatHistory,
+            identity = currentChatId,
+            state = scrollState,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = horizontalPadding, end = horizontalPadding,
+                top = topPadding, bottom = bottomPadding),
+            header = { Column {
             ThemePreviewNotice(currentChatId)
             if (hasOlderDisplayHistory) {
                 Text(
@@ -433,26 +430,12 @@ fun ChatArea(
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
-            val timestampKeyOccurrences = mutableMapOf<Long, Int>()
-            chatHistory.forEachIndexed { actualIndex, message ->
-                // 隐藏的用户消息（自动触发/唤醒留痕）不在界面上画分隔线，只留给模型
-                if (isHiddenPlaceholder(message)) return@forEachIndexed
+            } },
+            messageContent = { actualIndex, message ->
+                if (!isHiddenPlaceholder(message)) {
                 val isLastAiMessage = actualIndex == messagesCount - 1 && message.sender == "ai"
                 val shouldHide = shouldHideLastAiMessage && isLastAiMessage
-                val timestampKeyOccurrence = timestampKeyOccurrences[message.timestamp] ?: 0
-                timestampKeyOccurrences[message.timestamp] = timestampKeyOccurrence + 1
-
-                key(message.timestamp, timestampKeyOccurrence) {
-                    Box(
-                        modifier =
-                            Modifier.onGloballyPositioned { coordinates ->
-                                messageAnchors[message.timestamp] =
-                                    ChatScrollMessageAnchor(
-                                        absoluteTopPx = coordinates.positionInParent().y,
-                                        heightPx = coordinates.size.height,
-                                    )
-                            },
-                    ) {
+                Column {
                         MessageItem(
                             index = actualIndex,
                             currentChatId = currentChatId,
@@ -506,12 +489,11 @@ fun ChatArea(
                             bubbleAiContentPaddingLeft = bubbleAiContentPaddingLeft,
                             bubbleAiContentPaddingRight = bubbleAiContentPaddingRight,
                         )
-                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
+                }
+            },
+            footer = { Column {
             if (hasNewerDisplayHistory) {
                 Text(
                     text = stringResource(id = R.string.load_newer_history),
@@ -567,13 +549,13 @@ fun ChatArea(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-        }
+            } },
+        )
 
         ChatScrollNavigator(
             chatHistory = chatHistory,
             currentChatId = currentChatId,
             scrollState = scrollState,
-            messageAnchors = messageAnchors,
             viewportHeightPx = viewportHeightPx,
             autoScrollToBottom = autoScrollToBottom,
             hasNewerDisplayHistory = hasNewerDisplayHistory,

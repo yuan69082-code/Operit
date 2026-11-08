@@ -240,7 +240,7 @@ class ChatServiceCore(
             messageProcessingDelegate.cancelMessageForDestructiveMutation(chatId)
         }
         chatHistoryDelegate.setAfterDestructiveHistoryMutation { chatId ->
-            messageCoordinationDelegate.refreshStableContextWindow(chatId = chatId)
+            messageCoordinationDelegate.requestStableContextWindowRefresh(chatId = chatId)
         }
 
         initialized = true

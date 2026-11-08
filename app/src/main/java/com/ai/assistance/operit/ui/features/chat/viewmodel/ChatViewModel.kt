@@ -1142,7 +1142,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 // 直接在数据库中更新该条消息
                 chatHistoryDelegate.addMessageToChat(editedMessage)
 
-                messageCoordinationDelegate.refreshStableContextWindow(chatId = currentChatId.value)
+                messageCoordinationDelegate.requestStableContextWindowRefresh(chatId = currentChatId.value)
 
                 // 显示成功提示
                 uiStateDelegate.showToast(context.getString(R.string.chat_message_updated))
@@ -1182,7 +1182,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     return@launch
                 }
                 chatHistoryDelegate.selectMessageVariant(targetMessage.timestamp, targetVariantIndex)
-                messageCoordinationDelegate.refreshStableContextWindow(chatId = currentChatId.value)
+                messageCoordinationDelegate.requestStableContextWindowRefresh(chatId = currentChatId.value)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "切换回答版本失败", e)
                 uiStateDelegate.showErrorMessage(
@@ -1215,7 +1215,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     timestamp = targetMessage.timestamp,
                     variantIndex = targetMessage.selectedVariantIndex,
                 )
-                messageCoordinationDelegate.refreshStableContextWindow(chatId = currentChatId.value)
+                messageCoordinationDelegate.requestStableContextWindowRefresh(chatId = currentChatId.value)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "删除当前消息候选失败", e)
                 uiStateDelegate.showErrorMessage(

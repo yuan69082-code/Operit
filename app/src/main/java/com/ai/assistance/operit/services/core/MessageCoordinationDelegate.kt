@@ -252,6 +252,28 @@ class MessageCoordinationDelegate(
         }
     }
 
+    private val windowRefreshJobs = ConcurrentHashMap<String, Job>()
+
+    /** Statistics must not hold up an edit or rollback; replace obsolete estimates for that chat. */
+    fun requestStableContextWindowRefresh(chatId: String?) {
+        val target = chatId ?: return
+        windowRefreshJobs.remove(target)?.cancel()
+        val job = coroutineScope.launch(Dispatchers.Default, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                delay(150)
+                refreshStableContextWindow(chatId = target)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLogger.e(TAG, "后台上下文统计刷新失败: $target", error)
+            } finally {
+                windowRefreshJobs.remove(target, coroutineContext[Job])
+            }
+        }
+        windowRefreshJobs[target] = job
+        job.start()
+    }
+
     suspend fun refreshStableContextWindow(
         chatId: String? = null,
         roleCardId: String? = null,
@@ -287,6 +309,7 @@ class MessageCoordinationDelegate(
                 chatModelIndexOverride = effectiveChatModelIndexOverride,
                 memorySpaceIdOverride = effectiveMemorySpaceIdOverride
             )
+        coroutineContext.ensureActive()
         val (inputTokens, outputTokens) = tokenStatsDelegate.getCumulativeTokenCounts(targetChatId)
         chatHistoryDelegate.saveCurrentChat(
             inputTokens = inputTokens,

@@ -53,6 +53,17 @@ internal fun InternalStatePanel(role: String) {
     var selectedId by remember(role, reveal) { mutableStateOf<String?>(null) }
     var editing by remember(role, reveal) { mutableStateOf<StateEditTarget?>(null) }
     var data by remember(role, reveal) { mutableStateOf(JSONObject()) }
+    var timelines by remember(role, reveal) { mutableStateOf<Map<Pair<String, String>, List<StateTimelineEntry>>>(emptyMap()) }
+    suspend fun showObservation(observation: JSONObject) {
+        val prepared = withContext(Dispatchers.Default) {
+            InternalStateEngine.rows(observation, "states").associate { state ->
+                (state.getString("id") to state.getString("instance_scope")) to stateTimeline(observation, state)
+            }
+        }
+        data = observation
+        timelines = prepared
+    }
+
     var error by remember(role) { mutableStateOf("") }
     var busy by remember(role) { mutableStateOf(false) }
     LaunchedEffect(role, reveal, enabled, editing) {
@@ -60,17 +71,19 @@ internal fun InternalStatePanel(role: String) {
         if (editing != null) return@LaunchedEffect
         while (isActive) {
             try {
-                data = withContext(Dispatchers.IO) {
+                val observation = withContext(Dispatchers.IO) {
                     val chat = AssistantWindowRouter.chat(context, role).orEmpty()
                     InternalStateEngine.observation(store.snapshot(role, chat, false), chat, System.currentTimeMillis(), reveal)
                         .put("chat_id", chat)
                 }
+                showObservation(observation)
                 error = ""
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 AppLogger.e("InternalStatePanel", "状态观察读取失败", failure)
                 error = "内部状态读取失败，请稍后重试。"
                 data = JSONObject()
+                timelines = emptyMap()
             }
             delay(3000)
         }
@@ -108,7 +121,7 @@ internal fun InternalStatePanel(role: String) {
     if (classified.isEmpty()) Text("暂无可见的${stateKindLabel(category)}状态。", style = MaterialTheme.typography.bodySmall)
     classified.forEach { state ->
         key(state.getString("id"), state.getString("instance_scope")) {
-            StateCompactCard(state, stateTimeline(data, state)) { selectedId = state.getString("id") }
+            StateCompactCard(state, timelines[state.getString("id") to state.getString("instance_scope")].orEmpty()) { selectedId = state.getString("id") }
         }
     }
     val pending = states.filter { InternalStateEngine.kind(it) == "unclassified" }
@@ -117,7 +130,7 @@ internal fun InternalStatePanel(role: String) {
         Text("这些已有状态尚未归入四个模块，点开可编辑分类，也可由助手补充。", style = MaterialTheme.typography.bodySmall)
         pending.forEach { state ->
             key(state.getString("id"), state.getString("instance_scope")) {
-                StateCompactCard(state, stateTimeline(data, state)) { selectedId = state.getString("id") }
+                StateCompactCard(state, timelines[state.getString("id") to state.getString("instance_scope")].orEmpty()) { selectedId = state.getString("id") }
             }
         }
     }
@@ -126,7 +139,7 @@ internal fun InternalStatePanel(role: String) {
     val selected = states.firstOrNull { it.getString("id") == selectedId }
     if (selected != null && editing == null) {
         key(selected.getString("id"), selected.getString("instance_scope")) {
-            StateDetailDialog(selected, data, editable = !busy && data.optString("chat_id").isNotBlank(),
+            StateDetailDialog(selected, data, timelines[selected.getString("id") to selected.getString("instance_scope")].orEmpty(), editable = !busy && data.optString("chat_id").isNotBlank(),
                 edit = {
                     editing = StateEditTarget(JSONObject(selected.toString()), data.getString("chat_id"),
                         data.getLong("semantic_revision"))
@@ -140,7 +153,7 @@ internal fun InternalStatePanel(role: String) {
                 store.updateFromUser(role, target.chat, target.state.getString("id"),
                     target.state.getInt("version"), target.revision, submission.changes, submission.reason, reveal)
             }
-            data = refreshed.put("chat_id", target.chat)
+            showObservation(refreshed.put("chat_id", target.chat))
             val updated = InternalStateEngine.rows(data, "states").firstOrNull { it.getString("id") == target.state.getString("id") }
             if (updated != null && InternalStateEngine.kind(updated) in InternalStateEngine.kinds) category = InternalStateEngine.kind(updated)
             error = ""
@@ -178,8 +191,7 @@ private fun StateCompactCard(state: JSONObject, timeline: List<StateTimelineEntr
 }
 
 @Composable
-private fun StateDetailDialog(state: JSONObject, observation: JSONObject, editable: Boolean, edit: () -> Unit, close: () -> Unit) {
-    val timeline = stateTimeline(observation, state)
+private fun StateDetailDialog(state: JSONObject, observation: JSONObject, timeline: List<StateTimelineEntry>, editable: Boolean, edit: () -> Unit, close: () -> Unit) {
     val versions = InternalStateEngine.rows(observation, "versions").filter { it.getString("dimension") == state.getString("id") }.asReversed()
     var limit by remember { mutableIntStateOf(60) }
     var selectedKey by remember { mutableStateOf<String?>(null) }
