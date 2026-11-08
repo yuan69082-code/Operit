@@ -516,7 +516,8 @@ class EnhancedAIService private constructor(private val context: Context) {
     }
 
     // Coroutine management
-    private val toolProcessingScope = CoroutineScope(Dispatchers.IO)
+    // A failed tool continuation belongs to its request; future requests must keep a usable scope.
+    private val toolProcessingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val toolExecutionJobs = ConcurrentHashMap<String, Job>()
     // private val conversationHistory = mutableListOf<Pair<String, String>>() // Moved to MessageExecutionContext
     // private val conversationMutex = Mutex() // Moved to MessageExecutionContext
@@ -1000,8 +1001,6 @@ class EnhancedAIService private constructor(private val context: Context) {
                     eventChannel = eventChannel
                 )
             registerExecutionContext(execContext)
-            var hadFatalError = false
-            var providerStreamCollectionStarted = false
             try {
                 // 确保所有操作都在IO线程上执行
                 withContext(Dispatchers.IO) {
@@ -1189,7 +1188,6 @@ class EnhancedAIService private constructor(private val context: Context) {
                     var totalChars = 0
                     var lastLogTime = messageTimingNow()
 
-                    providerStreamCollectionStarted = true
                     coroutineScope {
                         val revisionJob =
                             revisableStream?.let { carrier ->
@@ -1285,8 +1283,6 @@ class EnhancedAIService private constructor(private val context: Context) {
                             execContext.currentResponseHasStateReport = true
                         }
                     }
-                    providerStreamCollectionStarted = false
-
                     // Update accumulated token counts and persist them
                     val inputTokens = serviceForFunction.inputTokenCount
                     val cachedInputTokens = serviceForFunction.cachedInputTokenCount
@@ -1309,84 +1305,64 @@ class EnhancedAIService private constructor(private val context: Context) {
                         details = "functionType=$functionType, totalChars=$totalChars, stream=$stream"
                     )
                 }
+                // Completion can request another model turn after a tool call. Keep it inside
+                // the same error boundary so a failed continuation cannot complete the reply.
+                if (isExecutionContextActive(execContext)) {
+                    val collector = requestCollector
+                    withContext(Dispatchers.IO) {
+                        processStreamCompletion(
+                            execContext,
+                            functionType,
+                            promptFunctionType,
+                            collector,
+                            enableThinking,
+                            enableMemoryAutoUpdate,
+                            onNonFatalError,
+                            onTokenLimitExceeded,
+                            maxTokens,
+                            tokenUsageThreshold,
+                            isSubTask,
+                            characterName,
+                            avatarUri,
+                            roleCardId,
+                            chatId,
+                            onToolInvocation,
+                            notifyReplyOverride,
+                            chatModelConfigIdOverride,
+                            chatModelIndexOverride,
+                            memorySpaceIdOverride,
+                            stream,
+                            enableGroupOrchestrationHint,
+                            disableWarning
+                        )
+                    }
+                } else {
+                    throw CancellationException("Message execution was cancelled before completion")
+                }
             } catch (e: CancellationException) {
                 invalidateExecutionContext(execContext, "sendMessage.collect.cancelled")
                 AppLogger.d(TAG, "sendMessage流被取消")
                 throw e
             } catch (e: Exception) {
-                // 用户取消导致的 Socket closed 是预期行为，不应作为错误处理
-                val isSocketClosed = e.message?.contains("Socket closed", ignoreCase = true) == true
-                if (isSocketClosed) {
-                    if (isExecutionContextActive(execContext)) {
-                        AppLogger.d(TAG, "Stream was cancelled by the user (Socket closed).")
-                    } else {
-                        AppLogger.d(TAG, "Stream closed after execution context was invalidated.")
-                    }
-                    invalidateExecutionContext(execContext, "sendMessage.collect.socketClosed")
-                } else {
-                    hadFatalError = true
-                    // Handle any exceptions
-                    AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
-                    if (!providerStreamCollectionStarted || e is InternalStateReportStream.ProtocolException ||
-                        e is NativeResponseRevisionBarrier.ProtocolException) {
-                        withContext(Dispatchers.Main) {
-                            _inputProcessingState.value =
-                                    InputProcessingState.Error(message = context.getString(R.string.enhanced_error_with_message, e.message ?: ""))
-                        }
-                    }
+                currentCoroutineContext().ensureActive()
+                if (!isExecutionContextActive(execContext) &&
+                    e.message?.contains("Socket closed", ignoreCase = true) == true) {
+                    // A transport may report cancellation as an IOException instead of a
+                    // CancellationException. Do not turn that into successful stream closure.
+                    throw CancellationException("Message execution was cancelled").apply { initCause(e) }
                 }
-
-                // 发生无法处理的错误时，也应停止服务，但用户取消除外
-                if (!isSocketClosed) {
-                    if (!isSubTask) stopAiService()
-                    if (!providerStreamCollectionStarted || e is InternalStateReportStream.ProtocolException ||
-                        e is NativeResponseRevisionBarrier.ProtocolException) {
-                        throw e
-                    }
+                invalidateExecutionContext(execContext, "sendMessage.failed")
+                AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    _inputProcessingState.value =
+                        InputProcessingState.Error(message = context.getString(R.string.enhanced_error_with_message, e.message ?: ""))
                 }
+                if (!isSubTask) stopAiService()
+                throw e
             } finally {
-                try {
-                    // 确保流处理完成后调用；如果本轮已被取消，则不能再继续跑完成逻辑。
-                    if (!hadFatalError && isExecutionContextActive(execContext)) {
-                        val collector = requestCollector
-                        withContext(Dispatchers.IO) {
-                            processStreamCompletion(
-                                execContext,
-                                functionType,
-                                promptFunctionType,
-                                collector,
-                                enableThinking,
-                                enableMemoryAutoUpdate,
-                                onNonFatalError,
-                                onTokenLimitExceeded,
-                                maxTokens,
-                                tokenUsageThreshold,
-                                isSubTask,
-                                characterName,
-                                avatarUri,
-                                roleCardId,
-                                chatId,
-                                onToolInvocation,
-                                notifyReplyOverride,
-                                chatModelConfigIdOverride,
-                                chatModelIndexOverride,
-                                memorySpaceIdOverride,
-                                stream,
-                                enableGroupOrchestrationHint,
-                                disableWarning
-                            )
-                        }
-                    } else if (!hadFatalError) {
-                        AppLogger.d(
-                            TAG,
-                            "跳过流完成处理：执行上下文已失效, id=${execContext.executionId}"
-                        )
-                    }
-                } finally {
-                    unregisterExecutionContext(execContext)
-                    withContext(NonCancellable) {
-                        releaseModelExecutionSnapshot(execContext)
-                    }
+                unregisterExecutionContext(execContext)
+                withContext(NonCancellable) {
+                    releaseModelExecutionSnapshot(execContext)
                 }
             }
         }
@@ -1811,8 +1787,8 @@ class EnhancedAIService private constructor(private val context: Context) {
             // Get response content
             val content = context.streamBuffer.toString().trim()
 
-            // If content is empty, it means an error likely occurred or the model returned nothing.
-            // We must still finalize the conversation to reset the state correctly.
+            // Only successfully collected streams reach this point. A state-only response can
+            // legitimately have no public text and must still commit its state report.
             if (content.isEmpty()) {
                 AppLogger.d(TAG, "Stream content is empty. Finalizing conversation state.")
                 finalizeAssistantResponse(
@@ -2084,11 +2060,8 @@ class EnhancedAIService private constructor(private val context: Context) {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (e: Exception) {
-            // Catch any exceptions in the processing flow
             AppLogger.e(TAG, "处理流完成时发生错误", e)
-            withContext(Dispatchers.Main) {
-                _inputProcessingState.value = InputProcessingState.Idle
-            }
+            throw e
         }
     }
 
@@ -2221,7 +2194,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             }
         }
 
-        val processToolJob = toolProcessingScope.launch {
+        val processToolJob = toolProcessingScope.async {
             val modelSnapshot = getModelExecutionSnapshot(
                 context,
                 functionType,
@@ -2293,8 +2266,12 @@ class EnhancedAIService private constructor(private val context: Context) {
         toolExecutionJobs[invocationId] = processToolJob
 
         try {
-            processToolJob.join()
+            // join() only waits: await() also carries a failed continuation back to sendMessage.
+            processToolJob.await()
         } finally {
+            withContext(NonCancellable) {
+                processToolJob.cancelAndJoin()
+            }
             toolExecutionJobs.remove(invocationId)
         }
     }
@@ -2612,10 +2589,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "处理工具执行结果时出错", e)
-                withContext(Dispatchers.Main) {
-                    _inputProcessingState.value =
-                            InputProcessingState.Error(this@EnhancedAIService.context.getString(R.string.enhanced_process_tool_result_failed, e.message ?: ""))
-                }
+                throw e
             } finally {
                 logMessageTiming(
                     stage = "enhanced.processToolResults.complete",

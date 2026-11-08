@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -80,6 +81,12 @@ class MessageProcessingDelegate(
         private const val STREAM_SCROLL_THROTTLE_MS = 200L
         private const val STREAM_PERSIST_INTERVAL_MS = 1000L
         private const val AUTO_READ_PREVIEW_MAX = 48
+
+        internal fun requireSuccessfulResponse(vararg streams: SharedStream<*>) {
+            // Text-only observers intentionally do not throw. The owning send operation must
+            // inspect the recorded cause before publishing any completion callbacks.
+            streams.firstNotNullOfOrNull { it.completionCause }?.let { throw it }
+        }
 
         internal fun completeInterruptedMessage(
             streamingMessage: ChatMessage,
@@ -467,11 +474,11 @@ class MessageProcessingDelegate(
         chatId: String,
         activeTurn: ActiveStreamingTurn,
         snapshot: TurnCancellationSnapshot? = null,
+        completedAt: Long = System.currentTimeMillis(),
     ) {
         val streamingMessage = activeTurn.message
         val finalContent = resolveFinalContent(streamingMessage)
         streamingMessage.content = finalContent
-        val completedAt = System.currentTimeMillis()
         val finalMessage =
             completeInterruptedMessage(
                 streamingMessage = streamingMessage,
@@ -503,7 +510,11 @@ class MessageProcessingDelegate(
             }
             val segmentedMessages = activeTurn.segmentedMessages
             if (segmentedMessages == null) {
-                addMessageToChat(chatId, finalMessage)
+                // No public output means there is no assistant message to preserve. In
+                // particular, a rejected request must not create a completed empty bubble.
+                if (finalContent.isNotBlank() || messages.any { it.timestamp == streamingMessage.timestamp }) {
+                    addMessageToChat(chatId, finalMessage)
+                }
             } else {
                 segmentedMessages.forEach { segmentMessage ->
                     addMessageToChat(
@@ -1431,22 +1442,16 @@ class MessageProcessingDelegate(
                     syncWaifuMessageMetrics(sourceMessage)
                 }
 
-                // Group replies are only persisted once publication is approved by the gate.
-                // An empty initial row would otherwise leave a bubble after a quiet decision.
-                if (!isWaifuModeEnabled && !isGroupOrchestrationTurn) {
-                    withContext(Dispatchers.Main) {
-                        if (effectivePersistTurn && chatId != null) {
-                            addMessageToChat(chatId, aiMessage)
-                        }
-                    }
-                }
+                // The existing loading state covers the wait for the first chunk. Persist the
+                // first real snapshot instead of creating an empty row before a request succeeds.
                 
                 // 启动一个独立的协程来收集流内容并持续更新数据库
                 val streamCollectionResult = CompletableDeferred<Throwable?>()
-                chatRuntime.streamCollectionJob =
+                val streamCollectionJob =
                     coroutineScope.launch(Dispatchers.IO) {
                         try {
                             var hasLoggedFirstChunk = false
+                            var hasPersistedStreamingMessage = false
                             var lastStreamingPersistAt = 0L
                             val revisionTracker = TextStreamRevisionTracker()
                             val revisionMutex = Mutex()
@@ -1509,7 +1514,11 @@ class MessageProcessingDelegate(
 
                             suspend fun persistStreamingSnapshot(contentSnapshot: String) {
                                 val targetChatId = chatId ?: return
+                                // Do not create a row for an empty first snapshot. Once published,
+                                // an explicit revision back to empty must still replace stale text.
+                                if (contentSnapshot.isBlank() && !hasPersistedStreamingMessage) return
                                 addMessageToChat(targetChatId, aiMessage.copy(content = contentSnapshot))
+                                hasPersistedStreamingMessage = true
                             }
 
                             val autoReadJob =
@@ -1628,6 +1637,8 @@ class MessageProcessingDelegate(
                                 }
                             }
 
+                            requireSuccessfulResponse(responseStream, sharedCharStream)
+
                             if (isGroupOrchestrationTurn && aiMessage.content.isNotBlank()) {
                                 com.ai.assistance.operit.api.chat.AIForegroundService.notifyReplyCompleted(
                                     context, activeChatId, characterName, aiMessage.content, avatarUri,
@@ -1649,18 +1660,25 @@ class MessageProcessingDelegate(
                                 flushAutoReadSegment(remaining, interrupt = isFirstAutoReadSegment)
                             }
                         } catch (t: Throwable) {
+                            // The send operation owns error reporting. Cancel remaining readers,
+                            // then deliver the cause through the result instead of also throwing
+                            // an uncaught exception from this independent collection job.
+                            coroutineContext.cancelChildren()
                             if (!streamCollectionResult.isCompleted) {
                                 streamCollectionResult.complete(t)
                             }
-                            throw t
+                            if (t is kotlinx.coroutines.CancellationException) throw t
                         } finally {
                             if (!streamCollectionResult.isCompleted) {
                                 streamCollectionResult.complete(null)
                             }
                         }
                     }
+                chatRuntime.streamCollectionJob = streamCollectionJob
 
                 val streamCollectionError = streamCollectionResult.await()
+                // All readers must stop before a failed turn's partial message is detached.
+                streamCollectionJob.join()
                 if (streamCollectionError != null) {
                     throw streamCollectionError
                 }
@@ -1726,9 +1744,12 @@ class MessageProcessingDelegate(
                 if (stateAfterStream !is EnhancedInputProcessingState.Error) {
                     shouldNotifyTurnComplete = true
                     finalInputStateAfterSend = EnhancedInputProcessingState.Completed
+                } else {
+                    shouldFinalizeInterruptedMessage = true
+                    finalInputStateAfterSend = stateAfterStream
                 }
 
-                if (pendingAsyncSummaryUiByChatId.containsKey(chatId)) {
+                if (!shouldFinalizeInterruptedMessage && pendingAsyncSummaryUiByChatId.containsKey(chatId)) {
                     setSuppressIdleCompletedStateForChat(chatId, true)
                     finalInputStateAfterSend =
                         EnhancedInputProcessingState.Summarizing(
@@ -1751,10 +1772,11 @@ class MessageProcessingDelegate(
                 } else {
                     AppLogger.e(TAG, "发送消息时出错", e)
                     shouldFinalizeInterruptedMessage = true
-                    setChatInputProcessingState(
-                        chatId,
+                    shouldNotifyTurnComplete = false
+                    val failureState =
                         EnhancedInputProcessingState.Error(context.getString(R.string.message_send_failed, e.message))
-                    )
+                    finalInputStateAfterSend = failureState
+                    setChatInputProcessingState(chatId, failureState)
                     withContext(Dispatchers.Main) { showErrorMessage(context.getString(R.string.message_send_failed, e.message)) }
                 }
             } finally {
@@ -1768,9 +1790,10 @@ class MessageProcessingDelegate(
                             chatId = chatId,
                             activeTurn = interruptedTurn,
                             snapshot = readCurrentTurnCancellationSnapshot(chatId),
+                            completedAt = 0L,
                         )
                         false
-                    } else if (cancellationToPropagate == null) {
+                    } else if (!shouldFinalizeInterruptedMessage && cancellationToPropagate == null) {
                         finalizeMessageAndNotify(
                             chatId = chatId,
                             activeChatId = activeChatId,
@@ -1784,7 +1807,7 @@ class MessageProcessingDelegate(
                             turnOptions = turnOptions
                         )
                     } else {
-                        AppLogger.d(TAG, "取消回合不执行消息收尾: chatId=$activeChatId")
+                        AppLogger.d(TAG, "失败或取消回合不执行成功收尾: chatId=$activeChatId")
                         false
                     }
                 logMessageTiming(
@@ -2029,6 +2052,8 @@ class MessageProcessingDelegate(
                     }
             }
 
+            requireSuccessfulResponse(responseStream, sharedResponseStream)
+
             val finalContent = transformFinalProse(chatId, aiMessage, resolveFinalContent(aiMessage))
             var turnInputTokens = 0L
             var turnOutputTokens = 0L
@@ -2152,8 +2177,9 @@ class MessageProcessingDelegate(
             // 优先使用共享流的全量重放缓存重建最终文本，避免完成信号早于收集协程处理尾部字符时丢字。
             val finalContent = resolveFinalContent(aiMessage)
             aiMessage.content = finalContent
-            if (finalContent.isBlank() && activeChatId != null &&
-                com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(activeChatId)?.characterGroupId != null) return false
+            // Successful state-only/quiet turns still complete normally, but have no public
+            // assistant text to store or read aloud. Their state report was committed upstream.
+            if (finalContent.isBlank()) return false
             val completedAt = System.currentTimeMillis()
 
             withContext(Dispatchers.IO) {

@@ -9,9 +9,9 @@ import com.ai.assistance.operit.data.model.getValidModelIndex
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
-import com.ai.assistance.operit.core.chat.hooks.toPromptTurns
 import com.ai.assistance.operit.util.AssetCopyUtils
 import com.ai.assistance.operit.util.ChatMarkupRegex
+import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.ImagePoolManager
 import com.ai.assistance.operit.util.MediaPoolManager
 import kotlinx.coroutines.CancellationException
@@ -57,26 +57,73 @@ data class ModelConnectionTestReport(
 
 object ModelConfigConnectionTester {
     /**
-     * One complete tool-call round trip for the Tool Call probe: the user asks, the assistant calls
-     * the tool, the tool answers.
-     *
-     * The turn kinds matter. The answer has to be a [PromptTurnKind.TOOL_RESULT] turn so that the
-     * provider pairs it with the call instead of reporting the call as never answered, and the
-     * probe has to open with a user turn because gateways that translate the OpenAI payload into
-     * another protocol (Poe onto Anthropic, for instance) reject a conversation that starts with an
-     * assistant message and leave its `tool_result` without a matching `tool_use`.
+     * Ask for a real call before returning its result. A fabricated assistant call has no provider
+     * signature, and rebuilding the returned call would discard hidden protocol metadata.
      */
-    internal fun buildToolCallProbeHistory(toolName: String): List<PromptTurn> {
-        val toolTagName = ChatMarkupRegex.generateRandomToolTagName()
+    internal suspend fun runToolCallProbe(
+        request: suspend (List<PromptTurn>) -> String
+    ): ModelConnectionTestOutcome {
+        val history = listOf(
+            PromptTurn(kind = PromptTurnKind.SYSTEM, content = "You are a helpful assistant."),
+            PromptTurn(
+                kind = PromptTurnKind.USER,
+                content =
+                    "Call the echo tool exactly once with the text \"ping\". " +
+                        "After the tool replies, respond with its result without calling more tools."
+            )
+        )
+        val assistantResponse = request(history)
+        val callContent = toolProbeContent(assistantResponse)
+        val call = ChatMarkupRegex.toolCallPattern.findAll(callContent).toList().singleOrNull()
+            ?: return ModelConnectionTestOutcome.UNVERIFIED
+        if (call.groupValues[2] != "echo" ||
+            ChatMarkupRegex.containsAnyToolLikeTag(callContent.removeRange(call.range))) {
+            return ModelConnectionTestOutcome.UNVERIFIED
+        }
+
+        val body = call.groupValues[3]
+        val parameter = ChatMarkupRegex.toolParamPattern.findAll(body).toList().singleOrNull()
+            ?: return ModelConnectionTestOutcome.UNVERIFIED
+        val echoedText = parameter.groupValues[2].trim()
+        if (parameter.groupValues[1] != "text" || echoedText != "ping" ||
+            body.removeRange(parameter.range).isNotBlank()) {
+            return ModelConnectionTestOutcome.UNVERIFIED
+        }
+
+        // Only execute this fixed, local echo. Never dispatch model-selected tools from a probe.
         val toolResultTagName = ChatMarkupRegex.generateRandomToolResultTagName()
-        return listOf(
-            "system" to "You are a helpful assistant.",
-            "user" to "Call the $toolName tool with the text \"ping\".",
-            "assistant" to
-                "<$toolTagName name=\"$toolName\"><param name=\"text\">ping</param></$toolTagName>",
-            "tool_result" to
-                "<$toolResultTagName name=\"$toolName\" status=\"success\"><content>pong</content></$toolResultTagName>"
-        ).toPromptTurns()
+        val continuation = request(
+            history + listOf(
+                PromptTurn(kind = PromptTurnKind.ASSISTANT, content = assistantResponse),
+                PromptTurn(
+                    kind = PromptTurnKind.TOOL_RESULT,
+                    toolName = "echo",
+                    content =
+                        "<$toolResultTagName name=\"echo\" status=\"success\">" +
+                            "<content>$echoedText</content></$toolResultTagName>"
+                )
+            )
+        )
+        val reply = toolProbeContent(continuation)
+        return if (!ChatMarkupRegex.containsAnyToolLikeTag(reply) &&
+            reply.replace(ChatMarkupRegex.anyXmlTag, "").isNotBlank()) {
+            ModelConnectionTestOutcome.PASSED
+        } else {
+            ModelConnectionTestOutcome.UNVERIFIED
+        }
+    }
+
+    private fun toolProbeContent(response: String): String {
+        return ChatUtils.removeThinkingContent(
+            response
+                .replace(ChatMarkupRegex.metaTag, "")
+                .replace(ChatMarkupRegex.thinkSelfClosingTag, "")
+                .replace(ChatMarkupRegex.searchSelfClosingTag, "")
+        )
+            .replace(ChatMarkupRegex.thinkTag, "")
+            .replace(ChatMarkupRegex.statusTag, "")
+            .replace(ChatMarkupRegex.statusSelfClosingTag, "")
+            .trim()
     }
 
     suspend fun run(
@@ -102,13 +149,17 @@ object ModelConfigConnectionTester {
         try {
             val parameters = modelConfigManager.getModelParametersForConfig(configForTest.id)
 
-            suspend fun collectResponse(history: List<PromptTurn>): String {
+            suspend fun collectResponse(
+                history: List<PromptTurn>,
+                availableTools: List<ToolPrompt>? = null
+            ): String {
                 val buffer = StringBuilder()
                 service.sendMessage(
                     context,
                     history,
                     parameters,
                     stream = false,
+                    availableTools = availableTools,
                     enableRetry = false,
                     recordTokenUsage = false,
                 ).collect { chunk -> buffer.append(chunk) }
@@ -158,19 +209,9 @@ object ModelConfigConnectionTester {
                             )
                         )
 
-                    suspend fun runToolCallTest(toolName: String) {
-                        service.sendMessage(
-                            context,
-                            buildToolCallProbeHistory(toolName),
-                            parameters,
-                            stream = false,
-                            availableTools = availableTools,
-                            enableRetry = false,
-                            recordTokenUsage = false,
-                        ).collect { }
+                    runToolCallProbe { history ->
+                        collectResponse(history, availableTools)
                     }
-                    runToolCallTest("echo")
-                    ModelConnectionTestOutcome.PASSED
                 }
             }
 

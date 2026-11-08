@@ -1468,12 +1468,19 @@ object AIMessageManager {
         // 清理思考内容
         val cleanedContent = ChatUtils.removeThinkingContent(message.content).trim()
         val contentWithoutStatus = removeStatusTags(cleanedContent)
+        // Existing messages already store their provider/model. Keep that provenance through
+        // request preparation so switching Gemini backends cannot replay the old backend's state.
+        val sourceMetadata = mapOf(
+            PromptTurn.SOURCE_PROVIDER_METADATA_KEY to message.provider.substringBefore('/').trim(),
+            PromptTurn.SOURCE_MODEL_METADATA_KEY to message.modelName.trim()
+        )
 
         // 非角色隔离模式：直接返回 assistant 消息
         if (!isRoleScopedMode) {
             return PromptTurn(
                 kind = PromptTurnKind.ASSISTANT,
-                content = message.content
+                content = message.content,
+                metadata = sourceMetadata
             )
         }
 
@@ -1483,7 +1490,8 @@ object AIMessageManager {
             // 当前角色的消息：作为 assistant 返回
             PromptTurn(
                 kind = PromptTurnKind.ASSISTANT,
-                content = message.content
+                content = message.content,
+                metadata = sourceMetadata
             )
         } else {
             // 其他角色的消息：转换为 user 消息，添加角色标签

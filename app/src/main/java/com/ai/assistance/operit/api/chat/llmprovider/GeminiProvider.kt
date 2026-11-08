@@ -134,6 +134,42 @@ internal fun buildGeminiFunctionCallPart(
         thoughtSignature?.let { put("thoughtSignature", it) }
     }
 
+/**
+ * Do not forward completed-turn opaque state when its recorded backend/model has changed.
+ * Only remove it from completed turns, before adjacent history blocks can merge their provenance.
+ * The text, calls and results stay in the request, and persisted messages are never changed.
+ * Gemini's current tool loop (after the latest user input) must retain every original signature.
+ */
+internal fun prepareGeminiThoughtSignatureHistory(
+    history: List<PromptTurn>,
+    providerType: ApiProviderType,
+    modelName: String,
+): List<PromptTurn> {
+    val currentTurnStart = history.indexOfLast {
+        it.kind in setOf(PromptTurnKind.USER, PromptTurnKind.SUMMARY) && it.content.isNotBlank()
+    }
+    if (currentTurnStart <= 0) return history
+
+    return history.mapIndexed { index, turn ->
+        if (index >= currentTurnStart ||
+            turn.kind !in setOf(PromptTurnKind.ASSISTANT, PromptTurnKind.TOOL_CALL)
+        ) {
+            return@mapIndexed turn
+        }
+
+        val sourceProvider = (turn.metadata[PromptTurn.SOURCE_PROVIDER_METADATA_KEY] as? String)
+            ?.let { ApiProviderType.fromProviderTypeId(it) }
+        val sourceModel = (turn.metadata[PromptTurn.SOURCE_MODEL_METADATA_KEY] as? String)?.trim()
+        val differentProvider = sourceProvider != null && sourceProvider != providerType
+        val differentModel = !sourceModel.isNullOrBlank() && sourceModel != modelName.trim()
+        if (differentProvider || differentModel) {
+            turn.copy(content = ChatMarkupRegex.removeGeminiThoughtSignatureMeta(turn.content))
+        } else {
+            turn
+        }
+    }
+}
+
 /** Google Gemini API的实现 支持标准Gemini接口流式传输 */
 open class GeminiProvider(
     private val apiEndpoint: String,
@@ -604,7 +640,7 @@ open class GeminiProvider(
 
         val providerReadyHistory =
             StructuredToolCallBridge.compileHistoryForProvider(
-                chatHistory,
+                prepareGeminiThoughtSignatureHistory(chatHistory, providerType, modelName),
                 useToolCall = enableToolCall
             )
 
