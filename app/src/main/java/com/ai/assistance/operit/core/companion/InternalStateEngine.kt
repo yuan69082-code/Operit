@@ -10,7 +10,7 @@ import kotlin.math.ln
 /** Pure host reducer. Time and objective events are local; subjective reports are frame-bound. */
 object InternalStateEngine {
     val sources = setOf("user_message", "assistant_reply", "assistant_action", "tool_success", "tool_failure",
-        "reading", "exploration", "todo_progress", "todo_failed", "todo_completed", "wake", "time")
+        "reading", "exploration", "todo_progress", "todo_failed", "todo_completed", "wake", "time", "group_context")
     val actions = listOf("contact", "explore", "todo", "tool", "reply", "defer", "drop", "rest")
     val kinds = setOf("drive", "sentiment", "emotion", "psychology")
     internal val subjectiveFields = listOf("reason", "object_ref", "unresolved", "desire", "choice", "evidence", "report_frame_id",
@@ -126,7 +126,7 @@ object InternalStateEngine {
         val from = state.getLong("at")
         if (now <= from) return
         if (InternalStateTimeRules.isDefined(definition)) {
-            InternalStateTimeRules.steps(data, definition, state, chat, now).forEach { step ->
+            InternalStateTimeRules.stepSequence(data, definition, state, chat, now).forEach { step ->
                 change(definition, state, step.value, step.at)?.let { change ->
                     changes.put(change.put("interval_start", step.from).put("interval_end", step.at)
                         .put("time_reasons", JSONArray(step.reasons)))
@@ -367,7 +367,7 @@ object InternalStateEngine {
         if (current != null) return current
         return rows(data, "versions").firstOrNull {
             it.getString("dimension") == id && it.getInt("version") == version
-        }?.getJSONObject("after")
+        }?.getJSONObject("after") ?: (data as? InternalStateDocument)?.history?.definition(id, version)
     }
 
     private fun disclosurePolicy(definitions: List<JSONObject?>): JSONObject {
@@ -386,7 +386,7 @@ object InternalStateEngine {
         fun visibleVersion(dimension: String, version: Int): Boolean {
             val historical = rows(data, "versions").firstOrNull {
                 it.getString("dimension") == dimension && it.getInt("version") == version
-            }?.getJSONObject("after")
+            }?.getJSONObject("after") ?: (data as? InternalStateDocument)?.history?.definition(dimension, version)
             return historical != null && visible(historical, reveal)
         }
         fun observable(change: JSONObject): Boolean {

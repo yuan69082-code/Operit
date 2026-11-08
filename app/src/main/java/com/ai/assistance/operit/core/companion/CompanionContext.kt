@@ -121,7 +121,11 @@ object CompanionContext {
         // History previews can resume on Main after rollback. State projection reads storage
         // and ranks the complete event history; doing it there freezes editing and scrolling.
         val internalSections = withContext(Dispatchers.IO) {
-            internal.promptSections(roleId, chatId, recordSnapshot, wake, capabilities, currentInput)
+            if (internalEnabled) {
+                val actor = requireNotNull(roleId)
+                val groupInput = internal.requireRecipient(actor, chatId)
+                internal.prepare(actor, chatId, recordSnapshot, wake, capabilities, currentInput, groupInput)
+            } else RuntimeContextSections()
         }
         appendSections(internalSections)
         state.append("\n</operit_state>\n")

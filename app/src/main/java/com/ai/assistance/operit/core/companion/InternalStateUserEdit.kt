@@ -30,7 +30,7 @@ object InternalStateUserEdits {
 
         // Validate and settle on a copy: a rejected edit must not leave half a rule revision,
         // advance a clock, or discard a concurrent model update.
-        val next = JSONObject(data.toString())
+        val next = InternalStateDocument.copy(data)
         val old = requireNotNull(InternalStateEngine.definitions(next).firstOrNull { it.getString("id") == id }) {
             "状态不存在"
         }
@@ -123,7 +123,7 @@ object InternalStateUserEdits {
 
         // Observation may instantiate untouched states for display; keep that read projection
         // separate from the transaction's durable, target-only changes.
-        val observation = InternalStateEngine.observation(JSONObject(next.toString()), chat, now, reveal)
+        val observation = InternalStateEngine.observation(InternalStateDocument.copy(next), chat, now, reveal)
         data.keys().asSequence().toList().forEach { data.remove(it) }
         next.keys().forEach { key -> data.put(key, next.get(key)) }
         return observation

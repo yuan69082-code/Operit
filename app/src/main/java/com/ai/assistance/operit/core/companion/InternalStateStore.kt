@@ -14,32 +14,53 @@ import java.util.UUID
 /** Uses CompanionStore's atomic transaction/lock and assistant ownership. No second todo or thought store. */
 class InternalStateStore(private val context: Context) {
     private val store = CompanionStore(context)
-    private fun key(role: String) = "internal-state:$role"
+    private fun key(role: String) = SubjectStateBoundary.scope(role, "internal-state")
+    private fun update(role: String, source: String, change: (JSONObject) -> Unit) =
+        store.updateSubject(role, "internal-state", source, change)
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
     fun read(role: String) = store.read(key(role))
+
+    /** Validate against host chat metadata, never the visible/selected assistant or model. */
+    suspend fun requireRecipient(role: String, chat: String): Boolean {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val metadata = requireNotNull(ChatHistoryManager.getInstance(context).getChatMetadata(chat)) { "状态来源会话不存在" }
+        val groupId = metadata.characterGroupId
+        if (groupId.isNullOrBlank()) require(metadata.characterCardId == role) { "状态来源会话不属于当前助手" }
+        else require(com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+            .getCharacterGroupCard(groupId)?.members.orEmpty().any { it.characterCardId == role }) { "状态接收主体不是群成员" }
+        return !groupId.isNullOrBlank()
+    }
 
     suspend fun configure(role: String, enable: Boolean) {
         require(role.isNotBlank())
         if (enable) CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "companion_internal_state", true)
         // Disabled time is paused. Turning back on must not replay the unobserved interval.
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            store.update(key(role)) { data ->
+            if (enabled(role) == enable) return@withContext
+            update(role, "user_configuration") { data ->
                 val now = System.currentTimeMillis()
                 InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+                // A frame prepared before disabling/re-enabling cannot later become current.
+                data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1L))
             }
             check(store.preferences.edit().putBoolean("internal_state:$role", enable).commit())
         }
     }
 
-    fun event(role: String?, chat: String, id: String, source: String, detail: String, contactAt: Long? = null) {
+    fun event(role: String?, chat: String, id: String, source: String, detail: String, contactAt: Long? = null,
+              author: String? = null) {
         if (!enabled(role)) return
-        store.update(key(requireNotNull(role))) {
+        update(requireNotNull(role), source) {
             // Archived messages remain idempotent after compaction and process restart.
-            if (store.archivedStateRow(key(role), "events", id) != null) return@update
+            if (InternalStateEngine.rows(it, "events").any { row -> row.getString("id") == id } ||
+                store.archivedStateRow(key(role), "events", id) != null) return@update
             // These facts are interpreted in the main generation. Replaying old keyword rules
             // here would assign a second, contradictory subjective meaning before that report.
             InternalStateEngine.event(it, id, source, chat, detail, System.currentTimeMillis(),
                 applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"), contactAt = contactAt)
+            InternalStateEngine.rows(it, "events").last { row -> row.getString("id") == id }
+                .put("recipient", role).put("author", author ?: JSONObject.NULL)
+                .put("source_chat", chat)
         }
     }
 
@@ -67,13 +88,17 @@ class InternalStateStore(private val context: Context) {
         actors.distinct().forEach { actor ->
             event(actor, chat, "message:$chat:${message.sender}:${message.timestamp}",
                 if (message.sender == "user") "user_message" else "assistant_reply", spoken,
-                contactAt = if (message.sender == "user") message.timestamp else null)
+                contactAt = if (message.sender == "user") message.timestamp else null,
+                author = if (message.sender == "user") "user" else actor)
         }
     }
 
-    suspend fun tool(role: String?, chat: String?, name: String, action: String?, status: String?, success: Boolean) {
+    suspend fun tool(role: String?, chat: String?, name: String, action: String?, status: String?, success: Boolean,
+                     invocationId: String) {
         if (chat == null || !enabled(role) || name == "companion_internal_state") return
-        val id = "tool:${UUID.randomUUID()}"
+        requireRecipient(requireNotNull(role), chat)
+        require(invocationId.isNotBlank())
+        val id = "tool:$invocationId"
         // Await persistence on IO: the next model round must see the completed tool's event.
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             toolNow(role, chat, id, name, action, status, success)
@@ -82,9 +107,18 @@ class InternalStateStore(private val context: Context) {
     private fun toolNow(role: String?, chat: String, id: String, name: String, action: String?, status: String?, success: Boolean) {
         if (!enabled(role)) return
         // Both facts belong to one completed tool: one read/compact/write, preserving event order.
-        store.update(key(requireNotNull(role))) { data ->
+        update(requireNotNull(role), "tool_result") { data ->
+            val previous = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == id }
+                ?: store.archivedStateRow(key(role), "events", id)
+            if (previous != null) {
+                require(previous.getString("source") == if (success) "tool_success" else "tool_failure") { "同一工具结果标识发生冲突" }
+                require(previous.getString("chat") == chat && previous.getString("detail") == "$name/${action.orEmpty()}".take(240)) { "工具结果来源发生冲突" }
+                return@update
+            }
             InternalStateEngine.event(data, id, if (success) "tool_success" else "tool_failure",
                 chat, "$name/${action.orEmpty()}", System.currentTimeMillis())
+            InternalStateEngine.rows(data, "events").last { it.getString("id") == id }
+                .put("recipient", role).put("author", role).put("source_chat", chat)
             val source = InternalStateEvents.toolSource(name, action, status, success)
             if (source != null) InternalStateEngine.event(data, "$id:$source", source,
                 chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
@@ -94,7 +128,7 @@ class InternalStateStore(private val context: Context) {
 
     fun snapshot(role: String, chat: String, persist: Boolean): JSONObject {
         val now = System.currentTimeMillis()
-        return if (persist && enabled(role)) store.update(key(role)) { InternalStateEngine.advance(it, chat, now) }
+        return if (persist && enabled(role)) update(role, "time") { InternalStateEngine.advance(it, chat, now) }
         else read(role).also { if (enabled(role)) InternalStateEngine.advance(it, chat, now) }
     }
 
@@ -108,7 +142,7 @@ class InternalStateStore(private val context: Context) {
             }
             InternalStateTimeRules.requireDefined(definition)
         }
-        store.update(key(role)) {
+        update(role, "definition_tool") {
             restoreEvidence(it, role, evidence)
             InternalStateEngine.evolve(it, operation, id, expected, definition, target, reason, evidence, chat, System.currentTimeMillis())
         }
@@ -119,7 +153,8 @@ class InternalStateStore(private val context: Context) {
                        changes: JSONObject, reason: String, reveal: Boolean): JSONObject {
         require(role.isNotBlank() && chat.isNotBlank())
         lateinit var observation: JSONObject
-        store.update(key(role)) { data ->
+        check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "用户编辑入口不能由助手调用" }
+        update(role, "user_edit") { data ->
             observation = InternalStateUserEdits.apply(data, chat, id, expectedVersion, expectedRevision,
                 changes, reason, reveal, System.currentTimeMillis(), advanceTime = enabled(role))
         }
@@ -131,11 +166,13 @@ class InternalStateStore(private val context: Context) {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         lateinit var receipt: JSONObject
-        store.update(key(frame.roleId)) { data ->
+        val saved = update(frame.roleId, "state_report") { data ->
             requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
             store.archivedStateRow(key(frame.roleId), "semantic_reports", frame.id)?.let {
-                val receipts = data.optJSONArray("semantic_reports") ?: JSONArray().also { rows -> data.put("semantic_reports", rows) }
-                if ((0 until receipts.length()).none { i -> receipts.getJSONObject(i).getString("frame_id") == frame.id }) receipts.put(it)
+                val replayData = InternalStateDocument.copy(data)
+                replayData.put("semantic_reports", JSONArray().put(it))
+                receipt = InternalStateReports.apply(replayData, frame, report, System.currentTimeMillis())
+                return@update
             }
             // Old receipts still use the original digest validation. A new report must not
             // bypass conflict checks if intervening objective changes have already been archived.
@@ -144,6 +181,7 @@ class InternalStateStore(private val context: Context) {
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
+        AppLogger.d("InternalState", "Accepted subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} saved=${SubjectStateBoundary.revision(saved)} semantic=${InternalStateEngine.semanticRevision(saved)}")
         return receipt
     }
 
@@ -164,11 +202,15 @@ class InternalStateStore(private val context: Context) {
         val page = events.drop(offset).take(21).toMutableList()
         if (page.size < 21) page.addAll(store.archivedStateEvents(key(role),
             (offset - events.size).coerceAtLeast(0), 21 - page.size, events.map { it.getString("id") }.toSet()))
+        val versionPage = versions.drop(offset).take(21).toMutableList()
+        if (versionPage.size < 21) versionPage.addAll(store.archivedStateVersions(key(role),
+            (offset - versions.size).coerceAtLeast(0), 21 - versionPage.size,
+            versions.map { InternalStateArchive.lookup("versions", it) }.toSet()))
         return JSONObject().put("definitions", JSONArray(InternalStateEngine.definitions(data)))
             .put("states", JSONArray(InternalStateEngine.snapshot(data, chat, System.currentTimeMillis())))
-            .put("events", JSONArray(page.take(20))).put("versions", JSONArray(versions.drop(offset).take(20)))
+            .put("events", JSONArray(page.take(20))).put("versions", JSONArray(versionPage.take(20)))
             .put("last_selection", data.optJSONObject("last_selection") ?: JSONObject.NULL)
-            .put("next_offset", if (page.size > 20 || offset.toLong() + 20 < versions.size) offset + 20 else JSONObject.NULL)
+            .put("next_offset", if (page.size > 20 || versionPage.size > 20) offset + 20 else JSONObject.NULL)
     }
 
     fun prompt(role: String?, chat: String, persist: Boolean, wake: Boolean = false,
@@ -183,19 +225,21 @@ class InternalStateStore(private val context: Context) {
 
     /** Preview reads a detached time projection. Only an actual request records input and rotation. */
     fun prepare(actor: String, chat: String, persist: Boolean, wake: Boolean = false,
-                capabilities: JSONObject = JSONObject(), currentInput: String = ""): RuntimeContextSections {
+                capabilities: JSONObject = JSONObject(), currentInput: String = "", groupInput: Boolean = false): RuntimeContextSections {
         require(actor.isNotBlank() && chat.isNotBlank())
         check(enabled(actor)) { "内部状态未开启" }
         val now = System.currentTimeMillis()
         fun project(data: JSONObject): RuntimeContextSections {
             val requestId = if (persist) UUID.randomUUID().toString() else null
             val inputEventId = requestId?.let { "input:$it" }
-            val source = if (wake || currentInput.isBlank()) "wake" else "user_message"
+            val source = if (wake || currentInput.isBlank()) "wake" else if (groupInput) "group_context" else "user_message"
             if (inputEventId != null) {
                 // Record the received input even when it has no numeric changes. Its complete
                 // original text is already in this request; the event supplies a real evidence ID.
                 InternalStateEngine.event(data, inputEventId, source, chat,
                     currentInput.ifBlank { "本次自主继续判断，没有用户新输入" }, now, applyTriggers = false)
+                InternalStateEngine.rows(data, "events").last { it.getString("id") == inputEventId }
+                    .put("recipient", actor).put("author", JSONObject.NULL).put("source_chat", chat)
             } else {
                 InternalStateEngine.advance(data, chat, now)
             }
@@ -206,11 +250,12 @@ class InternalStateStore(private val context: Context) {
                     revision = InternalStateEngine.semanticRevision(data), at = now,
                     eventIds = selected.eventIds, definitionVersions = InternalStateEngine.definitions(data).associate {
                         definition -> definition.getString("id") to definition.getInt("version")
-                    }, eventSequence = data.getLong("sequence"))
+                    }, eventSequence = data.getLong("sequence"), stateVersion = SubjectStateBoundary.revision(data))
             }
             val payload = selected.payload
             if (frame != null) {
                 payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
+                    .put("subject_id", actor).put("state_version", frame.stateVersion)
                     .put("at", frame.at).put("available_event_ids", JSONArray(frame.eventIds.sorted()))
                     .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                         .put("at", now).put("text_location", "current_request_input"))
@@ -219,7 +264,7 @@ class InternalStateStore(private val context: Context) {
                     .put("chat", chat).put("selected_ids", JSONArray(selected.selectedIds))
                     .put("decisions", selected.decisions).put("status", "PREPARED_FOR_SEND"))
                 // Sizes only: do not log private state, input text, or candidate descriptions.
-                AppLogger.d("InternalState", "Request state chars=${payload.toString().length}, " +
+                AppLogger.d("InternalState", "Prepared subject=$actor chat=$chat frame=${frame.id} version=${frame.stateVersion} semantic=${frame.revision}; chars=${payload.toString().length}, " +
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
@@ -230,7 +275,7 @@ class InternalStateStore(private val context: Context) {
         }
         if (!persist) return project(read(actor))
         lateinit var sections: RuntimeContextSections
-        store.update(key(actor)) { data -> sections = project(data) }
+        update(actor, "request_input") { data -> sections = project(data) }
         return sections
     }
 
@@ -307,11 +352,12 @@ class InternalStateStore(private val context: Context) {
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) { AppLogger.e("InternalState", "消息状态记录失败", failure) }
         }
-        suspend fun noteTool(context: Context, role: String?, chat: String?, tool: com.ai.assistance.operit.data.model.AITool, success: Boolean) {
+        suspend fun noteTool(context: Context, role: String?, chat: String?, tool: com.ai.assistance.operit.data.model.AITool, success: Boolean,
+                             invocationId: String) {
             try {
                 fun param(key: String) = tool.parameters.firstOrNull { it.name == key }?.value
                 val status = param("status") ?: param("details")?.let { JSONObject(it).optString("status") }
-                InternalStateStore(context).tool(role, chat, tool.name, param("action"), status, success)
+                InternalStateStore(context).tool(role, chat, tool.name, param("action"), status, success, invocationId)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) { AppLogger.e("InternalState", "工具状态记录失败", failure) }
         }

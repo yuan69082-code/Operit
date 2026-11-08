@@ -17,7 +17,7 @@ import java.util.ArrayDeque
 
 /** Only historical rows leave the hot document; definitions and current values never do. */
 internal object InternalStateHistory {
-    val limits = mapOf("events" to 3000, "experiences" to 600, "semantic_reports" to 300)
+    val limits = mapOf("events" to 3000, "experiences" to 600, "semantic_reports" to 300, "versions" to 300)
     private const val MAX_FIELD_CHARS = 2 * 1024 * 1024
 
     // Parse one row at a time: parsing the entire old file before trimming caused startup OOMs.
@@ -27,6 +27,7 @@ internal object InternalStateHistory {
             reader.beginObject()
             while (reader.hasNext()) {
                 val name = reader.nextName()
+                if (name == "archived_contacts") { reader.skipValue(); continue }
                 val limit = limits[name]
                 if (limit == null) {
                     result.put(name, org.json.JSONTokener(JsonParser.parseReader(reader).toString()).nextValue())
@@ -111,6 +112,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             db.execSQL("CREATE TABLE IF NOT EXISTS history (scope TEXT NOT NULL, kind TEXT NOT NULL, hash TEXT NOT NULL, lookup TEXT NOT NULL, payload TEXT NOT NULL, contact_chat TEXT, contact_at INTEGER, PRIMARY KEY(scope,kind,hash))")
             db.execSQL("CREATE INDEX IF NOT EXISTS history_lookup ON history(scope,kind,lookup)")
             db.execSQL("CREATE INDEX IF NOT EXISTS history_contact ON history(scope,contact_chat,contact_at)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS history_contact_global ON history(scope,contact_at)")
         }
     }
 
@@ -122,7 +124,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             .joinToString("") { "%02x".format(it) }
         val values = ContentValues().apply {
             put("scope", scope); put("kind", kind); put("hash", hash)
-            put("lookup", if (kind == "semantic_reports") row.getString("frame_id") else row.optString("id"))
+            put("lookup", lookup(kind, row))
             put("payload", payload)
             if (kind == "events" && row.optString("source") == "user_message" &&
                 (row.has("contact_at") || row.getString("id").startsWith("message:"))) {
@@ -159,17 +161,28 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         return result
     }
 
-    // Preserve contact integration for dormant session instances too, without reloading event bodies.
-    fun contacts(since: Long): JSONArray {
-        val result = JSONArray()
-        if (!file.exists()) return result
-        db().rawQuery("SELECT contact_chat, MAX(contact_at) FROM history WHERE scope=? AND contact_at<=? GROUP BY contact_chat UNION SELECT contact_chat, contact_at FROM history WHERE scope=? AND contact_at>? ORDER BY 2",
-            arrayOf(scope, since.toString(), scope, since.toString())).use { cursor ->
-            while (cursor.moveToNext()) if (!cursor.isNull(0) && !cursor.isNull(1)) {
-                result.put(JSONObject().put("chat", cursor.getString(0)).put("at", cursor.getLong(1)))
-            }
+    fun latestContact(chat: String?, at: Long): Long? {
+        if (!file.exists()) return null
+        val filter = if (chat == null) "" else " AND contact_chat=?"
+        val args = listOf(scope, at.toString()) + listOfNotNull(chat)
+        return db().rawQuery("SELECT MAX(contact_at) FROM history WHERE scope=? AND contact_at<=?$filter",
+            args.toTypedArray()).use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
+    }
+
+    fun contactPage(chat: String?, after: Long, until: Long): List<Long> {
+        if (!file.exists()) return emptyList()
+        val filter = if (chat == null) "" else " AND contact_chat=?"
+        val args = listOf(scope, after.toString(), until.toString()) + listOfNotNull(chat)
+        return db().rawQuery("SELECT DISTINCT contact_at FROM history WHERE scope=? AND contact_at>? AND contact_at<=?$filter ORDER BY contact_at LIMIT 256",
+            args.toTypedArray()).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getLong(0)) } }
+    }
+
+    companion object {
+        fun lookup(kind: String, row: JSONObject): String = when (kind) {
+            "semantic_reports" -> row.getString("frame_id")
+            "versions" -> "${row.getString("dimension")}:${row.getInt("version")}"
+            else -> row.optString("id")
         }
-        return result
     }
 
     fun commit() {

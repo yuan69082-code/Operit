@@ -30,7 +30,7 @@ object ThoughtPool {
         val sink = minutes ?: DEFAULT_SINK_MINUTES
         require(choice != "sink" || sink in 1..43200) { "沉着时间须为1–43200分钟" }
         lateinit var saved: JSONObject
-        CompanionStore(context).update(scope(role)) { data ->
+        CompanionStore(context).updateSubject(role, "thoughts", "assistant_thought") { data ->
             val list = data.optJSONArray("items").objects().toMutableList()
             val index = id?.let { key -> list.indexOfFirst { it.getString("id") == key }.also { require(it >= 0) { "念头不存在" } } }
             val item = index?.let { list[it] } ?: JSONObject().put("id", UUID.randomUUID().toString()).put("created", now)

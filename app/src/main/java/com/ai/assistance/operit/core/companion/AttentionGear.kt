@@ -23,7 +23,7 @@ object AttentionGear {
     private val attachment = Regex("<attachment\\b[\\s\\S]*?</attachment>", RegexOption.IGNORE_CASE)
 
     data class State(val level: String, val until: Long, val reason: String,
-                     val floors: Map<String, String>, val effective: String)
+                     val floors: Map<String, String>, val effective: String, val legacyHostPolicy: Boolean = false)
 
     // 事件循环每两秒检查一次，档位短暂缓存，避免反复读文件
     @Volatile private var cache: Triple<String, Long, State>? = null
@@ -42,7 +42,13 @@ object AttentionGear {
         val key = "$chatId/$roleId"
         cache?.let { (k, at, s) -> if (k == key && now - at in 0..15_000) return s }
         val store = CompanionStore(context)
-        val raw = store.read(KEY)
+        // Legacy global configuration has no reliable owner. Preserve it at KEY, but never
+        // claim it was independently chosen by every new observer.
+        val owned = if (roleId.isNullOrBlank()) JSONObject() else store.read(SubjectStateBoundary.scope(roleId, "attention"))
+        val legacyHostPolicy = !owned.has("level")
+        // Preserve the already active host policy until an observer makes its own choice.
+        // It stays explicitly unattributed and is never copied into that subject's file.
+        val raw = if (legacyHostPolicy) store.read(KEY) else owned
         val until = raw.optLong("until")
         val expired = until in 1..now
         val level = if (expired) "normal" else raw.optString("level", "normal").takeIf { it in order } ?: "normal"
@@ -52,7 +58,7 @@ object AttentionGear {
         // 降档理由只覆盖写理由时已经存在的底线；之后冒出新的硬事实，还是回到盯紧
         val honored = reason.isNotBlank() && atSet.containsAll(floors.keys)
         val effective = if (floors.isNotEmpty() && level != "tight" && !honored) "tight" else level
-        return State(level, if (expired) 0 else until, reason, floors, effective).also { cache = Triple(key, now, it) }
+        return State(level, if (expired) 0 else until, reason, floors, effective, legacyHostPolicy).also { cache = Triple(key, now, it) }
     }
 
     private fun floors(context: Context, store: CompanionStore, chatId: String, roleId: String?, now: Long): Map<String, String> {
@@ -62,7 +68,7 @@ object AttentionGear {
         ledger.optInt("unanswered").takeIf { it >= 2 }?.let { out["unanswered"] = "她已经连着${it}次没回我" }
         val night = store.read("$KEY:night:$chatId").optLong("goodnight_at")
         if (night > 0 && now - night in 0..GOODNIGHT_WINDOW_MS) out["goodnight"] = "她${(now - night) / 60_000}分钟前说过晚安/要睡了"
-        if (store.emotionEnabled) {
+        if (store.emotionEnabled && !InternalStateStore(context).enabled(roleId)) {
             val text = XcEmotionBridge.receipt(context, store.scope(chatId, roleId)).optJSONObject("snapshot")
                 ?.optString("additionalContext").orEmpty()
             val pleasure = Regex("愉悦=(-?[0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
@@ -88,7 +94,7 @@ object AttentionGear {
         }
         val now = System.currentTimeMillis()
         val store = CompanionStore(context)
-        store.update(KEY) {
+        store.updateSubject(requireNotNull(roleId), "attention", "assistant_attention") {
             it.put("level", level).put("until", hours?.let { h -> now + (h * 3_600_000).toLong() } ?: 0L)
                 .put("reason", note).put("set_at", now).put("floors_at_set", JSONArray(current.floors.keys.toList()))
         }
@@ -105,7 +111,7 @@ object AttentionGear {
             if (s.until > 0) append("，到").append(java.time.Instant.ofEpochMilli(s.until).atZone(java.time.ZoneId.systemDefault())
                 .toLocalTime().withSecond(0).withNano(0)).append("自动回平常")
             if (s.floors.isNotEmpty()) append("\n底线：").append(s.floors.values.joinToString("；"))
-            if (s.reason.isNotBlank()) append("\n上一次的我降档时写的理由：").append(s.reason).append("（觉得不对就改回去）")
+            if (s.reason.isNotBlank()) append(if (s.legacyHostPolicy) "\n旧全局调度配置的理由，作者未知：" else "\n上一次由此助手设置的理由：").append(s.reason)
         }
     }
 

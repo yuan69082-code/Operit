@@ -2092,14 +2092,16 @@ class EnhancedAIService private constructor(private val context: Context) {
                         R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes), reason.code))
             } else {
                 try {
-                    InternalStateStore(this@EnhancedAIService.context).submit(frame, report)
+                    withContext(Dispatchers.IO) {
+                        InternalStateStore(this@EnhancedAIService.context).submit(frame, report)
+                    }
                     context.stateReportCommitted = true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
                     // Report text, source text and arbitrary JSON exception messages are private.
                     val reason = InternalStateReportFailure.classify(failure)
-                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED code=${reason.code} type=${failure.javaClass.simpleName}")
+                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} code=${reason.code} type=${failure.javaClass.simpleName}")
                     onNonFatalError(this@EnhancedAIService.context.getString(
                         R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes), reason.code))
                 }

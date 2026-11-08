@@ -13,7 +13,8 @@ data class InternalStateFrame(
     val at: Long,
     val eventIds: Set<String>,
     val definitionVersions: Map<String, Int>,
-    val eventSequence: Long
+    val eventSequence: Long,
+    val stateVersion: Long = 0L
 )
 
 /** Applies one subjective report atomically. This does not replay the source event or choose actions. */
@@ -56,7 +57,7 @@ object InternalStateReports {
 
         // All validation and writes happen on a detached copy. Rejection cannot leave a definition
         // without its initial experience or alter an unreported dimension's value/time anchor.
-        val next = JSONObject(data.toString())
+        val next = InternalStateDocument.copy(data)
         val updates = objects(report, "updates")
         val creates = objects(report, "create")
         val revisions = if (report.has("revise")) objects(report, "revise") else emptyList()

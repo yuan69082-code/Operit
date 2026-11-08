@@ -672,7 +672,7 @@ object ToolExecutionManager {
                         runtimeContext = toolRuntimeContext
                     )
                 com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
-                com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success)
+                com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
                 trace.tool(traceKey, result)
                 orderedResults.complete(index, result)
             }
@@ -688,7 +688,7 @@ object ToolExecutionManager {
                     runtimeContext = toolRuntimeContext
                 )
             com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
-            com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success)
+            com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
             trace.tool(traceKey, result)
                 orderedResults.complete(index, result)
         }
