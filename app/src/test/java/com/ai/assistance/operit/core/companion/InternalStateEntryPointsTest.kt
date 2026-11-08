@@ -80,9 +80,12 @@ class InternalStateEntryPointsTest {
         val restarted = InternalStateStore(context)
         assertEquals(SubjectStateBoundary.revision(states.read(role)), SubjectStateBoundary.revision(restarted.read(role)))
         assertEquals(63.0, InternalStateEngine.snapshot(restarted.read(role), one, System.currentTimeMillis()).first().getDouble("value"), 0.0)
+        // A host-populated cache must not bypass ownership on a later assistant read.
+        AttentionGear.state(context, null, role)
         withContext(AssistantScope.executionContext(other)) {
             assertThrows(IllegalArgumentException::class.java) { states.read(role) }
             assertThrows(IllegalArgumentException::class.java) { states.event(role, one, "bad", "wake", "不得进入") }
+            assertThrows(IllegalArgumentException::class.java) { AttentionGear.state(context, null, role) }
         }
     }
 
@@ -133,13 +136,35 @@ class InternalStateEntryPointsTest {
         } finally { pool.shutdownNow() }
     }
 
+    @Test fun archivedReceiptRetryDoesNotRestoreOrReapplyOldState() {
+        seed()
+        val request = frame()
+        val payload = report(request, JSONArray().put(JSONObject().put("id", "global").put("value", 71).put("reason", "真实回报")))
+        val receipt = states.submit(request, payload)
+        val row = InternalStateEngine.rows(states.read(role), "semantic_reports").single { it.getString("frame_id") == request.id }
+        // Simulate the existing archive boundary, retaining the actual production receipt.
+        InternalStateArchive(java.io.File(context.filesDir, "companion/internal-state-history.sqlite"), "internal-state:$role").use {
+            it.put("semantic_reports", row); it.commit()
+        }
+        CompanionStore(context).updateSubject(role, "internal-state", "test_archive_fixture") { data ->
+            data.put("semantic_reports", JSONArray(InternalStateEngine.rows(data, "semantic_reports").filter { it.getString("frame_id") != request.id }))
+        }
+        val version = SubjectStateBoundary.revision(states.read(role))
+        assertEquals(receipt.toString(), states.submit(request, payload).toString())
+        assertEquals(version, SubjectStateBoundary.revision(states.read(role)))
+        assertFalse(InternalStateEngine.rows(states.read(role), "semantic_reports").any { it.getString("frame_id") == request.id })
+        assertThrows(InternalStateReportRejected::class.java) { states.submit(request, report(request)) }
+        assertEquals(71.0, value(one, "global"), 0.0)
+    }
+
     @Test fun groupMessageAuthorsDoNotBecomeAnotherAssistantsExperience() = runBlocking {
         // Existing group history remains attributable even when the group card is unavailable.
         val group = ChatHistory(title = "已有群历史", messages = emptyList(), characterGroupId = "historical-group")
         ChatHistoryManager.getInstance(context).saveChatHistory(group)
-        val a = ChatMessage(sender = "ai", content = "A的感受", roleName = "同名助手")
-        val b = ChatMessage(sender = "ai", content = "B的感受", roleName = "同名助手")
-        val unknown = ChatMessage(sender = "ai", content = "没有作者凭据", roleName = "同名助手")
+        val at = System.currentTimeMillis()
+        val a = ChatMessage(sender = "ai", content = "A的感受", roleName = "同名助手", timestamp = at)
+        val b = ChatMessage(sender = "ai", content = "B的感受", roleName = "同名助手", timestamp = at + 1)
+        val unknown = ChatMessage(sender = "ai", content = "没有作者凭据", roleName = "同名助手", timestamp = at + 2)
         com.ai.assistance.operit.core.group.GroupProvenance.record(context, group.id, a, role)
         com.ai.assistance.operit.core.group.GroupProvenance.record(context, group.id, b, other)
         states.message(group.id, a); states.message(group.id, b); states.message(group.id, unknown)

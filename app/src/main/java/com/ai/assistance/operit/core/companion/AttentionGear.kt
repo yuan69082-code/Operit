@@ -38,6 +38,8 @@ object AttentionGear {
     }
 
     fun state(context: Context, chatId: String?, roleId: String?): State {
+        if (!roleId.isNullOrBlank()) SubjectStateBoundary.authorize(roleId,
+            com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val now = System.currentTimeMillis()
         val key = "$chatId/$roleId"
         cache?.let { (k, at, s) -> if (k == key && now - at in 0..15_000) return s }
@@ -107,7 +109,8 @@ object AttentionGear {
         val s = state(context, chatId, roleId)
         return buildString {
             append("关注档位：").append(names[s.effective])
-            if (s.effective != s.level) append("（我设的是${names[s.level]}，底线把它抬到了盯紧）")
+            if (s.effective != s.level) append(if (s.legacyHostPolicy)
+                "（旧宿主配置为${names[s.level]}，底线把它抬到了盯紧）" else "（我设的是${names[s.level]}，底线把它抬到了盯紧）")
             if (s.until > 0) append("，到").append(java.time.Instant.ofEpochMilli(s.until).atZone(java.time.ZoneId.systemDefault())
                 .toLocalTime().withSecond(0).withNano(0)).append("自动回平常")
             if (s.floors.isNotEmpty()) append("\n底线：").append(s.floors.values.joinToString("；"))

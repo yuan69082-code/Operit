@@ -122,9 +122,13 @@ class InternalStateStore(private val context: Context) {
                 .put("recipient", role).put("author", role).put("source_chat", chat)
                 .put("tool_status", status ?: JSONObject.NULL)
             val source = InternalStateEvents.toolSource(name, action, status, success)
-            if (source != null) InternalStateEngine.event(data, "$id:$source", source,
-                chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
-                applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"))
+            if (source != null) {
+                InternalStateEngine.event(data, "$id:$source", source,
+                    chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
+                    applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"))
+                InternalStateEngine.rows(data, "events").last { it.getString("id") == "$id:$source" }
+                    .put("recipient", role).put("author", role).put("source_chat", chat).put("tool_event", id)
+            }
         }
     }
 
