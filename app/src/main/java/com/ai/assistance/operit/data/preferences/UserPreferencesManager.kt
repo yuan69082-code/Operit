@@ -746,6 +746,13 @@ class UserPreferencesManager private constructor(private val context: Context) {
         }
     }
 
+    fun getAiAvatarsForCharacterCardsFlow(ids: Collection<String>): Flow<Map<String, String?>> =
+        context.userPreferencesDataStore.data.map { preferences ->
+            ids.associateWith { id ->
+                preferences[stringPreferencesKey("${getCharacterCardThemePrefix(id)}${KEY_CUSTOM_AI_AVATAR_URI.name}")]
+            }
+        }
+
     fun getAiAvatarForCharacterCardFlow(characterCardId: String): Flow<String?> {
         return context.userPreferencesDataStore.data.map { preferences ->
             val prefix = getCharacterCardThemePrefix(characterCardId)

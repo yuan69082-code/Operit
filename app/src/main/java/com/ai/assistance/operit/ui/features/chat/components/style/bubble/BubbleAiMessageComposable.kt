@@ -43,7 +43,6 @@ import com.ai.assistance.operit.util.SpeechCueText
 import com.ai.assistance.operit.util.markdown.toCharStream
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
-import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.ToolCollapseMode
 import androidx.compose.foundation.Image
 import coil.compose.AsyncImage
@@ -63,8 +62,7 @@ import com.ai.assistance.operit.ui.theme.LocalThemePreferenceSnapshot
 import com.ai.assistance.operit.ui.theme.liquidGlass
 import com.ai.assistance.operit.ui.theme.resolveConfiguredFontFamily
 import com.ai.assistance.operit.ui.theme.waterGlass
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.runBlocking
+import com.ai.assistance.operit.ui.features.chat.components.rememberRoleAvatar
 
 private val ExpandedBubbleLayoutNodeTypes =
     setOf(
@@ -101,7 +99,6 @@ fun BubbleAiMessageComposable(
     val context = LocalContext.current
     val preferencesManager = remember { UserPreferencesManager.getInstance(context) }
     val displayPreferencesManager = remember { DisplayPreferencesManager.getInstance(context) }
-    val characterCardManager = remember { CharacterCardManager.getInstance(context) }
     val themeSnapshot = LocalThemePreferenceSnapshot.current
     val bubbleShowAvatar = themeSnapshot.bubbleShowAvatar
     val bubbleWideLayoutEnabled = themeSnapshot.bubbleWideLayoutEnabled
@@ -121,24 +118,7 @@ fun BubbleAiMessageComposable(
     val toolCollapseMode by displayPreferencesManager.toolCollapseMode.collectAsState(initial = ToolCollapseMode.ALL)
     
     // 根据角色名获取头像
-    val aiAvatarUri by remember(message.roleName, themeSnapshot.customAiAvatarUri) {
-        if (message.roleName != null) {
-            try {
-                runBlocking {
-                    val characterCard = characterCardManager.findCharacterCardByName(message.roleName)
-                    if (characterCard != null) {
-                        preferencesManager.getAiAvatarForCharacterCardFlow(characterCard.id)
-                    } else {
-                        flowOf(themeSnapshot.customAiAvatarUri)
-                    }
-                }
-            } catch (e: Exception) {
-                flowOf(themeSnapshot.customAiAvatarUri)
-            }
-        } else {
-            flowOf(themeSnapshot.customAiAvatarUri)
-        }
-    }.collectAsState(initial = null)
+    val aiAvatarUri = rememberRoleAvatar(message.roleName, themeSnapshot.customAiAvatarUri)
 
     val avatarShape = remember(avatarShapePref, avatarCornerRadius) {
         if (avatarShapePref == UserPreferencesManager.AVATAR_SHAPE_SQUARE) {

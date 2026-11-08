@@ -8,7 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.lazy.LazyListState as ComposeLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -313,8 +313,7 @@ internal fun ChatScrollNavigator(
 internal fun ChatScrollNavigator(
     chatHistory: List<ChatMessage>,
     currentChatId: String? = null,
-    scrollState: ScrollState,
-    messageAnchors: Map<Long, ChatScrollMessageAnchor>,
+    scrollState: ComposeLazyListState,
     viewportHeightPx: Int,
     autoScrollToBottom: Boolean,
     hasNewerDisplayHistory: Boolean = false,
@@ -365,7 +364,6 @@ internal fun ChatScrollNavigator(
                         scrollState = scrollState,
                         viewportHeightPx = viewportHeightPx,
                         chatHistory = chatHistory,
-                        messageAnchors = messageAnchors,
                     ),
                 isScrollInProgress = scrollState.isScrollInProgress,
             )
@@ -387,19 +385,20 @@ internal fun ChatScrollNavigator(
     }
 
     LaunchedEffect(scrollState) {
-        var lastPosition = scrollState.value
-        snapshotFlow { scrollState.value }
+        var lastPosition = scrollState.firstVisibleItemIndex to scrollState.firstVisibleItemScrollOffset
+        snapshotFlow { scrollState.firstVisibleItemIndex to scrollState.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
             .collectLatest { currentPosition ->
                 if (scrollState.isScrollInProgress) {
-                    val movedAwayFromBottom = currentPosition < lastPosition
+                    val movedAwayFromBottom = currentPosition.first < lastPosition.first ||
+                        (currentPosition.first == lastPosition.first && currentPosition.second < lastPosition.second)
                     if (movedAwayFromBottom) {
                         if (currentAutoScrollToBottom) {
                             currentOnAutoScrollToBottomChange?.invoke(false)
                         }
                     } else {
                         val isAtBottom =
-                            scrollState.value >= scrollState.maxValue &&
+                            !scrollState.canScrollForward &&
                                 !currentHasNewerDisplayHistory
                         if (isAtBottom && !currentAutoScrollToBottom) {
                             currentOnAutoScrollToBottomChange?.invoke(true)
@@ -557,7 +556,7 @@ internal fun ChatScrollNavigator(
                                 if (currentHasNewerDisplayHistory) {
                                     currentOnRequestLatestMessages?.invoke()
                                 }
-                                scrollState.animateScrollTo(scrollState.maxValue)
+                                scrollState.animateScrollToEnd()
                             }
                             currentOnAutoScrollToBottomChange?.invoke(true)
                         },
@@ -1145,24 +1144,18 @@ private fun resolveCenteredMessageIndex(
 }
 
 private fun resolveCenteredMessageIndex(
-    scrollState: ScrollState,
+    scrollState: ComposeLazyListState,
     viewportHeightPx: Int,
     chatHistory: List<ChatMessage>,
-    messageAnchors: Map<Long, ChatScrollMessageAnchor>,
 ): Int? {
-    if (viewportHeightPx <= 0 || chatHistory.isEmpty() || messageAnchors.isEmpty()) {
-        return null
-    }
+    if (viewportHeightPx <= 0 || chatHistory.isEmpty()) return null
+    val info = scrollState.layoutInfo
+    val center = (info.viewportStartOffset + info.viewportEndOffset) / 2f
+    return info.visibleItemsInfo
+        .filter { it.index in 1..chatHistory.size }
+        .minByOrNull { abs(it.offset + it.size / 2f - center) }
+        ?.index?.minus(1)
 
-    val viewportCenter = scrollState.value + viewportHeightPx / 2f
-    val centeredTimestamp =
-        messageAnchors
-            .entries
-            .minByOrNull { (_, anchor) ->
-                abs((anchor.absoluteTopPx + anchor.heightPx / 2f) - viewportCenter)
-            }?.key ?: return null
-
-    return chatHistory.indexOfFirst { it.timestamp == centeredTimestamp }.takeIf { it >= 0 }
 }
 
 private fun senderLabelRes(sender: String): Int =

@@ -250,6 +250,17 @@ class CharacterCardManager private constructor(private val context: Context) {
         preferences[CHARACTER_CARD_LIST]?.toList() ?: emptyList()
     }
     
+    // Avatar lookup needs only names and IDs, never full prompts/settings for every bubble.
+    val characterNamesFlow: Flow<Map<String, String>> = dataStore.data.map { preferences ->
+        buildMap {
+            preferences[CHARACTER_CARD_LIST].orEmpty().forEach { id ->
+                val name = preferences[stringPreferencesKey("character_card_${id}_name")]
+                    ?: context.getString(R.string.default_character_card)
+                if (!containsKey(name)) put(name, id)
+            }
+        }
+    }
+
     // 活跃角色卡ID流（可以为null）
     private val activeCharacterCardIdFlow: Flow<String?> = dataStore.data.map { preferences ->
         preferences[ACTIVE_CHARACTER_CARD_ID]

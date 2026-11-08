@@ -50,7 +50,6 @@ import coil.compose.rememberAsyncImagePainter
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
-import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.ui.features.chat.components.attachments.AttachmentViewerDialog
@@ -69,9 +68,8 @@ import com.ai.assistance.operit.ui.theme.resolveConfiguredFontFamily
 import com.ai.assistance.operit.ui.theme.waterGlass
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import com.ai.assistance.operit.ui.features.chat.components.rememberRoleAvatar
 import kotlinx.coroutines.withContext
 
 @SuppressLint("UnusedBoxWithConstraintsScope")
@@ -103,7 +101,6 @@ fun BubbleUserMessageComposable(
         textColor
     val preferencesManager = remember { UserPreferencesManager.getInstance(context) }
     val displayPreferencesManager = remember { DisplayPreferencesManager.getInstance(context) }
-    val characterCardManager = remember { CharacterCardManager.getInstance(context) }
     val themeSnapshot = LocalThemePreferenceSnapshot.current
     val bubbleShowAvatar = themeSnapshot.bubbleShowAvatar
     val bubbleWideLayoutEnabled = themeSnapshot.bubbleWideLayoutEnabled
@@ -136,24 +133,7 @@ fun BubbleUserMessageComposable(
     val proxySenderName = if (isHiddenPlaceholder) null else parseResult.proxySenderName
 
     val isProxySender = !proxySenderName.isNullOrBlank()
-    val proxyAvatarUri by remember(proxySenderName, themeSnapshot.customAiAvatarUri) {
-        if (isProxySender) {
-            try {
-                runBlocking {
-                    val characterCard = characterCardManager.findCharacterCardByName(proxySenderName!!)
-                    if (characterCard != null) {
-                        preferencesManager.getAiAvatarForCharacterCardFlow(characterCard.id)
-                    } else {
-                        flowOf(themeSnapshot.customAiAvatarUri)
-                    }
-                }
-            } catch (_: Exception) {
-                flowOf(themeSnapshot.customAiAvatarUri)
-            }
-        } else {
-            flowOf(themeSnapshot.customAiAvatarUri)
-        }
-    }.collectAsState(initial = null)
+    val proxyAvatarUri = rememberRoleAvatar(proxySenderName, themeSnapshot.customAiAvatarUri)
 
     val avatarUri = remember(customUserAvatarUri, globalUserAvatarUri, proxyAvatarUri, isProxySender) {
         when {

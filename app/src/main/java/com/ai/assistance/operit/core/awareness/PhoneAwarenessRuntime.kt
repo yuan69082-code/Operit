@@ -42,6 +42,14 @@ object PhoneAwarenessRuntime {
         var lastCapture = 0L
         var lastPrune = 0L
         var captureJob: Job? = null
+        // This runtime owns its status text. Unchanged two-second polls must not parse event history.
+        var publishedStatus: String? = null
+        fun publishStatus(message: String) {
+            if (publishedStatus == message) return
+            store.status(message)
+            publishedStatus = message
+        }
+
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (store.enabled) intent.action?.let { signals.trySend(it to System.currentTimeMillis()) }
@@ -75,7 +83,7 @@ object PhoneAwarenessRuntime {
                     if (!store.enabled) {
                         if (active) {
                             captureJob?.cancelAndJoin(); presence = PhonePresence(); store.discardPending()
-                            store.status("手机感知已关闭")
+                            publishStatus("手机感知已关闭")
                         }
                         active = false
                         while (signals.tryReceive().isSuccess) { }
@@ -166,7 +174,7 @@ object PhoneAwarenessRuntime {
                         if (!locked && interactive) resumedWhileLocked?.let { pkg -> presence.resume(pkg, now).forEach { record(it) } }
                         resumedWhileLocked = null
                     }
-                    store.status(when {
+                    publishStatus(when {
                         usageError != null -> "亮灭屏仍在记录；应用记录中断：$usageError"
                         hasUsage -> "正在记录亮灭屏、锁定和应用进出；仅在后台服务运行期间有效"
                         else -> "正在记录亮灭屏和锁定；请开通使用情况访问以记录应用进出"
@@ -185,7 +193,7 @@ object PhoneAwarenessRuntime {
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) {
                     AppLogger.e("PhoneAwareness", "手机观察未完成", failure)
-                    store.status("观察中断：${failure.message.orEmpty().take(180)}")
+                    publishStatus("观察中断：${failure.message.orEmpty().take(180)}")
                     // A service/query gap is not a measured visit. Do not fabricate its duration.
                     presence = PhonePresence(); resumedWhileLocked = null; cursor = System.currentTimeMillis()
                 }
@@ -194,7 +202,7 @@ object PhoneAwarenessRuntime {
         } finally {
             withContext(NonCancellable) {
                 captureJob?.cancelAndJoin()
-                store.status("观察服务已停止；停止期间的状态未采集")
+                publishStatus("观察服务已停止；停止期间的状态未采集")
                 if (registered) app.unregisterReceiver(receiver)
                 signals.close(); running = false
             }
