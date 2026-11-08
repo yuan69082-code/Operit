@@ -49,6 +49,10 @@ class ResponseReaderIsolationTest {
         try {
             MessageProcessingDelegate.collectResponseReaders { throw cancelled }
             fail("cancellation must propagate")
-        } catch (actual: CancellationException) { assertSame(cancelled, actual) }
+        } catch (actual: CancellationException) {
+            // Coroutine stack-trace recovery may copy the exception across a suspension point.
+            // The contract is propagated cancellation, not referential identity of the Throwable.
+            assertEquals(cancelled.message, actual.message)
+        }
     }
 }
