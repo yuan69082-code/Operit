@@ -48,9 +48,9 @@ class CompanionStore(context: Context) {
 
     // Last committed tree per scope. update() mutates it in place instead of re-parsing the whole
     // file every time (internal state reached 36MB and was parsed twice per tool call).
-    private val cache = ConcurrentHashMap<String, JSONObject>()
     fun update(scope: String, change: (JSONObject) -> Unit): JSONObject = synchronized(lock(scope)) {
-        val data = cache.remove(scope) ?: read(scope)
+        val path = File(root, key(scope)).absolutePath
+        val data = cache.remove(path) ?: read(scope)
         change(data)
         val target = file(scope)
         val out = target.startWrite()
@@ -63,7 +63,7 @@ class CompanionStore(context: Context) {
         }
         // Only a fully written tree is cached; a failed change leaves the cache empty and the next
         // update re-reads the last good file.
-        cache[scope] = data
+        cache[path] = data
         data
     }
     /** Append overflow rows to a per-scope JSON-lines archive. Never rewrites old archive lines. */
@@ -213,5 +213,10 @@ class CompanionStore(context: Context) {
         check(!target.exists() || target.delete()) { "资料已更新，但旧文件清理失败。" }
     }
 
-    companion object { private val locks = ConcurrentHashMap<String, Any>() }
+    companion object {
+        private val locks = ConcurrentHashMap<String, Any>()
+        // Shared like locks, keyed by file path: a per-instance cache would let a stale copy
+        // overwrite a newer write made through another CompanionStore instance.
+        private val cache = ConcurrentHashMap<String, JSONObject>()
+    }
 }
