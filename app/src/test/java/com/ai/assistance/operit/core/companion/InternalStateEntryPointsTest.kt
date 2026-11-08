@@ -43,7 +43,7 @@ class InternalStateEntryPointsTest {
             .putBoolean("internal_state:$role", true).putBoolean("internal_state:$other", true).commit()
         states = InternalStateStore(context)
         suspend fun chat(owner: String): String {
-            val history = ChatHistory(title = "状态入口测试", characterCardId = owner)
+            val history = ChatHistory(title = "状态入口测试", messages = emptyList(), characterCardId = owner)
             ChatHistoryManager.getInstance(context).saveChatHistory(history)
             return history.id
         }

@@ -50,7 +50,7 @@ object InternalStateSelection {
     ): Result {
         require(detailCharacters >= 0)
         // snapshot can instantiate an untouched dimension; preview/selection must remain pure.
-        val view = JSONObject(data.toString())
+        val view = InternalStateDocument.copy(data)
         val states = InternalStateEngine.snapshot(view, chat, now)
         val byId = states.associateBy { it.getString("id") }
         val definitions = InternalStateEngine.definitions(view)
