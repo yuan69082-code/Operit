@@ -4,6 +4,7 @@ import android.content.Context
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.util.AppLogger
+import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,9 +42,15 @@ class OpenAiToolCallHistoryTest {
     }
 
     @Test
-    fun `connection test tool call probe answers the call it opened`() {
-        val messages =
-            buildMessages(ModelConfigConnectionTester.buildToolCallProbeHistory("echo"))
+    fun `connection test tool call probe answers the call it received`() = runBlocking {
+        val requests = mutableListOf<List<PromptTurn>>()
+        val outcome = ModelConfigConnectionTester.runToolCallProbe { history ->
+            requests.add(history)
+            if (requests.size == 1) toolCall("echo", "text" to "ping") else "ping"
+        }
+        assertEquals(ModelConnectionTestOutcome.PASSED, outcome)
+        assertEquals(2, requests.size)
+        val messages = buildMessages(requests.last())
 
         assertEquals(
             listOf("system", "user", "assistant", "tool"),
@@ -54,7 +61,7 @@ class OpenAiToolCallHistoryTest {
             messages.at(2).getJSONArray("tool_calls").getJSONObject(0).getString("id"),
             messages.at(3).getString("tool_call_id")
         )
-        assertEquals("pong", messages.at(3).getString("content"))
+        assertEquals("ping", messages.at(3).getString("content"))
     }
 
     @Test
@@ -175,9 +182,18 @@ class OpenAiToolCallHistoryTest {
     @Test
     fun `assistant tool call message omits empty content`() {
         val messages =
-            buildMessages(ModelConfigConnectionTester.buildToolCallProbeHistory("echo"))
+            buildMessages(
+                listOf(
+                    PromptTurn(kind = PromptTurnKind.USER, content = "Call echo with ping."),
+                    PromptTurn(
+                        kind = PromptTurnKind.ASSISTANT,
+                        content = toolCall("echo", "text" to "ping")
+                    ),
+                    PromptTurn(kind = PromptTurnKind.TOOL_RESULT, content = toolResult("echo", "ping"))
+                )
+            )
 
-        assertFalse(messages.at(2).has("content"))
+        assertFalse(messages.at(1).has("content"))
     }
 
     @Test

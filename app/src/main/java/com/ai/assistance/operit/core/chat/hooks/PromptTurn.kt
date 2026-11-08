@@ -41,6 +41,10 @@ data class PromptTurn(
             }
 
     companion object {
+        // Request-only provenance of persisted assistant messages; never sent as prompt text.
+        const val SOURCE_PROVIDER_METADATA_KEY = "source_provider"
+        const val SOURCE_MODEL_METADATA_KEY = "source_model"
+
         fun fromRole(
             role: String,
             content: String,

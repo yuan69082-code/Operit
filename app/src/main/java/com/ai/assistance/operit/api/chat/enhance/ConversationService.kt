@@ -712,7 +712,10 @@ class ConversationService(
                     val xmlTags = splitXmlTag(content)
                     if (xmlTags.isNotEmpty()) {
                         // Process the message with tool results
-                        processChatMessageWithTools(content, xmlTags, preparedHistory, index, effectiveChatHistory.size)
+                        processChatMessageWithTools(
+                            content, xmlTags, preparedHistory, index, effectiveChatHistory.size,
+                            message.metadata
+                        )
                     } else {
                         // Add the message as is
                         preparedHistory.add(message)
@@ -824,14 +827,16 @@ class ConversationService(
             xmlTags: List<List<String>>,
             conversationHistory: MutableList<PromptTurn>,
             messageIndex: Int,
-            totalMessages: Int
+            totalMessages: Int,
+            messageMetadata: Map<String, Any?> = emptyMap()
     ) {
         if (xmlTags.isEmpty()) {
             // 如果没有XML标签，直接添加为AI消息
             conversationHistory.add(
                 PromptTurn(
                     kind = PromptTurnKind.ASSISTANT,
-                    content = content
+                    content = content,
+                    metadata = messageMetadata
                 )
             )
             return
@@ -934,7 +939,11 @@ class ConversationService(
         }
 
         // 将合并后的消息添加到对话历史
-        conversationHistory.addAll(mergedSegments)
+        // Tool calls, their signature meta and results are split into separate turns. They must
+        // retain the source of the original message before provider-specific history compilation.
+        conversationHistory.addAll(mergedSegments.map { segment ->
+            segment.copy(metadata = messageMetadata + segment.metadata)
+        })
     }
 
     /** Data class for search-replace operations, used for JSON deserialization. */
