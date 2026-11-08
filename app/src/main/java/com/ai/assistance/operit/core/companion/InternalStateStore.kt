@@ -13,6 +13,11 @@ import java.util.UUID
 
 /** Uses CompanionStore's atomic transaction/lock and assistant ownership. No second todo or thought store. */
 class InternalStateStore(private val context: Context) {
+    companion object {
+        private val WRITER = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "internal-state-writer").apply { isDaemon = true } }
+        // name -> (compact when above, keep after compaction)
+        private val LIMITS = mapOf("events" to (4000 to 3000), "experiences" to (800 to 600), "semantic_reports" to (400 to 300))
+    }
     private val store = CompanionStore(context)
     private fun key(role: String) = "internal-state:$role"
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
@@ -31,15 +36,33 @@ class InternalStateStore(private val context: Context) {
 
     fun event(role: String?, chat: String, id: String, source: String, detail: String, contactAt: Long? = null) {
         if (!enabled(role)) return
+        val overflow = mutableMapOf<String, List<JSONObject>>()
         store.update(key(requireNotNull(role))) {
+            compact(it, overflow)
             // These facts are interpreted in the main generation. Replaying old keyword rules
             // here would assign a second, contradictory subjective meaning before that report.
             InternalStateEngine.event(it, id, source, chat, detail, System.currentTimeMillis(),
                 applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"), contactAt = contactAt)
         }
+        overflow.forEach { (name, rows) -> store.archive("${key(role)}:$name", rows) }
+    }
+    /** Keep the hot file bounded. Oldest rows move to the archive in order; nothing is dropped. */
+    private fun compact(data: JSONObject, out: MutableMap<String, List<JSONObject>>) {
+        LIMITS.forEach { (name, limit) ->
+            val array = data.optJSONArray(name) ?: return@forEach
+            if (array.length() <= limit.first) return@forEach
+            val cut = array.length() - limit.second
+            out[name] = (0 until cut).map { array.getJSONObject(it) }
+            data.put(name, JSONArray((cut until array.length()).map { array.get(it) }))
+        }
     }
 
-    suspend fun message(chat: String, message: ChatMessage) {
+    // Persistence runs on the IO pool: these were called on the main looper and caused the ANRs
+    // in anr_reports (CompanionStore.read under InternalStateStore.message).
+    suspend fun message(chat: String, message: ChatMessage) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        messageNow(chat, message)
+    }
+    private suspend fun messageNow(chat: String, message: ChatMessage) {
         if (message.isVariantPreview || message.displayMode != ChatMessageDisplayMode.NORMAL || message.content.isBlank()) return
         if (message.sender !in setOf("user", "ai", "assistant")) return
         if (message.sender != "user" && message.contentStream != null) return
@@ -65,6 +88,11 @@ class InternalStateStore(private val context: Context) {
     fun tool(role: String?, chat: String?, name: String, action: String?, status: String?, success: Boolean) {
         if (chat == null || !enabled(role) || name == "companion_internal_state") return
         val id = "tool:${UUID.randomUUID()}"
+        // One ordered background writer: tool calls no longer block the caller thread.
+        WRITER.execute { runCatching { toolNow(role, chat, id, name, action, status, success) }
+            .onFailure { AppLogger.e("InternalState", "tool event failed", it) } }
+    }
+    private fun toolNow(role: String?, chat: String, id: String, name: String, action: String?, status: String?, success: Boolean) {
         event(role, chat, id, if (success) "tool_success" else "tool_failure", "$name/${action.orEmpty()}")
         val source = InternalStateEvents.toolSource(name, action, status, success)
         if (source != null) event(role, chat, "$id:$source", source, "$name/${action.orEmpty()}/${status.orEmpty()}")

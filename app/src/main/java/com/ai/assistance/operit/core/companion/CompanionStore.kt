@@ -46,8 +46,11 @@ class CompanionStore(context: Context) {
         else JSONObject(source.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
     }
 
+    // Last committed tree per scope. update() mutates it in place instead of re-parsing the whole
+    // file every time (internal state reached 36MB and was parsed twice per tool call).
+    private val cache = ConcurrentHashMap<String, JSONObject>()
     fun update(scope: String, change: (JSONObject) -> Unit): JSONObject = synchronized(lock(scope)) {
-        val data = read(scope)
+        val data = cache.remove(scope) ?: read(scope)
         change(data)
         val target = file(scope)
         val out = target.startWrite()
@@ -58,7 +61,18 @@ class CompanionStore(context: Context) {
             target.failWrite(out)
             throw failure
         }
+        // Only a fully written tree is cached; a failed change leaves the cache empty and the next
+        // update re-reads the last good file.
+        cache[scope] = data
         data
+    }
+    /** Append overflow rows to a per-scope JSON-lines archive. Never rewrites old archive lines. */
+    fun archive(scope: String, rows: List<JSONObject>) {
+        if (rows.isEmpty()) return
+        synchronized(lock("archive:$scope")) {
+            File(root, key(scope) + ".archive.jsonl").appendText(
+                rows.joinToString("\n", postfix = "\n") { it.toString() }, Charsets.UTF_8)
+        }
     }
 
     fun setMemory(chatId: String, action: String, id: String, text: String) {
