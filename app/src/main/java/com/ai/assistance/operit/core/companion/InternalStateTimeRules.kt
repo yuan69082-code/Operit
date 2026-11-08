@@ -194,11 +194,14 @@ object InternalStateTimeRules {
     }
 
     private fun contactTimes(data: JSONObject, definition: JSONObject, chat: String, now: Long): List<Long> =
-        InternalStateEngine.rows(data, "events").asSequence()
+        (InternalStateEngine.rows(data, "events").asSequence()
             .filter { it.getString("source") == "user_message" &&
                 (it.has("contact_at") || it.getString("id").startsWith("message:")) &&
                 (definition.getString("scope") == "global" || it.getString("chat") == chat) }
-            .map { if (it.has("contact_at")) it.getLong("contact_at") else it.getLong("at") }
+            .map { if (it.has("contact_at")) it.getLong("contact_at") else it.getLong("at") } +
+            InternalStateEngine.rows(data, "archived_contacts").asSequence()
+                .filter { definition.getString("scope") == "global" || it.getString("chat") == chat }
+                .map { it.getLong("at") })
             .filter { it <= now }.distinct().sorted().toList()
 
     private fun windowMillis(rules: JSONObject): Long {

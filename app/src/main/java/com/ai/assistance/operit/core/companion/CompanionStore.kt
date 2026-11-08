@@ -43,36 +43,69 @@ class CompanionStore(context: Context) {
     fun read(scope: String): JSONObject = synchronized(lock(scope)) {
         val source = file(scope)
         if (!source.baseFile.exists() && !File(source.baseFile.path + ".bak").exists()) JSONObject()
-        else JSONObject(source.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
+        else if (scope.startsWith("internal-state:")) {
+            var moved = false
+            var archivedSequence = 0L
+            val data = history(scope).use { archive ->
+                val state = source.openRead().bufferedReader(Charsets.UTF_8).use { reader ->
+                    InternalStateHistory.read(reader) { kind, row ->
+                        archive.put(kind, row)
+                        moved = true
+                        if (kind == "events") archivedSequence = maxOf(archivedSequence, row.getLong("sequence"))
+                    }
+                }
+                state.put("archived_event_sequence", maxOf(state.optLong("archived_event_sequence"), archivedSequence))
+                attachContacts(state, archive)
+                archive.commit()
+                state
+            }
+            // The old AtomicFile remains intact until all archived rows are durable.
+            if (moved) write(scope, data)
+            data
+        } else JSONObject(source.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
     }
 
-    // Last committed tree per scope. update() mutates it in place instead of re-parsing the whole
-    // file every time (internal state reached 36MB and was parsed twice per tool call).
     fun update(scope: String, change: (JSONObject) -> Unit): JSONObject = synchronized(lock(scope)) {
-        val path = File(root, key(scope)).absolutePath
-        val data = cache.remove(path) ?: read(scope)
+        // A detached bounded document avoids mutable cache aliases and retaining every role in RAM.
+        val data = read(scope)
         change(data)
+        if (scope.startsWith("internal-state:")) history(scope).use { archive ->
+            InternalStateHistory.compact(data) { kind, row ->
+                archive.put(kind, row)
+                if (kind == "events") data.put("archived_event_sequence",
+                    maxOf(data.optLong("archived_event_sequence"), row.getLong("sequence")))
+            }
+            attachContacts(data, archive)
+            archive.commit()
+        }
+        write(scope, data)
+        data
+    }
+
+    private fun write(scope: String, data: JSONObject) {
         val target = file(scope)
         val out = target.startWrite()
         try {
-            out.write(data.toString().toByteArray(Charsets.UTF_8))
+            InternalStateHistory.write(data, out.writer(Charsets.UTF_8).buffered())
             target.finishWrite(out)
         } catch (failure: Throwable) {
             target.failWrite(out)
             throw failure
         }
-        // Only a fully written tree is cached; a failed change leaves the cache empty and the next
-        // update re-reads the last good file.
-        cache[path] = data
-        data
     }
-    /** Append overflow rows to a per-scope JSON-lines archive. Never rewrites old archive lines. */
-    fun archive(scope: String, rows: List<JSONObject>) {
-        if (rows.isEmpty()) return
-        synchronized(lock("archive:$scope")) {
-            File(root, key(scope) + ".archive.jsonl").appendText(
-                rows.joinToString("\n", postfix = "\n") { it.toString() }, Charsets.UTF_8)
-        }
+
+    private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
+
+    internal fun archivedStateRow(scope: String, kind: String, id: String): JSONObject? =
+        synchronized(lock(scope)) { history(scope).use { it.find(kind, id) } }
+
+    internal fun archivedStateEvents(scope: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> =
+        synchronized(lock(scope)) { history(scope).use { it.page("events", offset, limit, hotIds) } }
+
+    private fun attachContacts(data: JSONObject, archive: InternalStateArchive) {
+        val start = InternalStateEngine.rows(data, "instances").minOfOrNull { it.getLong("at") }
+            ?: System.currentTimeMillis()
+        data.put("archived_contacts", archive.contacts(start))
     }
 
     fun setMemory(chatId: String, action: String, id: String, text: String) {
@@ -215,8 +248,5 @@ class CompanionStore(context: Context) {
 
     companion object {
         private val locks = ConcurrentHashMap<String, Any>()
-        // Shared like locks, keyed by file path: a per-instance cache would let a stale copy
-        // overwrite a newer write made through another CompanionStore instance.
-        private val cache = ConcurrentHashMap<String, JSONObject>()
     }
 }
