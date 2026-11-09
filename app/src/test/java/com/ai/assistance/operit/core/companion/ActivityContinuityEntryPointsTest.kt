@@ -14,6 +14,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
@@ -30,7 +31,9 @@ class ActivityContinuityEntryPointsTest {
     private lateinit var second: String
     private lateinit var foreign: String
     private lateinit var history: ChatHistoryManager
+    private lateinit var observerScope: CoroutineScope
     @Before fun setup(): Unit = runBlocking {
+        observerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         context = RuntimeEnvironment.getApplication()
         val cards = CharacterCardManager.getInstance(context)
         role = cards.createCharacterCard(CharacterCard("", "主体", characterSetting = "初始"))
@@ -42,7 +45,12 @@ class ActivityContinuityEntryPointsTest {
         }
         chat = window(role); second = window(role); foreign = window(other)
     }
-    private fun delegate(scope: CoroutineScope) = ChatHistoryDelegate(context, scope,
+    @After fun stopObservers(): Unit = runBlocking {
+        observerScope.coroutineContext[Job]!!.cancelAndJoin()
+    }
+    // Production UI observers are intentionally long-lived. Own them outside each finite
+    // test coroutine and cancel/join them at teardown instead of waiting for Flow completion.
+    private fun delegate() = ChatHistoryDelegate(context, observerScope,
         onTokenStatisticsLoaded = { _, _, _, _ -> }, getEnhancedAiService = { null })
     private suspend fun rejects(block: suspend () -> Unit) {
         try { block(); fail("expected failure") } catch (_: IllegalArgumentException) { } catch (_: IllegalStateException) { }
@@ -74,7 +82,7 @@ class ActivityContinuityEntryPointsTest {
     }
 
     @Test fun backgroundReplyPersistsAndEmptyEarlierReplyDoesNotHideSupplement(): Unit = runBlocking {
-        val d = delegate(this)
+        val d = delegate()
         d.addMessageToChat(ChatMessage(sender = "user", content = "13:27 那句话", timestamp = 100), chat)
         d.addMessageToChat(ChatMessage(sender = "ai", content = "", timestamp = 101), chat)
         val message = ChatMessage(sender = "ai", roleName = "主体", content = "补答已真实保存")
@@ -86,13 +94,13 @@ class ActivityContinuityEntryPointsTest {
         val next = CompanionContext.compose(context, second, role, JSONObject(), false, "继续")
         assertTrue(next.state.contains("补答已真实保存")); assertTrue(next.state.contains("reply_saved"))
         // New delegate/repository reads persistent rows rather than reusing an old UI list.
-        assertTrue(delegate(this).getRuntimeChatHistory(chat).any { it.timestamp == saved.message.timestamp && it.content == message.content })
+        assertTrue(delegate().getRuntimeChatHistory(chat).any { it.timestamp == saved.message.timestamp && it.content == message.content })
         rejects { d.addWakeMessageToChat(message.copy(content = "不能以新文字重试同一次发送"), chat, role, "study:stable:public") }
         assertEquals(1, history.recentAssistantActivity(role).count { it.content == "补答已真实保存" })
     }
 
     @Test fun activityOriginalsArePagedAndPrivateProjectionDoesNotEnterGroups(): Unit = runBlocking {
-        val d = delegate(this)
+        val d = delegate()
         d.addWakeMessageToChat(ChatMessage(sender = "ai", content = "私聊内容".repeat(1200)), chat, role, "long-reply")
         val activity = history.recentAssistantActivity(role).first()
         assertEquals(1200, activity.content.length)
@@ -129,7 +137,7 @@ class ActivityContinuityEntryPointsTest {
     }
 
     @Test fun concurrentChatAndStudyUseActualOwnerAndDoNotLoseMessages(): Unit = runBlocking {
-        val d = delegate(this)
+        val d = delegate()
         val store = StudyStore(context, role)
         val book = store.create("书", "writing", "daily", "user").getString("id")
         val writes = listOf(
