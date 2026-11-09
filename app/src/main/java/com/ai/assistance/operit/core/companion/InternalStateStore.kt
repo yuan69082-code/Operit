@@ -298,7 +298,8 @@ class InternalStateStore(private val context: Context) {
     /** Preview reads a detached time projection. Only an actual request records input and rotation. */
     fun prepare(actor: String, chat: String, persist: Boolean, wake: Boolean = false,
                 capabilities: JSONObject = JSONObject(), currentInput: String = "", groupInput: Boolean = false,
-                innerSources: Map<String, String> = emptyMap(), innerObjects: Set<String> = emptySet()): RuntimeContextSections {
+                innerSources: Map<String, String> = emptyMap(), innerObjects: Set<String> = emptySet(),
+                hostMaterials: List<JSONObject> = emptyList(), retrievedMaterials: List<JSONObject> = emptyList()): RuntimeContextSections {
         require(actor.isNotBlank() && chat.isNotBlank())
         check(enabled(actor)) { "内部状态未开启" }
         val now = System.currentTimeMillis()
@@ -329,12 +330,22 @@ class InternalStateStore(private val context: Context) {
                     innerVersions = InnerStructure.versions(data), innerPending = InnerStructure.pendingBindings(data),
                     innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
-            val payload = selected.payload
+            var payload = selected.payload
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
                 .put("category_events", CategoryEvents.material(data, persist))
-                .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data))
+                .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data, persist, chat, now))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
+                .put("host_materials", JSONArray(hostMaterials))
+                .put("retrieved_materials", JSONArray(if (groupInput) emptyList<JSONObject>() else retrievedMaterials))
+            if (frame != null) payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
+                .put("subject_id", actor).put("state_version", frame.stateVersion).put("at", frame.at)
+                .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
+                .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
+                    .put("at", now).put("text_location", "current_request_input"))
+            payload = SubjectMaterialBudget.select(payload,
+                capabilities.optInt("subject_material_tokens", SubjectMaterialBudget.DEFAULT_TOKENS)
+                    .coerceIn(SubjectMaterialBudget.DEFAULT_TOKENS, SubjectMaterialBudget.MAX_TOKENS))
             if (!groupInput && frame != null) {
                 val members = mutableMapOf<String, Int>()
                 val inner = payload.getJSONObject("inner_structure")
@@ -350,21 +361,28 @@ class InternalStateStore(private val context: Context) {
                     val row = episodes.getJSONObject(i)
                     members["episode:" + row.getString("id")] = row.getInt("version")
                 }
-                frame = frame.copy(interactionMembers = members)
+                val numeric = payload.getJSONArray("states")
+                for (i in 0 until numeric.length()) {
+                    val row = numeric.getJSONObject(i)
+                    members["state:" + row.getString("id")] = row.getInt("version")
+                }
+                val materials = payload.getJSONArray("retrieved_materials")
+                frame = frame.copy(interactionMembers = members, materialSources = (0 until materials.length())
+                    .map { materials.getJSONObject(it) }.filter { it.optString("status") == "retrieved" }
+                    .associate { it.getString("id") to it.toString() })
             }
             if (frame != null) {
-                payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
-                    .put("subject_id", actor).put("state_version", frame.stateVersion)
-                    .put("at", frame.at).put("available_event_ids", JSONArray(frame.eventIds.sorted()))
-                    .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
-                        .put("at", now).put("text_location", "current_request_input"))
+                val changes = payload.getJSONArray("important_changes")
+                frame = frame.copy(eventIds = setOfNotNull(inputEventId) +
+                    (0 until changes.length()).map { changes.getJSONObject(it).getString("id") })
                 data.put("selection_cursor", selected.nextCursor)
                 // The old selector's cursor wraps at its own item count; sharing that cursor
                 // would starve inner records beyond that count. This is selection, not growth.
                 innerRoot.put("selection_cursor", (innerCursor + 1) % 128)
                 data.put("last_selection", JSONObject().put("frame_id", frame.id).put("at", now)
                     .put("chat", chat).put("selected_ids", JSONArray(selected.selectedIds))
-                    .put("decisions", selected.decisions).put("status", "PREPARED_FOR_SEND"))
+                    .put("decisions", selected.decisions).put("material_budget", payload.getJSONObject("material_budget"))
+                    .put("status", "PREPARED_FOR_SEND"))
                 // Sizes only: do not log private state, input text, or candidate descriptions.
                 AppLogger.d("InternalState", "Prepared subject=$actor chat=$chat frame=${frame.id} version=${frame.stateVersion} semantic=${frame.revision}; chars=${payload.toString().length}, " +
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")

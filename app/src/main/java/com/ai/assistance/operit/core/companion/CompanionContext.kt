@@ -51,10 +51,14 @@ object CompanionContext {
         // Compose each source once so observing the state does not acknowledge events twice.
         val instructions = StringBuilder("\n[软件状态解读规则，仅作为内部上下文，不复述或朗读字段名]\n")
         val state = StringBuilder("\n<operit_state>\n")
+        val hostMaterials = mutableListOf<JSONObject>()
+        val retrievedMaterials = mutableListOf<JSONObject>()
         var internalStateFrame: InternalStateFrame? = null
         fun appendSections(sections: RuntimeContextSections) {
             instructions.append(sections.instructions)
-            state.append(sections.state)
+            if (internalEnabled && sections.state.isNotBlank()) hostMaterials.add(JSONObject()
+                .put("source", "host_context").put("text", sections.state))
+            else state.append(sections.state)
             sections.internalStateFrame?.let { frame ->
                 check(internalStateFrame == null || internalStateFrame == frame) { "一次请求不能混用内部状态帧" }
                 internalStateFrame = frame
@@ -80,12 +84,38 @@ object CompanionContext {
             // No private cross-window material enters a group or another assistant's request.
             if (metadata?.characterCardId == roleId && metadata.characterGroupId.isNullOrBlank()) {
                 instructions.append("[近期实际活动]来自已保存记录，非模型自述。saved不代表用户已读；空回复不能否定其后已保存的补答。节选不完整，companion_room message用details.message_id和offset按页查聊天原文；不据此猜测新的经历。companion_study activity可查近期书房事实，note用id=书目ID/details.note_id=回复ID读原文；notes可追溯批注线程。\n")
-                state.append("\n[近期实际活动]\n").append(JSONObject()
+                val activity = JSONObject()
                     .put("chat", org.json.JSONArray(history.recentAssistantActivity(roleId).map { row ->
                         JSONObject().put("chat_id", row.chatId).put("message_id", row.messageId).put("timestamp", row.timestamp)
                             .put("author", if (row.sender == "user") "user" else roleId).put("excerpt", row.content)
                             .put("state", if (row.completedAt > 0) "reply_saved" else "persisted_message")
-                    })).put("study", StudyStore(context, roleId).recentActivity()).toString()).append("\n")
+                    })).put("study", StudyStore(context, roleId).recentActivity())
+                if (!internalEnabled) state.append("\n[近期实际活动]\n").append(activity).append("\n")
+                else {
+                    val chats = activity.getJSONArray("chat")
+                    for (i in 0 until chats.length()) {
+                        val row = chats.getJSONObject(i)
+                        retrievedMaterials.add(JSONObject().put("id", "material:chat:" + row.getLong("message_id"))
+                            .put("type", "saved_chat_excerpt").put("owner", roleId).put("author", row.get("author"))
+                            .put("at", row.getLong("timestamp")).put("text", row.getString("excerpt"))
+                            .put("status", "retrieved").put("save_state", row.getString("state"))
+                            .put("locator", JSONObject().put("tool", "companion_room message")
+                                .put("chat_id", row.getString("chat_id")).put("message_id", row.get("message_id"))))
+                    }
+                    val study = activity.getJSONObject("study")
+                    val notes = study.getJSONArray("notes")
+                    for (i in 0 until notes.length()) {
+                        val n = notes.getJSONObject(i)
+                        retrievedMaterials.add(JSONObject().put("id", "material:study:" + n.getString("reply_id"))
+                            .put("type", "saved_study_reply").put("owner", roleId).put("author", n.getString("author"))
+                            .put("at", n.getLong("at")).put("text", n.getString("text_excerpt"))
+                            .put("status", "retrieved").put("save_state", "reply_saved")
+                            .put("locator", JSONObject().put("tool", "companion_study note")
+                                .put("book", n.getString("book")).put("reply_id", n.getString("reply_id"))
+                                .put("reply_to", n.opt("reply_to"))))
+                    }
+                    hostMaterials.add(JSONObject().put("source", "study_dispatch").put("content", study.getJSONArray("dispatch")))
+                }
             }
         }
         appendSections(com.ai.assistance.operit.core.awareness.SoftwareAwareness.promptSections(context, chatId, roleId, recordSnapshot))
@@ -137,10 +167,18 @@ object CompanionContext {
         val internalSections = withContext(Dispatchers.IO) {
             if (internalEnabled) {
                 val actor = requireNotNull(roleId)
-                InnerStructureContext.prepare(context, actor, chatId, recordSnapshot, wake, capabilities, currentInput)
+                hostMaterials.add(JSONObject().put("source", "host_state").put("text", state.toString()))
+                InnerStructureContext.prepare(context, actor, chatId, recordSnapshot, wake, capabilities, currentInput,
+                    hostMaterials, retrievedMaterials)
             } else RuntimeContextSections()
         }
-        appendSections(internalSections)
+        if (internalEnabled) {
+            // Exactly one serialized material block: do not append unbudgeted copies afterwards.
+            instructions.append(internalSections.instructions)
+            state.setLength(0)
+            state.append("\n<operit_state>\n").append(internalSections.state)
+            internalStateFrame = internalSections.internalStateFrame
+        }
         state.append("\n</operit_state>\n")
         RuntimeContextSections(instructions.toString(), state.toString(), internalStateFrame)
     }

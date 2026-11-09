@@ -20,7 +20,8 @@ data class InternalStateFrame(
     val innerSources: Map<String, String> = emptyMap(),
     val innerObjects: Set<String> = emptySet(),
     val innerGuard: String = "",
-    val interactionMembers: Map<String, Int> = emptyMap()
+    val interactionMembers: Map<String, Int> = emptyMap(),
+    val materialSources: Map<String, String> = emptyMap()
 )
 
 /** Applies one subjective report atomically. This does not replay the source event or choose actions. */
@@ -44,6 +45,8 @@ object InternalStateReports {
             .put("inner_sources", JSONObject(frame.innerSources.mapValues { InnerStructure.hash(it.value) }))
             .put("inner_objects", JSONArray(frame.innerObjects.sorted()))
         if (frame.interactionMembers.isNotEmpty()) frameIdentity.put("interaction_members", JSONObject(frame.interactionMembers))
+        if (frame.materialSources.isNotEmpty()) frameIdentity.put("material_sources",
+            JSONObject(frame.materialSources.mapValues { InnerStructure.hash(it.value) }))
         val frameDigest = digest(frameIdentity)
 
         // A transport retry is identified before checking the newer semantic revision. A changed
@@ -198,7 +201,8 @@ object InternalStateReports {
         // in-flight report: no semantic state has changed merely because the model stayed quiet.
         val innerChanged = InnerStructure.apply(next, frame, if (report.has("inner")) report.getJSONArray("inner") else JSONArray(), now)
         val episodesChanged = CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
-        val unionsChanged = InnerInteractions.apply(data, next, frame, report.optJSONArray("unions") ?: JSONArray(), now)
+        val unionsChanged = InnerInteractions.apply(data, next, frame,
+            if (report.has("unions")) report.getJSONArray("unions") else JSONArray(), now)
         val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !innerChanged && !episodesChanged && !unionsChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)
         val receipt = JSONObject().put("frame_id", frame.id).put("revision", nextRevision)

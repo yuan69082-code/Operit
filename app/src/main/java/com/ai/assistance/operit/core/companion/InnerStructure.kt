@@ -112,7 +112,12 @@ internal object InnerStructure {
                     require(proposal.getInt("expected_version") == (old?.getInt("version") ?: 0)) { "候选前态已变化，请重新提出明确变化" }
                     require(hash(proposal.opt("before")) == hash(old?.getJSONObject("content"))) { "候选前态不对应" }
                     proposal.getJSONObject("bindings").keys().forEach { ref ->
-                        require(hash(source(data, frame, ref)) == hash(proposal.getJSONObject("bindings").getJSONObject(ref))) { "候选原始来源已变化或不可用" }
+                        val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
+                        if (binding.optString("source") == "retrieved_material") {
+                            // This is the actual excerpt received with the original proposal,
+                            // preserved as provenance; a later memory edit is not the old source.
+                            require(hash(binding.getJSONObject("snapshot")) == binding.getString("hash"))
+                        } else require(hash(source(data, frame, ref)) == hash(binding)) { "候选原始来源已变化或不可用" }
                     }
                     validateContent(content, records, data, frame)
                     if (content.getString("family") in identityFamilies) {
@@ -157,6 +162,14 @@ internal object InnerStructure {
             require(raw.contains(text(anchor, "quote", 600))) { "人格依据引用不在原文中" }
             text(anchor, "interpretation", 600)
             if (proposal.getString("origin") == "initial_configuration" && ref.startsWith("config:")) continue
+            val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
+            if (binding.optString("source") == "retrieved_material") {
+                val snapshot = binding.getJSONObject("snapshot")
+                require(snapshot.optLong("at", Long.MAX_VALUE) < proposal.getLong("source_frame_at"))
+                // A prior material may inform development; it remains attributed material,
+                // not a claim that a memory summary is an original personal experience.
+                continue
+            }
             val event = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }
             require(event != null && event.getLong("at") < proposal.getLong("source_frame_at") &&
                 event.getString("source") !in setOf("state_report", "time")) { "当前断言或状态变化不能冒充先前发展依据" }
@@ -254,6 +267,14 @@ internal object InnerStructure {
     }
 
     internal fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
+        frame.materialSources[ref]?.let { raw ->
+            val material = JSONObject(raw)
+            return JSONObject().put("hash", hash(material)).put("source", "retrieved_material")
+                .put("snapshot", material)
+                .put("locator", material.getJSONObject("locator")).put("type", material.getString("type"))
+                .put("author", material.opt("author") ?: JSONObject.NULL).put("at", material.opt("at") ?: JSONObject.NULL)
+                .put("not_new_occurrence", true)
+        }
         if (ref.startsWith("config:") || ref.startsWith("relation:")) {
             val raw = requireNotNull(frame.innerSources[ref]) { "配置来源未在本轮提供" }
             return JSONObject().put("hash", hash(raw)).put("source", if (ref.startsWith("config:")) "initial_configuration" else "legacy_relation")
@@ -267,7 +288,11 @@ internal object InnerStructure {
     }
 
     private fun sourceText(data: JSONObject, frame: InternalStateFrame, ref: String): String =
-        if (ref.startsWith("config:") || ref.startsWith("relation:")) requireNotNull(frame.innerSources[ref])
+        if (ref in frame.materialSources) JSONObject(frame.materialSources.getValue(ref)).getString("text")
+        else if (ref.startsWith("material:")) pending(data).asSequence()
+            .mapNotNull { it.getJSONObject("bindings").optJSONObject(ref)?.optJSONObject("snapshot") }
+            .first().getString("text")
+        else if (ref.startsWith("config:") || ref.startsWith("relation:")) requireNotNull(frame.innerSources[ref])
         else InternalStateEngine.rows(data, "events").single { it.getString("id") == ref }.let {
             if (it.has("inner_source")) it.getString("inner_source") else it.getString("detail")
         }
