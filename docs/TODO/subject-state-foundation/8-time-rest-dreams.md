@@ -24,6 +24,7 @@
 - 当前头与各版本复用 InternalStateArchive.category_current/category_versions；AtomicFile 只保留有界提交日志。归档事务失败可在下次读取重放索引，报告重复不会造第二段梦。没有复制整个历史计算材料。
 - 私域头按scope/kind/private索引逆向读取，每页SQL LIMIT；即使通用查询省略parent，也绑定真实private分区，避免临时全表排序。独立SQLite查询计划检查使用一万条构造记录，确认SEARCH category_recent且无SCAN/TEMP B-TREE；这不是Android真机性能基准。
 - 备份仍使用 RawSnapshotBackupManager 的完整 files/shared_prefs/databases 路径；companion 内的主体文件、归档和能力产物均包含。恢复 UI 原本要求重启；测试仅模拟 ChatHistoryManager 单例重建，不冒充手机杀进程实测。
+- 全应用快照测试使用独立API29/NATIVE SQLite测试环境，保留真实导出ZIP内会话行、恢复后DAO和正常请求断言。初次失败实际路径指向另一测试的临时目录：仅重建Room仍会被持有旧Context的管理器重开旧目录，不能将此误报为手机资料丢失。导出检查点另修正为实际步进游标，避免懒查询未执行。
 - 时间仍按既有逐实例 at 锚点和有效条件规则计算；重复时间、倒退时间不重复结算，离线正向间隔按规则补算，不另触发模型。无可信外部时间源时，跨设备重启后的正向墙钟跳变无法与真实离线间隔完全区分；未新增网络校时或保活。
 - 求生欲是已采用的细分 need，不挂接旧数值时间引擎；联合、休息、恢复不替它改值。其他状态继续原先各自采用的规则，不统一冻结。
 

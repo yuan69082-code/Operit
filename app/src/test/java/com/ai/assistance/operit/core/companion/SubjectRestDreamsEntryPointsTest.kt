@@ -39,11 +39,6 @@ class SubjectRestDreamsEntryPointsTest {
     private lateinit var handler: AIToolHandler
     @Before fun setup(): Unit = runBlocking {
         context = RuntimeEnvironment.getApplication()
-        // Robolectric reuses application classes while replacing the Context between methods.
-        // A cached Room/DAO would otherwise write another method's temporary data directory,
-        // which the real current-application snapshot correctly does not export.
-        com.ai.assistance.operit.data.db.AppDatabase.closeDatabase()
-        ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "梦测试", characterSetting = "初始参考"))
         InternalStateStore(context).configure(role, true)
         suspend fun window(): String {
@@ -201,6 +196,10 @@ class SubjectRestDreamsEntryPointsTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @SQLiteMode(SQLiteMode.Mode.NATIVE)
+    // A separate SDK sandbox gives this whole-app restore test fresh application classes,
+    // including DataStore delegates and managers which retain Contexts across Robolectric
+    // methods. Resetting Room alone allows an old manager to reopen another test's directory.
+    @Config(sdk = [29], application = Application::class)
     @Test fun realFullSnapshotBackupRestoresDreamAndSubsequentNormalRead(): Unit = runBlocking {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         try {
@@ -208,7 +207,7 @@ class SubjectRestDreamsEntryPointsTest {
             val original = item("dream", id).toString()
             assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             val databasePath = context.getDatabasePath("app_database")
-            val actualPath = com.ai.assistance.operit.data.db.AppDatabase.getDatabase(context).openHelper.writableDatabase.path
+            val actualPath = requireNotNull(com.ai.assistance.operit.data.db.AppDatabase.getDatabase(context).openHelper.writableDatabase.path)
             assertEquals("Room must belong to this test application's storage", databasePath.canonicalPath, java.io.File(actualPath).canonicalPath)
             assertTrue("actual Room file must be present: $actualPath", databasePath.isFile)
             assertEquals("snapshot must include the actual Room directory", java.io.File(context.dataDir, "databases").canonicalFile, databasePath.parentFile!!.canonicalFile)
