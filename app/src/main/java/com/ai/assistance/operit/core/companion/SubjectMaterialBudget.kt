@@ -54,7 +54,7 @@ internal object SubjectMaterialBudget {
         lane(result, "host_materials", "host_materials")
         for (key in listOf("states", "important_changes", "experiences", "thoughts", "candidates", "state_catalog"))
             lane(result, key, key)
-        for (key in listOf("pending", "pending_fragments", "pending_read", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
+        for (key in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
         result.remove("selection")
         inner.put("selection", "Whole records selected under shared token estimate; omitted identity remains authoritative. Retrieve by ID before assuming its content.")
         val omitted = JSONObject()
@@ -73,7 +73,7 @@ internal object SubjectMaterialBudget {
             if (estimate(result.toString()) + ENVELOPE_RESERVE > requested) {
                 // A fragment is an explicit range of immutable text, not a shortened record.
                 // Adapt its range to the shared remaining budget, including provenance metadata.
-                if (lane.path == "inner_structure.pending_fragments" && row is JSONObject) {
+                if (lane.path in setOf("inner_structure.pending_fragments", "inner_structure.record_fragments") && row is JSONObject) {
                     val original = row.getString("text")
                     var low = 1; var high = original.length - 1; var best: JSONObject? = null
                     while (low <= high) {
@@ -99,8 +99,7 @@ internal object SubjectMaterialBudget {
         // from permanently hiding the next page of existing records.
         val directory = lanes.firstOrNull { it.path == "inner_structure.catalogue" }
         directory?.rows?.forEach { include(directory, it) }
-        // Identity has the first detail turn, not an unlimited exclusive allocation.
-        // Rotate all other domains per request so emotion/identity cannot forever exclude
+        // Rotate detail domains per request so emotion/identity cannot forever exclude
         // contrary material. This is technical exposure, never a change in subjective focus.
         val rest = lanes.filter { it != directory }
         val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)

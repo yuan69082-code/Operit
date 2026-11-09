@@ -14,6 +14,7 @@ enum class ChatConfigReadinessIssue {
     ENDPOINT_INVALID,
     MODEL_MISSING,
     CODEX_LOGIN_REQUIRED,
+    SUBSCRIPTION_LOGIN_REQUIRED,
     API_KEY_MISSING,
     API_KEY_INVALID
 }
@@ -39,8 +40,14 @@ object ChatConfigReadiness {
         modelIndex: Int,
         registeredPluginProviderIds: Set<String>,
         codexAuthenticated: Boolean = false,
+        subscriptionAuthenticated: Boolean = false,
     ): ChatConfigReadinessResult {
         val providerTypeId = config.apiProviderTypeId.trim()
+        if (config.subscriptionChannel.isNotEmpty()) {
+            if (config.subscriptionChannel !in setOf("kimi", "grok")) return ChatConfigReadinessResult(ChatConfigReadinessIssue.PROVIDER_UNAVAILABLE)
+            if (!subscriptionAuthenticated) return ChatConfigReadinessResult(ChatConfigReadinessIssue.SUBSCRIPTION_LOGIN_REQUIRED)
+            return ChatConfigReadinessResult(if (config.modelName.isBlank()) ChatConfigReadinessIssue.MODEL_MISSING else null)
+        }
         if (providerTypeId.isEmpty()) {
             return ChatConfigReadinessResult(ChatConfigReadinessIssue.PROVIDER_MISSING)
         }

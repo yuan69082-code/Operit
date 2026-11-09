@@ -298,8 +298,15 @@ fun ModelConfigScreen(
                         modelIndex = targetModelIndex,
                         registeredPluginProviderIds = registeredPluginProviderIds,
                         codexAuthenticated = codexAuthState != null,
+                        subscriptionAuthenticated = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.ai.assistance.operit.data.api.SubscriptionAccounts.get(context).connected(targetConfig.subscriptionChannel)
+                        },
                     )
                 if (!readiness.isReady) {
+                    if (readiness.issue == ChatConfigReadinessIssue.SUBSCRIPTION_LOGIN_REQUIRED) {
+                        showOnboardingError("请先在订阅账号中连接对应套餐")
+                        return@RegisterRouteBackGuard false
+                    }
                     val messageResId =
                         when (readiness.issue) {
                             ChatConfigReadinessIssue.PROVIDER_MISSING ->
@@ -311,6 +318,8 @@ fun ModelConfigScreen(
                             ChatConfigReadinessIssue.MODEL_MISSING ->
                                 R.string.onboarding_config_model_missing
                             ChatConfigReadinessIssue.CODEX_LOGIN_REQUIRED ->
+                                R.string.onboarding_config_codex_login_required
+                            ChatConfigReadinessIssue.SUBSCRIPTION_LOGIN_REQUIRED ->
                                 R.string.onboarding_config_codex_login_required
                             ChatConfigReadinessIssue.API_KEY_MISSING ->
                                 R.string.onboarding_config_api_key_missing

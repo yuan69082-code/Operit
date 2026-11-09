@@ -1,22 +1,17 @@
 package com.ai.assistance.operit.core.companion
 import android.content.Context
-import android.content.SharedPreferences
+import android.app.Application
 import org.json.JSONObject
 import org.junit.Assert.*
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.whenever
+import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(OperitStorageTestRunner::class)
+@Config(sdk = [28], application = Application::class)
 class ThoughtPoolTest {
-    @get:Rule val folder = TemporaryFolder()
-    private fun context(): Context {
-        val context = mock<Context>(); val prefs = mock<SharedPreferences>()
-        whenever(context.applicationContext).thenReturn(context); whenever(context.filesDir).thenReturn(folder.root)
-        whenever(context.getSharedPreferences("companion_options", Context.MODE_PRIVATE)).thenReturn(prefs)
-        return context
-    }
+    private fun context(): Context = RuntimeEnvironment.getApplication()
 
     @Test fun sinkFloatsUpAfterItsTimeAndDefaultsToTwoDays() {
         val context = context()

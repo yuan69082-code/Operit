@@ -414,21 +414,21 @@ private fun Long.date() = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateF
 private fun stateSourceLabel(source: String) = mapOf("user_message" to "用户新消息", "assistant_reply" to "助手回复",
     "assistant_action" to "自主选择", "tool_success" to "工具成功", "tool_failure" to "工具失败", "reading" to "阅读",
     "exploration" to "探索结果", "todo_progress" to "待办推进", "todo_failed" to "待办失败", "todo_completed" to "待办完成",
-    "wake" to "主动唤醒", "time" to "时间涨落", "merge" to "状态合并", "state_report" to "主体状态回报", "user_edit" to "用户修改").getValue(source)
+    "wake" to "主动唤醒", "time" to "时间涨落", "merge" to "状态合并", "state_report" to "主体状态回报", "user_edit" to "用户修改")[source] ?: "其他来源（$source）"
 private fun stateKindLabel(kind: String) = when (kind) {
     "drive" -> "驱力"
     "sentiment" -> "情感"
     "emotion" -> "情绪"
     "psychology" -> "心理"
     "unclassified" -> "待分类"
-    else -> error("未知状态类别")
+    else -> kind
 }
 private fun stateConditionLabel(condition: String) = when (condition) {
     "always" -> "任何"
     "not_contacted" -> "未联系"
     "custom" -> "自定义"
-    else -> error("未知时间条件")
+    else -> "其他时间条件（$condition）"
 }
-private fun stateOperationLabel(operation: String) = mapOf("create" to "新增", "revise" to "修订", "deactivate" to "停用", "merge" to "合并").getValue(operation)
+private fun stateOperationLabel(operation: String) = mapOf("create" to "新增", "revise" to "修订", "deactivate" to "停用", "merge" to "合并")[operation] ?: operation
 private fun stateActionLabel(action: String) = mapOf("contact" to "联系", "explore" to "探索", "todo" to "待办",
-    "tool" to "工具", "reply" to "表达", "defer" to "暂缓", "drop" to "放下", "rest" to "休息").getValue(action)
+    "tool" to "工具", "reply" to "表达", "defer" to "暂缓", "drop" to "放下", "rest" to "休息")[action] ?: action

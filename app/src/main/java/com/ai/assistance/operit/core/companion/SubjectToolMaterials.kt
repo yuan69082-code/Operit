@@ -56,6 +56,9 @@ internal object SubjectToolMaterials {
             if (!receipt.privateContext || receipt.owner != frame.roleId || receipt.chatId != frame.chatId ||
                 !turn.content.contains(receipt.value)) return@forEach
             val body = JSONObject(receipt.value)
+            if (receipt.section == "inner_record_chunk") body.optJSONObject("fragment")?.let {
+                readParts["record:" + it.getString("record_id")] = it.toString()
+            }
             if (receipt.section == "inner_chunk") body.optJSONObject("fragment")?.let {
                 readParts[it.getString("candidate_id")] = it.toString()
             }

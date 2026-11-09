@@ -120,7 +120,10 @@ class ActivityNotesEntryPointsTest {
             history.updateMessage(chat, final)
             history.updateMessage(chat, final)
             history.addMessage(chat, ChatMessage(sender = "ai", content = "另一条实际表达。", timestamp = 1235))
-            assertEquals(2, CompanionStore(context).activityRead(role, "activity", ref.id)!!.getInt("message_count"))
+            assertEquals(role, history.getChatMetadata(chat)?.characterCardId)
+            assertEquals(ref, ActivityNotes.current(chat))
+            assertEquals(org.robolectric.shadows.ShadowLog.getLogsForTag("ActivityNotes").joinToString { it.msg + " " + it.throwable?.stackTraceToString() },
+                2, CompanionStore(context).activityRead(role, "activity", ref.id)!!.getInt("message_count"))
             ActivityNotes.schedule(context, ref, JSONObject().put("generation", "plan-one").put("at", 9999)
                 .put("purpose", "已经保存的继续事项").put("paused", false))
             val page = ActivityNotes.page(context, role, "activity_part", ref.id, 0).getJSONArray("items")

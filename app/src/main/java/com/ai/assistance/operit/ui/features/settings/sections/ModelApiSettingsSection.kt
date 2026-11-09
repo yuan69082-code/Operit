@@ -137,6 +137,10 @@ fun ModelApiSettingsSection(
         showNotification: (String) -> Unit,
         navigateToMnnModelDownload: (() -> Unit)? = null
 ) {
+    if (config.subscriptionChannel.isNotEmpty()) {
+        SubscriptionSettings(config, configManager)
+        return
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val codexAuthManager = remember { CodexAuthManager.getInstance(context) }
@@ -526,6 +530,10 @@ fun ModelApiSettingsSection(
     }
     // 移除了强制锁定模型名称的逻辑，允许用户自由修改
 
+    SubscriptionSettings(config, configManager, onCodex = {
+        selectedProviderTypeId = ApiProviderType.OPENAI_CODEX.name
+        showCodexLoginDialog = true
+    })
     Card(
             modifier = Modifier
                     .fillMaxWidth()
@@ -1305,6 +1313,12 @@ private fun CodexAuthSettingsBlock(
                 usageError = usageError,
                 nowEpochSeconds = usageNowEpochSeconds,
             )
+            usage?.otherWindows?.forEach { window ->
+                CodexQuotaWindowRow("服务返回的窗口（${window.windowDurationSeconds ?: "未知"} 秒）", window, usageNowEpochSeconds)
+            }
+            Text("另购 credits：${usage?.creditBalance ?: "未知"}。这与订阅窗口额度不同；Operit 不会切换普通 API，但不能关闭账号服务端的额外计费设置。",
+                style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onLogin) { Text("切换账号") }
 
             OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Logout, contentDescription = null)

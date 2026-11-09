@@ -239,7 +239,9 @@ object RawSnapshotBackupManager {
                 AppLogger.i(TAG, "export add external_files done in ${externalFilesMs}ms")
 
                 withContext(Dispatchers.Main) { onProgress?.invoke(ExportProgressInfo(ExportProgress.ZIPPING_SHARED_PREFS)) }
-                val sharedPrefsMs = measureTimeMillis { addDirToZip(zos, sharedPrefsDir, ENTRY_SHARED_PREFS) }
+                // OAuth credentials belong to this device/account, not to the assistant backup.
+                val sharedPrefsMs = measureTimeMillis { addDirToZip(zos, sharedPrefsDir, ENTRY_SHARED_PREFS,
+                    excludedTopLevelDirNames = setOf("codex_oauth_credentials.xml", "codex_oauth_credentials.xml.bak")) }
                 AppLogger.i(TAG, "export add shared_prefs done in ${sharedPrefsMs}ms")
 
                 withContext(Dispatchers.Main) { onProgress?.invoke(ExportProgressInfo(ExportProgress.ZIPPING_DATASTORE)) }
@@ -327,7 +329,8 @@ object RawSnapshotBackupManager {
                     replaceDirContents(externalFilesPayloadDir, externalFilesDir)
                 }
                 withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_SHARED_PREFS) }
-                replaceDirContents(File(payloadDir, "shared_prefs"), File(context.dataDir, "shared_prefs"))
+                replaceDirContents(File(payloadDir, "shared_prefs"), File(context.dataDir, "shared_prefs"),
+                    preservedTopLevelDirNames = setOf("codex_oauth_credentials.xml", "codex_oauth_credentials.xml.bak"))
                 withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_DATASTORE) }
                 replaceDirContents(File(payloadDir, "datastore"), File(context.dataDir, "datastore"))
                 withContext(Dispatchers.Main) { onProgress?.invoke(RestoreProgress.REPLACING_DATABASES) }

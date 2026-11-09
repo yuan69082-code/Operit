@@ -19,6 +19,7 @@ data class CodexAuthState(
     val accountId: String,
     val residency: String? = null,
     val email: String? = null,
+    val sessionId: String = java.util.UUID.randomUUID().toString(),
 )
 
 class CodexAuthPreferences private constructor(context: Context) {
@@ -41,6 +42,7 @@ class CodexAuthPreferences private constructor(context: Context) {
             .putString(KEY_REFRESH_TOKEN, state.refreshToken)
             .putLong(KEY_EXPIRES_AT, state.expiresAtMillis)
             .putString(KEY_ACCOUNT_ID, state.accountId)
+            .putString("session_id", state.sessionId)
             .apply {
                 if (state.residency.isNullOrBlank()) {
                     remove(KEY_RESIDENCY)
@@ -94,6 +96,7 @@ class CodexAuthPreferences private constructor(context: Context) {
             accountId = accountId,
             residency = preferences.getString(KEY_RESIDENCY, null),
             email = preferences.getString(KEY_EMAIL, null),
+            sessionId = preferences.getString("session_id", null) ?: "legacy:$accountId",
         )
     }
 

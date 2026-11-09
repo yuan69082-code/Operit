@@ -342,8 +342,10 @@ internal object InnerStructure {
                     .count { it.isNotBlank() && input.contains(it, true) }
             }
         return JSONObject().put("schema", SCHEMA)
-            .put("identity", JSONArray(records.rotating(cursor, "identity").map(::identityMaterial)))
-            .put("selected", JSONArray(others.map(::identityMaterial)))
+            .put("identity", JSONArray(records.rotating(cursor, "identity").filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
+            .put("selected", JSONArray(others.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
+            .put("record_fragments", JSONArray((records.rotating(cursor, "identity") + others).distinctBy { it.getString("id") }
+                .filter { SubjectMaterialBudget.estimate(it.toString()) > 384 }.map { InnerReadProgress.recordFragment(data, it) }))
             .put("pending", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }))
             .put("pending_fragments", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) > 384 && !InnerReadProgress.complete(data, it) }
                 .map { InnerReadProgress.fragment(data, it) }))
@@ -397,6 +399,7 @@ internal object InnerStructure {
         候选、采用与保存不设业务条数上限。单次请求和模型窗口仍有限；大批内容分批提交、保留进度，不丢弃尾部。完整记录和候选用 companion_internal_state get 的 offset 按页或ID读取；未送入本轮的候选不能采用。
         长候选的 pending_fragments 是同一完整原文的连续片段，不是摘要；hash 绑定准确候选版本。宿主只登记实际请求返回后已提供的片段，完整提供前不能采用。可用 get section=inner_chunk id=候选ID offset=next_offset 按需继续，不能用编造片段补齐。pending_read 表示该版本已完整提供，仍由你决定是否采用或重新查阅。人格采用的大段 before/after 可改为 development:{account:说明,candidate_hash:候选完整hash,before_version:候选expected_version,anchors:[...]}，保存的始终是原候选全文，不是说明的摘要。
         恢复已有确定人格、立场、关系、偏好等，可用 origin:"established_import"，evidence:[]，不伪造历史原文。只在用户明确开启的48小时窗口内提交新候选；formed_at 可省略，提交时间不代表形成时间。人格等采用时仍给 development 的准确 before/after 和 account，anchors:[]。按时提交的候选在截止后仍可采用；改写须新候选标识，不继承旧版本已读事实。get section:inner_pending 查询候选。
+        record_fragments 是已采用完整内容的连续原文片段，绝不是替换原文的摘要；同一hash/version的片段共同属于一份内容。可用 get section=inner_record_chunk id=记录ID offset=next_offset 继续读取。片段未出现的限定和例外仍有效，不能猜测它们或退回初始模板。
         整份报告仍须符合原16384字符上限，复杂变化可分轮提出。来源/对象名录只显示前16/32项，数量字段给出总量，可通过原角色/关系工具查询；未列出不是不存在。
     """.trimIndent()
 

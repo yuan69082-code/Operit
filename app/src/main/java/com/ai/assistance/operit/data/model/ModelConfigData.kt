@@ -103,6 +103,8 @@ data class ModelConfigData(
         val modelName: String = "",
         val apiProviderType: ApiProviderType = ApiProviderType.DEEPSEEK,
         val apiProviderTypeId: String = apiProviderType.name,
+        // No credential here. A channel selects its account vault and fixed subscription endpoint.
+        val subscriptionChannel: String = "",
 
         // 多API Key支持
         val useMultipleApiKeys: Boolean = false, // 是否启用多API Key模式

@@ -22,7 +22,7 @@ object CompanionTools {
                 param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
             description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=inner|inner_pending|episode|focus|experience_link|union|category_versions|source|action|decision|feedback|activity|activity_part|waking_note；id 查具体记录，版本用 episode:ID、union:ID、decision:ID、feedback:ID 或 focus:类别ID；offset 真正分页。action 是实际工具请求与回执，decision/feedback 是私聊中已采用的决定/理解，技术完成不等于主观满足。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
-                "inner_family 用 id 指定 family 分页；长候选可用 inner_chunk +候选id+字符offset 分段读完整原文，next_offset继续，未完整提供不赋予采用资格。当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
+                "inner_family 用 id 指定 family 分页；长候选可用 inner_chunk +候选id+字符offset 分段读完整原文，长的已采用内容用 inner_record_chunk +记录id+字符offset；next_offset继续，未完整提供不赋予采用资格。当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
                 "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
                 "create/revise传完整definition JSON：id,name,description,kind（只能drive驱力/sentiment情感/emotion情绪/psychology心理）,baseline,min,max,scope=global|session,private,share（AI愿向本机公开）,participates,effects=[{action,weight,cue,target可选}],time_rules，可带object_ref绑定明确对象。" +
                 "新建必须明确kind和完整time_rules；旧定义缺kind时保留unclassified，新时间规则显示undefined，原规则继续到明确修订，不能替它预设类别、数值或速度。不同对象不要无声共用同一状态ID。" +

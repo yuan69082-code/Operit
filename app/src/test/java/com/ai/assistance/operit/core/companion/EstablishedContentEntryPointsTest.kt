@@ -50,10 +50,7 @@ class EstablishedContentEntryPointsTest {
         val body = states.inspectCategory(role, chat, "inner_pending", null, 0)
         val rows = body.getJSONArray("items")
         if (rows.length() == 0) return 0
-        val result = ToolResult("companion_internal_state", true, InternalStateReadResultData(body.toString(), role, chat, "inner_pending", true))
-        val turns = CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, "继续")), s) +
-            PromptTurn(PromptTurnKind.TOOL_RESULT, body.toString(), "companion_internal_state")
-        val f = requireNotNull(CurrentRequestContext.internalStateFrame(SubjectToolMaterials.attach(turns, System.currentTimeMillis(), listOf(result))))
+        val f = nativeInnerRead(context, requireNotNull(s.internalStateFrame), "inner_pending")
         val actions = JSONArray()
         for (i in 0 until rows.length()) actions.put(JSONObject().put("op", "adopt").put("id", rows.getJSONObject(i).getString("id")).put("reason", "本次采用"))
         InnerStructureContext.submit(context, f, report(f, actions))

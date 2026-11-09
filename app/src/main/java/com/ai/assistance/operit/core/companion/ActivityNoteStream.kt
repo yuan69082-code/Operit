@@ -29,10 +29,10 @@ internal class ActivityNoteStream(
     private var escaped = false
     private var index = 0
     private val keys = mutableListOf<String>()
-    private val protected = mapOf("<think>" to "think", "<thinking>" to "thinking",
+    private val protectedTags = mapOf("<think>" to "think", "<thinking>" to "thinking",
         "<companion_note>" to "companion_note", "<operit_state_report>" to "operit_state_report",
         "<tool " to "tool", "<tool>" to "tool", "<tool_result " to "tool_result", "<tool_result>" to "tool_result")
-    private val opens = listOf("<activity_note>", "<waking_note>", "<activity_private/>") + protected.keys
+    private val opens = listOf("<activity_note>", "<waking_note>", "<activity_private/>") + protectedTags.keys
 
     fun savepoint(id: String) {
         checkpoints[id] = State(probe, payload.toString(), note, thinking, ticks, code, tickChar, codeChar, escaped, index, keys.toList())
@@ -89,7 +89,7 @@ internal class ActivityNoteStream(
             }
             if (probe in opens) {
                 when {
-                    probe in protected -> { thinking = protected.getValue(probe); out.append(probe) }
+                    probe in protectedTags -> { thinking = protectedTags.getValue(probe); out.append(probe) }
                     probe == "<activity_private/>" -> {
                         val key = "$round:private:${index++}"
                         durable { privateChoice(key) }; keys.add(key)

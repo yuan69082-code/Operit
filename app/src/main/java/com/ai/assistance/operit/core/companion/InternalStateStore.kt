@@ -62,7 +62,9 @@ class InternalStateStore(private val context: Context) {
                 if (original != null) {
                     require(original.isNotBlank() && !sourceLabel.isNullOrBlank()) { "原文路径需要提供原文和实际来源说明" }
                     val source = "import-source:$id"
-                    InternalStateEngine.event(data, source, "user_edit", chat, original, now, applyTriggers = false)
+                    // A supplied document is an attributed user submission, not a new lived
+                    // event and not a trigger for the legacy numerical emotion rules.
+                    InternalStateEngine.record(data, source, "user_edit", chat, original, JSONArray(), now)
                     InternalStateEngine.rows(data, "events").last { it.getString("id") == source }
                         .put("inner_source", original).put("provided_source", sourceLabel)
                         .put("original_evidence_verified", false).put("formed_at", formedAt ?: JSONObject.NULL)
@@ -390,7 +392,7 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
         if (kind == "thought") {
             require(!recipientScope(role, chat)) { "念头仅在本助手私域读取" }
             return ThoughtPool.page(context, role, offset)
@@ -420,6 +422,11 @@ class InternalStateStore(private val context: Context) {
             val count = rows.familyCount(family)
             return JSONObject().put("records", JSONArray(rows.familyPage(family, offset)))
                 .put("count", count).put("next_offset", if (offset + 8 < count) offset + 8 else JSONObject.NULL)
+        }
+        if (kind == "inner_record_chunk") {
+            require(!recipientScope(role, chat)) { "内在全文只在本助手私域读取" }
+            return JSONObject().put("fragment", InnerReadProgress.recordFragment(data,
+                requireNotNull(InnerStructure.record(data, requireNotNull(id))) { "已采用记录不存在" }, offset))
         }
         if (kind == "inner_chunk") {
             require(!recipientScope(role, chat)) { "候选全文只在本助手私域读取" }
@@ -546,7 +553,7 @@ class InternalStateStore(private val context: Context) {
                 // Candidate drafts and read-progress are private even when a future adopted
                 // belief can be expressed in a group. Serialized fragments must not evade scrub.
                 val inner = payload.getJSONObject("inner_structure")
-                for (name in listOf("pending", "pending_fragments", "pending_read", "pending_ids")) inner.put(name, JSONArray())
+                for (name in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "pending_ids")) inner.put(name, JSONArray())
                 inner.remove("pending_count")
                 payload = SubjectRestDreams.publicMaterial(payload)
             }
@@ -593,6 +600,11 @@ class InternalStateStore(private val context: Context) {
                     .associate { it.getString("id") to InnerStructure.hash(it) }.toMutableMap()
                 val readParts = mutableMapOf<String, String>()
                 if (!groupInput) {
+                    val recordParts = inner.optJSONArray("record_fragments") ?: JSONArray()
+                    for (i in 0 until recordParts.length()) {
+                        val part = recordParts.getJSONObject(i)
+                        readParts["record:" + part.getString("record_id")] = part.toString()
+                    }
                     val fragments = inner.getJSONArray("pending_fragments")
                     for (i in 0 until fragments.length()) {
                         val part = fragments.getJSONObject(i)

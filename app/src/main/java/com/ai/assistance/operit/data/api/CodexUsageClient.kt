@@ -25,6 +25,10 @@ data class CodexUsageSnapshot(
     val planType: String?,
     val fiveHourWindow: CodexUsageWindow?,
     val sevenDayWindow: CodexUsageWindow?,
+    val otherWindows: List<CodexUsageWindow> = emptyList(),
+    val creditBalance: String? = null,
+    val hasCredits: Boolean? = null,
+    val unlimitedCredits: Boolean? = null,
 )
 
 class CodexUsageClient(
@@ -61,6 +65,7 @@ class CodexUsageClient(
             }
 
             Result.success(parseUsage(body))
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error
         } catch (error: Exception) {
             AppLogger.e(TAG, "Failed to fetch Codex usage", error)
             Result.failure(error)
@@ -82,6 +87,10 @@ class CodexUsageClient(
             sevenDayWindow = windows.firstOrNull {
                 it.windowDurationSeconds == SEVEN_DAY_WINDOW_SECONDS
             },
+            otherWindows = windows.filter { it.windowDurationSeconds != FIVE_HOUR_WINDOW_SECONDS && it.windowDurationSeconds != SEVEN_DAY_WINDOW_SECONDS },
+            creditBalance = root.optJSONObject("credits")?.let { if (it.has("balance") && !it.isNull("balance")) it.get("balance").toString() else null },
+            hasCredits = root.optJSONObject("credits")?.let { if (it.has("has_credits")) it.getBoolean("has_credits") else null },
+            unlimitedCredits = root.optJSONObject("credits")?.let { if (it.has("unlimited")) it.getBoolean("unlimited") else null },
         )
     }
 
