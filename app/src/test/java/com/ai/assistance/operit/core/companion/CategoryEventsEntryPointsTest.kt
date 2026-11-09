@@ -86,24 +86,37 @@ class CategoryEventsEntryPointsTest {
 
     @Test fun unionAdoptionSharesTheReportTransactionAndDoesNotReplayMembers(): Unit = runBlocking {
         category(); category("longing")
+        suspend fun unionFrame(): InternalStateFrame {
+            val sections = InnerStructureContext.prepare(context, role, chat, true, input = "继续理解")
+            val original = requireNotNull(sections.internalStateFrame)
+            val reads = listOf("unwilling", "longing").filter { "inner:$it" !in original.interactionMembers }
+                .map { nativeRead("inner", it) }
+            if (reads.isEmpty()) return original
+            val turns = com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(
+                listOf(com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER, "继续理解")), sections) +
+                com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.TOOL_RESULT,
+                    com.ai.assistance.operit.api.chat.enhance.ConversationMarkupManager.buildToolResultMessage(reads), "companion_internal_state")
+            return requireNotNull(com.ai.assistance.operit.core.chat.CurrentRequestContext.internalStateFrame(
+                SubjectToolMaterials.attach(turns, System.currentTimeMillis(), reads)))
+        }
         fun union(f: InternalStateFrame, version: Int) = JSONObject().put("id", "u").put("expected_version", version)
             .put("members", JSONArray(listOf("unwilling", "longing").map {
                 JSONObject().put("kind", "inner").put("id", it).put("version", f.interactionMembers.getValue("inner:$it"))
             })).put("objects", JSONArray().put("user")).put("evidence", JSONArray().put(f.eventIds.first()))
             .put("interpretation", "亲近与失落同时存在").put("decision", "尚未决定行动").put("status", "active")
             .put("effects", JSONArray().put(JSONObject().put("from", "inner:unwilling").put("to", "inner:longing").put("meaning", "重新理解，暂不改值")))
-        val f = frame()
+        val f = unionFrame()
         val r = report(f).put("unions", JSONArray().put(union(f, 0)))
         val before = InnerStructure.hash(states.read(role).getJSONObject("inner_structure").getJSONObject("records"))
         val receipt = submit(f, r)
         assertEquals(receipt.toString(), submit(f, r).toString())
         assertEquals(before, InnerStructure.hash(states.read(role).getJSONObject("inner_structure").getJSONObject("records")))
         assertTrue(CompanionContext.compose(context, second, role, JSONObject(), false).state.contains("亲近与失落同时存在"))
-        val next = frame()
+        val next = unionFrame()
         val bad = union(next, 1).put("members", JSONArray().put(JSONObject().put("kind", "inner").put("id", "missing").put("version", 1)))
         rejects { submit(next, report(next).put("episodes", JSONArray().put(appraisal(next, "atomic"))).put("unions", JSONArray().put(bad))) }
         assertTrue(states.inspectCategory(role, chat, "episode", "atomic", 0).isNull("item"))
-        val end = frame()
+        val end = unionFrame()
         submit(end, report(end).put("unions", JSONArray().put(union(end, 1).put("status", "ended"))))
         assertEquals(2, states.inspectCategory(role, chat, "category_versions", "union:u", 0).getJSONArray("items").length())
     }
