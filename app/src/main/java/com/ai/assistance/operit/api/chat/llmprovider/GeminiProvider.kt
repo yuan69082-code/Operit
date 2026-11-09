@@ -1140,7 +1140,7 @@ open class GeminiProvider(
         if (exception is PromptBlockedException) {
             throw exception
         }
-        if (exception is GeminiRequestContentException) throw exception
+        if (exception is GeminiRequestContentException || exception is InvalidThinkingOptionException) throw exception
         // Replaying an unchanged invalid request cannot repair its arguments and
         // previously hid HTTP 400 behind a misleading connection-timeout message.
         if (exception is HttpStatusException && exception.statusCode in 400..499 && exception.statusCode !in setOf(408, 429)) {

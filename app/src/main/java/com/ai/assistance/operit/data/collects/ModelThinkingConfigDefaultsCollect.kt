@@ -397,7 +397,13 @@ object ModelThinkingConfigDefaults {
                 ]
                 """.trimIndent()
 
-        fun forProvider(providerTypeId: String): String {
+        fun forProvider(providerTypeId: String): String = rulesForProvider(providerTypeId, true)
+
+        // Exact shipped rules are retained only to recognize untouched published configurations.
+        internal fun legacyGeminiRulesForProvider(providerTypeId: String): String =
+                rulesForProvider(providerTypeId, false)
+
+        private fun rulesForProvider(providerTypeId: String, modelSpecificGemini: Boolean): String {
                 val provider = providerTypeId.trim().uppercase(Locale.US)
                 if (provider.isEmpty()) {
                         return "[]"
@@ -413,7 +419,29 @@ object ModelThinkingConfigDefaults {
                                 val configRule = JSONObject(rule.toString())
                                 configRule.remove("providers")
                                 configRule.remove("providerTypeIds")
-                                target.put(configRule)
+                                if (modelSpecificGemini && configRule.optString("id") == "gemini-thinking-level") {
+                                        // A generation number is not a capability: Pro, Flash and image
+                                        // models accept different levels. Persist these rules in the editor.
+                                        fun addLevels(id: String, regex: String, levels: List<String>) {
+                                                val copy = JSONObject(configRule.toString())
+                                                copy.put("id", id)
+                                                copy.put("match", JSONObject().put("modelRegex", JSONArray().put(regex)))
+                                                val options = configRule.getJSONArray("options")
+                                                copy.put("options", JSONArray().also { selected ->
+                                                        for (i in 0 until options.length()) {
+                                                                val option = options.getJSONObject(i)
+                                                                if (option.getString("id") in levels) selected.put(option)
+                                                        }
+                                                })
+                                                target.put(copy)
+                                        }
+                                        addLevels("gemini-pro-thinking-level", "(?:^|/)gemini-3-pro(?:$|-)", listOf("LOW", "HIGH"))
+                                        addLevels("gemini-no-minimal-thinking-level", "(?:^|/)gemini-(?:3[.]1-pro|3[.][78]-flash|4-argon)(?:$|-)", listOf("LOW", "MEDIUM", "HIGH"))
+                                        addLevels("gemini-image-thinking-level", "(?:^|/)gemini-3[.]1-flash-(?:lite-)?image(?:$|-)", listOf("MINIMAL", "HIGH"))
+                                        // Other existing mappings remain available. No runtime retry switches
+                                        // a user's level after the service rejects a request.
+                                        target.put(configRule)
+                                } else target.put(configRule)
                         }
                 }
                 return target.toString()

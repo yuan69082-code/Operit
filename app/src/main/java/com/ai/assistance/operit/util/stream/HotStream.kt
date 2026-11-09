@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
 
 /** 共享Stream接口，类似于SharedFlow */
 interface SharedStream<T> : Stream<T> {
@@ -331,20 +332,39 @@ fun <T> Stream<T>.share(
     )
     var upstreamJob: Job? = null
 
+    suspend fun completionFailure(block: suspend CoroutineScope.() -> Unit): Throwable? {
+        var failure: Throwable? = null
+        try {
+            coroutineScope {
+                // Capture the job's original cause before coroutine debug stack recovery can
+                // copy it. Completion consumers rely on the same failure/cancellation identity.
+                coroutineContext[Job]!!.invokeOnCompletion { cause -> failure = cause }
+                block()
+            }
+        } catch (error: Throwable) {
+            if (failure == null) failure = error
+        }
+        return failure
+    }
+
+    suspend fun collectUpstream() {
+        // Own the producer's children as well as collect's direct exception. Otherwise a child
+        // can cancel the root sharing job after its try has returned and success was published.
+        val failure = completionFailure { this@share.collect { sharedStream.emit(it) } }
+        val cleanupFailure = completionFailure { onComplete() }
+        if (failure != null && cleanupFailure != null && failure !== cleanupFailure) {
+            failure.addSuppressed(cleanupFailure)
+        }
+        // Publish once after all child work/cleanup, retaining both failures when applicable.
+        sharedStream.close(failure ?: cleanupFailure)
+    }
+
     when (started) {
         StreamStart.EAGERLY -> {
             // 这个Job现在是scope的直接子Job
             upstreamJob =
                     scope.launch {
-                        var completionCause: Throwable? = null
-                        try {
-                            this@share.collect { value -> sharedStream.emit(value) }
-                        } catch (error: Throwable) {
-                            completionCause = error
-                        } finally {
-                            sharedStream.close(completionCause)
-                            onComplete()
-                        }
+                        collectUpstream()
                     }
         }
         StreamStart.LAZILY -> {
@@ -355,17 +375,7 @@ fun <T> Stream<T>.share(
                         if (count > 0 && upstreamJob?.isActive != true) {
                             upstreamJob =
                                     scope.launch {
-                                        var completionCause: Throwable? = null
-                                        try {
-                                            this@share.collect { emittedValue ->
-                                                sharedStream.emit(emittedValue)
-                                            }
-                                        } catch (error: Throwable) {
-                                            completionCause = error
-                                        } finally {
-                                            sharedStream.close(completionCause)
-                                            onComplete()
-                                        }
+                                        collectUpstream()
                                     }
                         } else if (count == 0) {
                             // 当没有订阅者时，取消上游流的收集
@@ -379,15 +389,7 @@ fun <T> Stream<T>.share(
                     )
                     // Fallback to EAGERLY behavior
                     scope.launch {
-                        var completionCause: Throwable? = null
-                        try {
-                            this@share.collect { value -> sharedStream.emit(value) }
-                        } catch (error: Throwable) {
-                            completionCause = error
-                        } finally {
-                            sharedStream.close(completionCause)
-                            onComplete()
-                        }
+                        collectUpstream()
                     }
                 }
             }
