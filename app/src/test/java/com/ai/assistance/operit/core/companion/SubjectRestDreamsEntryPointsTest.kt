@@ -39,6 +39,11 @@ class SubjectRestDreamsEntryPointsTest {
     private lateinit var handler: AIToolHandler
     @Before fun setup(): Unit = runBlocking {
         context = RuntimeEnvironment.getApplication()
+        // Robolectric reuses application classes while replacing the Context between methods.
+        // A cached Room/DAO would otherwise write another method's temporary data directory,
+        // which the real current-application snapshot correctly does not export.
+        com.ai.assistance.operit.data.db.AppDatabase.closeDatabase()
+        ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "梦测试", characterSetting = "初始参考"))
         InternalStateStore(context).configure(role, true)
         suspend fun window(): String {
@@ -203,12 +208,17 @@ class SubjectRestDreamsEntryPointsTest {
             val original = item("dream", id).toString()
             assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             val databasePath = context.getDatabasePath("app_database")
+            val actualPath = com.ai.assistance.operit.data.db.AppDatabase.getDatabase(context).openHelper.writableDatabase.path
+            assertEquals("Room must belong to this test application's storage", databasePath.canonicalPath, java.io.File(actualPath).canonicalPath)
+            assertTrue("actual Room file must be present: $actualPath", databasePath.isFile)
             assertEquals("snapshot must include the actual Room directory", java.io.File(context.dataDir, "databases").canonicalFile, databasePath.parentFile!!.canonicalFile)
             val zip = RawSnapshotBackupManager.exportToBackupDir(context)
             assertTrue(zip.length() > 0)
             // Check exported facts, not only the ZIP size. No writes to either database.
             java.util.zip.ZipFile(zip).use { archive ->
-                val entry = requireNotNull(archive.getEntry("payload/databases/app_database"))
+                val entry = requireNotNull(archive.getEntry("payload/databases/app_database")) {
+                    "Room file missing from export: path=$actualPath; entries=" + archive.entries().asSequence().map { it.name }.toList()
+                }
                 val copy = java.io.File(context.cacheDir, "verify-exported-chat.sqlite")
                 archive.getInputStream(entry).use { input -> copy.outputStream().use { input.copyTo(it) } }
                 android.database.sqlite.SQLiteDatabase.openDatabase(copy.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { db ->
