@@ -87,9 +87,9 @@ class RelationshipNetwork(private val context: Context) {
             val old = adopted(from).firstOrNull { it.getString("to") == to }
                 ?: legacy().firstOrNull { it.getString("from") == from && it.getString("to") == to }
                 ?: error("关系记录不存在")
-            com.ai.assistance.operit.core.companion.InternalStateStore(context).relationshipProposal(from, caller,
+            val result = com.ai.assistance.operit.core.companion.InternalStateStore(context).relationshipProposal(from, caller,
                 JSONObject(old.toString()).put("operation", "request_retirement"), "")
-            store.log("relationship_audit", "关系结束建议", "$from → $to", caller ?: "user")
+            if (!result.getBoolean("replayed")) store.log("relationship_audit", "关系结束建议", "$from → $to", caller ?: "user")
             return
         }
         store.update("relationships") { it.remove("$from:$to") }

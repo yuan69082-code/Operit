@@ -108,5 +108,15 @@ class InnerStructureContractsTest {
         assertEquals(adopted, InnerStructure.hash(original))
         assertTrue(InnerStructure.records(original).isEmpty())
         assertTrue(InnerStructure.pending(original).isEmpty())
+        val future = JSONObject(original.toString())
+        future.getJSONObject("inner_structure").put("schema", 2)
+        val savedFuture = future.toString()
+        assertThrows(IllegalArgumentException::class.java) { InnerStructure.root(future) }
+        assertThrows(IllegalArgumentException::class.java) { InnerStructure.records(future) }
+        assertEquals(savedFuture, future.toString())
+        val malformed = JSONObject(original.toString()).put("inner_structure", "unrecognized original data")
+        val savedMalformed = malformed.toString()
+        assertThrows(org.json.JSONException::class.java) { InnerStructure.root(malformed) }
+        assertEquals(savedMalformed, malformed.toString())
     }
 }

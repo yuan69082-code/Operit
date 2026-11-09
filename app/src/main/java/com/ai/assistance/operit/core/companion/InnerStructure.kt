@@ -17,12 +17,13 @@ internal object InnerStructure {
     const val MATERIAL_BUDGET = 14000
     private val common = setOf("id", "family", "kind", "description", "object_ref", "context", "exceptions", "status", "legacy_ref")
 
-    fun root(data: JSONObject): JSONObject {
-        val existing = data.optJSONObject("inner_structure")
-        if (existing != null) {
-            require(existing.getInt("schema") == SCHEMA) { "不支持的内在结构版本" }
-            return existing
+    private fun existingRoot(data: JSONObject): JSONObject? =
+        if (!data.has("inner_structure")) null else data.getJSONObject("inner_structure").also {
+            require(it.getInt("schema") == SCHEMA) { "不支持的内在结构版本" }
         }
+
+    fun root(data: JSONObject): JSONObject {
+        existingRoot(data)?.let { return it }
         // No psychological values are inferred from old numbers or free-form character text.
         return JSONObject().put("schema", SCHEMA).put("records", JSONObject()).put("pending", JSONObject())
             .put("history_sequence", 0L).put("legacy_policy", "preserved_in_original_authority")
@@ -30,9 +31,9 @@ internal object InnerStructure {
     }
 
     fun records(data: JSONObject): List<JSONObject> =
-        data.optJSONObject("inner_structure")?.getJSONObject("records")?.let(::values).orEmpty()
+        existingRoot(data)?.getJSONObject("records")?.let(::values).orEmpty()
     fun pending(data: JSONObject): List<JSONObject> =
-        data.optJSONObject("inner_structure")?.getJSONObject("pending")?.let(::values).orEmpty()
+        existingRoot(data)?.getJSONObject("pending")?.let(::values).orEmpty()
     fun identity(data: JSONObject) = records(data).filter {
         it.getJSONObject("content").getString("family") in identityFamilies &&
             it.getJSONObject("content").getString("status") == "active"
