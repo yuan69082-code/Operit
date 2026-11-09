@@ -3,6 +3,8 @@ package com.ai.assistance.operit.services.core
 import android.content.Context
 import com.ai.assistance.operit.api.chat.llmprovider.GeminiProvider
 import com.ai.assistance.operit.api.chat.llmprovider.SingleApiKeyProvider
+import com.ai.assistance.operit.api.chat.llmprovider.InvalidThinkingOptionException
+import com.ai.assistance.operit.data.collects.ModelThinkingConfigDefaults
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.util.JvmAppLogRule
@@ -23,6 +25,31 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class GeminiHttpFailureIntegrationTest {
     @get:Rule val appLog = JvmAppLogRule()
+
+    @Test fun invalidPersistedLevelIsRejectedBeforeHttpWithoutRetry(): Unit = runBlocking {
+        val calls = AtomicInteger()
+        val client = OkHttpClient.Builder().addInterceptor {
+            calls.incrementAndGet()
+            error("An invalid local option must not reach HTTP")
+        }.build()
+        val context = mock<Context>()
+        whenever(context.getString(any<Int>())).thenReturn("status")
+        val provider = GeminiProvider("https://example.test", SingleApiKeyProvider("test"),
+            "gemini-3-pro-preview", client,
+            thinkingConfigurations = ModelThinkingConfigDefaults.forProvider("GOOGLE"),
+            thinkingOptionId = "MINIMAL")
+        val retries = CopyOnWriteArrayList<String>()
+        val failure = withTimeout(3_000) {
+            MessageProcessingDelegate.collectResponseReaders {
+                provider.sendMessage(context, listOf(PromptTurn(PromptTurnKind.USER, "hello")),
+                    emptyList(), false, true, null, false, { _, _, _ -> }, null,
+                    { retries.add(it) }, true, false, null).collect { fail("No reply expected") }
+            }
+        }
+        assertTrue(failure is InvalidThinkingOptionException)
+        assertEquals(0, calls.get())
+        assertTrue(retries.isEmpty())
+    }
 
     @Test fun actualHttp400IsDeliveredToTurnWithoutCrashingHostOrRetrying(): Unit = runBlocking {
         val uncaught = CopyOnWriteArrayList<Throwable>()
