@@ -8,11 +8,19 @@ import org.json.JSONObject
  * report transaction. Reading or ending a union never reapplies those changes.
  */
 internal object InnerInteractions {
+    /** Inactive definitions remain identifiable for ending an existing union, never for new propagation. */
+    fun stateMember(data: JSONObject, id: String, chat: String, at: Long): JSONObject {
+        val definition = requireNotNull(InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id })
+        if (!definition.getBoolean("active")) return JSONObject(definition.toString())
+            .put("instance_scope", definition.getString("scope")).put("available", false)
+        return requireNotNull(InternalStateEngine.snapshot(InternalStateDocument.copy(data), chat, at)
+            .firstOrNull { it.getString("id") == id })
+    }
+
     private fun member(data: JSONObject, kind: String, id: String, chat: String, at: Long): JSONObject = when (kind) {
         "inner" -> requireNotNull(InnerStructure.records(data).firstOrNull { it.getString("id") == id })
         "episode" -> requireNotNull(CategoryEvents.row(data, kind, id))
-        "state" -> requireNotNull(InternalStateEngine.snapshot(InternalStateDocument.copy(data), chat, at)
-            .firstOrNull { it.getString("id") == id })
+        "state" -> stateMember(data, id, chat, at)
         else -> throw IllegalArgumentException("联合成员类型不受支持")
     }
 
@@ -46,6 +54,14 @@ internal object InnerInteractions {
                 val kind = text(ref, "kind", 16); val target = text(ref, "id", 64)
                 require(keys.add("$kind:$target"))
                 val prior = member(before, kind, target, frame.chatId, frame.at)
+                if (kind == "state" && !prior.optBoolean("available", true)) {
+                    val oldRefs = old?.getJSONObject("content")?.getJSONArray("members")
+                    require(a.getString("status") == "ended" && oldRefs != null &&
+                        (0 until oldRefs.length()).any {
+                            val oldRef = oldRefs.getJSONObject(it)
+                            oldRef.getString("kind") == kind && oldRef.getString("id") == target
+                        }) { "停用成员只可随已有联合明确结束，不能形成新作用" }
+                }
                 if (kind == "state" && prior.optString("instance_scope") != "global") local = true
                 require(frame.interactionMembers["$kind:$target"] == prior.getInt("version")) { "成员未在本轮实际材料中提供，或版本已变化" }
                 val version = ref.get("version")

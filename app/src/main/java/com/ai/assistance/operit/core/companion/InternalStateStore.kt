@@ -283,8 +283,11 @@ class InternalStateStore(private val context: Context) {
             return JSONObject().put("item", InnerStructure.records(data).firstOrNull { it.getString("id") == id } ?: JSONObject.NULL)
         }
         if (kind == "state") {
+            if (id != null) {
+                val exists = InternalStateEngine.definitions(data).any { it.getString("id") == id }
+                return JSONObject().put("item", if (exists) InnerInteractions.stateMember(data, id, chat, System.currentTimeMillis()) else JSONObject.NULL)
+            }
             val states = InternalStateEngine.snapshot(data, chat, System.currentTimeMillis())
-            if (id != null) return JSONObject().put("item", states.firstOrNull { it.getString("id") == id } ?: JSONObject.NULL)
             return JSONObject().put("items", JSONArray(states.drop(offset).take(8)))
                 .put("next_offset", if (offset + 8 < states.size) offset + 8 else JSONObject.NULL)
         }

@@ -74,6 +74,15 @@ class CategoryEventsEntryPointsTest {
     private suspend fun rejects(block: suspend () -> Unit) {
         try { block(); fail("expected rejection") } catch (_: IllegalArgumentException) { } catch (_: IllegalStateException) { } catch (_: org.json.JSONException) { }
     }
+    private fun nativeRead(section: String, id: String): com.ai.assistance.operit.data.model.ToolResult {
+        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
+        CompanionTools.register(handler, context)
+        return handler.executeTool(com.ai.assistance.operit.data.model.AITool("companion_internal_state",
+            mapOf("action" to "get", "section" to section, "id" to id,
+                "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role)
+                .map { com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value) }))
+            .also { assertTrue(it.error, it.success) }
+    }
 
     @Test fun unionAdoptionSharesTheReportTransactionAndDoesNotReplayMembers(): Unit = runBlocking {
         category(); category("longing")
@@ -107,15 +116,7 @@ class CategoryEventsEntryPointsTest {
         val sections = InnerStructureContext.prepare(context, role, chat, true, input = "取回这两种理解")
         val first = requireNotNull(sections.internalStateFrame)
         assertTrue(listOf("left", "right").any { "inner:$it" !in first.interactionMembers })
-        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
-        CompanionTools.register(handler, context)
-        val results = listOf("left", "right").map { id ->
-            handler.executeTool(com.ai.assistance.operit.data.model.AITool("companion_internal_state",
-                mapOf("action" to "get", "section" to "inner", "id" to id,
-                    "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role)
-                    .map { com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value) }))
-                .also { assertTrue(it.error, it.success) }
-        }
+        val results = listOf("left", "right").map { nativeRead("inner", it) }
         val turns = com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(
             listOf(com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER, "取回这两种理解")), sections) +
             com.ai.assistance.operit.core.chat.hooks.PromptTurn(
@@ -278,6 +279,21 @@ class CategoryEventsEntryPointsTest {
         states.evolve(role, chat, "deactivate", "local", 1, null, null, "明确停用但保留经历", listOf("definition-input"))
         assertTrue(CompanionContext.compose(context, chat, role, JSONObject(), false).state.contains("仅此窗口的理解"))
         assertEquals(1, states.inspectCategory(role, chat, "union", "local-union", 0).getJSONObject("item").getInt("version"))
+        val sections = InnerStructureContext.prepare(context, role, chat, true, input = "结束已不适用的联合")
+        val result = nativeRead("state", "local")
+        val request = com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(
+            listOf(com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER, "结束")), sections) +
+            com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.TOOL_RESULT,
+                com.ai.assistance.operit.api.chat.enhance.ConversationMarkupManager.buildToolResultMessage(listOf(result)), "companion_internal_state")
+        val afterRead = requireNotNull(com.ai.assistance.operit.core.chat.CurrentRequestContext.internalStateFrame(
+            SubjectToolMaterials.attach(request, System.currentTimeMillis(), listOf(result))))
+        val end = JSONObject(union.toString()).put("expected_version", 1).put("status", "ended")
+            .put("evidence", JSONArray().put(afterRead.materialSources.keys.last()))
+        end.getJSONArray("members").getJSONObject(0).put("version", afterRead.interactionMembers.getValue("state:local"))
+        rejects { submit(afterRead, report(afterRead).put("unions", JSONArray().put(JSONObject(end.toString()).put("status", "active")))) }
+        submit(afterRead, report(afterRead).put("unions", JSONArray().put(end)))
+        assertEquals("ended", states.inspectCategory(role, chat, "union", "local-union", 0).getJSONObject("item").getJSONObject("content").getString("status"))
+        assertFalse(InternalStateEngine.definitions(states.read(role)).single { it.getString("id") == "local" }.getBoolean("active"))
     }
 
     @Test fun preferenceLinksAccumulateOnlyAfterAdoption(): Unit = runBlocking {
