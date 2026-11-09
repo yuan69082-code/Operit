@@ -216,7 +216,21 @@ class SubjectActionEntryPointsTest {
             count.incrementAndGet(); Thread.sleep(40); ToolResult("sleep", true, StringResultData("once"))
         })
         val f = requireNotNull(sections().internalStateFrame)
-        val results = coroutineScope { (0..1).map { async(Dispatchers.IO) { execute(f, listOf(invocation("sleep"))).results.single() } }.awaitAll() }
+        // Preserve a stalled concurrency site's evidence in CI artifacts. This does not
+        // bypass assertions, interrupt workers or change the production execution path.
+        val watchdog = java.util.Timer("subject-action-concurrency-diagnostics", true)
+        watchdog.schedule(object : java.util.TimerTask() {
+            override fun run() {
+                val report = java.io.File("build/reports/subject-action-concurrency-threads.txt")
+                report.parentFile.mkdirs()
+                report.writeText(Thread.getAllStackTraces().entries.joinToString("\n\n") { (thread, stack) ->
+                    "${thread.name} ${thread.state}\n" + stack.joinToString("\n")
+                })
+            }
+        }, 5000)
+        val results = try {
+            coroutineScope { (0..1).map { async(Dispatchers.IO) { execute(f, listOf(invocation("sleep"))).results.single() } }.awaitAll() }
+        } finally { watchdog.cancel() }
         assertEquals(1, count.get()); assertTrue(results.any { it.success })
         val other = requireNotNull(sections(second).internalStateFrame)
         execute(other, listOf(invocation("sleep")))
