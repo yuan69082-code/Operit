@@ -12,11 +12,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = com.ai.assistance.operit.core.experience.ExperienceTools.names + RoomTools.names + setOf("companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
+    val names = com.ai.assistance.operit.core.experience.ExperienceTools.names + RoomTools.names + setOf("companion_software", "companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
 
     fun prompts(): List<ToolPrompt> = com.ai.assistance.operit.core.experience.ExperienceTools.prompts() + RoomTools.prompts() + listOf(
+        ToolPrompt(name = "companion_software",
+            description = "在本助手私聊中使用现有计算器的持久表达式能力。build 用 id/source 保存纯四则算术模板，变量写成 ${'$'}{x}，previous_version 可关联上次产物进行调整；不执行源码，只校验并返回不可变版本。run 用 version 和 inputs JSON 数字对象真正执行；get 查原产物。只支持数字、括号及 + - * / %，不支持文件、网络、任意JS或自动状态修改。已有脚本和工具包仍用其原工具。技术运行结果与主体对结果的理解分开，回执用 internal_state section=action 查。可带 __operit_action 关联明确打算。",
+            parametersStructured = listOf(param("action", "build/run/get", true), param("id", "能力名称"),
+                param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
+                param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
-            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
+            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=episode|focus|experience_link|union|category_versions|source|action|decision|feedback；id 查具体记录，版本用 episode:ID、union:ID、decision:ID、feedback:ID 或 focus:类别ID；offset 真正分页。action 是实际工具请求与回执，decision/feedback 是私聊中已采用的决定/理解，技术完成不等于主观满足。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
                 "当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
                 "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
                 "create/revise传完整definition JSON：id,name,description,kind（只能drive驱力/sentiment情感/emotion情绪/psychology心理）,baseline,min,max,scope=global|session,private,share（AI愿向本机公开）,participates,effects=[{action,weight,cue,target可选}],time_rules，可带object_ref绑定明确对象。" +
@@ -31,9 +36,9 @@ object CompanionTools {
             parametersStructured = listOf(param("action", "操作", true), param("id", "维度稳定ID"),
                 param("definition", "完整维度定义JSON；新建须有四类之一的kind及完整time_rules，不夹带value"), param("expected_version", "get读取的定义版本，新建0"),
                 param("reason", "演化经过与理由"), param("evidence", "真实事件ID的JSON数组"),
-                param("target", "merge目标维度ID"), param("offset", "历史分页起点"))),
+                param("target", "merge目标维度ID"), param("tokens", "budget 本主体材料预算2048至16384"), param("offset", "历史分页起点"), param("section", "get 可选 episode/focus/experience_link/union/category_versions/source/action/decision/feedback/rest/dream/dream_understanding（私域记录仅本人私聊）"))),
         ToolPrompt(name = "companion_explore",
-            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；本轮没安排也没 pause 时，软件默认3小时后再给一次自由判断机会，不代表继续同一兴趣。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材、继续旧方向或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
+            description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；启用连续性内部状态的助手没有自动续约，只有明确安排的事项才继续；其他助手保留既有三小时判断规则。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材、继续旧方向或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
         ToolPrompt(name = "software_awareness",
             description = "仅用户指定的观察助手在自己私聊中使用。查询软件变更日志和使用记录。action=status|events|usage|models|gear。gear 查看或调整你的关注档位（与 phone_awareness 共用）：level=tight盯紧/normal平常/loose放松，hours可选（到点回平常），reason降档理由。events 按递增序号分页，用 next_after 继续；可按 kind 或 assistant_id 筛选。区分打开聊天页与实际发送，停留不等于注意力，记录他人不等于自己经历；不提供密钥或聊天正文。",
@@ -88,18 +93,39 @@ object CompanionTools {
                     val store = CompanionStore(context)
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
+                    var privateStateRead = false
                     val result = when (name) {
+                        "companion_software" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO +
+                            com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            val capability = SoftwareCapabilityArtifacts(context, requireNotNull(roleId), chatId)
+                            when (action) {
+                                "build" -> capability.build(required(tool, "id"), required(tool, "source"), value(tool, "previous_version"))
+                                "run" -> capability.run(required(tool, "version"), JSONObject(required(tool, "inputs")))
+                                "get" -> capability.get(required(tool, "version"))
+                                else -> error("不支持的软件能力操作")
+                            }
+                        }
                         "companion_internal_state" -> {
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
                             val internal = InternalStateStore(context)
                             check(internal.enabled(actor)) { "内部状态未开启" }
-                            if (action != "get") {
+                            if (action != "get" && action != "budget") {
                                 val evidence = JSONArray(required(tool, "evidence"))
                                 internal.evolve(actor, chatId, requireNotNull(action), required(tool, "id"),
                                     required(tool, "expected_version").toInt(), value(tool, "definition")?.let { JSONObject(it) },
                                     value(tool, "target"), required(tool, "reason"), (0 until evidence.length()).map { evidence.getString(it) })
                             }
-                            internal.inspect(actor, chatId, value(tool, "offset")?.toInt() ?: 0)
+                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                                privateStateRead = !internal.requireRecipient(actor, chatId)
+                                val section = value(tool, "section")
+                                check(privateStateRead || (section != "union" &&
+                                    !(section == "category_versions" && value(tool, "id").orEmpty().startsWith("union:")))) {
+                                    "私人联合须在该助手自己的私聊读取"
+                                }
+                                if (action == "budget") internal.materialBudget(actor, chatId, required(tool, "tokens").toInt())
+                                else if (action == "get" && section != null) internal.inspectCategory(actor, chatId, section, value(tool, "id"), value(tool, "offset")?.toInt() ?: 0)
+                                else internal.inspect(actor, chatId, value(tool, "offset")?.toInt() ?: 0)
+                            }
                         }
                         "companion_explore" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                             val exploration = ExplorationStore(context)
@@ -219,7 +245,11 @@ object CompanionTools {
                         }
                         else -> library(context, roleId, store, scope, tool, required(tool, "action"))
                     }
-                    ToolResult(toolName = tool.name, success = true, result = StringResultData(result.toString()))
+                    val payload = if (name == "companion_internal_state" && action == "get")
+                        com.ai.assistance.operit.core.tools.InternalStateReadResultData(
+                            result.toString(), requireNotNull(roleId), chatId, value(tool, "section"), privateStateRead)
+                    else StringResultData(result.toString())
+                    ToolResult(toolName = tool.name, success = true, result = payload)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {

@@ -56,14 +56,18 @@ class CharacterCardToolAccessResolver private constructor(private val context: C
     suspend fun resolve(
         roleCardId: String?,
         packageManager: PackageManager,
-        globalToolVisibility: Map<String, Boolean>? = null
+        globalToolVisibility: Map<String, Boolean>? = null,
+        includeExternalSources: Boolean = true
     ): ResolvedCharacterCardToolAccess {
         val effectiveGlobalToolVisibility = globalToolVisibility
             ?: runCatching { apiPreferences.legacyToolPromptVisibilityFlow.first() }.getOrElse { emptyMap() }
 
-        val globalPackageNames = buildGlobalPackageNames(packageManager)
-        val globalSkillNames = LinkedHashSet(skillRepository.getAvailableSkillPackages().keys)
-        val globalMcpServerNames = LinkedHashSet(packageManager.getAvailableServerPackages().keys)
+        // A built-in-only execution needs the same built-in permission decision, not
+        // package initialization (which can require main-thread runtime callbacks).
+        // Prompt/catalog callers retain the full source view through the default true.
+        val globalPackageNames = if (includeExternalSources) buildGlobalPackageNames(packageManager) else linkedSetOf()
+        val globalSkillNames = if (includeExternalSources) LinkedHashSet(skillRepository.getAvailableSkillPackages().keys) else linkedSetOf()
+        val globalMcpServerNames = if (includeExternalSources) LinkedHashSet(packageManager.getAvailableServerPackages().keys) else linkedSetOf()
 
         val roleCardConfig = roleCardId
             ?.takeIf { it.isNotBlank() }

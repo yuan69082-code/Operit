@@ -495,6 +495,8 @@ internal object StructuredToolCallBridge {
 
         val properties = JSONObject()
         val required = JSONArray()
+        properties.put("__operit_action", JSONObject().put("type", "string").put("description",
+            "可选内部操作关联JSON；仅在主体请求中按宿主说明提供决定、已读依据及能力标识。不改变工具权限。普通调用省略。"))
 
         for (param in params) {
             properties.put(param.name, JSONObject().apply {

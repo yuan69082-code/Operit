@@ -19,7 +19,7 @@ object ExplorationPolicy {
     fun day(now: Long): String = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().toString()
     fun used(data: JSONObject, day: String): Int = if (data.optString("day") == day) data.optInt("used") else 0
 
-    fun configure(data: JSONObject, enable: Boolean, choices: Set<String>, limit: Int, now: Long) {
+    fun configure(data: JSONObject, enable: Boolean, choices: Set<String>, limit: Int, now: Long, continuous: Boolean = false) {
         require(limit in 1..24) { "每天探索轮次须为1–24次" }
         require(choices.all { it in activities } && (!enable || choices.isNotEmpty())) { "请选择至少一项探索活动" }
         val wasEnabled = enabled(data)
@@ -30,10 +30,11 @@ object ExplorationPolicy {
         if (!enable || interrupted) {
             data.put("paused", true)
             data.remove("at")
-        } else if (!wasEnabled) {
+        } else if (!wasEnabled && !continuous) {
             data.put("at", now + 15 * 60_000L).put("paused", false)
+                .put("arrangement_origin", "initial")
                 .put("purpose", "第一次自主探索：先看看此刻有没有自己还想继续或新出现的方向；没有也可以休息，不必为了探索而找题目。")
-        }
+        } else if (!wasEnabled) pause(data)
     }
 
     fun schedule(data: JSONObject, minutes: Int, purpose: String, now: Long) {
@@ -41,6 +42,7 @@ object ExplorationPolicy {
         require(minutes in 15..10080) { "探索间隔须为15–10080分钟" }
         require(purpose.isNotBlank() && purpose.length <= 500) { "请填写1–500字的下次打算" }
         data.put("at", now + minutes * 60_000L).put("purpose", purpose).put("paused", false)
+        data.put("arrangement_origin", "subject")
         data.remove("self_paused")
         data.remove("auto_continued")
     }
@@ -75,12 +77,13 @@ object ExplorationPolicy {
         enabled(data) && data.optString("chat") == chat && revision(data) == expectedRevision &&
             data.optString("running") == ticket
 
-    fun finish(data: JSONObject, ticket: String, outcome: String, now: Long = System.currentTimeMillis()) {
+    fun finish(data: JSONObject, ticket: String, outcome: String, now: Long = System.currentTimeMillis(), continuous: Boolean = false) {
         if (data.optString("running") != ticket) return
         data.remove("running")
         data.put("last_outcome", outcome)
         // 本轮里已自己约了下一次，或明说要歇：尊重它
         if (data.has("at") || data.optBoolean("self_paused")) return
+        if (continuous) { pause(data); return }
         if (!enabled(data)) { pause(data); return }
         // 没有自行安排时，只给下一次重新判断的机会；不替助手认定兴趣仍然持续。失败的多歇一会儿。
         val minutes = if (outcome == "failed") AUTO_CONTINUE_MINUTES * 2 else AUTO_CONTINUE_MINUTES
@@ -89,10 +92,24 @@ object ExplorationPolicy {
             .put("purpose", "软件提供一次新的自由判断机会；这不代表你仍想继续上次方向。上一轮没有自行安排下一次。上次的打算仅供参考：$last".take(500))
     }
 
-    fun recover(data: JSONObject): Boolean {
+    fun recover(data: JSONObject, continuous: Boolean = false): Boolean {
         val ticket = data.optString("running")
         if (ticket.isBlank()) return false
-        finish(data, ticket, "interrupted")
+        finish(data, ticket, "interrupted", continuous = continuous)
         return true
+    }
+
+    /** Preserve old arrangements as evidence, but never consume an automatic idle opportunity
+     * as the subject's own decision. This migration is idempotent and does not wake a model. */
+    fun adoptContinuousBoundary(data: JSONObject) {
+        if (data.optInt("continuous_boundary") == 1) return
+        if (data.optBoolean("auto_continued") || data.optString("arrangement_origin") == "initial" ||
+            (data.optString("arrangement_origin").isEmpty() && data.optString("purpose") ==
+                "第一次自主探索：先看看此刻有没有自己还想继续或新出现的方向；没有也可以休息，不必为了探索而找题目。")) {
+            data.put("suspended_automatic_arrangement", JSONObject().put("at", data.opt("at"))
+                .put("purpose", data.optString("purpose")))
+            pause(data)
+        }
+        data.put("continuous_boundary", 1)
     }
 }

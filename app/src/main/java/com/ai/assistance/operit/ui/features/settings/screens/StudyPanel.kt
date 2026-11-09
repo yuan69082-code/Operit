@@ -25,6 +25,7 @@ import org.json.JSONObject
 internal fun StudyPanel(role: String, name: String, section: String, revision: Long) {
     val context = LocalContext.current
     val store = remember(role) { StudyStore(context, role) }
+    val savedRevision by com.ai.assistance.operit.core.companion.AssistantRoom.revision.collectAsState()
     val scope = rememberCoroutineScope()
     var category by rememberSaveable(role, section) { mutableStateOf("daily") }
     var books by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
@@ -45,7 +46,7 @@ internal fun StudyPanel(role: String, name: String, section: String, revision: L
                 finally { busy = false } }
         }
     }
-    LaunchedEffect(role, revision, reload) {
+    LaunchedEffect(role, revision, savedRevision, reload) {
         try { books = withContext(Dispatchers.IO) { store.books() } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { AppLogger.e("StudyPanel", "书架读取失败", failure); error = failure.message.orEmpty() }
@@ -215,7 +216,7 @@ private fun StudyBook(store: StudyStore, book: JSONObject, name: String, busy: B
                 if (book.getString("section") == "writing") Button(enabled = !busy, onClick = { newChapter = true; editing = true }) { Text("写新章节／短篇") }
                 TextButton(enabled = !busy, onClick = { annotation = StudyAnchor(null) }) { Text("写读后感") }
                 TextButton(enabled = !busy, onClick = { run { store.userEvent(id, "用户邀请你继续共读或写作") } }) { Text("请 $name 来读／写") }
-                val failures = studyObjects(book.getJSONArray("events")).filter { it.optString("state") == "failed" }
+                val failures = studyObjects(book.getJSONArray("events")).filter { it.optString("state") in setOf("failed", "unknown") }
                 if (failures.isNotEmpty()) {
                     Text("助手尚未处理完：${failures.last().optString("error")}", color = MaterialTheme.colorScheme.error)
                     TextButton(enabled = !busy, onClick = { run { store.retry(id) } }) { Text("重新提醒助手") }

@@ -133,6 +133,11 @@ class LlamaProvider(
         Result.success("llama.cpp backend is available (native ready).")
     }
 
+    override suspend fun countLocalTextTokens(text: String): Long = withContext(Dispatchers.IO) {
+        val session = requireNotNull(ensureSessionLocked()) { "Local tokenizer is unavailable" }
+        session.countTokens(text).toLong()
+    }
+
     override suspend fun calculateInputTokens(
         chatHistory: List<PromptTurn>,
         availableTools: List<ToolPrompt>?

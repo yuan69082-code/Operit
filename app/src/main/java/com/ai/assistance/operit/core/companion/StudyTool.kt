@@ -11,6 +11,13 @@ internal object StudyTool {
         fun page(rows: List<JSONObject>, size: Int = 20) = JSONObject().put("total", rows.size).put("items", JSONArray(rows.drop(offset).take(size)))
             .put("next_offset", if (offset + size < rows.size) offset + size else JSONObject.NULL)
         return when (action) {
+            "activity" -> store.recentActivity()
+            "note" -> {
+                val book = store.book(bookId())
+                val note = book.getJSONArray("notes").objects().firstOrNull { it.getString("id") == data.getString("note_id") }
+                    ?: error("此书目中不存在指定批注或回复")
+                JSONObject(note.toString()).put("book", bookId()).put("saved", true)
+            }
             "list" -> page(store.books().filter { (data.optString("section").isEmpty() || it.getString("section") == data.getString("section")) &&
                 (data.optString("category").isEmpty() || it.getString("category") == data.getString("category")) }.map {
                 JSONObject().put("id", it.getString("id")).put("title", it.getString("title")).put("section", it.getString("section")).put("category", it.getString("category"))
@@ -33,18 +40,18 @@ internal object StudyTool {
             }
             "reply" -> {
                 val parent = store.book(bookId()).getJSONArray("notes").objects().firstOrNull { it.getString("id") == data.getString("reply_to") } ?: error("被回复的批注不存在")
-                store.annotate(bookId(), if (parent.isNull("version")) null else parent.getString("version"),
+                val saved = store.annotate(bookId(), if (parent.isNull("version")) null else parent.getString("version"),
                     parent.getInt("start"), parent.getInt("end"), parent.getString("quote"), data.optString("text"),
                     data.optString("font", "hand"), data.optString("color", "#486B65"), data.optJSONArray("lines") ?: JSONArray(),
                     data.optJSONArray("photos") ?: JSONArray(), role, data.getString("operation_id"), parent.getString("id"))
-                JSONObject().put("saved", true).put("user_unread", true)
+                receipt(saved, role, data.getString("operation_id"))
             }
             "annotate", "review" -> {
-                store.annotate(bookId(), if (action == "annotate") data.getString("version") else null,
+                val saved = store.annotate(bookId(), if (action == "annotate") data.getString("version") else null,
                     data.optInt("start"), data.optInt("end"), data.optString("quote"), data.optString("text"),
                     data.optString("font", "hand"), data.optString("color", "#486B65"), data.optJSONArray("lines") ?: JSONArray(),
                     data.optJSONArray("photos") ?: JSONArray(), role, data.getString("operation_id"))
-                JSONObject().put("saved", true).put("user_unread", true)
+                receipt(saved, role, data.getString("operation_id"))
             }
             "schedule" -> {
                 val minutes = data.getInt("minutes"); require(minutes in 1..10080)
@@ -54,5 +61,15 @@ internal object StudyTool {
             }
             else -> error("未知共读/写作操作")
         }
+    }
+
+    private fun receipt(book: JSONObject, author: String, operation: String): JSONObject {
+        val note = book.getJSONArray("notes").objects().single { it.getString("author") == author && it.getString("operation") == operation }
+        val chapter = book.getJSONArray("chapters").objects().firstOrNull { c -> c.getString("version") == note.optString("version") ||
+            c.getJSONArray("history").let { a -> (0 until a.length()).any { a.getString(it) == note.optString("version") } } }
+        return JSONObject().put("saved", true).put("book", book.getString("id"))
+            .put("chapter", chapter?.getString("id") ?: JSONObject.NULL).put("version", note.opt("version"))
+            .put("reply_to", note.opt("reply_to")).put("reply_id", note.getString("id")).put("author", author)
+            .put("operation_id", operation).put("saved_at", note.getLong("at")).put("book_unread_count", book.optInt("unread"))
     }
 }

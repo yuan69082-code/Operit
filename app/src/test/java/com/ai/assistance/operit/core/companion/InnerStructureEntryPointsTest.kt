@@ -241,7 +241,7 @@ class InnerStructureEntryPointsTest {
         assertEquals(role, archive.getString("owner"))
         assertEquals(8, states.inspect(role, one, 40).getJSONArray("inner_history").length())
         val material = InnerStructure.material(data, "语言方式", 0)
-        assertTrue(material.toString().length <= InnerStructure.MATERIAL_BUDGET)
+        assertTrue(material.getJSONArray("selected").length() <= 8)
         assertEquals(8, material.getJSONArray("catalogue").length())
         val seen = mutableSetOf<String>()
         repeat(12) {
