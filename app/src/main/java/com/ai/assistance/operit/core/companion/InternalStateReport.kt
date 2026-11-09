@@ -19,7 +19,8 @@ data class InternalStateFrame(
     val innerPending: Map<String, String> = emptyMap(),
     val innerSources: Map<String, String> = emptyMap(),
     val innerObjects: Set<String> = emptySet(),
-    val innerGuard: String = ""
+    val innerGuard: String = "",
+    val interactionMembers: Map<String, Int> = emptyMap()
 )
 
 /** Applies one subjective report atomically. This does not replay the source event or choose actions. */
@@ -32,7 +33,7 @@ object InternalStateReports {
         require(frame.id.isNotBlank() && frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         require(frame.revision >= 0 && frame.at >= 0 && now >= frame.at) { "状态报告时间早于本轮快照" }
         requireStateReport(frame.eventSequence >= 0 && frame.eventSequence <= data.optLong("sequence"), InternalStateReportFailure.SOURCE)
-        require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise", "inner", "episodes") }) { "状态报告包含未知字段" }
+        require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise", "inner", "episodes", "unions") }) { "状态报告包含未知字段" }
         requireStateReport(string(report, "frame_id", 160) == frame.id, InternalStateReportFailure.FRAME)
         val reportDigest = digest(report)
         val frameIdentity = JSONObject().put("id", frame.id).put("role", frame.roleId).put("chat", frame.chatId)
@@ -42,6 +43,7 @@ object InternalStateReports {
             .put("inner_pending", JSONObject(frame.innerPending))
             .put("inner_sources", JSONObject(frame.innerSources.mapValues { InnerStructure.hash(it.value) }))
             .put("inner_objects", JSONArray(frame.innerObjects.sorted()))
+        if (frame.interactionMembers.isNotEmpty()) frameIdentity.put("interaction_members", JSONObject(frame.interactionMembers))
         val frameDigest = digest(frameIdentity)
 
         // A transport retry is identified before checking the newer semantic revision. A changed
@@ -196,13 +198,15 @@ object InternalStateReports {
         // in-flight report: no semantic state has changed merely because the model stayed quiet.
         val innerChanged = InnerStructure.apply(next, frame, if (report.has("inner")) report.getJSONArray("inner") else JSONArray(), now)
         val episodesChanged = CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
-        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !innerChanged && !episodesChanged) revision else revision + 1
+        val unionsChanged = InnerInteractions.apply(data, next, frame, report.optJSONArray("unions") ?: JSONArray(), now)
+        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !innerChanged && !episodesChanged && !unionsChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)
         val receipt = JSONObject().put("frame_id", frame.id).put("revision", nextRevision)
             .put("updated", JSONArray(updates.map { it.getString("id") }))
             .put("created", JSONArray(creates.map { it.getJSONObject("definition").getString("id") }))
             .put("revised", JSONArray(revisions.map { it.getString("id") }))
             .put("episodes_adopted", episodesChanged)
+            .put("unions_adopted", unionsChanged)
         if (report.has("inner")) receipt.put("inner_operations", JSONArray((0 until report.getJSONArray("inner").length()).map {
             report.getJSONArray("inner").getJSONObject(it).let { action -> JSONObject().put("op", action.getString("op")).put("id", action.getString("id")) }
         }))

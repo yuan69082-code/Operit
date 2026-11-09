@@ -33,7 +33,7 @@ internal object CategoryEvents {
         .firstOrNull { it.getString("id") == id }) { "类别须先通过内在候选采用" }.getJSONObject("content").also {
         require(it.getString("family") in families && it.getString("status") == "active") { "此记录不是活动的心理类别" }
     }
-    private fun append(data: JSONObject, frame: InternalStateFrame, row: JSONObject) {
+    internal fun append(data: JSONObject, frame: InternalStateFrame, row: JSONObject) {
         var journal = data.optJSONObject("category_commit")
         if (journal == null || journal.getString("id") != frame.id) {
             journal = JSONObject().put("schema", 1).put("id", frame.id).put("rows", JSONArray())

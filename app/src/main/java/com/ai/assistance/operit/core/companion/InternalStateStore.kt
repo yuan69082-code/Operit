@@ -268,7 +268,7 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("episode", "focus", "experience_link", "category_versions", "source"))
+        require(offset >= 0 && kind in setOf("episode", "focus", "experience_link", "union", "category_versions", "source"))
         val data = snapshot(role, chat, false)
         if (kind == "source") {
             require(!id.isNullOrBlank())
@@ -320,7 +320,7 @@ class InternalStateStore(private val context: Context) {
             }
             val selected = InternalStateSelection.select(data, chat, now, currentInput,
                 candidates(data, actor, chat, wake, capabilities), ThoughtPool.all(context, actor), inputEventId)
-            val frame = requestId?.let {
+            var frame = requestId?.let {
                 InternalStateFrame(id = "state-frame:$it", roleId = actor, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,
                     eventIds = selected.eventIds, definitionVersions = InternalStateEngine.definitions(data).associate {
@@ -332,8 +332,26 @@ class InternalStateStore(private val context: Context) {
             val payload = selected.payload
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
                 .put("category_events", CategoryEvents.material(data, persist))
+                .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
+            if (!groupInput && frame != null) {
+                val members = mutableMapOf<String, Int>()
+                val inner = payload.getJSONObject("inner_structure")
+                for (field in listOf("identity", "selected")) {
+                    val rows = inner.getJSONArray(field)
+                    for (i in 0 until rows.length()) {
+                        val row = rows.getJSONObject(i)
+                        members["inner:" + row.getJSONObject("content").getString("id")] = row.getInt("version")
+                    }
+                }
+                val episodes = payload.getJSONObject("category_events").getJSONArray("episodes")
+                for (i in 0 until episodes.length()) {
+                    val row = episodes.getJSONObject(i)
+                    members["episode:" + row.getString("id")] = row.getInt("version")
+                }
+                frame = frame.copy(interactionMembers = members)
+            }
             if (frame != null) {
                 payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
                     .put("subject_id", actor).put("state_version", frame.stateVersion)
@@ -352,7 +370,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerStructure.guard(data),
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )
