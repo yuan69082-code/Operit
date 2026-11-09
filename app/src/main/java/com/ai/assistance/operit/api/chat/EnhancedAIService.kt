@@ -2230,7 +2230,9 @@ class EnhancedAIService private constructor(private val context: Context) {
                 toolExposureMode = ToolExposureMode.resolve(config.apiProviderType),
                 callerName = characterName,
                 callerChatId = chatId,
-                callerCardId = roleCardId
+                callerCardId = roleCardId,
+                subjectFrame = context.internalStateFrame,
+                subjectRound = context.conversationHistory.count { it.kind == PromptTurnKind.TOOL_RESULT }
             )
 
             if (toolBatch.results.isNotEmpty()) {
@@ -2364,7 +2366,9 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         val normalizedChatHistory =
             conversationService.normalizeConversationHistoryForModel(context.conversationHistory, roleCardId)
-                .let { com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(it, System.currentTimeMillis(), results) }
+                .let { normalized -> withContext(Dispatchers.IO) {
+                    com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(normalized, System.currentTimeMillis(), results, this@EnhancedAIService.context)
+                } }
         context.conversationHistory.clear()
         context.conversationHistory.addAll(normalizedChatHistory)
         context.internalStateFrame = CurrentRequestContext.internalStateFrame(normalizedChatHistory)

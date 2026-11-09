@@ -13,7 +13,8 @@ import com.ai.assistance.operit.core.tools.InternalStateReadResultData
  * do not duplicate its body in the subject material block or claim an unexecuted read.
  */
 internal object SubjectToolMaterials {
-    fun attach(turns: List<PromptTurn>, at: Long, results: List<ToolResult> = emptyList()): List<PromptTurn> {
+    fun attach(turns: List<PromptTurn>, at: Long, results: List<ToolResult> = emptyList(),
+               context: android.content.Context? = null): List<PromptTurn> {
         val frame = CurrentRequestContext.internalStateFrame(turns) ?: return turns
         val index = turns.indexOfLast { it.kind == PromptTurnKind.TOOL_RESULT }
         if (index < 0) return turns
@@ -31,8 +32,19 @@ internal object SubjectToolMaterials {
                 .put("tool", turn.toolName ?: JSONObject.NULL).put("normalized_result_hash", hash))
         // Bounded per request, without an unbounded process-global registry. Older results
         // remain in normal tool history; an unbound result cannot claim a receipt here.
-        val sources = (frame.materialSources + (id to material.toString())).entries.toList().takeLast(16)
-            .associate { it.key to it.value }
+        val sources = (frame.materialSources + (id to material.toString())).toMutableMap()
+        val actionIds = mutableListOf<String>()
+        if (context != null) results.forEach { result ->
+            val action = result.subjectActionId ?: return@forEach
+            val row = SubjectActions.read(context, frame.roleId, frame.chatId, action, 0).optJSONObject("item")
+                ?: return@forEach
+            val receipt = row.optJSONObject("receipt") ?: return@forEach
+            if (receipt.getString("text") != result.result.toString() ||
+                !turn.content.contains(result.result.toString())) return@forEach
+            val source = SubjectActions.material(row)
+            sources[source.getString("id")] = source.toString()
+            actionIds.add(source.getString("id"))
+        }
         val members = frame.interactionMembers.toMutableMap()
         results.filter { it.success && it.toolName == "companion_internal_state" }.forEach { result ->
             val receipt = result.result as? InternalStateReadResultData ?: return@forEach
@@ -41,6 +53,22 @@ internal object SubjectToolMaterials {
             if (!receipt.privateContext || receipt.owner != frame.roleId || receipt.chatId != frame.chatId ||
                 !turn.content.contains(receipt.value)) return@forEach
             val body = JSONObject(receipt.value)
+            if (receipt.section in SubjectRestDreams.kinds) {
+                val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
+                if (rows != null) for (i in 0 until rows.length()) {
+                    val source = SubjectRestDreams.material(rows.getJSONObject(i))
+                    sources[source.getString("id")] = source.toString()
+                    actionIds.add(source.getString("id"))
+                }
+            }
+            if (receipt.section == "action") {
+                val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
+                if (rows != null) for (i in 0 until rows.length()) {
+                    val source = SubjectActions.material(rows.getJSONObject(i))
+                    sources[source.getString("id")] = source.toString()
+                    actionIds.add(source.getString("id"))
+                }
+            }
             fun rows(kind: String, values: JSONArray?) {
                 if (values == null) return
                 for (i in 0 until values.length()) {
@@ -54,17 +82,18 @@ internal object SubjectToolMaterials {
                     rows("episode", body.optJSONObject("psychological_events")?.optJSONArray("items"))
                     rows("state", body.optJSONArray("states"))
                 }
-                "inner", "state", "episode" -> {
+                "inner", "state", "episode", "decision", "feedback" -> {
                     val one = body.optJSONObject("item")
                     rows(receipt.section, if (one != null) JSONArray().put(one)
                         else body.optJSONArray(if (receipt.section == "inner") "records" else "items"))
                 }
             }
         }
-        val bound = CurrentRequestContext.bindInternalStateFrame(turns, frame.copy(materialSources = sources, interactionMembers = members))
+        val bound = CurrentRequestContext.bindInternalStateFrame(turns, frame.copy(
+            materialSources = sources.entries.toList().takeLast(24).associate { it.key to it.value }, interactionMembers = members))
         return bound.mapIndexed { i, row ->
             if (i != index) row else row.copy(content = row.content +
-                "\n[宿主来源ID:$id；仅指上述实际工具返回，成功或失败以上述结果为准，不表示新亲历。]",
+                "\n[宿主来源ID:$id；实际操作来源:${actionIds.joinToString(",")}；仅指上述实际工具返回，成功或失败以上述结果为准，不表示新亲历。]",
                 metadata = row.metadata + ("subject_material_id" to id))
         }
     }

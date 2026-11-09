@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
+import com.ai.assistance.operit.core.companion.SubjectActions
+import com.ai.assistance.operit.core.companion.InternalStateFrame
 
 /** Utility class for managing tool executions */
 object ToolExecutionManager {
@@ -422,6 +424,7 @@ object ToolExecutionManager {
         }
 
         return executor.invokeAndStream(invocation.tool).catch { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.e(TAG, "Tool execution error: ${invocation.tool.name}", e)
             toolHandler?.notifyToolExecutionError(invocation.tool, e)
             emit(
@@ -429,7 +432,8 @@ object ToolExecutionManager {
                     toolName = invocation.tool.name,
                     success = false,
                     result = StringResultData(""),
-                    error = "Tool execution error: ${e.message}"
+                    error = "Tool execution error: ${e.message}",
+                    executionStatus = "unknown"
                 )
             )
         }
@@ -527,13 +531,84 @@ object ToolExecutionManager {
         toolExposureMode: ToolExposureMode = ToolExposureMode.FULL,
         callerName: String? = null,
         callerChatId: String? = null,
-        callerCardId: String? = null
+        callerCardId: String? = null,
+        subjectFrame: InternalStateFrame? = null,
+        subjectRound: Int = 0
     ): ToolExecutionBatch = coroutineScope {
         val trace = com.ai.assistance.operit.core.experience.RequestDiagnostics(context)
         val traceKey = trace.active(callerChatId, callerCardId)
         trace.append(traceKey, "模型选择的工具", invocations.joinToString("\n") { it.tool.name })
         val orderedResults = OrderedToolResults(invocations.size) { markup ->
             collector.emit(ensureOwnLine(markup))
+        }
+        val actions = subjectFrame?.let {
+            require(it.roleId == callerCardId && it.chatId == callerChatId)
+            SubjectActions(context, it)
+        }
+        val actionIds = mutableMapOf<Int, String>()
+        val eligible = mutableListOf<IndexedValue<ToolInvocation>>()
+        for ((index, invocation) in invocations.withIndex()) {
+          try {
+            require(invocation.tool.parameters.count { it.name == SubjectActions.DECLARATION } <= 1)
+            val declaration = invocation.tool.parameters.firstOrNull { it.name == SubjectActions.DECLARATION }?.value
+            val clean = invocation.copy(tool = invocation.tool.copy(parameters =
+                invocation.tool.parameters.filterNot { it.name == SubjectActions.DECLARATION }))
+            if (actions == null) {
+                require(declaration == null) { "内部操作关联只在指定主体请求中使用" }
+                eligible.add(IndexedValue(index, clean))
+            } else {
+                // Stable position in this persisted request frame; contents are separately bound.
+                val id = com.ai.assistance.operit.core.companion.InnerStructure.hash("${actions.frame.id}:$subjectRound:$index")
+                val claim = actions.claim(id, resolveToolTarget(clean.tool).tool, declaration)
+                actionIds[index] = id
+                if (claim.execute) eligible.add(IndexedValue(index, clean.copy(hostInvocationId = id)))
+                else orderedResults.complete(index, requireNotNull(claim.replay))
+            }
+          } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+          catch (failure: Exception) {
+            // Invalid metadata or a failed pre-execution write must not rerun the business turn.
+            AppLogger.e(TAG, "操作登记或来源校验失败，当前操作未执行", failure)
+            orderedResults.complete(index, ToolResult(resolveDisplayToolName(invocation.tool), false,
+                StringResultData(""), "当前操作未执行：${failure.message}", executionStatus = "denied"))
+          }
+        }
+        suspend fun complete(index: Int, result: ToolResult, denied: Boolean = false) {
+            val saved = if (actions == null) result else try {
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    actions.finish(requireNotNull(actionIds[index]), result,
+                        if (denied) "denied" else result.executionStatus ?: if (result.success) "completed" else "failed")
+                }
+            } catch (failure: Exception) {
+                // Execution already happened. Keep the pending durable request and expose uncertainty;
+                // never throw a storage failure into the generation retry loop.
+                AppLogger.e(TAG, "操作回执保存失败；禁止自动重跑", failure)
+                result.copy(success = false, error = "回执未可靠保存，执行结果未知；不得自动重试。",
+                    subjectActionId = actionIds[index], executionStatus = "unknown")
+            }
+            orderedResults.complete(index, saved)
+        }
+        suspend fun runRecorded(index: Int, invocation: ToolInvocation, runtime: ToolRuntimeContext): ToolResult {
+            try {
+                actions?.started(requireNotNull(actionIds[index]))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                // A start-record failure must not escape into a whole-turn retry after
+                // other tools in this batch may already have produced side effects.
+                AppLogger.e(TAG, "开始执行记录未保存，当前操作未执行", failure)
+                return ToolResult(resolveDisplayToolName(invocation.tool), false, StringResultData(""),
+                    "开始执行记录未保存，当前操作未执行。", executionStatus = "denied")
+            }
+            return try { executeTool(invocation, toolHandler, packageManager, runtime) }
+            catch (failure: Exception) {
+                val unknown = ToolResult(resolveDisplayToolName(invocation.tool), false, StringResultData(""),
+                    "执行中断，结果未知：${failure.javaClass.simpleName}", executionStatus = "unknown")
+                if (actions != null) withContext(kotlinx.coroutines.NonCancellable) {
+                    try { actions.finish(requireNotNull(actionIds[index]), unknown, "unknown") }
+                    catch (save: Exception) { AppLogger.e(TAG, "中断回执保存失败，保留待确认请求", save) }
+                }
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                unknown
+            }
         }
         // 默认工具注册现在可能在启动阶段被延后；这里确保在真正执行工具前已完成注册
         // registerDefaultTools() 是幂等且线程安全的，可安全重复调用
@@ -547,7 +622,10 @@ object ToolExecutionManager {
             runCatching {
                 CharacterCardToolAccessResolver
                     .getInstance(context)
-                    .resolve(callerCardId, packageManager)
+                    .resolve(callerCardId, packageManager, includeExternalSources = eligible.any { (_, invocation) ->
+                        val target = resolveToolTarget(invocation.tool).tool.name
+                        ':' in target || target == "use_package" || invocation.tool.name == PACKAGE_PROXY_TOOL_NAME
+                    })
             }.onFailure { error ->
                 AppLogger.e(TAG, "角色卡工具权限解析失败: callerCardId=$callerCardId", error)
             }.getOrNull()
@@ -560,13 +638,13 @@ object ToolExecutionManager {
 
         // 1. 顶层工具暴露模式拦截
         val toolExposurePermittedInvocations = mutableListOf<IndexedValue<ToolInvocation>>()
-        for ((index, invocation) in invocations.withIndex()) {
+        for ((index, invocation) in eligible) {
             val deniedResult = buildToolExposureDeniedResult(context, invocation, toolExposureMode)
             if (deniedResult == null) {
                 toolExposurePermittedInvocations.add(IndexedValue(index, invocation))
             } else {
                 toolHandler.notifyToolExecutionResult(invocation.tool, deniedResult)
-                orderedResults.complete(index, deniedResult)
+                complete(index, deniedResult, true)
             }
         }
 
@@ -585,7 +663,7 @@ object ToolExecutionManager {
                 roleCardPermittedInvocations.add(IndexedValue(index, invocation))
             } else {
                 toolHandler.notifyToolExecutionResult(invocation.tool, deniedResult)
-                orderedResults.complete(index, deniedResult)
+                complete(index, deniedResult, true)
             }
         }
 
@@ -601,7 +679,7 @@ object ToolExecutionManager {
                     success = false, result = StringResultData(""), error = wakeDenial)
                 toolHandler.notifyToolExecutionResult(invocation.tool, deniedResult)
                 toolHandler.notifyToolExecutionFinished(invocation.tool)
-                orderedResults.complete(index, deniedResult)
+                complete(index, deniedResult, true)
                 continue
             }
             toolHandler.notifyToolCallRequested(invocation.tool)
@@ -613,7 +691,7 @@ object ToolExecutionManager {
                     if (hasPermission) {
                         permittedInvocations.add(IndexedValue(index, invocation))
                     } else {
-                        orderedResults.complete(index, checkNotNull(errorResult))
+                        complete(index, checkNotNull(errorResult), true)
                     }
                 }
 
@@ -625,7 +703,7 @@ object ToolExecutionManager {
                         )
                     toolHandler.notifyToolExecutionResult(invocation.tool, interceptedResult)
                     toolHandler.notifyToolExecutionFinished(invocation.tool)
-                    orderedResults.complete(index, interceptedResult)
+                    complete(index, interceptedResult, true)
                 }
             }
         }
@@ -634,7 +712,11 @@ object ToolExecutionManager {
             if (callerName.isNullOrBlank() && callerChatId.isNullOrBlank() && callerCardId.isNullOrBlank()) {
                 permittedInvocations
             } else {
-                val jsPackageNames = packageManager.getAvailablePackages().keys
+                // Only qualified package calls need the catalog. Built-ins (and batches
+                // fully satisfied from durable receipts) must not wait for unrelated
+                // ToolPkg/WebView initialization merely to bind their caller identity.
+                val jsPackageNames = if (permittedInvocations.any { ':' in resolveToolTarget(it.value.tool).tool.name })
+                    packageManager.getAvailablePackages().keys else emptySet()
                 permittedInvocations.map { (index, invocation) ->
                     IndexedValue(
                         index,
@@ -666,32 +748,23 @@ object ToolExecutionManager {
         val parallelJobs = parallelInvocations.map { (index, invocation) ->
             async {
                 val result =
-                    executeTool(
-                        invocation = invocation,
-                        toolHandler = toolHandler,
-                        packageManager = packageManager,
-                        runtimeContext = toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId)
-                    )
+                    runRecorded(index, invocation, toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId))
+                // Persist before observational hooks: cancellation there must not lose an executed fact.
+                complete(index, result)
                 com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
                 com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
                 trace.tool(traceKey, result)
-                orderedResults.complete(index, result)
             }
         }
 
         // 顺序执行串行工具
         for ((index, invocation) in serialInvocations) {
             val result =
-                executeTool(
-                    invocation = invocation,
-                    toolHandler = toolHandler,
-                    packageManager = packageManager,
-                    runtimeContext = toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId)
-                )
+                runRecorded(index, invocation, toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId))
+            complete(index, result)
             com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
             com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
             trace.tool(traceKey, result)
-                orderedResults.complete(index, result)
         }
 
         // 等待所有并行任务完成
@@ -761,10 +834,12 @@ object ToolExecutionManager {
                 toolName = displayToolName,
                 success = false,
                 result = StringResultData(""),
-                error = "The tool execution returned no results."
+                error = "The tool execution returned no results.",
+                executionStatus = "unknown"
             )
         }
         val lastResult = collectedResults.last()
+        if (collectedResults.size == 1) return lastResult
         val combinedResultString = collectedResults.joinToString("\n") { res ->
             (if (res.success) res.result.toString() else "Step error: ${res.error ?: "Unknown error"}").trim()
         }.trim()
@@ -772,7 +847,10 @@ object ToolExecutionManager {
             toolName = displayToolName,
             success = lastResult.success,
             result = StringResultData(combinedResultString),
-            error = lastResult.error
+            error = lastResult.error,
+            executionStatus = if (collectedResults.any { it.executionStatus == "unknown" }) "unknown"
+                else if (collectedResults.any { it.success } && collectedResults.any { !it.success }) "partial"
+                else if (lastResult.success) "completed" else "failed"
         )
     }
 

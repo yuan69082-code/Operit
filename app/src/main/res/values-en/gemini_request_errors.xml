@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gemini_error_empty_request_content">The model request has no usable content and was not sent. Check that the current message and its attachments are still available.</string>
+</resources>

@@ -72,6 +72,12 @@ class InternalStateStore(private val context: Context) {
         return !groupId.isNullOrBlank()
     }
 
+    /** Synchronous storage/tool adapters retain the executing assistant across the IO bridge.
+     * Production callers already run these adapters on IO; never perform metadata IO in a state lock. */
+    internal fun recipientScope(role: String, chat: String): Boolean = kotlinx.coroutines.runBlocking(
+        kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(
+            com.ai.assistance.operit.data.preferences.AssistantScope.callerId())) { requireRecipient(role, chat) }
+
     suspend fun configure(role: String, enable: Boolean) {
         require(role.isNotBlank())
         if (enable) CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "companion_internal_state", true)
@@ -158,7 +164,7 @@ class InternalStateStore(private val context: Context) {
                 return@update
             }
             InternalStateEngine.event(data, id, if (success) "tool_success" else "tool_failure",
-                chat, "$name/${action.orEmpty()}", System.currentTimeMillis())
+                chat, "$name/${action.orEmpty()}", System.currentTimeMillis(), applyTriggers = false)
             InternalStateEngine.rows(data, "events").last { it.getString("id") == id }
                 .put("recipient", role).put("author", role).put("source_chat", chat)
                 .put("tool_status", status ?: JSONObject.NULL)
@@ -166,7 +172,7 @@ class InternalStateStore(private val context: Context) {
             if (source != null) {
                 InternalStateEngine.event(data, "$id:$source", source,
                     chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
-                    applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"))
+                    applyTriggers = false)
                 InternalStateEngine.rows(data, "events").last { it.getString("id") == "$id:$source" }
                     .put("recipient", role).put("author", role).put("source_chat", chat).put("tool_event", id)
             }
@@ -212,6 +218,10 @@ class InternalStateStore(private val context: Context) {
     fun submit(frame: InternalStateFrame, report: JSONObject, currentInnerSources: Map<String, String>? = null): JSONObject {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
+        if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
+            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || SubjectRestDreams.requested(report)) {
+            require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
+        }
         lateinit var receipt: JSONObject
         val saved = update(frame.roleId, "state_report") { data ->
             requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
@@ -248,6 +258,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspect(role: String, chat: String, offset: Int): JSONObject {
+        val result = inspectLocal(role, chat, offset)
+        return if (recipientScope(role, chat)) SubjectRestDreams.publicMaterial(result) else result
+    }
+
+    private fun inspectLocal(role: String, chat: String, offset: Int): JSONObject {
         require(offset >= 0)
         val data = snapshot(role, chat, true)
         val events = InternalStateEngine.rows(data, "events").asReversed()
@@ -276,7 +291,24 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source"))
+        val result = inspectCategoryLocal(role, chat, kind, id, offset)
+        return if (recipientScope(role, chat)) SubjectRestDreams.publicMaterial(result) else result
+    }
+
+    private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
+        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds)
+        if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
+        if (kind == "action_versions") {
+            requireNotNull(id)
+            // Authorize the current row before exposing any archived versions of this operation.
+            SubjectActions.read(store.context, role, chat, id, 0)
+            val rows = store.actionVersions(role, id, offset)
+            return JSONObject().put("items", JSONArray(rows.take(8)))
+                .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+        }
+        if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds ||
+            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
+              require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "inner") {
             if (id == null) return InnerStructure.page(data, offset)
@@ -376,12 +408,17 @@ class InternalStateStore(private val context: Context) {
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
                 .put("host_materials", JSONArray(hostMaterials))
-                .put("retrieved_materials", JSONArray(if (groupInput) emptyList<JSONObject>() else retrievedMaterials))
+                .put("retrieved_materials", JSONArray(if (groupInput) retrievedMaterials.filter {
+                    // Only this group's own actual operations; never private cross-window material.
+                    it.optString("type") == "actual_operation" && it.optString("owner") == actor &&
+                        it.optJSONObject("locator")?.optString("parent") == "group:$chat"
+                } else retrievedMaterials))
             if (frame != null) payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
                 .put("subject_id", actor).put("state_version", frame.stateVersion).put("at", frame.at)
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
+            if (groupInput) payload = SubjectRestDreams.publicMaterial(payload)
             payload = SubjectMaterialBudget.select(payload,
                 capabilities.optInt("subject_material_tokens", data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS))
                     .coerceIn(SubjectMaterialBudget.DEFAULT_TOKENS, SubjectMaterialBudget.MAX_TOKENS))
@@ -405,8 +442,11 @@ class InternalStateStore(private val context: Context) {
                     val row = numeric.getJSONObject(i)
                     members["state:" + row.getString("id")] = row.getInt("version")
                 }
+                frame = frame.copy(interactionMembers = members)
+            }
+            if (frame != null) {
                 val materials = payload.getJSONArray("retrieved_materials")
-                frame = frame.copy(interactionMembers = members, materialSources = (0 until materials.length())
+                frame = frame.copy(materialSources = (0 until materials.length())
                     .map { materials.getJSONObject(it) }.filter { it.optString("status") == "retrieved" }
                     .associate { it.getString("id") to it.toString() })
             }
@@ -430,7 +470,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + InnerStructure.guard(data),
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gemini_error_empty_request_content">本次模型请求缺少有效内容，未发送。请检查当前消息及附件是否仍可读取。</string>
+</resources>
