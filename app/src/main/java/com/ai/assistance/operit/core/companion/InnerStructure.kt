@@ -14,7 +14,6 @@ internal object InnerStructure {
     val families = identityFamilies + setOf("drive", "need", "desire", "emotion", "sentiment", "feeling", "relation", "preference")
     private const val MAX_RECORDS = 128
     private const val MAX_PENDING = 32
-    const val MATERIAL_BUDGET = 14000
     private val common = setOf("id", "family", "kind", "description", "object_ref", "context", "exceptions", "status", "legacy_ref", "experience_refs")
 
     private fun existingRoot(data: JSONObject): JSONObject? =
@@ -326,27 +325,24 @@ internal object InnerStructure {
             })).put("record_count", catalogue.size).put("pending_count", pendingRows.size)
             .put("pending_ids", JSONArray((pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)).take(8).map { it.getString("id") }))
             .put("selection", "身份依据完整保留，其他完整记录与名录按预算轮换；未展示不表示删除或失效，get 可按页查阅")
-        var used = result.toString().length
         val others = all.filter { it.getJSONObject("content").getString("family") !in identityFamilies }
         val rotated = if (others.isEmpty()) others else others.drop((cursor % others.size).toInt()) + others.take((cursor % others.size).toInt())
         val relevant = rotated.sortedByDescending { row ->
             val c = row.getJSONObject("content")
             listOf(c.getString("kind"), c.optString("object_ref"), c.optString("aspect")).count { it.isNotBlank() && input.contains(it, true) }
         }
-        for (row in pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)) {
-            val text = row.toString()
-            if (used + text.length + 1 <= MATERIAL_BUDGET - 2000) { candidates.put(copy(row)); used += text.length + 1 }
-        }
-        for (row in relevant) {
+        // One bounded page per lane; the final cross-module selector owns the Token budget.
+        // A large adopted identity must not make construction fail or starve all other lanes.
+        for (row in (pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)).take(8))
+            candidates.put(copy(row))
+        for (row in relevant.take(8)) {
             // Current meaning is complete; adoption receipts and quoted evidence remain in
             // get/history, not duplicated beside every active record on every request.
             val projected = identityMaterial(row).put("id", row.getString("id"))
                 .put("evidence_ids", JSONArray(row.getJSONObject("evidence").keys().asSequence().toList()))
                 .put("detail", "companion_internal_state get; original evidence/history retained")
-            val text = projected.toString()
-            if (used + text.length + 1 <= MATERIAL_BUDGET) { details.put(projected); used += text.length + 1 }
+            details.put(projected)
         }
-        check(result.toString().length <= MATERIAL_BUDGET)
         return result
     }
     private fun identityMaterial(row: JSONObject) = JSONObject().put("content", copy(row.getJSONObject("content")))

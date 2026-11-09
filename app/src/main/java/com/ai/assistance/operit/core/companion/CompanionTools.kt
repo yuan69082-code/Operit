@@ -88,6 +88,7 @@ object CompanionTools {
                     val store = CompanionStore(context)
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
+                    var privateStateRead = false
                     val result = when (name) {
                         "companion_internal_state" -> {
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
@@ -100,8 +101,12 @@ object CompanionTools {
                                     value(tool, "target"), required(tool, "reason"), (0 until evidence.length()).map { evidence.getString(it) })
                             }
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
-                                internal.requireRecipient(actor, chatId)
+                                privateStateRead = !internal.requireRecipient(actor, chatId)
                                 val section = value(tool, "section")
+                                check(privateStateRead || (section != "union" &&
+                                    !(section == "category_versions" && value(tool, "id").orEmpty().startsWith("union:")))) {
+                                    "私人联合须在该助手自己的私聊读取"
+                                }
                                 if (action == "budget") internal.materialBudget(actor, chatId, required(tool, "tokens").toInt())
                                 else if (action == "get" && section != null) internal.inspectCategory(actor, chatId, section, value(tool, "id"), value(tool, "offset")?.toInt() ?: 0)
                                 else internal.inspect(actor, chatId, value(tool, "offset")?.toInt() ?: 0)
@@ -225,7 +230,11 @@ object CompanionTools {
                         }
                         else -> library(context, roleId, store, scope, tool, required(tool, "action"))
                     }
-                    ToolResult(toolName = tool.name, success = true, result = StringResultData(result.toString()))
+                    val payload = if (name == "companion_internal_state" && action == "get")
+                        com.ai.assistance.operit.core.tools.InternalStateReadResultData(
+                            result.toString(), requireNotNull(roleId), chatId, value(tool, "section"), privateStateRead)
+                    else StringResultData(result.toString())
+                    ToolResult(toolName = tool.name, success = true, result = payload)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {

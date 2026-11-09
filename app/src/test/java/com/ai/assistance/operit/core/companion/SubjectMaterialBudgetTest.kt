@@ -72,6 +72,24 @@ class SubjectMaterialBudgetTest {
         assertNull(SubjectRequestWindow.check(1800, listOf(p.copy(isEnabled = false)), 2048).outputReserve)
     }
 
+    @Test fun nativeReadProofRejectsForeignTruncatedAndUntrustedResults() {
+        val f = InternalStateFrame("f", "role", "chat", 0, 10, setOf("input"), emptyMap(), 1)
+        val json = JSONObject().put("item", JSONObject().put("id", "x").put("version", 2)).toString()
+        val native = com.ai.assistance.operit.core.tools.InternalStateReadResultData(json, "role", "chat", "inner", true)
+        fun members(data: com.ai.assistance.operit.core.tools.ToolResultData, delivered: String = json): Map<String, Int> {
+            val original = CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, "取回")),
+                RuntimeContextSections(internalStateFrame = f)) + PromptTurn(PromptTurnKind.TOOL_RESULT, delivered, "companion_internal_state")
+            return requireNotNull(CurrentRequestContext.internalStateFrame(SubjectToolMaterials.attach(original, 20,
+                listOf(com.ai.assistance.operit.data.model.ToolResult("companion_internal_state", true, data))))).interactionMembers
+        }
+        assertEquals(mapOf("inner:x" to 2), members(native))
+        assertTrue(members(native.copy(owner = "other")).isEmpty())
+        assertTrue(members(native.copy(chatId = "other-window")).isEmpty())
+        assertTrue(members(native.copy(privateContext = false)).isEmpty())
+        assertTrue(members(native, json.take(10)).isEmpty())
+        assertTrue(members(com.ai.assistance.operit.core.tools.StringResultData(json)).isEmpty())
+    }
+
     @Test fun actualToolContinuationBindsResultOnceAndKeepsFailureText() {
         val f = InternalStateFrame("f", "role", "chat", 0, 10, setOf("input"), emptyMap(), 1)
         val original = CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, "查资料")),

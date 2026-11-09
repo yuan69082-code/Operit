@@ -276,8 +276,18 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("episode", "focus", "experience_link", "union", "category_versions", "source"))
+        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source"))
         val data = snapshot(role, chat, false)
+        if (kind == "inner") {
+            if (id == null) return InnerStructure.page(data, offset)
+            return JSONObject().put("item", InnerStructure.records(data).firstOrNull { it.getString("id") == id } ?: JSONObject.NULL)
+        }
+        if (kind == "state") {
+            val states = InternalStateEngine.snapshot(data, chat, System.currentTimeMillis())
+            if (id != null) return JSONObject().put("item", states.firstOrNull { it.getString("id") == id } ?: JSONObject.NULL)
+            return JSONObject().put("items", JSONArray(states.drop(offset).take(8)))
+                .put("next_offset", if (offset + 8 < states.size) offset + 8 else JSONObject.NULL)
+        }
         if (kind == "source") {
             require(!id.isNullOrBlank())
             val found = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == id }
@@ -286,10 +296,27 @@ class InternalStateStore(private val context: Context) {
         }
         if (kind == "category_versions") {
             require(!id.isNullOrBlank()) { "版本查询须给出 episode:ID 或 focus:类别ID" }
+            if (id.startsWith("union:")) {
+                val union = CategoryEvents.row(data, "union", id.removePrefix("union:"))
+                require(union?.optString("local_chat").orEmpty() in setOf("", chat)) { "该联合属于另一个窗口" }
+            }
             val rows = store.categoryVersions(key(role), id, offset)
             return JSONObject().put("items", JSONArray(rows.take(8))).put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
         }
         if (kind == "experience_link") return CategoryEvents.page(data, kind, offset, id)
+        if (kind == "union") {
+            if (id != null) {
+                val row = CategoryEvents.row(data, kind, id)
+                require(row?.optString("local_chat").orEmpty() in setOf("", chat)) { "该联合属于另一个窗口" }
+                return JSONObject().put("item", row ?: JSONObject.NULL)
+            }
+            val page = CategoryEvents.page(data, kind, offset)
+            val rows = page.getJSONArray("items")
+            for (i in rows.length() - 1 downTo 0) {
+                if (rows.getJSONObject(i).optString("local_chat") !in setOf("", chat)) rows.remove(i)
+            }
+            return page
+        }
         return if (id == null) CategoryEvents.page(data, kind, offset) else JSONObject().put("item", CategoryEvents.row(data, kind, id) ?: JSONObject.NULL)
     }
 

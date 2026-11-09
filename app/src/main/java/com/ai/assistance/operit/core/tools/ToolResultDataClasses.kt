@@ -38,6 +38,18 @@ data class StringResultData(val value: String) : ToolResultData() {
     override fun toString(): String = value
 }
 
+/** A native, authorized current-state read. Text from MCP or older history cannot mint this receipt. */
+@Serializable
+data class InternalStateReadResultData(
+    val value: String,
+    val owner: String,
+    val chatId: String,
+    val section: String?,
+    val privateContext: Boolean
+) : ToolResultData() {
+    override fun toString(): String = value
+}
+
 @Serializable
 data class SleepResultData(
         val requestedMs: Int,

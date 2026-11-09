@@ -727,13 +727,14 @@ class EnhancedAIService private constructor(private val context: Context) {
         CurrentRequestContext.subjectMaterial(history)?.let { material ->
             val exact = service.countLocalTextTokens(material)
             if (exact != null) {
-                require(exact >= 0 && exact <= frame.materialTokenLimit) { "主体材料实际分词超过本轮预算，本次请求未发送；此前工具结果保留，请调整材料预算。" }
+                require(exact > 0 && exact <= frame.materialTokenLimit) { "主体材料分词计数无效或超过本轮预算，本次请求未发送；此前工具结果保留，请检查分词器或材料预算。" }
                 AppLogger.d(TAG, "Subject material local tokenizer=$exact quota=${frame.materialTokenLimit}; text only, full window measured separately")
             }
         }
         val check = com.ai.assistance.operit.core.companion.SubjectRequestWindow.check(input, parameters, window)
         AppLogger.d(TAG, "Subject full window: inputEstimate=$input outputReserve=${check.outputReserve} window=$window; provider estimate, unknown tokenizer error")
         require(!check.exceeds) { "完整请求估算超过模型窗口（含历史、指令、工具和已配置输出预留），请先压缩或调整窗口；未重复执行本轮。" }
+        com.ai.assistance.operit.core.experience.RecallEvidence(context).selected(frame)
     }
 
     private suspend fun estimatePreparedRequestWindow(
@@ -2363,7 +2364,7 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         val normalizedChatHistory =
             conversationService.normalizeConversationHistoryForModel(context.conversationHistory, roleCardId)
-                .let { com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(it, System.currentTimeMillis()) }
+                .let { com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(it, System.currentTimeMillis(), results) }
         context.conversationHistory.clear()
         context.conversationHistory.addAll(normalizedChatHistory)
         context.internalStateFrame = CurrentRequestContext.internalStateFrame(normalizedChatHistory)

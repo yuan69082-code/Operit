@@ -78,18 +78,22 @@ class InnerStructureContractsTest {
                 .put("description", "完整内容".repeat(110))
             if (index >= 4) c.put("current_state", "待理解").put("unresolved", true)
             records.put("r$index", JSONObject().put("id", "r$index").put("content", c).put("version", 1)
-                .put("origin", "subject_development").put("source", "subject_adoption"))
+                .put("origin", "subject_development").put("source", "subject_adoption").put("evidence", JSONObject()))
         }
         val first = InnerStructure.material(d, "", 0)
         val later = InnerStructure.material(d, "", 16)
-        assertTrue(first.toString().length <= InnerStructure.MATERIAL_BUDGET)
-        assertTrue(later.toString().length <= InnerStructure.MATERIAL_BUDGET)
+        assertEquals(8, first.getJSONArray("selected").length())
+        assertEquals(8, later.getJSONArray("selected").length())
         assertEquals(4, first.getJSONArray("identity").length())
         assertEquals(128, first.getInt("record_count"))
         assertNotEquals(first.getJSONArray("catalogue").toString(), later.getJSONArray("catalogue").toString())
         for (i in 0 until first.getJSONArray("selected").length()) {
             val row = first.getJSONArray("selected").getJSONObject(i)
-            assertEquals(records.getJSONObject(row.getString("id")).toString(), row.toString())
+            val saved = records.getJSONObject(row.getString("id"))
+            assertEquals(saved.getJSONObject("content").toString(), row.getJSONObject("content").toString())
+            assertEquals(saved.getInt("version"), row.getInt("version"))
+            assertEquals(saved.getString("origin"), row.getString("origin"))
+            assertEquals(0, row.getJSONArray("evidence_ids").length())
         }
     }
 

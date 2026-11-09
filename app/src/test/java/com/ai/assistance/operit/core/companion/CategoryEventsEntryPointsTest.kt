@@ -99,6 +99,41 @@ class CategoryEventsEntryPointsTest {
         assertEquals(2, states.inspectCategory(role, chat, "category_versions", "union:u", 0).getJSONArray("items").length())
     }
 
+    @Test fun nativeOnDemandReadSuppliesOmittedMembersForNormalUnionReport(): Unit = runBlocking {
+        states.materialBudget(role, chat, 16384)
+        for (id in listOf("left", "right"))
+            adopt(content(id).put("description", "持续内容".repeat(150)).put("unresolved", true).put("current_state", "保留独立理解"))
+        states.materialBudget(role, chat, 2048)
+        val sections = InnerStructureContext.prepare(context, role, chat, true, input = "取回这两种理解")
+        val first = requireNotNull(sections.internalStateFrame)
+        assertTrue(listOf("left", "right").any { "inner:$it" !in first.interactionMembers })
+        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
+        CompanionTools.register(handler, context)
+        val results = listOf("left", "right").map { id ->
+            handler.executeTool(com.ai.assistance.operit.data.model.AITool("companion_internal_state",
+                mapOf("action" to "get", "section" to "inner", "id" to id,
+                    "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role)
+                    .map { com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value) }))
+                .also { assertTrue(it.error, it.success) }
+        }
+        val turns = com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(
+            listOf(com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER, "取回这两种理解")), sections) +
+            com.ai.assistance.operit.core.chat.hooks.PromptTurn(
+                com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.TOOL_RESULT,
+                com.ai.assistance.operit.api.chat.enhance.ConversationMarkupManager.buildToolResultMessage(results), "companion_internal_state")
+        val read = SubjectToolMaterials.attach(turns, System.currentTimeMillis(), results)
+        val f = requireNotNull(com.ai.assistance.operit.core.chat.CurrentRequestContext.internalStateFrame(read))
+        val u = JSONObject().put("id", "on-demand").put("expected_version", 0)
+            .put("members", JSONArray(listOf("left", "right").map {
+                JSONObject().put("kind", "inner").put("id", it).put("version", f.interactionMembers.getValue("inner:$it"))
+            })).put("objects", JSONArray()).put("evidence", JSONArray().put(f.materialSources.keys.last()))
+            .put("interpretation", "实际取回后共同理解").put("decision", "暂不行动").put("status", "active").put("effects", JSONArray())
+        submit(f, report(f).put("unions", JSONArray().put(u)))
+        states.materialBudget(role, chat, 16384)
+        assertTrue(CompanionContext.compose(context, second, role, JSONObject(), false).state.contains("实际取回后共同理解"))
+        assertEquals(1, states.inspectCategory(role, chat, "union", "on-demand", 0).getJSONObject("item").getInt("version"))
+    }
+
     @Test fun independentEventsAndIndependentDimensionsThroughNormalReports(): Unit = runBlocking {
         category()
         val f = frame(); submit(f, report(f, listOf("A", "B", "C").map { appraisal(f, it) }))
@@ -237,6 +272,9 @@ class CategoryEventsEntryPointsTest {
         submit(f, report(f).put("unions", JSONArray().put(union)))
         assertTrue(CompanionContext.compose(context, chat, role, JSONObject(), false).state.contains("仅此窗口的理解"))
         assertFalse(CompanionContext.compose(context, second, role, JSONObject(), false).state.contains("仅此窗口的理解"))
+        rejects { states.inspectCategory(role, second, "union", "local-union", 0) }
+        rejects { states.inspectCategory(role, second, "category_versions", "union:local-union", 0) }
+        assertEquals(0, states.inspectCategory(role, second, "union", null, 0).getJSONArray("items").length())
         states.evolve(role, chat, "deactivate", "local", 1, null, null, "明确停用但保留经历", listOf("definition-input"))
         assertTrue(CompanionContext.compose(context, chat, role, JSONObject(), false).state.contains("仅此窗口的理解"))
         assertEquals(1, states.inspectCategory(role, chat, "union", "local-union", 0).getJSONObject("item").getInt("version"))

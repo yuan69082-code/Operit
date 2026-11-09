@@ -6,8 +6,9 @@ import org.json.JSONObject
 import kotlin.math.ceil
 
 /** One budget for serialized subject material, independent of the model's full input window.
- * Providers currently expose a local estimate, not a preflight tokenizer. Retain that estimate
- * for comparability, charge non-ASCII non-Han text by UTF-8 bytes, and reserve 25% uncertainty.
+ * Selection uses the shared estimate; supported local channels additionally verify the selected
+ * envelope with their native tokenizer before sending. Charge non-ASCII non-Han text by UTF-8
+ * bytes and reserve 25% uncertainty for channels without a matching local tokenizer.
  * This is not a guaranteed error bound for an arbitrary provider tokenizer.
  */
 internal object SubjectMaterialBudget {
@@ -61,7 +62,7 @@ internal object SubjectMaterialBudget {
             .put("method", "host_estimate_utf8_non_han_plus_25_percent")
             .put("exact", false).put("error_bound", "unknown_for_custom_tokenizers")
             .put("omitted_counts", omitted).put("omission_is_not_deletion", true)
-            .put("retrieve", "companion_internal_state get(offset) includes inner; section=episode/focus/union/source; material locator tools")
+            .put("retrieve", "companion_internal_state get section=inner/state/episode/focus/union/source id or offset; material locator tools")
         result.put("material_budget", budget)
         lanes.forEach { omitted.put(it.path, it.rows.size) }
         // This envelope is small and bounded, regardless of the history volume.
