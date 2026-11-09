@@ -622,7 +622,10 @@ object ToolExecutionManager {
             runCatching {
                 CharacterCardToolAccessResolver
                     .getInstance(context)
-                    .resolve(callerCardId, packageManager)
+                    .resolve(callerCardId, packageManager, includeExternalSources = eligible.any { (_, invocation) ->
+                        val target = resolveToolTarget(invocation.tool).tool.name
+                        ':' in target || target == "use_package" || invocation.tool.name == PACKAGE_PROXY_TOOL_NAME
+                    })
             }.onFailure { error ->
                 AppLogger.e(TAG, "角色卡工具权限解析失败: callerCardId=$callerCardId", error)
             }.getOrNull()
@@ -709,7 +712,11 @@ object ToolExecutionManager {
             if (callerName.isNullOrBlank() && callerChatId.isNullOrBlank() && callerCardId.isNullOrBlank()) {
                 permittedInvocations
             } else {
-                val jsPackageNames = packageManager.getAvailablePackages().keys
+                // Only qualified package calls need the catalog. Built-ins (and batches
+                // fully satisfied from durable receipts) must not wait for unrelated
+                // ToolPkg/WebView initialization merely to bind their caller identity.
+                val jsPackageNames = if (permittedInvocations.any { ':' in resolveToolTarget(it.value.tool).tool.name })
+                    packageManager.getAvailablePackages().keys else emptySet()
                 permittedInvocations.map { (index, invocation) ->
                     IndexedValue(
                         index,

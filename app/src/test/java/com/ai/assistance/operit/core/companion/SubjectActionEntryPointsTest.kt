@@ -210,6 +210,26 @@ class SubjectActionEntryPointsTest {
         assertTrue(retry.error, retry.success); assertNotEquals(id, retry.subjectActionId)
     }
 
+    @Test fun builtInAndReceiptReplayDoNotInitializeUnrelatedPackageCatalog(): Unit = runBlocking {
+        val packages = org.mockito.Mockito.mock(com.ai.assistance.operit.core.tools.packTool.PackageManager::class.java)
+        org.mockito.Mockito.doThrow(IllegalStateException("unrelated package catalog must not be loaded"))
+            .`when`(packages).getAvailablePackages(org.mockito.Mockito.anyBoolean())
+        org.mockito.Mockito.doThrow(IllegalStateException("unrelated enabled packages must not be loaded"))
+            .`when`(packages).getEnabledPackageNames()
+        val f = requireNotNull(sections().internalStateFrame)
+        suspend fun normalRequest() = ToolExecutionManager.executeInvocations(
+            listOf(invocation("sleep", mapOf("duration_ms" to "0"))), context, handler, packages,
+            object : StreamCollector<String> { override suspend fun emit(value: String) {} },
+            callerCardId = role, callerChatId = chat, subjectFrame = f).results.single()
+        val first = normalRequest()
+        assertTrue(first.error, first.success)
+        val replay = normalRequest()
+        assertTrue(replay.error, replay.success)
+        assertEquals(first.subjectActionId, replay.subjectActionId)
+        org.mockito.Mockito.verify(packages, org.mockito.Mockito.never()).getAvailablePackages(org.mockito.Mockito.anyBoolean())
+        org.mockito.Mockito.verify(packages, org.mockito.Mockito.never()).getEnabledPackageNames()
+    }
+
     @Test fun concurrentDuplicateAndSeparateRequestsPreserveFacts(): Unit = runBlocking {
         val count = AtomicInteger()
         handler.registerTool("sleep", executor = { _: AITool ->
