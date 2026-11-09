@@ -118,6 +118,18 @@ class WebChatHttpBridge(
         }
 
         return when {
+            session.uri == "/api/web/private-state" && session.method == NanoHTTPD.Method.POST -> {
+                try {
+                    val files = HashMap<String, String>()
+                    session.parseBody(files)
+                    val request = org.json.JSONObject(requireNotNull(files["postData"]) { "缺少请求内容" })
+                    val result = runBlocking(Dispatchers.IO) { WebPrivateStateBridge(appContext).handle(request) }
+                    NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8", result.toString())
+                } catch (failure: Exception) {
+                    AppLogger.e("WebPrivateState", "私域请求未完成", failure)
+                    jsonResponse(NanoHTTPD.Response.Status.BAD_REQUEST, WebErrorResponse(failure.message ?: "私域读取或保存失败"))
+                }
+            }
             session.uri == BOOTSTRAP_PATH && session.method == NanoHTTPD.Method.GET ->
                 handleBootstrap()
 
@@ -288,7 +300,8 @@ class WebChatHttpBridge(
                     structuredRender = true,
                     streaming = true,
                     renameChat = true,
-                    deleteChat = true
+                    deleteChat = true,
+                    privateState = true
                 )
             )
         )

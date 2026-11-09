@@ -36,7 +36,9 @@ data class WebCapabilities(
     @SerialName("rename_chat")
     val renameChat: Boolean,
     @SerialName("delete_chat")
-    val deleteChat: Boolean
+    val deleteChat: Boolean,
+    @SerialName("private_state")
+    val privateState: Boolean = false
 )
 
 @Serializable

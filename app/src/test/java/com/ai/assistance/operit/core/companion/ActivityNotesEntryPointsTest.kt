@@ -32,6 +32,10 @@ class ActivityNotesEntryPointsTest {
     private lateinit var handler: AIToolHandler
     @Before fun setup(): Unit = runBlocking {
         context = RuntimeEnvironment.getApplication()
+        // Robolectric supplies a new Application/files directory per test while this Kotlin
+        // singleton can retain the preceding test's Context. Recreate the normal repository,
+        // not its data, so its post-save activity hook uses this test's actual application.
+        ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "随记"))
         InternalStateStore(context).configure(role, true)
         chat = window(role)

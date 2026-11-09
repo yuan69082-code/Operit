@@ -5,6 +5,7 @@ export type InputProcessingStage = 'idle' | 'connecting' | 'uploading' | 'stream
 
 export interface WebCapabilities {
   shared_service?: boolean;
+  private_state?: boolean;
   attachments: boolean;
   per_chat_theme: boolean;
   structured_render: boolean;

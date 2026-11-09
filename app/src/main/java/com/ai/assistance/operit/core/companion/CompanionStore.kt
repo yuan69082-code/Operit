@@ -74,6 +74,7 @@ class CompanionStore(context: Context) {
             write(scope, data)
         }
         if (scope.startsWith("internal-state:")) {
+            if (EstablishedWindowReceipt.reconcile(context, requireNotNull(owner), data)) write(scope, data)
             // The bounded journal is the commit point. Rebuild the index before any subsequent
             // reader/writer; an interrupted SQL transaction can repeat without a second owner.
             data.optJSONObject("category_commit")?.let { journal -> history(scope).use { it.applyCategoryJournal(journal) } }
@@ -149,6 +150,9 @@ class CompanionStore(context: Context) {
     }
 
     private fun write(scope: String, data: JSONObject) {
+        if (scope.startsWith("internal-state:")) {
+            EstablishedWindowReceipt.reconcile(context, requireNotNull(SubjectStateBoundary.owner(scope)), data)
+        }
         val target = file(scope)
         val out = target.startWrite()
         try {

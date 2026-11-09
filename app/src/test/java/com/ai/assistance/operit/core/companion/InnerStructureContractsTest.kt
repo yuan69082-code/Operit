@@ -69,7 +69,7 @@ class InnerStructureContractsTest {
         assertEquals("value", InnerStructure.records(d).single().getJSONObject("content").getString("family"))
     }
 
-    @Test fun materialBudgetPreservesWholeIdentityAndRotatesCompleteOtherRecords() {
+    @Test fun materialBudgetPreservesExactIdentityAndRotatesLosslessOtherRecords() {
         val d = data()
         val records = InnerStructure.root(d).getJSONObject("records")
         // Stress fixture for bounded selection, not a claim of normal adoption coverage.
@@ -82,11 +82,39 @@ class InnerStructureContractsTest {
         }
         val first = InnerStructure.material(d, "", 0)
         val later = InnerStructure.material(d, "", 16)
-        assertEquals(8, first.getJSONArray("selected").length())
-        assertEquals(8, later.getJSONArray("selected").length())
-        assertEquals(4, first.getJSONArray("identity").length())
+        fun fragments(material: JSONObject) = material.getJSONArray("record_fragments").let { a ->
+            (0 until a.length()).map { a.getJSONObject(it) }
+        }
+        fun selectedCount(material: JSONObject, identity: Boolean): Int =
+            material.getJSONArray(if (identity) "identity" else "selected").length() + fragments(material).count {
+                (records.getJSONObject(it.getString("record_id")).getJSONObject("content").getString("family") == "personality") == identity
+            }
+        assertEquals(8, selectedCount(first, false))
+        assertEquals(8, selectedCount(later, false))
+        assertEquals(4, selectedCount(first, true))
         assertEquals(128, first.getInt("record_count"))
         assertNotEquals(first.getJSONArray("catalogue").toString(), later.getJSONArray("catalogue").toString())
+        // A bounded page must provide original fragments, never silently replace a long
+        // adopted record with a summary. Reassembling all continuations recovers every
+        // character, including provenance and version, without changing persisted content.
+        for (initial in fragments(first) + fragments(later)) {
+            val saved = records.getJSONObject(initial.getString("record_id"))
+            val original = InnerStructure.serialized(saved)
+            val assembled = StringBuilder()
+            var part = initial
+            while (true) {
+                assertEquals(InnerStructure.hash(saved), part.getString("hash"))
+                assertEquals(saved.getInt("version"), part.getInt("version"))
+                assertEquals(assembled.length, part.getInt("offset"))
+                assertEquals(original.length, part.getInt("total"))
+                assertTrue(part.getString("text").length <= InnerReadProgress.CHUNK_CHARS)
+                assembled.append(part.getString("text"))
+                if (part.isNull("next_offset")) break
+                part = InnerReadProgress.recordFragment(d, saved, part.getInt("next_offset"))
+            }
+            assertEquals(original, assembled.toString())
+            assertEquals(original, InnerStructure.serialized(records.getJSONObject(saved.getString("id"))))
+        }
         for (i in 0 until first.getJSONArray("selected").length()) {
             val row = first.getJSONArray("selected").getJSONObject(i)
             val saved = records.getJSONObject(row.getString("id"))

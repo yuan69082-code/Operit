@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChatScreenContent } from '../components/ChatScreenContent';
 import { ConfigurationScreen } from './ConfigurationScreen';
+import { PrivateStateScreen } from './PrivateStateScreen';
 import { buildChatFontFaceCss, buildChatThemeStyle } from '../util/chatTheme';
 import { useChatViewModel } from '../viewmodel/ChatViewModel';
 
 export function AIChatScreen() {
   const viewModel = useChatViewModel();
   const [updatePage, setUpdatePage] = useState<string | null>(null);
+  const [showPrivate, setShowPrivate] = useState(false);
   useEffect(() => {
     if (!viewModel.token || !viewModel.boot?.capabilities.shared_service) return;
     const controller = new AbortController();
@@ -78,6 +80,9 @@ export function AIChatScreen() {
       </div>
 
       <ChatScreenContent viewModel={viewModel} />
+      {viewModel.boot?.capabilities.private_state && viewModel.selectedChatId && !viewModel.selectedChat?.character_group_id ?
+        <button style={{ position: 'fixed', top: 8, right: 12, zIndex: 600 }} onClick={() => setShowPrivate(true)}>私域 · 内部状态</button> : null}
+      {showPrivate && viewModel.token && viewModel.selectedChatId ? <PrivateStateScreen token={viewModel.token} chat={viewModel.selectedChatId} close={() => setShowPrivate(false)} /> : null}
       {updatePage ? (
         <a href={updatePage} target="_blank" rel="noreferrer"
           style={{ position: 'fixed', top: 40, right: 12, zIndex: 600,
