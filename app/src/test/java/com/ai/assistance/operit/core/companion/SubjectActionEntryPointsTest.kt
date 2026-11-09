@@ -111,6 +111,33 @@ class SubjectActionEntryPointsTest {
             .getJSONObject("receipt").getString("text"))
     }
 
+    @Test fun startRecordConflictDoesNotAbortOtherOperations(): Unit = runBlocking {
+        val f = requireNotNull(sections().internalStateFrame)
+        val secondId = InnerStructure.hash("${f.id}:0:1")
+        val executions = AtomicInteger()
+        handler.registerTool("sleep", executor = { _: AITool ->
+            if (executions.incrementAndGet() == 1) {
+                // Fault injection at the durable start boundary, after all requests were
+                // claimed by the real executor. Do not fabricate a successful receipt.
+                CompanionStore(context).actionWrite(role, secondId) { old ->
+                    val row = requireNotNull(old)
+                    row.put("status", "started").put("version", row.getInt("version") + 1)
+                }
+            }
+            ToolResult("sleep", true, StringResultData("实际完成"))
+        })
+        val results = execute(f, List(3) { invocation("sleep") }).results
+        assertEquals(3, results.size)
+        assertTrue(results[0].success)
+        assertFalse(results[1].success)
+        assertEquals("denied", results[1].executionStatus)
+        assertTrue(results[1].error!!.contains("未执行"))
+        assertTrue(results[2].success)
+        assertEquals(2, executions.get())
+        assertEquals("completed", SubjectActions.read(context, role, chat, results[0].subjectActionId, 0)
+            .getJSONObject("item").getString("status"))
+    }
+
     @Test fun adoptedUnderstandingIsReadLaterAndNotImpliedBySuccess(): Unit = runBlocking {
         val s = sections(); val f = requireNotNull(s.internalStateFrame)
         val result = execute(f, listOf(invocation("sleep", mapOf("duration_ms" to "0")))).results.single()

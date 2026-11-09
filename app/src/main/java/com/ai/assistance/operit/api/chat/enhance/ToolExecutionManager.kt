@@ -588,7 +588,16 @@ object ToolExecutionManager {
             orderedResults.complete(index, saved)
         }
         suspend fun runRecorded(index: Int, invocation: ToolInvocation, runtime: ToolRuntimeContext): ToolResult {
-            actions?.started(requireNotNull(actionIds[index]))
+            try {
+                actions?.started(requireNotNull(actionIds[index]))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                // A start-record failure must not escape into a whole-turn retry after
+                // other tools in this batch may already have produced side effects.
+                AppLogger.e(TAG, "开始执行记录未保存，当前操作未执行", failure)
+                return ToolResult(resolveDisplayToolName(invocation.tool), false, StringResultData(""),
+                    "开始执行记录未保存，当前操作未执行。", executionStatus = "denied")
+            }
             return try { executeTool(invocation, toolHandler, packageManager, runtime) }
             catch (failure: Exception) {
                 val unknown = ToolResult(resolveDisplayToolName(invocation.tool), false, StringResultData(""),
