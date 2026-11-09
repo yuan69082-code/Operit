@@ -35,7 +35,9 @@ internal object InnerStructureContext {
             store.prepare(role, chat, persist, wake, capabilities, input, group,
                 sources(context, role),
                 CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user",
-                hostMaterials, retrievedMaterials + if (group) emptyList() else SubjectMaterials.read(context, role, input))
+                hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
+                    if (group) emptyList() else SubjectMaterials.read(context, role, input) +
+                        ActionUnderstanding.materials(store.read(role)))
         }
 
     suspend fun submit(context: Context, frame: InternalStateFrame, report: JSONObject): JSONObject =

@@ -162,7 +162,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-            require(kind in setOf("episode", "focus", "experience_link", "union"))
+            require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback"))
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -175,6 +175,38 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return null
         return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? AND id=?", arrayOf(scope, kind, id))
             .use { if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
+    }
+
+    /** Objective operations share the existing archive, never the subjective report reducer.
+     * Claim and receipt are short SQL transactions; no executor runs under this transaction. */
+    fun actionWrite(id: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        val db = db()
+        if (!writing) { db.beginTransaction(); writing = true }
+        val old = find("action_history", id)
+        val row = change(old)
+        if (row.toString() != old?.toString()) {
+            put("action_history", row)
+            val head = JSONObject(row.toString())
+            head.getJSONObject("request").remove("parameters")
+            head.optJSONObject("receipt")?.let { receipt ->
+                val text = receipt.getString("text")
+                receipt.put("text", text.take(600)).put("excerpt", text.length > 600)
+            }
+            head.optJSONObject("declaration")?.optJSONObject("capability")?.remove("source")
+            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+                arrayOf(scope, "action", id, row.getString("parent"), head.toString()))
+        }
+        commit()
+        return row
+    }
+
+    fun actionPage(parent: String, offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind='action' AND parent=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, parent, offset.toString())).use { c ->
+            buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) }
+        }
     }
 
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?): List<JSONObject> {

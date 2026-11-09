@@ -1,0 +1,227 @@
+package com.ai.assistance.operit.core.companion
+
+import android.app.Application
+import android.content.Context
+import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
+import com.ai.assistance.operit.api.chat.enhance.ConversationMarkupManager
+import com.ai.assistance.operit.core.chat.CurrentRequestContext
+import com.ai.assistance.operit.core.chat.hooks.PromptTurn
+import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
+import com.ai.assistance.operit.core.tools.*
+import com.ai.assistance.operit.data.model.*
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
+import com.ai.assistance.operit.data.repository.ChatHistoryManager
+import com.ai.assistance.operit.ui.permissions.PermissionLevel
+import com.ai.assistance.operit.util.stream.StreamCollector
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.flow
+import org.json.JSONObject
+import org.json.JSONArray
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicInteger
+
+/** Simulated model outputs; actual production composer, parser, executor, permissions,
+ * SQLite receipts, report adoption and calculator runtime. No network or external sends. */
+@RunWith(OperitStorageTestRunner::class)
+@Config(sdk = [28], application = Application::class)
+class SubjectActionEntryPointsTest {
+    private lateinit var context: Context
+    private lateinit var role: String
+    private lateinit var chat: String
+    private lateinit var second: String
+    private lateinit var handler: AIToolHandler
+    @Before fun setup(): Unit = runBlocking {
+        context = RuntimeEnvironment.getApplication()
+        role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "主体", characterSetting = "初始参考"))
+        context.getSharedPreferences("companion_options", Context.MODE_PRIVATE).edit().putBoolean("internal_state:$role", true).commit()
+        suspend fun window(): String {
+            val c = ChatHistory(title = "操作测试", messages = emptyList(), characterCardId = role)
+            ChatHistoryManager.getInstance(context).saveChatHistory(c); return c.id
+        }
+        chat = window(); second = window()
+        handler = AIToolHandler.getInstance(context)
+        handler.registerDefaultTools()
+        handler.getToolPermissionSystem().saveMasterSwitch(PermissionLevel.ALLOW)
+    }
+    private suspend fun sections(window: String = chat) =
+        InnerStructureContext.prepare(context, role, window, true, input = "继续自己的研究")
+    private fun invocation(name: String, args: Map<String, String> = emptyMap()) = ToolInvocation(
+        AITool(name, args.map { ToolParameter(it.key, it.value) }), "", 0..0)
+    private suspend fun execute(f: InternalStateFrame, calls: List<ToolInvocation>, round: Int = 0) =
+        ToolExecutionManager.executeInvocations(calls, context, handler, handler.getOrCreatePackageManager(),
+            object : StreamCollector<String> { override suspend fun emit(value: String) {} },
+            callerCardId = role, callerChatId = f.chatId, subjectFrame = f, subjectRound = round)
+    private suspend fun reject(block: suspend () -> Unit) {
+        try { block(); fail("must reject") } catch (_: IllegalArgumentException) {} catch (_: IllegalStateException) {}
+    }
+    private suspend fun submit(f: InternalStateFrame, fields: JSONObject): JSONObject {
+        val r = JSONObject().put("frame_id", f.id).put("updates", JSONArray()).put("create", JSONArray())
+        fields.keys().forEach { r.put(it, fields.get(it)) }
+        val parser = InternalStateReportStream()
+        assertEquals("正文", parser.append("<operit_state_report>$r</operit_state_report>正文") + parser.finish())
+        return InnerStructureContext.submit(context, f, requireNotNull(parser.report))
+    }
+    private fun delivered(sections: com.ai.assistance.operit.core.chat.RuntimeContextSections, results: List<ToolResult>): InternalStateFrame {
+        val turns = CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, "继续")), sections) +
+            PromptTurn(PromptTurnKind.TOOL_RESULT, ConversationMarkupManager.buildToolResultMessage(results), "tools")
+        return requireNotNull(CurrentRequestContext.internalStateFrame(SubjectToolMaterials.attach(turns,
+            System.currentTimeMillis(), results, context)))
+    }
+
+    @Test fun actualRequestAndReceiptSurviveFinalReportRejectionAndReparse(): Unit = runBlocking {
+        val calls = AtomicInteger()
+        handler.registerTool("counted", executor = { _: AITool ->
+            calls.incrementAndGet(); ToolResult("counted", true, StringResultData("实际完成"))
+        })
+        val s = sections(); val f = requireNotNull(s.internalStateFrame)
+        val first = execute(f, listOf(invocation("counted"))).results.single()
+        assertTrue(first.error, first.success)
+        val row = SubjectActions.read(context, role, chat, first.subjectActionId, 0).getJSONObject("item")
+        assertEquals("completed", row.getString("status"))
+        assertTrue(row.isNull("declaration"))
+        reject { submit(f, JSONObject().put("unexpected", true)) }
+        // Re-parsed invocation has a fresh UUID, but same request frame and position.
+        val repeated = execute(f, listOf(invocation("counted"))).results.single()
+        assertEquals(first.subjectActionId, repeated.subjectActionId)
+        assertEquals(1, calls.get())
+        val continuation = delivered(s, listOf(first))
+        assertTrue(continuation.materialSources.values.any { JSONObject(it).optString("type") == "actual_operation" })
+        val next = sections(second)
+        // The budget may omit detail; normal native query still returns persisted exact content.
+        val result = execute(requireNotNull(next.internalStateFrame), listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "action", "id" to requireNotNull(first.subjectActionId))))).results.single()
+        assertTrue(result.error, result.success)
+        assertTrue(result.result.toString().contains("实际完成"))
+        assertEquals("实际完成", CompanionStore(context).actionRead(role, requireNotNull(first.subjectActionId))!!
+            .getJSONObject("receipt").getString("text"))
+    }
+
+    @Test fun adoptedUnderstandingIsReadLaterAndNotImpliedBySuccess(): Unit = runBlocking {
+        val s = sections(); val f = requireNotNull(s.internalStateFrame)
+        val result = execute(f, listOf(invocation("calculate", mapOf("expression" to "2+3")))).results.single()
+        assertTrue(result.error, result.success)
+        val bound = delivered(s, listOf(result))
+        val source = bound.materialSources.entries.first { JSONObject(it.value).optString("type") == "actual_operation" }.key
+        val state = InternalStateStore(context)
+        assertEquals(0, state.inspectCategory(role, chat, "feedback", null, 0).getJSONArray("items").length())
+        val feedback = JSONObject().put("id", "understanding").put("expected_version", 0)
+            .put("action_id", result.subjectActionId).put("result_source", source).put("meaning", "计算符合输入，但我还想换一种方法")
+            .put("evidence", JSONArray().put(source)).put("intention_refs", JSONArray())
+        val fields = JSONObject().put("action_feedback", JSONArray().put(feedback))
+        submit(bound, fields)
+        submit(bound, fields) // The original report receipt handles exact retry.
+        assertEquals(1, state.inspectCategory(role, chat, "feedback", "understanding", 0).getJSONObject("item").getInt("version"))
+        val next = sections(second)
+        assertTrue(ActionUnderstanding.materials(state.read(role)).any { it.getString("text").contains("换一种方法") })
+        val queried = execute(requireNotNull(next.internalStateFrame), listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "feedback", "id" to "understanding")))).results.single()
+        assertTrue(queried.error, queried.success)
+        assertTrue(queried.result.toString().contains("换一种方法"))
+    }
+
+    @Test fun permissionDenialIsPersistedWithoutExecution(): Unit = runBlocking {
+        val count = AtomicInteger()
+        handler.registerTool("forbidden", executor = { _: AITool -> count.incrementAndGet(); ToolResult("forbidden", true, StringResultData("wrong")) })
+        handler.getToolPermissionSystem().saveToolPermission("forbidden", PermissionLevel.FORBID)
+        val f = requireNotNull(sections().internalStateFrame)
+        val result = execute(f, listOf(invocation("forbidden"))).results.single()
+        assertFalse(result.success); assertEquals("denied", result.executionStatus); assertEquals(0, count.get())
+        assertEquals("denied", SubjectActions.read(context, role, chat, result.subjectActionId, 0).getJSONObject("item").getString("status"))
+    }
+
+    @Test fun partialAndUnknownResultsAreNotPromotedToCompletion(): Unit = runBlocking {
+        handler.registerTool("partial", executor = object : ToolExecutor {
+            override fun invoke(tool: AITool) = ToolResult("partial", true, StringResultData("part"))
+            override fun invokeAndStream(tool: AITool) = flow {
+                emit(invoke(tool)); emit(ToolResult("partial", false, StringResultData(""), "second part failed"))
+            }
+        })
+        handler.registerTool("uncertain", executor = { _: AITool -> throw IllegalStateException("transport lost after dispatch") })
+        val f = requireNotNull(sections().internalStateFrame)
+        val results = execute(f, listOf(invocation("partial"), invocation("uncertain"))).results
+        assertEquals("partial", results[0].executionStatus)
+        assertEquals("unknown", results[1].executionStatus)
+    }
+
+    @Test fun pendingRecoveryDoesNotReplayAndExplicitNewAttemptCanRun(): Unit = runBlocking {
+        val f = requireNotNull(sections().internalStateFrame)
+        val tool = AITool("calculate", listOf(ToolParameter("expression", "8+1")))
+        val id = InnerStructure.hash("${f.id}:0:0")
+        val ledger = SubjectActions(context, f)
+        assertTrue(ledger.claim(id, tool, null).execute)
+        ledger.started(id) // Contract crash boundary: no execution result was observed.
+        val duplicate = execute(f, listOf(ToolInvocation(tool, "", 0..0))).results.single()
+        assertEquals("unknown", duplicate.executionStatus)
+        val s = sections()
+        val read = execute(requireNotNull(s.internalStateFrame), listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "action", "id" to id)))).results.single()
+        val bound = delivered(s, listOf(read))
+        val declaration = JSONObject().put("decision", "我明确再试一次").put("retry_of", id)
+        val retry = execute(bound, listOf(invocation("calculate", mapOf("expression" to "8+1",
+            SubjectActions.DECLARATION to declaration.toString()))), 1).results.single()
+        assertTrue(retry.error, retry.success); assertNotEquals(id, retry.subjectActionId)
+    }
+
+    @Test fun concurrentDuplicateAndSeparateRequestsPreserveFacts(): Unit = runBlocking {
+        val count = AtomicInteger()
+        handler.registerTool("slow", executor = { _: AITool ->
+            count.incrementAndGet(); Thread.sleep(40); ToolResult("slow", true, StringResultData("once"))
+        })
+        val f = requireNotNull(sections().internalStateFrame)
+        val results = coroutineScope { (0..1).map { async(Dispatchers.IO) { execute(f, listOf(invocation("slow"))).results.single() } }.awaitAll() }
+        assertEquals(1, count.get()); assertTrue(results.any { it.success })
+        val other = requireNotNull(sections(second).internalStateFrame)
+        execute(other, listOf(invocation("slow")))
+        assertEquals(2, count.get())
+        assertEquals(2, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
+    }
+
+    @Test fun realCapabilityBuildRunAdjustAndFeedbackUseNormalTools(): Unit = runBlocking {
+        val s = sections(); val f = requireNotNull(s.internalStateFrame)
+        val build = execute(f, listOf(invocation("companion_software",
+            mapOf("action" to "build", "id" to "reading_minutes", "source" to "${'$'}{pages}*2")))).results.single()
+        assertTrue(build.error, build.success)
+        val installed = JSONObject(build.result.toString())
+        assertEquals("not_run", installed.getString("execution"))
+        val version = installed.getString("version")
+        val run = execute(f, listOf(invocation("companion_software", mapOf("action" to "run", "version" to version,
+            "inputs" to "{\"pages\":7}"))), 1).results.single()
+        assertTrue(run.error, run.success)
+        assertEquals(14.0, JSONObject(run.result.toString()).getDouble("output"), 0.0)
+        val bound = delivered(s, listOf(run))
+        val source = bound.materialSources.keys.first { it.startsWith("material:action:") }
+        submit(bound, JSONObject().put("action_feedback", JSONArray().put(JSONObject().put("id", "pace")
+            .put("expected_version", 0).put("meaning", "这个估计偏紧，后面可以调整；现在没有自动改")
+            .put("action_id", run.subjectActionId).put("result_source", source).put("evidence", JSONArray().put(source)))))
+        // A later simulated model explicitly requests adjustment; no test callback writes a next decision.
+        val next = requireNotNull(sections(second).internalStateFrame)
+        val feedback = execute(next, listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "feedback", "id" to "pace")))).results.single()
+        assertTrue(feedback.result.toString().contains("偏紧"))
+        val adjusted = execute(next, listOf(invocation("companion_software", mapOf("action" to "build",
+            "id" to "reading_minutes", "source" to "${'$'}{pages}*3", "previous_version" to version))), 1).results.single()
+        assertTrue(adjusted.error, adjusted.success)
+        val updated = JSONObject(adjusted.result.toString()).getString("version")
+        val output = execute(next, listOf(invocation("companion_software", mapOf("action" to "run",
+            "version" to updated, "inputs" to "{\"pages\":7}"))), 2).results.single()
+        assertEquals(21.0, JSONObject(output.result.toString()).getDouble("output"), 0.0)
+        assertEquals("${'$'}{pages}*2", SoftwareCapabilityArtifacts(context, role, second).get(version).getString("source"))
+    }
+
+    @Test fun resultHeadsStayBoundedAndDetailsSurviveLargeReceipts(): Unit = runBlocking {
+        handler.registerTool("large", executor = { _: AITool -> ToolResult("large", true, StringResultData("x".repeat(40000))) })
+        val f = requireNotNull(sections().internalStateFrame)
+        repeat(10) { execute(f, listOf(invocation("large")), it) }
+        val page = SubjectActions.read(context, role, chat, null, 0)
+        assertEquals(8, page.getJSONArray("items").length()); assertFalse(page.isNull("next_offset"))
+        assertTrue(page.toString().length < 20000)
+        val id = page.getJSONArray("items").getJSONObject(0).getString("id")
+        assertEquals(40000, SubjectActions.read(context, role, second, id, 0).getJSONObject("item").getJSONObject("receipt").getString("text").length)
+        assertEquals(2, SubjectActions.read(context, role, chat, null, 8).getJSONArray("items").length())
+    }
+}

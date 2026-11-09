@@ -158,7 +158,7 @@ class InternalStateStore(private val context: Context) {
                 return@update
             }
             InternalStateEngine.event(data, id, if (success) "tool_success" else "tool_failure",
-                chat, "$name/${action.orEmpty()}", System.currentTimeMillis())
+                chat, "$name/${action.orEmpty()}", System.currentTimeMillis(), applyTriggers = false)
             InternalStateEngine.rows(data, "events").last { it.getString("id") == id }
                 .put("recipient", role).put("author", role).put("source_chat", chat)
                 .put("tool_status", status ?: JSONObject.NULL)
@@ -166,7 +166,7 @@ class InternalStateStore(private val context: Context) {
             if (source != null) {
                 InternalStateEngine.event(data, "$id:$source", source,
                     chat, "$name/${action.orEmpty()}/${status.orEmpty()}", System.currentTimeMillis(),
-                    applyTriggers = source !in setOf("user_message", "assistant_reply", "wake", "assistant_action"))
+                    applyTriggers = false)
                 InternalStateEngine.rows(data, "events").last { it.getString("id") == "$id:$source" }
                     .put("recipient", role).put("author", role).put("source_chat", chat).put("tool_event", id)
             }
@@ -212,6 +212,10 @@ class InternalStateStore(private val context: Context) {
     fun submit(frame: InternalStateFrame, report: JSONObject, currentInnerSources: Map<String, String>? = null): JSONObject {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
+        if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
+            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0) {
+            require(!requireRecipient(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
+        }
         lateinit var receipt: JSONObject
         val saved = update(frame.roleId, "state_report") { data ->
             requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
@@ -276,7 +280,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source"))
+        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "decision", "feedback"))
+        if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
+        if (kind in setOf("decision", "feedback") ||
+            (kind == "category_versions" && (id.orEmpty().startsWith("decision:") || id.orEmpty().startsWith("feedback:"))))
+            require(!requireRecipient(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "inner") {
             if (id == null) return InnerStructure.page(data, offset)
@@ -430,7 +438,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + InnerStructure.guard(data),
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )

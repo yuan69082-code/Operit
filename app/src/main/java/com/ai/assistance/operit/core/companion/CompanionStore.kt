@@ -158,6 +158,24 @@ class CompanionStore(context: Context) {
 
     private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
 
+    internal fun actionWrite(role: String, id: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.actionWrite(id, change) } }
+    }
+
+    internal fun actionRead(role: String, id: String): JSONObject? {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.find("action_history", id) } }
+    }
+
+    internal fun actionPage(role: String, parent: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.actionPage(parent, offset) } }
+    }
+
     internal fun archivedStateRow(scope: String, kind: String, id: String): JSONObject? =
         synchronized(lock(scope)) { history(scope).use { it.find(kind, id) } }
 

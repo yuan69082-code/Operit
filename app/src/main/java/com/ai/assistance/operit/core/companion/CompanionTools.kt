@@ -12,9 +12,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object CompanionTools {
-    val names = com.ai.assistance.operit.core.experience.ExperienceTools.names + RoomTools.names + setOf("companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
+    val names = com.ai.assistance.operit.core.experience.ExperienceTools.names + RoomTools.names + setOf("companion_software", "companion_internal_state", "companion_state", "companion_library", "companion_todo", "companion_schedule", "companion_explore", "companion_capabilities", "phone_awareness", "software_awareness")
 
     fun prompts(): List<ToolPrompt> = com.ai.assistance.operit.core.experience.ExperienceTools.prompts() + RoomTools.prompts() + listOf(
+        ToolPrompt(name = "companion_software",
+            description = "在本助手私聊中使用现有计算器的持久表达式能力。build 用 id/source 保存纯四则算术模板，变量写成 ${'$'}{x}，previous_version 可关联上次产物进行调整；不执行源码，只校验并返回不可变版本。run 用 version 和 inputs JSON 数字对象真正执行；get 查原产物。只支持数字、括号及 + - * / %，不支持文件、网络、任意JS或自动状态修改。已有脚本和工具包仍用其原工具。技术运行结果与主体对结果的理解分开，回执用 internal_state section=action 查。可带 __operit_action 关联明确打算。",
+            parametersStructured = listOf(param("action", "build/run/get", true), param("id", "能力名称"),
+                param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
+                param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
             description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=episode|focus|experience_link|union|category_versions|source；id 查具体记录，版本用 episode:ID、union:ID 或 focus:类别ID；offset 真正分页。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
                 "当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
@@ -90,6 +95,16 @@ object CompanionTools {
                     val action = value(tool, "action")
                     var privateStateRead = false
                     val result = when (name) {
+                        "companion_software" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO +
+                            com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
+                            val capability = SoftwareCapabilityArtifacts(context, requireNotNull(roleId), chatId)
+                            when (action) {
+                                "build" -> capability.build(required(tool, "id"), required(tool, "source"), value(tool, "previous_version"))
+                                "run" -> capability.run(required(tool, "version"), JSONObject(required(tool, "inputs")))
+                                "get" -> capability.get(required(tool, "version"))
+                                else -> error("不支持的软件能力操作")
+                            }
+                        }
                         "companion_internal_state" -> {
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
                             val internal = InternalStateStore(context)
