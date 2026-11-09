@@ -1,26 +1,73 @@
 # 第4批：内在作用与统一材料预算
 
-状态：施工核对中，尚未实现、测试或交付，不得将本文当作功能完成证明。
+分支 feat/subject-interactions 承接 b868b9f 与书房修复 d0701b8，依赖 PR #55 → #54 → #53。本批 PR #56；不合并、不发布。实现已接线，最终验收结果待运行结束补充，未完成的运行不能计为通过。
 
-继续施工记录：已有未验证的联合实现草稿 InnerInteractions，接入原报告 detached transaction、同一归档重做记录和后续材料。成员原版本与本轮实际选入记录核对；联合保存解释、决定、作用边及成员前后版本/哈希，不执行固定系数传播或再投影覆盖成员。增加了正常解析/提交/下一轮读取测试草稿，尚未运行，不能视为已通过。
+## 原库对应与适配
 
-仍未完成：统一材料预算、实际记忆材料取用与来源凭证、全范围验收、三个只读参考文档的本轮重读，以及测试构建和PR交付。当前联合材料只读第一页，需纳入统一选材，不能作为完整第4批交付。
+参考引擎提交0567ba4，仓库与园园指定的三份工程流程文档只读。本轮读取这些文档及 domain/affect_union、open_needs、open_affect、dynamic_mind、person_relations、mind_intent，以及 dynamic_mind_service、person_relation_dynamics、continuity_core_service 的相关实现。
 
-已确认 TokenCacheManager.calculateTokensForHistory 使用 ChatUtils.estimateTokenCount：中文字符乘1.5、其余UTF-16长度乘0.25。这是启发式估算，无通用误差保证，不能直接当作精确计量。EnhancedAIService.estimatePreparedRequestWindow 在完整请求路径另估工具和历史；本批仍需核对输出预留和通道差异。
+- affect_union 的稳定身份、成员版本、来源、解释、结束状态与单次非递归作用，适配为 InnerInteractions 的 unions 候选。原库 reanchor_changes 的固定 .25 系数及时间投影不直接复制；成员变化由正常候选明确提出，不产生第二次数值传播。
+- open_needs 的开放类别、具体需要与独立解释和 proposed effect，沿用第2批内在记录及第3批类别事件。联合不覆盖成员，不新建需要权威。
+- open_affect / dynamic_mind 的当下体验与持续内容区分，沿用 inner/episodes 采用规则。dynamic_mind_service 的关注参与取材，适配为有界查询和轮换，不复制固定疲劳系数或强制唤醒。
+- person_relations / person_relation_dynamics 的对象、方向与来源，沿用关系候选；不复制关键词或固定亲密系数，不把另一方陈述当共同事实。
+- continuity_core_service 对实际材料、来源、版本的核对，适配为请求帧 materialSources、interactionMembers、来源快照哈希，不建立独立模型调用。
+- mind_intent 的候选与权威分离、支持与冲突并存，适配为 interpretation/decision/effects；decision 不代表已执行动作或新权限。
 
-本分支 feat/subject-interactions 从 b868b9f 建立，承接未合并的 #55 → #54 → #53。2026-11-09 核对远程提交均未改变，主线仍为 8b09126。重新查询 #55 构建运行 42577518139，测试、Android 构建与 Windows 检查均成功，发布跳过。这些是前批结果，不是第4批验收结果。
+园园新增要求包括2048/16384 Token统一预算、求生欲不受联合/时间自动改值、保持多种感受且不重复计入现实事实、无行动不处罚/加倍/循环唤醒。原库默认系数不替代这些要求。
 
-## 已核实的接入位置
+## 实际接线与时序
 
-- InnerStructureContext.prepare 调用原主体 prepare；submit 经原状态提交入口，不能再建写入权威。
-- 第3批 CategoryEvents 提供事件当前头、增量版本、重点和经历关联，复用同一归档与重做记录。
-- InternalStateSelection 明确以字符计量；它不能冒充本批 2048 Token 默认值。必须检查最终发送路径，再把人格、事件、联合和实际取得材料纳入同一个预算。
-- 引擎 domain/affect_union.py 的联合含成员、解释、版本、来源及历史；reanchor_changes 明确单次非递归传播并合并重叠作用关系。该实现也含固定 .25 系数和时间投影，不能不经适配直接复制为本批心理结论，更不能绕过求生欲特例。
+普通聊天及已有后台活动仍经过 ConversationService.prepareConversationHistory → CompanionContext.compose → InnerStructureContext.prepare → InternalStateStore.prepare。请求读取同一 CharacterCard.id 的身份、关系、偏好、需要、体验、重点事件及联合。CurrentRequestContext.stage/project 放入本轮宿主附件，不写成用户新消息。
 
-## 待实施与验收
+原 operit_state_report 可带 unions；InternalStateReportStream → InnerStructureContext.submit → InternalStateReport.apply 是唯一报告入口。原 updates/revise、inner propose/adopt、episodes 与 unions 在同一 detached transaction 校验，全部通过才经 CompanionStore 和原 CategoryEvents 日志提交。任一项非法整份不采用，不重跑模型、工具或已发消息。
 
-继续核对其余指定引擎模块、三个只读文档和 Operit 最终发送路径。建立有来源与成员版本的联合候选，连同成员变化在原事务内校验采用；不覆盖成员独立发展，不增加循环唤醒。
+双向变化通过同一报告的原成员操作实际保存，联合记录其相互作用方向；允许反向变化、无变化和拉扯。人格/偏好仍须先候选、后续请求明确采用，联合不能绕过。读取联合不重放 effects、不调度唤醒。
 
-通过已有记忆和资料读取入口记录本轮实际取得且送入模型的材料；未取得与失败必须区分，外部摘要不冒充现实原话。统一材料预算默认2048 Token、上限16384 Token，说明估算边界，完整对象选择不能静默截断。完整窗口另行核算。
+仍是本轮读取既有状态 → 同次正常生成形成正文和候选 → 业务轮结束采用 → 后续请求读取。没有新增模型调用，不宣称本轮正文读取了轮末新版本。
 
-正常解析、提交及后续请求集成测试必须覆盖用户第4批十三项验收，并保留前批及书房独立修复测试。完成后更新本文件与原六批规划，记录实际提交、依赖PR、测试构建结果及第5批入口；不合并、不发布，不修改引擎或参考文档。
+## 联合、成员、来源与恢复
+
+联合具有稳定id/version、owner/source_chat、成员及版本、对象、解释、决定、状态、证据、有向作用说明；提交记录成员前后版本/哈希。成员值由原记录负责。结束联合不删除成员；成员独立演变不被旧联合覆盖；停用数值成员在读取中标为版本不可用，历史仍在。
+
+窗口局部数值成员使联合标记 local_chat，另一窗口不投影或改写该局部联合。持续成员跨窗共享，模型更换不改变身份；群聊不注入私人跨窗活动、记忆检索或私人联合。
+
+同源材料可支持不同心理意义，保留同一来源ID/哈希；原更新器每轮同目标只更新一次。多个作用边记录解释，不重复驱动成员，不把 A→B→A 当递归计算。重试沿原frame/digest收据去重，过期版本拒绝，失效报告不能覆盖新值。
+
+union 是第3批归档 storage_kind 的扩展，当前头与增量版本沿用 SQLite archive 和 category_commit 重做记录。热文件只留最后一次有界提交，不嵌全部历史。get section=union 按id/offset查询；category_versions 的id=union:ID取历史，每页8项。正常材料最多取一页，独立游标轮换，不先加载全库。
+
+不清空旧值、不重分类旧经历、不补造证据。旧报告缺省unions不触碰联合。旧客户端不认识联合时不应降级回写；恢复使用支持新storage_kind的版本与原文件/归档成对备份。主权威schema及原迁移机制没有另造一套。
+
+## 实际材料取用
+
+- SubjectMaterials 使用助手已固定绑定的 MemoryRepository；未固定绑定时不猜全局空间，不跨助手查询，不要求重复选择已有配置。
+- 当前输入至多3词，当前事件理解/对象及已采用类别至多3词，复用中文分词。ObjectBox 原库查询最多3条相关记录，加1条独立轮换记录，不先findAll。独立样本交替优先，避免匹配排除所有相反材料；技术相关性不等于主体重要性。
+- 没有新增embedding或模型调用，不每轮访问全部MCP。原授权记忆/资料工具按需调用；SubjectToolMaterials 在真实工具续轮为实际返回附来源ID，失败仍是失败。正文只留原工具返回，不重复复制进主体材料。
+- 原 ChatHistoryManager.recentAssistantActivity 与 StudyStore.recentActivity 提供真实保存消息、回复、批注关联；保留作者、时间、窗口、回复ID、保存状态与locator。saved不等于已读，不以模型自述认定成功。
+- 只有实际选入的 retrieved_materials 才进入 frame.materialSources；查询失败不生成已读凭证。候选保存接收快照、哈希、类型与定位；后来原文变化不冒充过去读到的内容。数字体验也能引用本轮材料，在增量体验记录保留绑定。
+- 旧聊天、摘要、记忆不冒充新发生或自动相信的事实。原文不改写，新理解仍须采用；不靠异步长期摘要保证刚刚回复的可见性。
+
+书房仍是整书文件，recentActivity单书扫描随文件增长，未在本批重写。ObjectBox返回行数有界，但单条原始记忆大小与底层文本检索耗时仍受已有库影响，不将有界行数说成恒定扫描时间。
+
+## 统一预算与完整模型窗口
+
+SubjectMaterialBudget 统一选择身份、关系、偏好、驱力/体验、重点事件、联合、已取得记忆、近期结果、宿主材料及匹配世界书。默认2048、上限16384；companion_internal_state action=budget/tokens 修改本主体设置，走原归属与持久更新边界。它不是完整模型窗口。
+
+已核对各通道 calculateInputTokens/TokenCacheManager：现有请求前能力为启发式估算，没有精确tokenizer。材料以 ChatUtils 汉字×1.5、其他UTF-16单元×0.25为基础，对非汉字非ASCII字符额外计UTF-8字节，再加25%余量，为固定附件外壳留128估算Token。metadata 明示 exact=false、自定义分词器误差上界未知。25%是余量，不是误差保证；代码、特殊字符、不同分词器仍可能偏离。服务端usage只能事后得到。
+
+完整对象轮流争取空间，身份先获一次机会，不独占所有轮次；其余类别按请求轮换。过大对象不截断JSON，明确 omitted_counts 和原工具取回方式。未选中身份仍为权威，不用初始人设填补。材料游标不改写主体重点。
+
+EnhancedAIService 在最终请求组装及工具续轮调用原通道输入估算，历史、指令、工具、附件计入一次，再核对启用的输出上限与配置窗口。超出估算窗口在发送前明确失败，不重跑工具；输出未配置或通道不可识别时标未知，不宣称已精确预留。多模态编码与模型分词仍有估算边界，无额外计量模型调用。
+
+## 验收状态与边界
+
+首轮联合草稿 ccbdfd8 的 Android Tests 42585454809 已通过。预算接线后42587376139的Windows检查与打包通过；Android测试在 syncSttModelAssets 的OCR下载校验失败，未运行到测试。后续运行结果待补，不能把前次成功当最新版本通过。
+
+接线测试运行生产composer、CurrentRequestContext、报告解析、提交与下一轮读取，包括相反方向和环状作用说明、原子拒绝、幂等/过期、独立成员、窗口局部联合、停用成员、求生欲、分页历史、真实聊天/书房材料到候选采用、预算与工具来源；保留前三批和独立修复测试，不删除失败测试。
+
+构造候选只验证宿主机制，不证明真实模型心理或行为。无真机、真实模型、真实MCP及系统后台调度完整实测；不保证模型必须形成联合或说预设台词。测试数量、构建签名结果在运行结束补充。
+
+## 第5批交接
+
+沿用 CharacterCard.id、InternalStateFrame、InnerStructureContext.prepare/submit、InternalStateReport 和原增量归档。联合 decision/effects、成员 transitions、source_bindings、材料locator与已有聊天/书房/工具回执，是后续选择和真实反馈的来源。
+
+第5批区分决定、执行请求、真实返回、保存成功和未知，不把decision当执行收据，不把重复材料当新经历。保留第2批人格/偏好采用、第3批求生欲特例；不另建主体副本、记忆库或书房存储。本批不实现完整器官反馈、梦休息、闲置唤醒或数值强制工具调用。

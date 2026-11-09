@@ -110,6 +110,8 @@ internal object InnerInteractions {
             // The model receives the adopted meaning, not a replay of the transaction's hashes.
             // Full transitions remain available through the existing union/version query.
             row.getJSONObject("content").remove("transitions")
+            val bindings = row.getJSONObject("content").optJSONObject("source_bindings")
+            bindings?.keys()?.forEach { id -> bindings.getJSONObject(id).remove("snapshot") }
             row.put("projection", "current_meaning; full transaction via get union/version")
         }
         return page.put("notice", "联合保留当时理解；当前成员版本单独列出，旧联合不得覆盖成员的新状态。读取不再次生效。")

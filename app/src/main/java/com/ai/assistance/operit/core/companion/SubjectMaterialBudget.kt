@@ -13,6 +13,8 @@ import kotlin.math.ceil
 internal object SubjectMaterialBudget {
     const val DEFAULT_TOKENS = 2048
     const val MAX_TOKENS = 16384
+    // Includes the fixed Internal State header, operit_state and request-context envelopes.
+    const val ENVELOPE_RESERVE = 128
     fun estimate(text: String): Long {
         var extra = 0L
         var i = 0
@@ -63,11 +65,11 @@ internal object SubjectMaterialBudget {
         result.put("material_budget", budget)
         lanes.forEach { omitted.put(it.path, it.rows.size) }
         // This envelope is small and bounded, regardless of the history volume.
-        require(estimate(result.toString()) + 32 <= requested) { "主体材料预算不足以容纳来源与版本信息" }
+        require(estimate(result.toString()) + ENVELOPE_RESERVE <= requested) { "主体材料预算不足以容纳来源与版本信息" }
         fun include(lane: Lane, row: Any) {
             lane.target.put(row)
             omitted.put(lane.path, lane.rows.size - lane.target.length())
-            if (estimate(result.toString()) + 32 > requested) {
+            if (estimate(result.toString()) + ENVELOPE_RESERVE > requested) {
                 lane.target.remove(lane.target.length() - 1)
                 omitted.put(lane.path, lane.rows.size - lane.target.length())
             }
@@ -81,8 +83,8 @@ internal object SubjectMaterialBudget {
         val order = listOf(lanes.first()) + rest.drop(start) + rest.take(start)
         for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
             order.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
-        budget.put("estimated_tokens", estimate(result.toString()) + 32)
-        check(estimate(result.toString()) + 32 <= requested)
+        budget.put("estimated_tokens", estimate(result.toString()) + ENVELOPE_RESERVE)
+        check(estimate(result.toString()) + ENVELOPE_RESERVE <= requested)
         return result
     }
 }

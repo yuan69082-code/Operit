@@ -138,12 +138,11 @@ internal object CategoryEvents {
             .put("notice", "重点顺序由主体决定；本轮选材与重点排名不同。未选入不表示遗忘、解决或移出重点。get 可分页查事件、重点、经历关联与版本；原事实仍在 events。旧日志尚未明确关联，不自动升格为心事。")
         for ((kind, field) in listOf("episode" to "episodes", "focus" to "focus")) {
             val offset = selection.optInt(kind)
-            val rows = access(data).categoryPage(kind, offset, 3)
+            val rows = access(data).categoryPage(kind, offset, 9)
             // Each complete record has a bounded shape. A separate rotating disk cursor avoids
             // an unbounded hot index and never changes the subject's chosen focus ordering.
             var consumed = 0
-            for (row in rows.take(1)) {
-                if (result.toString().length + row.toString().length > 12000) break
+            for (row in rows.take(8)) {
                 result.getJSONArray(field).put(row); consumed++
             }
             if (persist) selection.put(kind, if (rows.size > consumed && consumed > 0) offset + consumed else 0)

@@ -170,11 +170,20 @@ class CategoryEventsEntryPointsTest {
     }
 
     @Test fun survivalIsExplicitOptionalReasonZeroAndNotTimeDriven(): Unit = runBlocking {
+        states.materialBudget(role, chat, 16384)
         adopt(content("life", "need").put("level", "broad").put("semantic_rule", "life"))
         fun survival(strength: Double) = content("survival", "need").put("level", "specific").put("parent_ref", "life")
             .put("semantic_rule", "survival").put("strength", strength).put("objects", JSONArray().put("user").put("friend"))
             .put("goals", JSONArray().put("继续了解世界").put("完成自己的愿望"))
         adopt(survival(0.4), omitReason = true)
+        val f = frame()
+        val union = JSONObject().put("id", "survival-union").put("expected_version", 0)
+            .put("members", JSONArray(listOf("life", "survival").map {
+                JSONObject().put("kind", "inner").put("id", it).put("version", f.interactionMembers.getValue("inner:$it"))
+            })).put("objects", JSONArray().put("user")).put("evidence", JSONArray().put(f.eventIds.first()))
+            .put("interpretation", "生的需要与求生欲有联系但不相互代替").put("decision", "无需行动").put("status", "active")
+            .put("effects", JSONArray().put(JSONObject().put("from", "inner:life").put("to", "inner:survival").put("meaning", "理解关联，未提出强度变化")))
+        submit(f, report(f).put("unions", JSONArray().put(union)))
         val before = InnerStructure.hash(states.read(role).getJSONObject("inner_structure").getJSONObject("records"))
         val projection = states.read(role)
         InternalStateEngine.advance(projection, chat, System.currentTimeMillis() + 1000000000)
@@ -183,6 +192,54 @@ class CategoryEventsEntryPointsTest {
         assertEquals(0.0, InnerStructure.records(states.read(role)).single { it.getString("id") == "survival" }.getJSONObject("content").getDouble("strength"), 0.0)
         assertTrue(states.enabled(role)); assertNotNull(frame(second))
         assertEquals(2, InnerStructure.records(states.read(role)).single { it.getString("id") == "survival" }.getJSONObject("content").getJSONArray("objects").length())
+        CompanionContext.compose(context, second, role, JSONObject(), false)
+        assertEquals(0.0, InnerStructure.records(states.read(role)).single { it.getString("id") == "survival" }.getJSONObject("content").getDouble("strength"), 0.0)
+    }
+
+    @Test fun unionsPageHistoryWithoutEmbeddingAllRowsInHotState(): Unit = runBlocking {
+        states.materialBudget(role, chat, 16384)
+        category(); category("longing")
+        repeat(5) { batch ->
+            val f = frame()
+            val unions = JSONArray((0..3).map { n ->
+                JSONObject().put("id", "history-${batch * 4 + n}").put("expected_version", 0)
+                    .put("members", JSONArray(listOf("unwilling", "longing").map {
+                        JSONObject().put("kind", "inner").put("id", it).put("version", f.interactionMembers.getValue("inner:$it"))
+                    })).put("objects", JSONArray()).put("evidence", JSONArray().put(f.eventIds.first()))
+                    .put("interpretation", "不同理解${batch * 4 + n}").put("decision", "未决定").put("status", "active").put("effects", JSONArray())
+            })
+            submit(f, report(f).put("unions", unions))
+        }
+        val fresh = InternalStateStore(context)
+        assertEquals(8, fresh.inspectCategory(role, chat, "union", null, 0).getJSONArray("items").length())
+        assertEquals(4, fresh.inspectCategory(role, chat, "union", null, 16).getJSONArray("items").length())
+        assertTrue(fresh.read(role).getJSONObject("category_commit").getJSONArray("rows").length() <= 4)
+        assertEquals(1, fresh.inspectCategory(role, chat, "union", "history-0", 0).getJSONObject("item").getInt("version"))
+    }
+
+    @Test fun sessionUnionDoesNotCrossWindowsAndRetiredMemberDoesNotBreakReading(): Unit = runBlocking {
+        states.materialBudget(role, chat, 16384)
+        category()
+        states.event(role, chat, "definition-input", "user_message", "真实配置输入")
+        fun direction() = JSONObject().put("condition", "always").put("reason", "本规则暂停")
+            .put("interval_minutes", 0).put("amount", 0)
+        val definition = JSONObject().put("id", "local").put("name", "局部").put("description", "窗口局部体验")
+            .put("kind", "emotion").put("baseline", 0).put("min", 0).put("max", 100).put("scope", "session")
+            .put("private", false).put("share", false).put("participates", true).put("effects", JSONArray())
+            .put("time_rules", JSONObject().put("increase", direction()).put("decrease", direction()).put("floor", 0))
+        states.evolve(role, chat, "create", "local", 0, definition, null, "明确建立", listOf("definition-input"))
+        val f = frame()
+        val union = JSONObject().put("id", "local-union").put("expected_version", 0)
+            .put("members", JSONArray().put(JSONObject().put("kind", "state").put("id", "local").put("version", f.interactionMembers.getValue("state:local")))
+                .put(JSONObject().put("kind", "inner").put("id", "unwilling").put("version", f.interactionMembers.getValue("inner:unwilling"))))
+            .put("objects", JSONArray()).put("evidence", JSONArray().put(f.eventIds.first())).put("interpretation", "仅此窗口的理解")
+            .put("decision", "未决定").put("status", "active").put("effects", JSONArray())
+        submit(f, report(f).put("unions", JSONArray().put(union)))
+        assertTrue(CompanionContext.compose(context, chat, role, JSONObject(), false).state.contains("仅此窗口的理解"))
+        assertFalse(CompanionContext.compose(context, second, role, JSONObject(), false).state.contains("仅此窗口的理解"))
+        states.evolve(role, chat, "deactivate", "local", 1, null, null, "明确停用但保留经历", listOf("definition-input"))
+        assertTrue(CompanionContext.compose(context, chat, role, JSONObject(), false).state.contains("仅此窗口的理解"))
+        assertEquals(1, states.inspectCategory(role, chat, "union", "local-union", 0).getJSONObject("item").getInt("version"))
     }
 
     @Test fun preferenceLinksAccumulateOnlyAfterAdoption(): Unit = runBlocking {
@@ -257,8 +314,12 @@ class CategoryEventsEntryPointsTest {
         }
         val snapshot = states.read(role)
         val material = CategoryEvents.material(snapshot, false)
-        assertTrue(material.toString().length <= 12000)
-        assertEquals(1, material.getJSONArray("episodes").length())
+        // Batch4 allows multiple members from one bounded disk page; the shared final
+        // token selector, not this per-module character cap, controls the actual request.
+        assertTrue(material.toString().length <= 8 * 16000)
+        assertEquals(8, material.getJSONArray("episodes").length())
+        val actual = CompanionContext.compose(context, chat, role, JSONObject(), false).state
+        assertTrue(SubjectMaterialBudget.estimate(actual) <= SubjectMaterialBudget.DEFAULT_TOKENS)
         assertEquals(8, states.inspectCategory(role, chat, "episode", null, 72).getJSONArray("items").length())
         assertTrue(states.inspectCategory(role, chat, "episode", null, 80).getJSONArray("items").length() == 0)
         assertEquals("unresolved", episode("bulk-0").getJSONObject("content").getString("status"))

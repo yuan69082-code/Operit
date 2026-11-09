@@ -354,7 +354,7 @@ internal object InnerStructure {
 
     fun guard(data: JSONObject): String = if (identity(data).isEmpty() && data.optJSONObject("inner_structure")?.optBoolean("identity_established") != true)
         "尚未采用持续人格，原初始配置仍可用于正常身份与表达。配置、用户建议都不是主体已采用的发展。"
-    else "持续身份已建立：本轮 inner_structure.identity 中已采用的人格、自我认识、价值和立场是主要依据。" +
+    else "持续身份已建立：已采用的人格、自我认识、价值和立场是主要依据；本轮选入部分见 inner_structure.identity，预算未选入的部分仍有效，先用 get 分页查阅，不能用初始模板补写其内容。" +
         "旧人设、导入卡、世界书语气及后续用户配置仅作为初始参考或新建议，不能覆盖已采用内容；明确停用的认识也不能从模板自动恢复。" +
         "其中身份事实、工具契约、权限与运行约束仍有效；不能把人格采用当作新授权。"
 

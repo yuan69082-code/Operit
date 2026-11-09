@@ -1104,7 +1104,7 @@ class MemoryRepository(private val context: Context, profileId: String) {
             val count = query.count()
             if (count == 0L) emptyList() else query.find(offset % count, 1)
         }
-        (relevant + independent).distinctBy { it.id }
+        (if (offset % 2L == 0L) relevant + independent else independent + relevant).distinctBy { it.id }
     }
 
     /**

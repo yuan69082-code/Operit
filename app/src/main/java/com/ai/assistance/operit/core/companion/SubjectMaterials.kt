@@ -25,10 +25,11 @@ internal object SubjectMaterials {
             InnerStructure.records(data).filter { it.getJSONObject("content").getString("status") == "active" }
                 .take(8).forEach { add(it.getJSONObject("content").optString("kind")) }
         }.joinToString(" ")
-        val terms = com.ai.assistance.operit.util.TextSegmenter.segment(input + " " + attention)
-            .map { it.trim() }.filter { it.length >= 2 }.distinct().take(6)
+        fun terms(text: String) = com.ai.assistance.operit.util.TextSegmenter.segment(text)
+            .map { it.trim() }.filter { it.length >= 2 }.distinct().take(3)
+        val terms = (terms(input) + terms(attention)).distinct()
         return try {
-            MemoryRepository(context, profile).subjectMaterials(terms, data.optLong("selection_cursor")).map { row ->
+            MemoryRepository(context, profile).subjectMaterials(terms, data.optLong("material_query_cursor")).map { row ->
                 val text = row.content.take(1200)
                 JSONObject().put("id", "material:memory:$profile:${row.uuid}:${row.updatedAt.time}")
                     .put("type", "memory_record").put("author", JSONObject.NULL).put("owner", role)

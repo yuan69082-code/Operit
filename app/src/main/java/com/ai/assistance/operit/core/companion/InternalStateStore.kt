@@ -388,6 +388,8 @@ class InternalStateStore(private val context: Context) {
                 // The old selector's cursor wraps at its own item count; sharing that cursor
                 // would starve inner records beyond that count. This is selection, not growth.
                 innerRoot.put("selection_cursor", (innerCursor + 1) % 128)
+                val materialCursor = data.optLong("material_query_cursor")
+                data.put("material_query_cursor", if (materialCursor == Long.MAX_VALUE) 0L else materialCursor + 1)
                 data.put("last_selection", JSONObject().put("frame_id", frame.id).put("at", now)
                     .put("chat", chat).put("selected_ids", JSONArray(selected.selectedIds))
                     .put("decisions", selected.decisions).put("material_budget", payload.getJSONObject("material_budget"))
