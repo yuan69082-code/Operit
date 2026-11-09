@@ -224,4 +224,72 @@ class SubjectActionEntryPointsTest {
         assertEquals(40000, SubjectActions.read(context, role, second, id, 0).getJSONObject("item").getJSONObject("receipt").getString("text").length)
         assertEquals(2, SubjectActions.read(context, role, chat, null, 8).getJSONArray("items").length())
     }
+
+    @Test fun privateResultsCannotBeReadByOtherAssistantsOrGroups(): Unit = runBlocking {
+        val f = requireNotNull(sections().internalStateFrame)
+        val result = execute(f, listOf(invocation("calculate", mapOf("expression" to "7+8")))).results.single()
+        assertTrue(result.error, result.success)
+        val other = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "另一助手"))
+        withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(other)) {
+            reject { SubjectActions.read(context, role, chat, result.subjectActionId, 0) }
+        }
+        val groupId = com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+            .createCharacterGroupCard(CharacterGroupCard("", "群", members = listOf(GroupMemberConfig(role), GroupMemberConfig(other))))
+        val group = ChatHistory(title = "群", messages = emptyList(), characterGroupId = groupId)
+        ChatHistoryManager.getInstance(context).saveChatHistory(group)
+        val groupFrame = requireNotNull(sections(group.id).internalStateFrame)
+        assertFalse(groupFrame.materialSources.values.any { it.contains(requireNotNull(result.subjectActionId)) })
+        val denied = execute(groupFrame, listOf(invocation("companion_internal_state", mapOf("action" to "get",
+            "section" to "action", "id" to requireNotNull(result.subjectActionId))))).results.single()
+        assertFalse(denied.success)
+        assertFalse(denied.result.toString().contains("15.0"))
+        assertEquals(0, CompanionStore(context).actionPage(other, "private", 0).size)
+        reject { SoftwareCapabilityArtifacts(context, role, group.id) }
+    }
+
+    @Test fun invalidOperationDeclarationDoesNotAbortOtherToolsOrForgeEvidence(): Unit = runBlocking {
+        val f = requireNotNull(sections().internalStateFrame)
+        val bad = JSONObject().put("decision", "我的选择").put("evidence", JSONArray().put("never-provided"))
+        val batch = execute(f, listOf(invocation("calculate", mapOf("expression" to "1+2", SubjectActions.DECLARATION to bad.toString())),
+            invocation("calculate", mapOf("expression" to "3+4"))))
+        assertFalse(batch.results[0].success)
+        assertTrue(batch.results[1].error, batch.results[1].success)
+        assertEquals(1, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
+        reject { submit(f, JSONObject().put("action_feedback", JSONArray().put(JSONObject().put("id", "invented")
+            .put("expected_version", 0).put("action_id", "none").put("result_source", "never-provided")
+            .put("meaning", "没有实际读取的结果").put("evidence", JSONArray().put("never-provided"))))) }
+    }
+
+    @Test fun nativeReadReplayKeepsProofAndCancellationNeverReexecutes(): Unit = runBlocking {
+        val count = AtomicInteger()
+        handler.registerTool("interrupted", executor = { _: AITool ->
+            count.incrementAndGet(); throw CancellationException("cancel after dispatch")
+        })
+        val f = requireNotNull(sections().internalStateFrame)
+        try { execute(f, listOf(invocation("interrupted"))); fail("cancel expected") }
+        catch (_: CancellationException) { }
+        val retried = execute(f, listOf(invocation("interrupted"))).results.single()
+        assertEquals(1, count.get()); assertEquals("unknown", retried.executionStatus)
+        val s = sections()
+        val next = requireNotNull(s.internalStateFrame)
+        val query = invocation("companion_internal_state", mapOf("action" to "get", "section" to "action", "id" to requireNotNull(retried.subjectActionId)))
+        execute(next, listOf(query))
+        val replay = execute(next, listOf(query)).results.single()
+        assertTrue(replay.result is InternalStateReadResultData)
+        assertTrue(delivered(s, listOf(replay)).materialSources.values.any {
+            JSONObject(it).optJSONObject("locator")?.optString("action_id") == retried.subjectActionId
+        })
+    }
+
+    @Test fun changedRequestsCannotReuseAnAttemptAndTechnicalFailureDoesNotCreateUnderstanding(): Unit = runBlocking {
+        handler.registerTool("timeout-result", executor = { _: AITool -> ToolResult("timeout-result", true,
+            TerminalCommandResultData("local", "partial output", -1, "session", timedOut = true)) })
+        val f = requireNotNull(sections().internalStateFrame)
+        val first = execute(f, listOf(invocation("timeout-result"))).results.single()
+        assertEquals("unknown", first.executionStatus)
+        val conflict = execute(f, listOf(invocation("calculate", mapOf("expression" to "1+1")))).results.single()
+        assertFalse(conflict.success)
+        assertEquals("unknown", SubjectActions.read(context, role, second, first.subjectActionId, 0).getJSONObject("item").getString("status"))
+        assertEquals(0, InternalStateStore(context).inspectCategory(role, chat, "feedback", null, 0).getJSONArray("items").length())
+    }
 }

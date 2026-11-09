@@ -548,6 +548,8 @@ object ToolExecutionManager {
         val actionIds = mutableMapOf<Int, String>()
         val eligible = mutableListOf<IndexedValue<ToolInvocation>>()
         for ((index, invocation) in invocations.withIndex()) {
+          try {
+            require(invocation.tool.parameters.count { it.name == SubjectActions.DECLARATION } <= 1)
             val declaration = invocation.tool.parameters.firstOrNull { it.name == SubjectActions.DECLARATION }?.value
             val clean = invocation.copy(tool = invocation.tool.copy(parameters =
                 invocation.tool.parameters.filterNot { it.name == SubjectActions.DECLARATION }))
@@ -562,6 +564,13 @@ object ToolExecutionManager {
                 if (claim.execute) eligible.add(IndexedValue(index, clean.copy(hostInvocationId = id)))
                 else orderedResults.complete(index, requireNotNull(claim.replay))
             }
+          } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+          catch (failure: Exception) {
+            // Invalid metadata or a failed pre-execution write must not rerun the business turn.
+            AppLogger.e(TAG, "操作登记或来源校验失败，当前操作未执行", failure)
+            orderedResults.complete(index, ToolResult(resolveDisplayToolName(invocation.tool), false,
+                StringResultData(""), "当前操作未执行：${failure.message}", executionStatus = "denied"))
+          }
         }
         suspend fun complete(index: Int, result: ToolResult, denied: Boolean = false) {
             val saved = if (actions == null) result else try {

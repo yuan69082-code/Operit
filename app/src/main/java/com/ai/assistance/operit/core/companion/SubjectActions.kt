@@ -8,6 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
+import com.ai.assistance.operit.core.tools.ToolResultData
 
 /** Durable objective facts, separate from adopted subjective understanding.
  * No recovery path replays an unconfirmed external operation. */
@@ -33,7 +36,7 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                 old
             } else {
                 fresh = true
-                JSONObject().put("id", id).put("version", 1).put("owner", frame.roleId).put("parent", parent)
+                JSONObject().put("schema", 1).put("id", id).put("version", 1).put("owner", frame.roleId).put("parent", parent)
                     .put("source_chat", frame.chatId).put("frame_id", frame.id).put("state_version", frame.stateVersion)
                     .put("semantic_revision", frame.revision).put("trigger_sources", JSONArray(frame.eventIds.toList()))
                     .put("request", request).put("request_hash", digest)
@@ -55,19 +58,25 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
 
     suspend fun finish(id: String, result: ToolResult, status: String): ToolResult = withContext(Dispatchers.IO) {
         require(status in setOf("completed", "failed", "partial", "cancelled", "unknown", "denied"))
+        val executionStatus = when (val data = result.result) {
+            is com.ai.assistance.operit.core.tools.TerminalCommandResultData -> if (data.timedOut) "unknown" else if (data.exitCode != 0) "failed" else status
+            is com.ai.assistance.operit.core.tools.HiddenTerminalCommandResultData -> if (data.timedOut) "unknown" else if (data.exitCode != 0) "failed" else status
+            else -> status
+        }
         val receipt = JSONObject().put("success", result.success).put("text", result.result.toString())
             .put("error", result.error ?: JSONObject.NULL).put("tool", result.toolName)
+            .put("data", result.result.toJson()).put("scope", "single_tool_request_not_downstream_goal")
         store.actionWrite(frame.roleId, id) { old ->
             val row = requireNotNull(old)
             if (row.has("receipt")) {
-                check(row.getJSONObject("receipt").toString() == receipt.toString() && row.getString("status") == status) {
+                check(row.getJSONObject("receipt").toString() == receipt.toString() && row.getString("status") == executionStatus) {
                     "已有回执不能被另一结果覆盖"
                 }
                 row
-            } else row.put("status", status).put("receipt", receipt).put("receipt_hash", InnerStructure.hash(receipt))
+            } else row.put("status", executionStatus).put("receipt", receipt).put("receipt_hash", InnerStructure.hash(receipt))
                 .put("version", row.getInt("version") + 1).put("finished_at", System.currentTimeMillis())
         }
-        result.copy(subjectActionId = id, executionStatus = status)
+        result.copy(subjectActionId = id, executionStatus = executionStatus)
     }
 
     private fun replay(row: JSONObject): ToolResult {
@@ -77,7 +86,9 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
         if (receipt == null) return ToolResult(row.getJSONObject("request").getString("tool"), false,
             StringResultData("操作已登记，尚无持久回执。可能处理中或已中断；结果未知，未再次执行。"),
             "UNKNOWN_RESULT", row.getString("id"), "unknown")
-        return ToolResult(receipt.getString("tool"), receipt.getBoolean("success"), StringResultData(receipt.getString("text")),
+        val data = Json { ignoreUnknownKeys = true; classDiscriminator = "__type" }
+            .decodeFromString<ToolResultData>(receipt.getString("data"))
+        return ToolResult(receipt.getString("tool"), receipt.getBoolean("success"), data,
             if (receipt.isNull("error")) null else receipt.getString("error"), row.getString("id"), row.getString("status"))
     }
 
@@ -92,7 +103,16 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
             for (i in 0 until refs.length()) {
                 val ref = refs.getJSONObject(i)
                 require(ref.keys().asSequence().toSet() == setOf("kind", "id", "version"))
-                require(frame.interactionMembers["${ref.getString("kind")}:${ref.getString("id")}"] == ref.getInt("version")) {
+                val kind = ref.getString("kind")
+                val version = ref.getInt("version")
+                require(ref.getDouble("version") == version.toDouble())
+                val providedDecision = kind in setOf("decision", "feedback") && frame.materialSources.values.any { text ->
+                    val source = JSONObject(text)
+                    val locator = source.optJSONObject("locator")
+                    source.optString("type") == "adopted_$kind" && locator != null && locator.optString("id") == ref.getString("id") &&
+                        locator.optInt("version") == version
+                }
+                require(providedDecision || frame.interactionMembers["$kind:${ref.getString("id")}"] == version) {
                     "意向依据必须是本轮实际读取的版本"
                 }
             }

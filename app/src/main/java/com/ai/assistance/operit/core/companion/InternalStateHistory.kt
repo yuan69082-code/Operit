@@ -190,6 +190,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             val head = JSONObject(row.toString())
             head.getJSONObject("request").remove("parameters")
             head.optJSONObject("receipt")?.let { receipt ->
+                  receipt.remove("data")
                 val text = receipt.getString("text")
                 receipt.put("text", text.take(600)).put("excerpt", text.length > 600)
             }
