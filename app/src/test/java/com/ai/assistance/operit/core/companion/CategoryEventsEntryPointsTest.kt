@@ -166,6 +166,23 @@ class CategoryEventsEntryPointsTest {
         assertEquals(1, episode("B").getInt("version"))
     }
 
+    @Test fun normalMaterialAndEventPagesRemainBoundedAsEpisodesAccumulate(): Unit = runBlocking {
+        category()
+        repeat(10) { batch ->
+            val f = frame()
+            submit(f, report(f, (0..7).map { appraisal(f, "bulk-${batch * 8 + it}") }))
+        }
+        val snapshot = states.read(role)
+        val material = CategoryEvents.material(snapshot, false)
+        assertTrue(material.toString().length <= 12000)
+        assertEquals(1, material.getJSONArray("episodes").length())
+        assertEquals(8, states.inspectCategory(role, chat, "episode", null, 72).getJSONArray("items").length())
+        assertTrue(states.inspectCategory(role, chat, "episode", null, 80).getJSONArray("items").length() == 0)
+        assertEquals("unresolved", episode("bulk-0").getJSONObject("content").getString("status"))
+        assertEquals(8, snapshot.getJSONObject("category_commit").getJSONArray("rows").length())
+        assertFalse(snapshot.has("category_current"))
+    }
+
     @Test fun committedJournalCanResumeAfterInterruptionWithoutDuplicates(): Unit = runBlocking {
         category(); val f = frame(); val r = report(f, listOf(appraisal(f, "A")))
         submit(f, r)

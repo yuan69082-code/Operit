@@ -7,6 +7,8 @@ status: validating
 
 第3批从未合并 #54 / b456315 接续；类别内部事件、重点、求生欲特例及第4批接入点见 [类别内部事件](4-category-events.md)。此前两批记录保留为对应交付时事实。
 
+同分支另有独立提交的 [实际活动承接修复](5-activity-continuity.md)，验证聊天与书房保存事实，未合并或发布。
+
 当前第 2 批从未合并的草稿 #53 / c6068de 建立依赖分支 feat/subject-inner-structure。实际实现、采用契约、兼容边界及第 3 批交接见 [完整内在结构](3-batch-two-implementation.md)。下文权威清点保留为第 1 批交付时的事实，人格与关系的新权威以第 2 批交接为准。
 
 基线为 main 8b09126，沿用 #50 的历史归档、报告幂等和 #52 的 IO 修复。参考引擎只读核对 0567ba4：current_identity 的来源边界、persistent_runtime_service 的旧持有者拒绝与恢复、PreservedRuntimeRepository 的身份和存储版本校验。没有移植 Python 运行时，也未决定后续实现语言。
