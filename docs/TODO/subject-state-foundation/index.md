@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: batch-six-validation
+status: batch-six-validation-blocked-actions-outage
 ---
 
 # 指定助手连续状态：六批实施记录
