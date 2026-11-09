@@ -40,10 +40,13 @@ internal object InnerStructure {
     fun versions(data: JSONObject) = records(data).associate { it.getString("id") to it.getInt("version") }
     fun pendingBindings(data: JSONObject) = pending(data).associate { it.getString("id") to hash(it) }
     fun evidenceToRestore(data: JSONObject, actions: JSONArray): List<String> {
+        require(actions.length() <= 8)
         val ids = (0 until actions.length()).map { actions.getJSONObject(it).optString("id") }.toSet()
-        return pending(data).filter { it.getString("id") in ids }.flatMap {
+        val proposed = (0 until actions.length()).map { actions.getJSONObject(it) }.filter { it.optString("op") == "propose" }
+            .flatMap { strings(it.getJSONArray("evidence"), 6) }
+        return (proposed + pending(data).filter { it.getString("id") in ids }.flatMap {
             it.getJSONObject("bindings").keys().asSequence().filter { key -> !key.startsWith("config:") && !key.startsWith("relation:") }.toList()
-        }.distinct()
+        }).filter { !it.startsWith("config:") && !it.startsWith("relation:") }.distinct()
     }
 
     fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {
@@ -67,13 +70,19 @@ internal object InnerStructure {
                     val before = records.optJSONObject(target)
                     val expected = integer(action, "expected_version")
                     require(expected == (before?.getInt("version") ?: 0) && expected == (frame.innerVersions[target] ?: 0)) { "内在记录版本已变化" }
-                    if (before != null) require(before.getJSONObject("content").getString("family") == content.getString("family")) { "不能无声更换记录类别" }
+                    if (before != null) {
+                        val oldContent = before.getJSONObject("content")
+                        require(oldContent.getString("family") == content.getString("family")) { "不能无声更换记录类别" }
+                        if (oldContent.has("object_ref")) require(oldContent.getString("object_ref") == content.optString("object_ref")) {
+                            "已明确的对象不能换成另一对象；请建立归属清楚的新记录"
+                        }
+                    }
                     val origin = text(action, "origin", 40)
                     require(origin in setOf("initial_configuration", "subject_development", "user_proposal", "model_suggestion"))
                     val refs = strings(action.getJSONArray("evidence"), 6)
                     require(refs.isNotEmpty()) { "候选需要真实来源" }
                     val bindings = JSONObject()
-                    refs.forEach { ref -> bindings.put(ref, source(data, frame, ref, true)) }
+                    refs.forEach { ref -> bindings.put(ref, source(data, frame, ref)) }
                     if (origin == "initial_configuration") require(refs.any { it.startsWith("config:") })
                     if (origin == "user_proposal") require(refs.any {
                         bindings.getJSONObject(it).getString("source") in setOf("user_message", "user_edit", "user_relation_proposal")
@@ -102,7 +111,7 @@ internal object InnerStructure {
                     require(proposal.getInt("expected_version") == (old?.getInt("version") ?: 0)) { "候选前态已变化，请重新提出明确变化" }
                     require(hash(proposal.opt("before")) == hash(old?.getJSONObject("content"))) { "候选前态不对应" }
                     proposal.getJSONObject("bindings").keys().forEach { ref ->
-                        require(hash(source(data, frame, ref, false)) == hash(proposal.getJSONObject("bindings").getJSONObject(ref))) { "候选原始来源已变化或不可用" }
+                        require(hash(source(data, frame, ref)) == hash(proposal.getJSONObject("bindings").getJSONObject(ref))) { "候选原始来源已变化或不可用" }
                     }
                     validateContent(content, records, data, frame)
                     if (content.getString("family") in identityFamilies) {
@@ -211,15 +220,22 @@ internal object InnerStructure {
                 require(row.has("context") && row.has("exceptions"))
             }
         }
+        if (family in setOf("drive", "need") && row.getString("status") == "active") require(values(records).none { stored ->
+            val c = stored.getJSONObject("content")
+            stored.getString("id") != row.getString("id") && c.getString("status") == "active" &&
+                listOf("family", "kind", "parent_ref", "object_ref", "context").all { c.optString(it) == row.optString(it) }
+        }) { "同类同对象同情境的需要已有当前记录，请明确修订而非复制类别" }
         require(row.toString().length <= 2600)
     }
 
-    private fun source(data: JSONObject, frame: InternalStateFrame, ref: String, proposing: Boolean): JSONObject {
+    private fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
         if (ref.startsWith("config:") || ref.startsWith("relation:")) {
             val raw = requireNotNull(frame.innerSources[ref]) { "配置来源未在本轮提供" }
             return JSONObject().put("hash", hash(raw)).put("source", if (ref.startsWith("config:")) "initial_configuration" else "legacy_relation")
         }
-        if (proposing) require(ref in frame.eventIds) { "候选只能引用本轮可用依据" }
+        // History may have been read with the existing get tool rather than selected for this
+        // request. Resolve only explicit IDs in this owner's store, bounded above by the frame;
+        // personality adoption additionally verifies exact original quotations.
         val event = requireNotNull(InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }) { "候选事件来源不可用" }
         require(event.getLong("at") <= frame.at && event.getLong("sequence") <= frame.eventSequence)
         return JSONObject().put("hash", hash(event)).put("source", event.getString("source"))
@@ -296,7 +312,7 @@ internal object InnerStructure {
         [内在结构候选契约 v1]
         inner_structure 中的记录是主体自己的有来源认识，不是客观事实或他人的同意。思维方式只记录倾向与方法，不保存隐藏思维链。
         在同一 operit_state_report 增加可选 inner:[...]，缺省或空数组保持所有新结构；不增加另一份报告。
-        提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["本轮事件ID或来源ID"],reason:"简短依据"}。
+        提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["已读本主体事件ID或本轮来源ID"],reason:"简短依据"}。历史原文可经 get 分页读取后引用；不能引用本帧开始之后发生的事，也不能猜测未读经历。
         采用先前候选：{op:"adopt",id:"候选ID",reason:"明确采用理由"}；放下候选用 op:"discard"。不能同轮提出并采用；用户说“你喜欢”只是候选来源，不能当作已采用偏好。
         record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，其数值/时间仍由旧维度负责）。
         family 可为 drive,need,desire,emotion,sentiment,feeling,personality,self_knowledge,value,stance,relation,preference；kind 自由命名细分类别，不靠复制同名记录表达不同对象。

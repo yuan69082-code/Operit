@@ -60,7 +60,8 @@ class RelationshipNetwork(private val context: Context) {
         protectSubject(caller, from)
         if (caller != null) check(RelationshipPolicy.mayEdit(caller, from, cards.isPrimaryAssistant(caller))) { "只能修改自己的看法，主助手可全局管理" }
         val ids = cards.getAllCharacterCards().map { it.id }
-        require(from != to && from in ids && to in ids) { "请选择两位不同的现有助手" }
+        require(from != to && from in ids && (to in ids || to == "user" &&
+            com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(from))) { "请选择现有助手，内部状态也可记录对用户的认识" }
         require(relation.isNotBlank() && relation.length <= 100 && opinion.length <= 2000 && progress.length <= 2000 && experiences.length <= 6000) { "关系必填，关系100字、看法/进展各2000字、经历6000字以内" }
         val value = JSONObject().put("from", from).put("to", to).put("relation", relation).put("opinion", opinion)
             .put("progress", progress).put("experiences", experiences).put("source_chat", source).put("updated_by", caller ?: "user")

@@ -12,8 +12,9 @@ internal object InnerStructureContext {
     suspend fun sources(context: Context, role: String): Map<String, String> {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val cards = CharacterCardManager.getInstance(context)
-        val configuration = cards.combinePrompts(role)
-        val voiceConfiguration = cards.combinePrompts(role, promptFunctionType = com.ai.assistance.operit.data.model.PromptFunctionType.VOICE)
+        val configuration = cards.combinePrompts(role, labelInitialConfiguration = false)
+        val voiceConfiguration = cards.combinePrompts(role, promptFunctionType = com.ai.assistance.operit.data.model.PromptFunctionType.VOICE,
+            labelInitialConfiguration = false)
         val relations = GroupStore(context).read("relationships")
         return buildMap {
             if (configuration.isNotBlank()) put("config:role_prompt", configuration)

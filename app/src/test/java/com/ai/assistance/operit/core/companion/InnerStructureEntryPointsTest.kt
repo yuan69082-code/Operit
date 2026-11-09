@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
 
 /** Real request composition/commit adapters, cards, chat metadata and disk stores. No live model. */
 @RunWith(OperitStorageTestRunner::class)
-@Config(manifest = Config.NONE, sdk = [28], application = Application::class)
+@Config(sdk = [28], application = Application::class)
 class InnerStructureEntryPointsTest {
     private lateinit var context: Context
     private lateinit var cards: CharacterCardManager
@@ -95,6 +95,8 @@ class InnerStructureEntryPointsTest {
         try { block(); fail("expected candidate rejection") } catch (_: IllegalArgumentException) { }
         catch (_: IllegalStateException) { } catch (_: org.json.JSONException) { }
     }
+    private fun innerHash() = InnerStructure.hash(JSONObject(states.read(role).getJSONObject("inner_structure").toString())
+        .apply { remove("selection_cursor") })
 
     @Test fun normalRequestCompositionReadsAdoptedIdentityAcrossWindowsAndRestart(): Unit = runBlocking {
         val first = sections()
@@ -127,11 +129,11 @@ class InnerStructureEntryPointsTest {
         val pending = proposeRecord(preference("interest"))
         val f = frame()
         cards.updateCharacterCard(cards.getCharacterCard(role).copy(characterSetting = "用户新提出：你喜欢所有游戏"))
-        val before = InnerStructure.hash(states.read(role).getJSONObject("inner_structure"))
+        val before = innerHash()
         rejected { InnerStructureContext.submit(context, f, report(f, adoption(pending))) }
         val current = frame()
         rejected { InnerStructureContext.submit(context, current, report(current, adoption(pending))) }
-        assertEquals(before, InnerStructure.hash(states.read(role).getJSONObject("inner_structure")))
+        assertEquals(before, innerHash())
         val next = sections()
         assertTrue(next.instructions.contains("不能覆盖已采用内容"))
         assertTrue(cards.combinePrompts(role).contains("用户新提出"))
@@ -188,6 +190,7 @@ class InnerStructureEntryPointsTest {
         assertEquals("user_relation_proposal", event.getString("source"))
         assertEquals("user", event.getString("author"))
         assertTrue(event.getString("inner_source").contains("用户提出的理解"))
+        assertTrue(sections(two, "毫不相关的本轮输入").state.contains(suggestion.getString("event_id")))
         adoptRecord(content("toward-other", "relation").put("object_ref", other).put("label", "朋友")
             .put("understanding", "这是我自己的认识").put("feeling", "有亲近，也可以生气"))
         assertEquals("subject_adopted", network.list(role).single().getString("adoption"))
@@ -197,11 +200,15 @@ class InnerStructureEntryPointsTest {
         network.delete(null, role, other)
         assertEquals(before, InnerStructure.hash(InnerStructure.records(states.read(role)).single()))
         rejected { network.save(other, role, other, "覆盖", "", "", "", foreign) }
+        withContext(AssistantScope.executionContext(role)) {
+            rejected { network.save(null, role, other, "伪装用户", "", "", "", one) }
+        }
     }
 
     @Test fun duplicateMalformedAndStaleReportsKeepAtomicBoundary(): Unit = runBlocking {
         val f = frame()
         val payload = report(f, propose("p", preference("p")))
+        rejected { states.submit(f, payload) } // Missing host source verification must not be a bypass.
         val receipt = InnerStructureContext.submit(context, f, payload)
         val version = SubjectStateBoundary.revision(states.read(role))
         assertEquals(receipt.toString(), InnerStructureContext.submit(context, f, payload).toString())
@@ -236,6 +243,13 @@ class InnerStructureEntryPointsTest {
         val material = InnerStructure.material(data, "语言方式", 0)
         assertTrue(material.toString().length <= InnerStructure.MATERIAL_BUDGET)
         assertEquals(8, material.getJSONArray("catalogue").length())
+        val seen = mutableSetOf<String>()
+        repeat(12) {
+            val next = JSONObject(sections().state.substringAfter("本轮名录与选择]\n").trim())
+                .getJSONObject("inner_structure").getJSONArray("catalogue")
+            repeat(next.length()) { i -> seen += next.getJSONObject(i).getString("id") }
+        }
+        assertTrue("new records must rotate independently of legacy selection", seen.size >= 19)
         val f = frame()
         val before = InnerStructure.hash(states.read(role).getJSONObject("inner_structure"))
         val oldFormat = report(f).apply { remove("inner") }
@@ -267,6 +281,27 @@ class InnerStructureEntryPointsTest {
             assertEquals(2, InnerStructure.records(states.read(role)).size)
             assertTrue(InnerStructure.pending(states.read(role)).isEmpty())
         } finally { pool.shutdownNow() }
+    }
+
+    @Test fun explicitOldEvidenceReadThroughGetCanBeResolvedFromTheExistingArchive(): Unit = runBlocking {
+        states.event(role, one, "older-fact", "assistant_reply", "我在先前窗口选择直说", author = role)
+        val row = InternalStateEngine.rows(states.read(role), "events").single()
+        // Move the actual host-recorded row across the existing compaction boundary.
+        InternalStateArchive(java.io.File(context.filesDir, "companion/internal-state-history.sqlite"), "internal-state:$role").use {
+            it.put("events", row); it.commit()
+        }
+        CompanionStore(context).updateSubject(role, "internal-state", "archive_fixture") { it.put("events", JSONArray()) }
+        val read = withContext(Dispatchers.IO) { states.inspect(role, two, 0) }
+        assertTrue(read.getJSONArray("events").toString().contains("older-fact"))
+        val f = frame(two)
+        assertFalse("old fact was fetched, not selected", "older-fact" in f.eventIds)
+        InnerStructureContext.submit(context, f, report(f, propose("old-source", preference("past"),
+            origin = "subject_development", evidence = "older-fact")))
+        val after = frame()
+        InnerStructureContext.submit(context, after, report(after, adoption("old-source")))
+        assertEquals("assistant_reply", InnerStructure.records(states.read(role)).single().getJSONObject("evidence")
+            .getJSONObject("older-fact").getString("source"))
+        assertTrue(InnerStructure.records(states.read(other)).isEmpty())
     }
 
     @Test fun openNeedHierarchyAndUnresolvedFeelingHaveIndependentStorage(): Unit = runBlocking {

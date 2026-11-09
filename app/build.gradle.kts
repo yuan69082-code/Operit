@@ -360,6 +360,11 @@ android {
     namespace = "com.ai.assistance.operit"
     compileSdk = 36
 
+    testOptions {
+        // Host-entry integration tests use real card/model preference migrations and strings.
+        unitTests.isIncludeAndroidResources = true
+    }
+
     sourceSets {
         getByName("main") {
             assets.setSrcDirs(listOf(generatedMainAssetsDir.get().asFile))

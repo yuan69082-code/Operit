@@ -23,9 +23,12 @@ class InternalStateStore(private val context: Context) {
     /** Existing relationship editors submit attributed input; they do not directly adopt a view. */
     suspend fun relationshipProposal(role: String, caller: String?, value: JSONObject, chat: String): JSONObject =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val executing = com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
+            check(executing == null || caller == executing) { "助手不能冒用用户或另一助手的编辑来源" }
             SubjectStateBoundary.authorize(role, caller)
             val invocation = com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.currentToolRuntimeContext()?.hostInvocationId
-            val id = "relation-proposal:" + (invocation ?: UUID.randomUUID().toString())
+            val id = "relation-proposal:" + (invocation?.let { "$it:${value.getString("to")}:${value.optString("operation", "save")}" }
+                ?: UUID.randomUUID().toString())
             var savedValue = JSONObject(value.toString())
             var replayed = false
             update(role, if (caller == null) "user_edit" else "relationship_proposal") { data ->
@@ -213,8 +216,9 @@ class InternalStateStore(private val context: Context) {
             // Old receipts still use the original digest validation. A new report must not
             // bypass conflict checks if intervening objective changes have already been archived.
             val replay = InternalStateEngine.rows(data, "semantic_reports").any { it.getString("frame_id") == frame.id }
-            if (!replay && currentInnerSources != null) require(frame.innerSources == currentInnerSources) {
-                "人格配置或关系来源已改变；本次候选报告不采用"
+            if (!replay && report.has("inner") && report.getJSONArray("inner").length() > 0) {
+                requireNotNull(currentInnerSources) { "内在候选须从宿主来源核验入口提交" }
+                require(frame.innerSources == currentInnerSources) { "人格配置或关系来源已改变；本次候选报告不采用" }
             }
             requireStateReport(replay || frame.eventSequence >= data.optLong("archived_event_sequence"), InternalStateReportFailure.CONFLICT)
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
@@ -278,7 +282,8 @@ class InternalStateStore(private val context: Context) {
         check(enabled(actor)) { "内部状态未开启" }
         val now = System.currentTimeMillis()
         fun project(data: JSONObject): RuntimeContextSections {
-            InnerStructure.root(data)
+            val innerRoot = InnerStructure.root(data)
+            val innerCursor = innerRoot.optLong("selection_cursor")
             val requestId = if (persist) UUID.randomUUID().toString() else null
             val inputEventId = requestId?.let { "input:$it" }
             val source = if (wake || currentInput.isBlank()) "wake" else if (groupInput) "group_context" else "user_message"
@@ -304,7 +309,7 @@ class InternalStateStore(private val context: Context) {
                     innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
             val payload = selected.payload
-            payload.put("inner_structure", InnerStructure.material(data, currentInput, data.optLong("selection_cursor")))
+            payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
             if (frame != null) {
@@ -314,6 +319,9 @@ class InternalStateStore(private val context: Context) {
                     .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                         .put("at", now).put("text_location", "current_request_input"))
                 data.put("selection_cursor", selected.nextCursor)
+                // The old selector's cursor wraps at its own item count; sharing that cursor
+                // would starve inner records beyond that count. This is selection, not growth.
+                innerRoot.put("selection_cursor", (innerCursor + 1) % 128)
                 data.put("last_selection", JSONObject().put("frame_id", frame.id).put("at", now)
                     .put("chat", chat).put("selected_ids", JSONArray(selected.selectedIds))
                     .put("decisions", selected.decisions).put("status", "PREPARED_FOR_SEND"))

@@ -36,7 +36,7 @@ fun RelationshipEditor(chatId: String) {
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(revision) { cards = CharacterCardManager.getInstance(context).getAllCharacterCards() }
-    fun name(id: String) = cards.firstOrNull { it.id == id }?.name ?: "已删除助手 ($id)"
+    fun name(id: String) = if (id == "user") "用户" else cards.firstOrNull { it.id == id }?.name ?: "已删除助手 ($id)"
     fun work(action: suspend () -> Unit) { scope.launch {
         try { error = null; action() } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { error = failure.message }
@@ -52,6 +52,8 @@ fun RelationshipEditor(chatId: String) {
     FlowRow { cards.forEach { card -> FilterChip(selected = from == card.id, onClick = { from = card.id }, label = { Text(card.name) }) } }
     Text("对哪位助手")
     FlowRow { cards.filter { it.id != from }.forEach { card -> FilterChip(selected = to == card.id, onClick = { to = card.id }, label = { Text(card.name) }) } }
+    if (com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(from))
+        FilterChip(selected = to == "user", onClick = { to = "user" }, label = { Text("用户") })
     OutlinedTextField(relation, { relation = it }, label = { Text("关系") })
     OutlinedTextField(opinion, { opinion = it }, label = { Text("看法") })
     OutlinedTextField(progress, { progress = it }, label = { Text("目前进展") })
