@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CompanionScheduleTest {
+    @Test fun continuousRecoveryRetainsUnknownWithoutCreatingJudgment() {
+        val data = JSONObject().put("purpose", "继续已安排的事").put("owner", "ai").put("at", 100)
+        CompanionSchedule.claim(data, "old", 100)
+        CompanionSchedule.finish(data, "old", false, 200, continuous = true)
+        assertTrue(data.getBoolean("paused"))
+        assertEquals("unknown", data.getString("result_status"))
+        assertFalse(CompanionSchedule.eligible(data, true))
+        assertEquals(100L, data.getLong("at"))
+        CompanionSchedule.supersede(data)
+        data.put("at", 300).put("paused", false)
+        assertTrue(CompanionSchedule.eligible(data, true))
+        assertFalse(CompanionSchedule.eligible(JSONObject().put("owner", "initial").put("at", 100), true))
+    }
     @Test fun interruptionSchedulesNewJudgmentWithoutChangingPurpose() {
         val data = JSONObject().put("purpose", "check progress")
         CompanionSchedule.claim(data, "old", 100)

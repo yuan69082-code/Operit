@@ -8,7 +8,7 @@ on:
         type: string
         default: "0"
   pull_request:
-    branches: [main, feat/subject-state-foundation, feat/subject-inner-structure, feat/subject-category-events, feat/subject-interactions]
+    branches: [main, feat/subject-state-foundation, feat/subject-inner-structure, feat/subject-category-events, feat/subject-interactions, feat/subject-action-feedback]
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main, feat/desktop-shared-chat, feat/polaris-experience]

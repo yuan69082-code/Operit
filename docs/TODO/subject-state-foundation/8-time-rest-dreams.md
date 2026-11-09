@@ -1,0 +1,57 @@
+# 第6批：时间、休息、梦与恢复
+
+从 ae2bb38 / PR #57 接续，分支 feat/subject-time-dreams，依赖 #57 → #56 → #55 → #54 → #53。只读参考引擎及三个指定文档。用户最新授权在第6批验证完成后整合这六批、合并并按现有双端渠道发布；此前不合并不发布的限制已取消，不包含无关 PR。本页随实现更新，不代表尚未运行的验收已经通过。
+
+## 已核对与施工范围
+
+- 复用 InternalStateEngine / InternalStateTimeRules 的逐实例时间锚点及已采用规则、原子报告/类别归档、统一材料预算、正常模型通道与既有预约。时间读取不另起模型调用。
+- 旧主动联系自动初次安排、恢复失败后重排，以及 ExplorationPolicy 的默认三小时续约，与指定主体要求冲突。限定启用内部状态的助手停止这些自动判断，保留明确安排和其他助手原行为。
+- 参考引擎 domain/dreaming.py、services/dream_process_service.py 的梦实分源、生成身份和原结果恢复；不移植周期 dream_interval、保留分数或强制现实素材引用。梦允许没有现实剧情依据，不作为他人现实行为证据。
+- 引擎 domain/affect_time.py 的来源版本与时间锚点仅作为边界参考；其默认 HOLD 时长、NEED 指数投影不代替 Operit 已采用规则。domain/sleep_input.py 的操作版本核验不扩展为新的通用执行平台，services/timeline_service.py 的历史投影不制造现实事件。只读参考版本0567ba4与远端HEAD一致，三个指定本地文档可访问且已核对。
+- 休息/醒来与梦通过原有私聊或已安排后台业务轮的可选内部报告采用。没有每次休息必做梦或新周期模型调用。设备停止与恢复不提交休息/醒来候选。
+- 新记录进既有类别增量归档，按需查询，纳入既有备份恢复和统一预算。保留前五批及书房实际活动修复。
+
+## 当前验证与发布检查点（未完成发布）
+
+### 2026-11-10恢复后的验证（覆盖下方故障时检查点）
+
+- 整合提交710a9a4完整承接PR #59 / fe1d212。Gemini空parts校验及HTTP400读流隔离新增10项，沿用六批已有异常处理，不删除历史原文。
+- [运行124](https://github.com/yuan69082-code/Operit/actions/runs/42679070016)详细HTML报告确认2000项、0失败、6原有跳过。SubjectRestDreamsEntryPointsTest的9项全部通过，包括真实导出ZIP会话行、正常恢复后DAO、梦和后续请求读取断言。最后的ObjectBox共享父加载器修正现已实际验证；没有删测试、弱化断言或伪造最终状态。
+- GeminiRequestContentTest 9项及GeminiReaderFailureTest 1项全部通过，覆盖实际发送前零网络/零重试；原始手机现场和真实Gemini仍未复现，不能因此声称真机修复实测。
+- 同一运行Windows24项及便携包通过，本地发布回归10项通过。Android APK构建、固定签名、包名、实际版本检查也全部通过。最终依赖整合发布继续进行，最终版本/资产及+86识别核验在PR #53/#58记录；本记录不预先宣称发布成功。
+
+### 以下保留为服务故障时的历史检查点
+
+- 最新实现检查点 be82bb8。主分支仍为8b09126，#53—#58保持依赖且未合并；无关#44/#38/#8未动。六批和书房修复的代码均已保留，合并发布授权有效，不需要再次授权。
+- 最近实际完整Android回归1990项，1项失败、6项原有跳过。唯一失败为全应用快照测试：先确认旧管理器持有另一测试Context，再隔离API29环境，随后因ObjectBox JNI在两个加载器重复加载失败。be82bb8已将ObjectBox API与原生加载器共享到父加载器，尚未获得执行验证，不能写成1990项通过。所有真实备份、恢复与后续正常读取断言保留。
+- 其余正常材料组合、报告解析采用、私域查询、醒后理解及感受候选、群聊/另一助手隔离、重复报告、有界历史读取，以及原时间/预约回归已通过此前运行。9项梦接线测试中8项通过、1项上述快照测试待验证；全批新增13项，不用模拟模型证明真实理解质量。
+- Windows24项检查及便携包构建在运行120通过；本地另10项发布流程回归通过。Android最后修正尚未完成测试和APK构建，因此未生成本次可发布的APK。
+- GitHub运行[121](https://github.com/yuan69082-code/Operit/actions/runs/42671689891)的两次尝试均在任何job启动前失败：Internal server error，关联ID334297f1-e38e-4254-826a-2c53138df511、37e9ab7d-c4cc-423c-a137-65ce0f953318。独立[Android Tests185](https://github.com/yuan69082-code/Operit/actions/runs/42672810453)同样启动失败，关联ID0c9c2388-f26e-41dd-b1c3-fc16abb38755。官方[Actions故障](https://www.githubstatus.com/incidents/tp8cghg7tlc4)在2026-11-09 18:12 UTC确认部分不可用。这是实际外部阻塞，不是心理规则待决或用户授权不足。
+- 服务恢复后，从本分支继续验证最新修正，完成Android和Windows构建；按依赖整合#58→#57→#56→#55→#54→#53，最终主分支候选走现有shared-desktop发布流程。勿提前合并到main或使用未验证旧包。最终发布结果更新到PR #53/#58，不将本检查点当作发布完成。
+- 已核对用户现有shared-v1.12.2-pc.1+86的更新代码：按shared-release.json的version_code严格递增识别，接受原shared预发布渠道；旧code为5300086。继续沿用com.ai.assistance.operit.debug及既有签名。实际新APK版本、清单、非草稿Release和资产校验尚待最终发布，不预先填写新版本号。
+
+## 实际入口与时序
+
+- InnerStructureContext.prepare 在 IO 上从既有归档读取 rest/dream/dream_understanding 的有界页，经 SubjectMaterialBudget 与其他材料一起选择；群聊排除私域材料。未选入的全文可由正常 companion_internal_state get 查询，SubjectToolMaterials 仅在实际完整返回送进工具续轮后登记来源。
+- 正常 InternalStateReportStream → InnerStructureContext.submit → InternalStateReports.apply → SubjectRestDreams.apply，使用原主体帧、语义版本、重试回执和原子提交。rest 是主体明确选择而非系统状态；dream 使用宿主 frame 派生稳定 ID。每轮最多一段，不定时造梦，也不要求每次休息生成。
+- 当前业务轮读取旧版本；休息、梦和理解在轮末合法报告中保存。后续正常私聊或已授权具体预约可读取。生成梦发生于已有该次模型调用中；没有额外必需调用。若主体明确安排以后继续，将由原预约在届时触发正常模型调用，并非零模型成本的离线做梦。
+- 醒后理解须引用确实提供的 dream_not_reality 来源，保存感受和解释及各自版本；普通内在候选可引用同一梦，仍须先提出、以后采用。技术保存成功不意味着已经理解。梦与理解可重新查询，不重复采用旧效应。
+- 当前头与各版本复用 InternalStateArchive.category_current/category_versions；AtomicFile 只保留有界提交日志。归档事务失败可在下次读取重放索引，报告重复不会造第二段梦。没有复制整个历史计算材料。
+- 私域头按scope/kind/private索引逆向读取，每页SQL LIMIT；即使通用查询省略parent，也绑定真实private分区，避免临时全表排序。独立SQLite查询计划检查使用一万条构造记录，确认SEARCH category_recent且无SCAN/TEMP B-TREE；这不是Android真机性能基准。
+- 备份仍使用 RawSnapshotBackupManager 的完整 files/shared_prefs/databases 路径；companion 内的主体文件、归档和能力产物均包含。恢复 UI 原本要求重启；测试仅模拟 ChatHistoryManager 单例重建，不冒充手机杀进程实测。
+- 全应用快照测试使用独立API29/NATIVE SQLite测试环境，保留真实导出ZIP内会话行、恢复后DAO和正常请求断言。初次失败实际路径指向另一测试的临时目录：仅重建Room仍会被持有旧Context的管理器重开旧目录，不能将此误报为手机资料丢失。导出检查点另修正为实际步进游标，避免懒查询未执行。
+- 时间仍按既有逐实例 at 锚点和有效条件规则计算；重复时间、倒退时间不重复结算，离线正向间隔按规则补算，不另触发模型。无可信外部时间源时，跨设备重启后的正向墙钟跳变无法与真实离线间隔完全区分；未新增网络校时或保活。
+- 求生欲是已采用的细分 need，不挂接旧数值时间引擎；联合、休息、恢复不替它改值。其他状态继续原先各自采用的规则，不统一冻结。
+
+## 六批接线收尾对照
+
+1. 主体底座：CharacterCard.id → InternalStateStore/SubjectStateBoundary → CompanionStore，前后台均使用正常请求帧。保留 global/session 与 user_edit 来源，原子版本和归档不重建。
+2. 内在结构：InnerStructure 的 propose/adopt 与人格 development 校验，InnerStructureContext/CharacterCardManager 提供采用身份及初始配置边界。人格、自我认识、关系和偏好持久保存，后续正常请求按统一预算读取。
+3. 类别事件：CategoryEvents 的 episode/focus/experience_link，独立事情及版本归档；本轮没选入不会删除或解决。求生欲特殊规则保留。
+4. 联合与材料：InnerInteractions 与同轮报告原子提交，成员版本独立；SubjectMaterials/SubjectToolMaterials 保留实际提供来源，SubjectMaterialBudget 统筹默认2048、上限16384 Token；本地分词/远程估算和完整窗口核查沿用。
+5. 操作与反馈：ToolExecutionManager → SubjectActions 的执行前事实与结果回执，ActionUnderstanding 的决定/理解另行采用；SoftwareCapabilityArtifacts 的真实本地计算能力构建/运行保持。恢复不盲目重放未知操作。
+6. 时间休息梦：既有时间引擎、CompanionSchedule/ExplorationPolicy 限定接管、SubjectRestDreams 私域报告与上述正常读取链。没有周期梦、闲置兜底、额外身份或记忆库。
+
+书房独立修复 d0701b8 及后续修正随依赖保留：实际回复 ID、后台表达先持久化、同助手按权限查询、未知结果不冒报成功。书房整书扫描限制仍在，不在本批重写。
+
+现存验证边界：真实模型理解/表达质量、手机长时间后台与进程恢复、实际 MCP、本地分词器设备运行未实测。模拟模型测试证明报告和数据链，不证明主观体验质量。无权内容仍由各入口限制；公开表达由原权限和正常选择负责，不默认转发梦。

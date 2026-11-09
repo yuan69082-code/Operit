@@ -219,7 +219,7 @@ class InternalStateStore(private val context: Context) {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
-            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0) {
+            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || SubjectRestDreams.requested(report)) {
             require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
@@ -258,6 +258,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspect(role: String, chat: String, offset: Int): JSONObject {
+        val result = inspectLocal(role, chat, offset)
+        return if (recipientScope(role, chat)) SubjectRestDreams.publicMaterial(result) else result
+    }
+
+    private fun inspectLocal(role: String, chat: String, offset: Int): JSONObject {
         require(offset >= 0)
         val data = snapshot(role, chat, true)
         val events = InternalStateEngine.rows(data, "events").asReversed()
@@ -286,7 +291,12 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback"))
+        val result = inspectCategoryLocal(role, chat, kind, id, offset)
+        return if (recipientScope(role, chat)) SubjectRestDreams.publicMaterial(result) else result
+    }
+
+    private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
+        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds)
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
         if (kind == "action_versions") {
             requireNotNull(id)
@@ -296,8 +306,8 @@ class InternalStateStore(private val context: Context) {
             return JSONObject().put("items", JSONArray(rows.take(8)))
                 .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
         }
-        if (kind in setOf("decision", "feedback") ||
-            (kind == "category_versions" && (id.orEmpty().startsWith("decision:") || id.orEmpty().startsWith("feedback:"))))
+        if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds ||
+            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "inner") {
@@ -408,6 +418,7 @@ class InternalStateStore(private val context: Context) {
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
+            if (groupInput) payload = SubjectRestDreams.publicMaterial(payload)
             payload = SubjectMaterialBudget.select(payload,
                 capabilities.optInt("subject_material_tokens", data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS))
                     .coerceIn(SubjectMaterialBudget.DEFAULT_TOKENS, SubjectMaterialBudget.MAX_TOKENS))
@@ -459,7 +470,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + InnerStructure.guard(data),
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )
