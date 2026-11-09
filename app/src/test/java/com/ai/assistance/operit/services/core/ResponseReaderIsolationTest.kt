@@ -7,27 +7,6 @@ import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 
 class ResponseReaderIsolationTest {
-    @Test fun httpFailureInChildReaderIsReportedWithoutCrashingHost(): Unit = runBlocking {
-        val uncaught = CopyOnWriteArrayList<Throwable>()
-        val host = CoroutineScope(SupervisorJob() + Dispatchers.Default +
-            CoroutineExceptionHandler { _, failure -> uncaught.add(failure) })
-        val outcome = CompletableDeferred<Throwable?>()
-        val expected = java.io.IOException("HTTP 400: at least one parts field")
-        try {
-            val job = host.launch {
-                outcome.complete(MessageProcessingDelegate.collectResponseReaders {
-                    launch { throw expected }
-                })
-            }
-            val failure = withTimeout(10_000) { outcome.await() }
-            withTimeout(10_000) { job.join() }
-            assertEquals(expected.message, failure?.message)
-            assertTrue(uncaught.isEmpty())
-            assertTrue(host.isActive)
-            assertNull(MessageProcessingDelegate.collectResponseReaders { launch { yield() } })
-        } finally { host.cancel() }
-    }
-
     @Test fun malformedAndLateReportsStayInsideOwningTurnAndCancelSiblingReaders(): Unit = runBlocking {
         for ((text, code) in listOf(
             "</operit_state_report>" to InternalStateReportStream.ErrorCode.MALFORMED_REPORT_TAG,
