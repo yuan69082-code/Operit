@@ -10,7 +10,7 @@ import kotlinx.coroutines.*
 import org.json.JSONArray
 
 object RelationshipTools {
-    fun prompts() = listOf(ToolPrompt(name = "assistant_relationship", description = "维护独立助手关系网。list 查看涉及自己的关系（主助手可看全部）；save 完整保存自己对另一位助手的关系、看法、进展、共同经历；delete 删除自己的记录。主助手可修改任意记录。from和to是稳定助手ID；普通助手只能以自己为from，不能替对方声称同意。阅读他人的看法/经历不等于自己亲历；没有证据不要编造共同经历。", parametersStructured = listOf(
+    fun prompts() = listOf(ToolPrompt(name = "assistant_relationship", description = "维护有方向的关系记录。list 查看原关系记录及自己的已采用认识。启用内部状态时，save/delete 只记录有来源的修改/结束建议，主体须经 inner 候选流程采用；其他助手及主助手不能代写该主体。未启用时保留原关系管理权限。from和to使用稳定助手ID；阅读他人的表述不等于自己亲历或双方同意，不编造共同经历。", parametersStructured = listOf(
         p("action", "list/save/delete", true), p("from", "观点所属助手ID，默认你自己"), p("to", "另一位助手ID"),
         p("relation", "关系名称"), p("opinion", "from对to的看法"), p("progress", "目前进展"), p("experiences", "共同经历，保留参与者/时间/来源；本局游戏须明确标为游戏"))))
     private fun p(name: String, description: String, required: Boolean = false) = ToolParameterSchema(name = name, type = "string", description = description, required = required)
@@ -25,7 +25,11 @@ object RelationshipTools {
                     val result: Any = when (arg("action")) {
                         "list" -> JSONArray(network.list(actor))
                         "save" -> network.save(actor, from, requireNotNull(arg("to")), requireNotNull(arg("relation")), arg("opinion").orEmpty(), arg("progress").orEmpty(), arg("experiences").orEmpty(), arg("__operit_package_chat_id").orEmpty())
-                        "delete" -> { network.delete(actor, from, requireNotNull(arg("to"))); "deleted" }
+                        "delete" -> {
+                            network.delete(actor, from, requireNotNull(arg("to")))
+                            if (com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(from))
+                                "已记录结束关系的建议，尚未改变已采用认识" else "deleted"
+                        }
                         else -> error("未知关系网操作")
                     }
                     ToolResult(toolName = tool.name, success = true, result = StringResultData(result.toString()))

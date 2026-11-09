@@ -16,6 +16,8 @@ import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -24,19 +26,22 @@ fun RelationshipEditor(chatId: String) {
     val scope = rememberCoroutineScope()
     val network = remember { RelationshipNetwork(context) }
     val revision by GroupStore.revision.collectAsState()
-    val entries = remember(revision) { network.all() }
+    val entries by produceState(initialValue = emptyList<org.json.JSONObject>(), revision) {
+        value = withContext(Dispatchers.IO) { network.all() }
+    }
     var cards by remember { mutableStateOf(emptyList<CharacterCard>()) }
     var from by remember { mutableStateOf("") }; var to by remember { mutableStateOf("") }
     var relation by remember { mutableStateOf("") }; var opinion by remember { mutableStateOf("") }
     var progress by remember { mutableStateOf("") }; var experiences by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(revision) { cards = CharacterCardManager.getInstance(context).getAllCharacterCards() }
     fun name(id: String) = cards.firstOrNull { it.id == id }?.name ?: "已删除助手 ($id)"
     fun work(action: suspend () -> Unit) { scope.launch {
         try { error = null; action() } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { error = failure.message }
     } }
-    Text("每条记录有明确方向：A 对 B 的看法不等于 B 对 A 的看法。你可以编辑全部；助手修改自己的记录，主助手可全局管理。")
+    Text("每条记录有明确方向：A 对 B 的看法不等于 B 对 A 的看法。启用内部状态后，保存和删除会记录为建议，须由该助手采用；其他助手不能代写。")
     entries.forEach { item ->
         TextButton(onClick = { from = item.getString("from"); to = item.getString("to"); relation = item.getString("relation"); opinion = item.optString("opinion"); progress = item.optString("progress"); experiences = item.optString("experiences") }) {
             Text("${name(item.getString("from"))} → ${name(item.getString("to"))}：${item.optString("relation")}")
@@ -52,9 +57,16 @@ fun RelationshipEditor(chatId: String) {
     OutlinedTextField(progress, { progress = it }, label = { Text("目前进展") })
     OutlinedTextField(experiences, { experiences = it }, label = { Text("共同经历，保留参与者、时间和来源") }, minLines = 3)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     Row {
-        TextButton(onClick = { work { network.save(null, from, to, relation, opinion, progress, experiences, chatId) } }) { Text("保存") }
-        TextButton(onClick = { work { network.delete(null, from, to) } }) { Text("删除这条关系") }
+        TextButton(onClick = { work {
+            val result = withContext(Dispatchers.IO) { network.save(null, from, to, relation, opinion, progress, experiences, chatId) }
+            notice = result.optString("notice").ifBlank { "已保存" }
+        } }) { Text("保存") }
+        TextButton(onClick = { work {
+            withContext(Dispatchers.IO) { network.delete(null, from, to) }
+            notice = if (com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(from)) "结束关系的建议已记录，等待主体采用" else "已删除"
+        } }) { Text("删除这条关系") }
     }
 }
 

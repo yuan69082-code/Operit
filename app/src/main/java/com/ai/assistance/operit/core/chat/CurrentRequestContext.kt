@@ -71,7 +71,11 @@ internal object CurrentRequestContext {
         }
         check(owners.size == 1) { "Prompt hook must preserve the host internal state instruction turn" }
         return clean.mapIndexed { index, turn ->
-            if (index == owners.single()) turn.copy(metadata = turn.metadata + (INTERNAL_STATE_FRAME_KEY to frame))
+            if (index == owners.single()) turn.copy(
+                // Reassert the host's precedence after editable prompt hooks and role/worldbook
+                // composition; retained character text is not an adopted identity authority.
+                content = turn.content + if (frame.innerGuard.isBlank() || turn.content.endsWith(frame.innerGuard)) "" else "\n[持续人格与初始配置]\n" + frame.innerGuard,
+                metadata = turn.metadata + (INTERNAL_STATE_FRAME_KEY to frame))
             else turn
         }
     }

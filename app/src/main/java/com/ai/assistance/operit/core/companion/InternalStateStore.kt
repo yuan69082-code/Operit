@@ -20,6 +20,36 @@ class InternalStateStore(private val context: Context) {
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
     fun read(role: String) = store.read(key(role))
 
+    /** Existing relationship editors submit attributed input; they do not directly adopt a view. */
+    suspend fun relationshipProposal(role: String, caller: String?, value: JSONObject, chat: String): JSONObject =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            SubjectStateBoundary.authorize(role, caller)
+            val invocation = com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.currentToolRuntimeContext()?.hostInvocationId
+            val id = "relation-proposal:" + (invocation ?: UUID.randomUUID().toString())
+            var savedValue = JSONObject(value.toString())
+            var replayed = false
+            update(role, if (caller == null) "user_edit" else "relationship_proposal") { data ->
+                val prior = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == id }
+                    ?: store.archivedStateRow(key(role), "events", id)
+                if (prior != null) {
+                    val original = JSONObject(prior.getString("inner_source"))
+                    fun comparable(input: JSONObject) = JSONObject(input.toString()).apply { remove("updated_at") }
+                    require(InnerStructure.hash(comparable(original)) == InnerStructure.hash(comparable(value))) { "同一关系操作重试内容不一致" }
+                    savedValue = original
+                    replayed = true
+                    return@update
+                }
+                InternalStateEngine.record(data, id, if (caller == null) "user_relation_proposal" else "assistant_relation_proposal",
+                    chat, "关系编辑建议；尚未采用：" + value.getString("relation"), JSONArray(), System.currentTimeMillis())
+                InternalStateEngine.rows(data, "events").last { it.getString("id") == id }
+                    .put("inner_source", JSONObject(value.toString()).toString()).put("recipient", role)
+                    .put("author", caller ?: "user").put("source_chat", chat)
+                data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1))
+            }
+            savedValue.put("status", "proposal_recorded").put("event_id", id).put("replayed", replayed)
+                .put("notice", "原文已保存为关系建议，尚未改变主体已采用的认识；通过正常内在候选流程采用")
+        }
+
     /** Validate against host chat metadata, never the visible/selected assistant or model. */
     suspend fun requireRecipient(role: String, chat: String): Boolean {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
@@ -168,7 +198,7 @@ class InternalStateStore(private val context: Context) {
     }
 
     /** The frame comes from host request metadata, never from role/chat fields in model output. */
-    fun submit(frame: InternalStateFrame, report: JSONObject): JSONObject {
+    fun submit(frame: InternalStateFrame, report: JSONObject, currentInnerSources: Map<String, String>? = null): JSONObject {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         lateinit var receipt: JSONObject
@@ -183,8 +213,12 @@ class InternalStateStore(private val context: Context) {
             // Old receipts still use the original digest validation. A new report must not
             // bypass conflict checks if intervening objective changes have already been archived.
             val replay = InternalStateEngine.rows(data, "semantic_reports").any { it.getString("frame_id") == frame.id }
+            if (!replay && currentInnerSources != null) require(frame.innerSources == currentInnerSources) {
+                "人格配置或关系来源已改变；本次候选报告不采用"
+            }
             requireStateReport(replay || frame.eventSequence >= data.optLong("archived_event_sequence"), InternalStateReportFailure.CONFLICT)
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
+            restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, report.optJSONArray("inner") ?: JSONArray()))
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
         AppLogger.d("InternalState", "Accepted subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} saved=${SubjectStateBoundary.revision(saved)} semantic=${InternalStateEngine.semanticRevision(saved)}")
@@ -212,7 +246,14 @@ class InternalStateStore(private val context: Context) {
         if (versionPage.size < 21) versionPage.addAll(store.archivedStateVersions(key(role),
             (offset - versions.size).coerceAtLeast(0), 21 - versionPage.size,
             versions.map { InternalStateArchive.lookup("versions", it) }.toSet()))
+        val innerHistory = InternalStateEngine.rows(data, "inner_history").asReversed()
+        val historyPage = innerHistory.drop(offset).take(9).toMutableList()
+        if (historyPage.size < 9) historyPage.addAll(store.archivedInnerHistory(key(role),
+            (offset - innerHistory.size).coerceAtLeast(0), innerHistory.map { it.getString("id") }.toSet()).take(9 - historyPage.size))
         return JSONObject().put("definitions", JSONArray(InternalStateEngine.definitions(data)))
+            .put("inner", InnerStructure.page(data, offset))
+            .put("inner_history", JSONArray(historyPage.take(8)))
+            .put("inner_history_next_offset", if (historyPage.size > 8) offset + 8 else JSONObject.NULL)
             .put("states", JSONArray(InternalStateEngine.snapshot(data, chat, System.currentTimeMillis())))
             .put("events", JSONArray(page.take(20))).put("versions", JSONArray(versionPage.take(20)))
             .put("last_selection", data.optJSONObject("last_selection") ?: JSONObject.NULL)
@@ -231,11 +272,13 @@ class InternalStateStore(private val context: Context) {
 
     /** Preview reads a detached time projection. Only an actual request records input and rotation. */
     fun prepare(actor: String, chat: String, persist: Boolean, wake: Boolean = false,
-                capabilities: JSONObject = JSONObject(), currentInput: String = "", groupInput: Boolean = false): RuntimeContextSections {
+                capabilities: JSONObject = JSONObject(), currentInput: String = "", groupInput: Boolean = false,
+                innerSources: Map<String, String> = emptyMap(), innerObjects: Set<String> = emptySet()): RuntimeContextSections {
         require(actor.isNotBlank() && chat.isNotBlank())
         check(enabled(actor)) { "内部状态未开启" }
         val now = System.currentTimeMillis()
         fun project(data: JSONObject): RuntimeContextSections {
+            InnerStructure.root(data)
             val requestId = if (persist) UUID.randomUUID().toString() else null
             val inputEventId = requestId?.let { "input:$it" }
             val source = if (wake || currentInput.isBlank()) "wake" else if (groupInput) "group_context" else "user_message"
@@ -256,9 +299,14 @@ class InternalStateStore(private val context: Context) {
                     revision = InternalStateEngine.semanticRevision(data), at = now,
                     eventIds = selected.eventIds, definitionVersions = InternalStateEngine.definitions(data).associate {
                         definition -> definition.getString("id") to definition.getInt("version")
-                    }, eventSequence = data.getLong("sequence"), stateVersion = SubjectStateBoundary.revision(data))
+                    }, eventSequence = data.getLong("sequence"), stateVersion = SubjectStateBoundary.revision(data),
+                    innerVersions = InnerStructure.versions(data), innerPending = InnerStructure.pendingBindings(data),
+                    innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
             val payload = selected.payload
+            payload.put("inner_structure", InnerStructure.material(data, currentInput, data.optLong("selection_cursor")))
+                .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
+                .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
             if (frame != null) {
                 payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
                     .put("subject_id", actor).put("state_version", frame.stateVersion)
@@ -274,7 +322,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS,
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )

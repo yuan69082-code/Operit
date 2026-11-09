@@ -1,12 +1,12 @@
 # 六批连续目标与人格、偏好补充
 
-以下是园园确认的后续要求与本批代码核对，不是已实现功能。第 1 批只落实主体底座及明确授权的报告异常隔离；不创建尚无行为的偏好类、人格开关或接口占位。
+以下保留园园确认的完整六批目标。第 1 批只落实主体底座及报告异常隔离。第 2 批现已实现内在记录、持久候选/采用、偏好与正常选材接线，具体契约及验证状态见 [第 2 批实现与交接](3-batch-two-implementation.md)；第 3–6 批仍未实施，不能把结构接线视为双向作用或完整反馈已经完成。
 
 ## 六批规划（完整目标保留）
 
 | 批次 | 范围与后续接线 |
 | --- | --- |
-| 1：本批 | CharacterCard.id 归属、现有存储事务、来源、版本、幂等、迁移、正常入口；核对人设注入与覆盖路径。为偏好明确同一主体归属与后续使用位置，不实施偏好机制。 |
+| 1：底座 | CharacterCard.id 归属、现有存储事务、来源、版本、幂等、迁移、正常入口；核对人设注入与覆盖路径。为偏好明确同一主体归属与后续使用位置，不实施偏好机制。 |
 | 2：完整内在结构 | 驱力、需要、情绪、情感、人格、自我认识、价值、立场、关系、偏好。已导入人格或人格稳定后，持续保存的人格/自我认识/价值/立场成为主要依据，人设词退为初始参考。区分初始设置、用户提出的变化、主体实际采用的变化，保存采用过程，不能编辑人设后直接宣称主体已经改变。 |
 | 3：类别内部事件与特殊规则 | 为各类别建立真实事件与规则，包括偏好的形成、确认、改变、暂停及情境适用；不能把未表态、一次随口回应或迎合行为自动认定为长期喜好。原事件来源、对象与缺失证据保持可辨。 |
 | 4：双向作用 | 偏好与驱力、需要、情绪、情感、人格、自我认识、价值、立场、关系相互影响；明确作用与冲突，不用某一高分机械决定一切。 |
@@ -15,7 +15,9 @@
 
 引擎第八、九批专项工作不包含在以上施工范围。本批没有决定未来必须全量 Python 嵌入或全量 Kotlin 重写。
 
-## 人设注入与覆盖路径：本批核对事实
+## 人设注入与覆盖路径：第 1 批基线核对
+
+以下“当前”“未来”描述的是第 1 批基线。第 2 批已在 combinePrompts 标明初始配置，并由 CompanionContext / CurrentRequestContext 读入已采用身份、在提示词 hook 之后重申优先级；保留原文中的身份资料、工具契约和运行限制。没有以规则判断观点价值，也不以对话轮数宣布稳定。
 
 1. CharacterCardManager.convertTavernCardToCharacterCard 把导入卡的 description/personality/scenario 合成 characterSetting；示例、system_prompt、post_history_instructions 合成聊天补充文字。这是导入配置，当前没有独立的“主体采用”记录。
 2. CharacterCardManager.combinePrompts 组合 characterSetting、聊天或语音 otherContent、附加标签、advancedCustomPrompt。ConversationService.prepareConversationHistory 在未携带 SYSTEM 的请求中，将它交给 SystemPromptConfig.getSystemPromptWithCustomPrompts；代理卡还会经 proxyRolePrompt 进入 SYSTEM。已有 SYSTEM 的工具续轮会沿用该段，不是每个网络分片都重组，但新请求仍可能重新注入初始文本。

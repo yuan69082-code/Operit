@@ -123,8 +123,7 @@ object CompanionContext {
         val internalSections = withContext(Dispatchers.IO) {
             if (internalEnabled) {
                 val actor = requireNotNull(roleId)
-                val groupInput = internal.requireRecipient(actor, chatId)
-                internal.prepare(actor, chatId, recordSnapshot, wake, capabilities, currentInput, groupInput)
+                InnerStructureContext.prepare(context, actor, chatId, recordSnapshot, wake, capabilities, currentInput)
             } else RuntimeContextSections()
         }
         appendSections(internalSections)

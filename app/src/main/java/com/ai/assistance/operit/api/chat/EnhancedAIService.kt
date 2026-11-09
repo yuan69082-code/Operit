@@ -2093,7 +2093,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             } else {
                 try {
                     withContext(Dispatchers.IO) {
-                        InternalStateStore(this@EnhancedAIService.context).submit(frame, report)
+                        com.ai.assistance.operit.core.companion.InnerStructureContext.submit(this@EnhancedAIService.context, frame, report)
                     }
                     context.stateReportCommitted = true
                 } catch (cancelled: CancellationException) {

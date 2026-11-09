@@ -16,7 +16,7 @@ object CompanionTools {
 
     fun prompts(): List<ToolPrompt> = com.ai.assistance.operit.core.experience.ExperienceTools.prompts() + RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_internal_state",
-            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页。" +
+            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
                 "当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
                 "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
                 "create/revise传完整definition JSON：id,name,description,kind（只能drive驱力/sentiment情感/emotion情绪/psychology心理）,baseline,min,max,scope=global|session,private,share（AI愿向本机公开）,participates,effects=[{action,weight,cue,target可选}],time_rules，可带object_ref绑定明确对象。" +

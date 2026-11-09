@@ -167,6 +167,9 @@ class CompanionStore(context: Context) {
     internal fun archivedStateVersions(scope: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> =
         synchronized(lock(scope)) { history(scope).use { it.page("versions", offset, limit, hotIds) } }
 
+    internal fun archivedInnerHistory(scope: String, offset: Int, hotIds: Set<String>): List<JSONObject> =
+        synchronized(lock(scope)) { history(scope).use { it.page("inner_history", offset, 9, hotIds) } }
+
     fun setMemory(chatId: String, action: String, id: String, text: String) {
         update("summary:$chatId") { data ->
             val pins = data.optJSONObject("pins") ?: JSONObject()

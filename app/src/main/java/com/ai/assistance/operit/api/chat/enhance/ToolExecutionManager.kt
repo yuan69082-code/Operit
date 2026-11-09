@@ -45,7 +45,8 @@ object ToolExecutionManager {
 
     data class ToolRuntimeContext(
         val callerCardId: String? = null,
-        val toolExposureMode: ToolExposureMode = ToolExposureMode.FULL
+        val toolExposureMode: ToolExposureMode = ToolExposureMode.FULL,
+        val hostInvocationId: String? = null
     )
 
     private data class ResolvedToolTarget(
@@ -669,7 +670,7 @@ object ToolExecutionManager {
                         invocation = invocation,
                         toolHandler = toolHandler,
                         packageManager = packageManager,
-                        runtimeContext = toolRuntimeContext
+                        runtimeContext = toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId)
                     )
                 com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
                 com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
@@ -685,7 +686,7 @@ object ToolExecutionManager {
                     invocation = invocation,
                     toolHandler = toolHandler,
                     packageManager = packageManager,
-                    runtimeContext = toolRuntimeContext
+                    runtimeContext = toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId)
                 )
             com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
             com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)

@@ -17,7 +17,7 @@ import java.util.ArrayDeque
 
 /** Only historical rows leave the hot document; definitions and current values never do. */
 internal object InternalStateHistory {
-    val limits = mapOf("events" to 3000, "experiences" to 600, "semantic_reports" to 300, "versions" to 300)
+    val limits = mapOf("events" to 3000, "experiences" to 600, "semantic_reports" to 300, "versions" to 300, "inner_history" to 40)
     private const val MAX_FIELD_CHARS = 2 * 1024 * 1024
 
     // Parse one row at a time: parsing the entire old file before trimming caused startup OOMs.
