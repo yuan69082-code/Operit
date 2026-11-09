@@ -150,7 +150,7 @@ object CompanionRuntime {
                             decision = launch {
                                 try {
                                     withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch,
-                                        softwareRole = batch.role, softwareRevision = batch.revision) }
+                                        softwareRole = batch.role, softwareRevision = batch.revision, triggerId = "software:${batch.id}") }
                                     softwareStore.finish(batch.id, "handled")
                                 } catch (timeout: TimeoutCancellationException) {
                                     currentCoroutineContext().ensureActive()
@@ -184,7 +184,7 @@ object CompanionRuntime {
                             phoneDecision = true
                             decision = launch {
                                 try {
-                                    withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch, phoneRole = batch.role) }
+                                    withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch, phoneRole = batch.role, triggerId = "phone:${batch.id}") }
                                     phoneStore.finish(batch.id, "handled", "助手已完成判断；具体决定见唤醒日志")
                                 } catch (timeout: TimeoutCancellationException) {
                                     currentCoroutineContext().ensureActive()
@@ -215,7 +215,7 @@ object CompanionRuntime {
                             val taskEpoch = generation.get()
                             decision = launch {
                                 try {
-                                    withTimeout(300_000) { evaluate(app, work.chat, work.board.prompt(current), taskEpoch, taskEvent = true) }
+                                    withTimeout(300_000) { evaluate(app, work.chat, work.board.prompt(current), taskEpoch, taskEvent = true, triggerId = "todo:${work.id}:${work.event}") }
                                     work.board.dispatchState(work.id, work.event, "handled", "本次处理已结束，事项是否完成以状态和实际进展为准")
                                 } catch (cancelled: CancellationException) {
                                     work.board.dispatchState(work.id, work.event, "interrupted", "执行已中断，请核对实际进展")
@@ -243,7 +243,7 @@ object CompanionRuntime {
                             decision = launch {
                                 var outcome = "failed"
                                 try {
-                                    withTimeout(300_000) { evaluate(app, work.chat, work.purpose, epoch, explorationWork = work) }
+                                    withTimeout(300_000) { evaluate(app, work.chat, work.purpose, epoch, explorationWork = work, triggerId = "explore:${work.ticket}") }
                                     outcome = if (exploration.valid(work) && epoch == generation.get()) "completed" else "interrupted"
                                 } catch (timeout: TimeoutCancellationException) {
                                     currentCoroutineContext().ensureActive()
@@ -279,12 +279,15 @@ object CompanionRuntime {
                             val epoch = generation.get()
                             decision = launch {
                                 try {
-                                    withTimeout(300_000) { evaluate(app, work.chat, work.prompt(), epoch, taskEvent = true, studyEvent = true) }
+                                    if (!work.store.claim(work.book.getString("id"), work.ids)) return@launch
+                                    withTimeout(300_000) { evaluate(app, work.chat, work.prompt(), epoch, taskEvent = true, studyEvent = true, triggerId = work.triggerId) }
                                     work.store.finish(work.book.getString("id"), work.ids, "handled")
                                 } catch (timeout: TimeoutCancellationException) {
                                     work.store.finish(work.book.getString("id"), work.ids, "failed", "本轮阅读超时，可在书房重试")
                                 } catch (cancelled: CancellationException) {
-                                    // Keep pending events for the next idle turn; completed annotations are idempotent.
+                                    // A cancelled network round may already have performed tools. Do not
+                                    // turn an unknown result into a new automatic model/tool execution.
+                                    work.store.finish(work.book.getString("id"), work.ids, "unknown", "执行中断，请核对实际已保存回复和工具结果")
                                     throw cancelled
                                 } catch (failure: Exception) {
                                     work.store.finish(work.book.getString("id"), work.ids, "failed", failure.message.orEmpty())
@@ -334,7 +337,7 @@ object CompanionRuntime {
                     decision = launch {
                         var completed = false
                         try {
-                            withTimeout(300_000) { evaluate(app, target, observation, epoch) }
+                            withTimeout(300_000) { evaluate(app, target, observation, epoch, triggerId = "schedule:$ticket") }
                             completed = epoch == generation.get()
                         } catch (timeout: TimeoutCancellationException) {
                             currentCoroutineContext().ensureActive()
@@ -383,7 +386,8 @@ object CompanionRuntime {
 
     private suspend fun evaluate(context: Context, chatId: String, event: String, epoch: Long, taskEvent: Boolean = false, phoneRole: String? = null,
                                  softwareRole: String? = null, softwareRevision: Long? = null,
-                                 explorationWork: ExplorationStore.Work? = null, studyEvent: Boolean = false) = coroutineScope {
+                                 explorationWork: ExplorationStore.Work? = null, studyEvent: Boolean = false,
+                                 triggerId: String = java.util.UUID.randomUUID().toString()) = coroutineScope {
         val store = CompanionStore(context)
         val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
         val chat = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId) ?: error("目标会话不存在")
@@ -426,7 +430,7 @@ object CompanionRuntime {
         val contactWake = explorationWork == null && !taskEvent
         val internalState = InternalStateStore(context)
         val internalEnabled = internalState.enabled(roleId)
-        val wakeEventId = "wake:${java.util.UUID.randomUUID()}"
+        val wakeEventId = "wake:$triggerId"
         InternalStateStore.noteEvent(context, roleId, chatId, wakeEventId, "wake", event)
 
         // 联系账本只服务于“是否联系用户”的判断，不拿去给自主探索或私人事项定方向。
@@ -572,8 +576,8 @@ object CompanionRuntime {
                 if (!note.isNullOrBlank()) append("\n我当时的想法：").append(note.take(1500))
             }
             val recording = runCatching {
-                core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = body,
-                    displayMode = ChatMessageDisplayMode.HIDDEN_PLACEHOLDER), chatId)
+                core.getChatHistoryDelegate().addWakeMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = body,
+                    displayMode = ChatMessageDisplayMode.HIDDEN_PLACEHOLDER), chatId, roleId, "$wakeEventId:note")
             }
             recordedExperience = recordedExperience || recording.isSuccess
             // 醒来这件事本身也会改变情绪：把实际发生的自主行动回传 XC，由 XC 判断类型
@@ -661,19 +665,15 @@ object CompanionRuntime {
             check(messages.size == 1) { "主动消息格式不明确" }
             val text = messages.single().groupValues[1].trim()
             require(text.isNotBlank() && text.length <= 4000) { "主动消息为空或过长" }
-            if (CompanionPolicy.duplicate(text, current.filter { it.sender == "ai" && it.displayMode != ChatMessageDisplayMode.HIDDEN_PLACEHOLDER }.takeLast(5).map { it.content })) {
-                store.log(chatId, "拦截重复", "内容与近期已发送消息重复，本次未发送")
-                rememberWake(raw, "想说的话跟刚说过的重复了，没发")
-                return@coroutineScope
-            }
-            rememberWake(raw, "我决定开口，下面紧跟着的那条就是我说的", text)
+            val saved = core.getChatHistoryDelegate().addWakeMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text),
+                chatId, roleId, "$wakeEventId:public")
+            rememberWake(raw, "聊天表达已保存，消息时间标识：${saved.timestamp}；不代表用户已读", text)
             store.update("ledger:$chatId") {
                 it.put("unanswered", it.optInt("unanswered") + 1)
                 it.put("quiet_streak", 0)
                 it.put("last_contact_at", System.currentTimeMillis())
                 it.put("last_contact_text", text.take(200))
             }
-            core.getChatHistoryDelegate().addMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text), chatId)
             AIForegroundService.notifyReplyCompleted(context, chatId, card.name, text, null,
                 notifyReplyOverride = true, notifyWhileForeground = true)
             store.log(chatId, "主动消息", text.take(240))

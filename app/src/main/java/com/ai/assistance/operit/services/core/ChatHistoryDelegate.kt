@@ -1432,6 +1432,19 @@ class ChatHistoryDelegate(
         }
     }
 
+    suspend fun addWakeMessageToChat(message: ChatMessage, chatId: String, role: String, trigger: String): ChatMessage =
+        historyUpdateMutex.withLock {
+            val saved = chatHistoryManager.persistWakeMessage(chatId, role, trigger, message)
+            // Visible state is published only after durable success, using the actual timestamp.
+            if (_currentChatId.value == chatId && allowAddMessage.get()) {
+                upsertCurrentChatMessageInMemory(saved)
+                refreshCurrentChatDisplayFlags(chatId)
+            }
+            ToolPkgChatMessageHookBridge.dispatchMessagePersisted(chatId, saved)
+            com.ai.assistance.operit.core.companion.InternalStateStore.noteMessage(context, chatId, saved)
+            saved
+        }
+
     /**
      * 异步向聊天历史添加或更新消息（供不需要等待完成的场景使用）
      */

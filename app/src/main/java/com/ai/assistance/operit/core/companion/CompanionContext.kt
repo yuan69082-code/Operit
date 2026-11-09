@@ -74,6 +74,20 @@ object CompanionContext {
         instructions.append("[人类思考链]是思考者未说出口的思考过程，【正文回复】是实际发出的正文；两者保持区分。你可以自行决定是否开启阅读，也可以自然谈及所读到的心里话。用 human_thought_chain status/enable/disable/rename 查看、选择或更改称呼；用户总授权只能由用户控制。\n")
         state.append("人类思考链状态：").append(humanThoughts.status(roleId)).append("。这是").append(humanThoughts.name).append("未说出口的思考过程。\n")
         appendSections(xc)
+        if (!roleId.isNullOrBlank()) {
+            val history = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+            val metadata = history.getChatMetadata(chatId)
+            // No private cross-window material enters a group or another assistant's request.
+            if (metadata?.characterCardId == roleId && metadata.characterGroupId.isNullOrBlank()) {
+                instructions.append("[近期实际活动]来自已保存记录，非模型自述。saved不代表用户已读；空回复不能否定其后已保存的补答。节选不完整，按来源ID查原文；不据此猜测新的经历。companion_study activity可查近期书房事实，note用id=书目ID/details.note_id=回复ID读原文；notes可追溯批注线程。\n")
+                state.append("\n[近期实际活动]\n").append(JSONObject()
+                    .put("chat", org.json.JSONArray(history.recentAssistantActivity(roleId).map { row ->
+                        JSONObject().put("chat_id", row.chatId).put("message_id", row.messageId).put("timestamp", row.timestamp)
+                            .put("author", if (row.sender == "user") "user" else roleId).put("excerpt", row.content)
+                            .put("state", if (row.completedAt > 0) "reply_saved" else "persisted_message")
+                    })).put("study", StudyStore(context, roleId).recentActivity()).toString()).append("\n")
+            }
+        }
         appendSections(com.ai.assistance.operit.core.awareness.SoftwareAwareness.promptSections(context, chatId, roleId, recordSnapshot))
         val phone = com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(context)
         if (phone.enabled && phone.role != null && phone.role == roleId &&

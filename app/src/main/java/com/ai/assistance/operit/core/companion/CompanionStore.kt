@@ -81,6 +81,28 @@ class CompanionStore(context: Context) {
         } else data
     }
 
+    /** Small read projection for book activity; skip chapter bodies and old notes while streaming. */
+    internal fun readArrayTail(scope: String, array: String, limit: Int): JSONArray = synchronized(lock(scope)) {
+        require(scope.startsWith("study-book:") && array in setOf("notes", "events") && limit in 1..8)
+        val input = file(scope)
+        if (!input.baseFile.exists() && !File(input.baseFile.path + ".bak").exists()) return@synchronized JSONArray()
+        val tail = java.util.ArrayDeque<JSONObject>()
+        com.google.gson.stream.JsonReader(input.openRead().bufferedReader(Charsets.UTF_8)).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() != array) { reader.skipValue(); continue }
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    tail.addLast(JSONObject(com.google.gson.JsonParser.parseReader(reader).toString()))
+                    if (tail.size > limit) tail.removeFirst()
+                }
+                reader.endArray()
+            }
+            reader.endObject()
+        }
+        JSONArray(tail.toList())
+    }
+
     fun update(scope: String, change: (JSONObject) -> Unit): JSONObject {
         check(SubjectStateBoundary.owner(scope) == null) { "主体状态须通过带来源的更新入口" }
         return updateDocument(scope, null, change)

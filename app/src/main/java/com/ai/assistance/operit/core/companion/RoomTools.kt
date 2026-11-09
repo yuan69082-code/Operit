@@ -27,7 +27,10 @@ object RoomTools {
             parametersStructured = listOf(p("action", "操作", true), p("id", "日记ID"), p("date", "日期"), p("title", "标题"), p("text", "正文，最多12000字"), p("expected_version", "更新前读取到的版本"), p("version", "查看某个旧版本"), p("offset", "列表分页起点，每页10条"))),
         ToolPrompt(name = "companion_reading", description = "自己的阅读角。action=sources|save_source|refresh|checked|progress|queue|history|add|get|fetch|note|skip。progress 用 id/text 覆盖写该来源的学习进度（学到哪、下一步）；读到别的方向感兴趣，可 save_source 新建来源并在 details 里写 parent=原来源id 表示由它延伸，方向不限；从聊天里长出来的方向写 parent=chat:YYYY-MM-DD（枝芽），这类话题题目不能含她的名字称呼或坐标。普通新内容去重入队，不等于已读或必须联系用户。sources 标记到期来源；RSS用refresh，topic用已授权搜索工具探索后checked。save_source用details设置title/kind=rss或topic/address/hours=1..168/enabled/可选parent，修改附id；公开搜索词不含私聊原文。add用title/url/text保存来源摘要，进待读后普通材料7天过期、论坛帖子2天；hy 帖子没有网址，url 写 hy:thread:帖子编号 就自动按论坛算；details可选forum=true或days=1..30；queue里expires_in_hours是还剩几小时；get用id并可指定part=summary或body；fetch取网页可读正文，保留部分正文标记；note用id/text写已读材料的随记，和来源分开。自主探索未允许上网时不可联网。",
             parametersStructured = listOf(p("action", "操作", true), p("id", "条目或来源ID"), p("details", "来源设置JSON"), p("title", "标题"), p("url", "原始来源链接"), p("text", "来源摘要或自己的随记"), p("part", "summary/body"), p("offset", "分页起点，每页10项")))
-    )
+    ).map { prompt ->
+        if (prompt.name == "companion_study") prompt.copy(description = prompt.description +
+            " action=activity查询实际近期书房保存/处理事实；action=note用id书目及details.note_id精确读取批注/回复。reply/annotate/review回执带book/chapter/version/reply_to/reply_id/author/saved_at；saved不代表用户已读。仅所属私聊可访问书房，群聊不可读取私人内容。") else prompt
+    }
     fun register(handler: AIToolHandler, context: Context) {
         names.forEach { name -> handler.registerTool(name, descriptionGenerator = { name }, executor = { tool ->
             try {
@@ -60,7 +63,10 @@ object RoomTools {
                             }
                             access.status(actor)
                         }
-                        "companion_study" -> StudyTool.execute(context, actor, action, arg("id"), JSONObject(arg("details") ?: "{}"), offset)
+                        "companion_study" -> {
+                            check(metadata.characterGroupId.isNullOrBlank()) { "书房原文、私人批注与活动仅在所属助手私聊中读取或操作" }
+                            StudyTool.execute(context, actor, action, arg("id"), JSONObject(arg("details") ?: "{}"), offset)
+                        }
                         "companion_room" -> when (action) {
                             "get" -> room.read().put("widgets", RoomPolicy.layout(room.read())).put("theme_values", RoomTheme.encode(com.ai.assistance.operit.data.preferences.UserPreferencesManager.getInstance(context).resolveThemePreferenceSnapshot(characterCardId = actor).values))
                                 .put("editable", "title/subtitle/cover；widgets数组各项id,visible,size(1..3)，须包含diary,todo,reading,collection,dates各一次；dates数组各项title,date(YYYY-MM-DD)；theme可含bubble_ai_bubble_color/bubble_user_bubble_color/bubble_ai_text_color/bubble_user_text_color(#RRGGBB)，font_scale(0.8..1.5)，bubble_ai_system_font_name/bubble_user_system_font_name(default/serif/sans-serif/monospace/cursive)，background_image_uri/use_background_image/background_image_opacity(0..1)，bubble_ai_rounded_corners_enabled/bubble_rounded_corners_enabled")

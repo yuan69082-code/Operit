@@ -25,6 +25,7 @@ import org.json.JSONObject
 internal fun StudyPanel(role: String, name: String, section: String, revision: Long) {
     val context = LocalContext.current
     val store = remember(role) { StudyStore(context, role) }
+    val savedRevision by com.ai.assistance.operit.core.companion.AssistantRoom.revision.collectAsState()
     val scope = rememberCoroutineScope()
     var category by rememberSaveable(role, section) { mutableStateOf("daily") }
     var books by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
@@ -45,7 +46,7 @@ internal fun StudyPanel(role: String, name: String, section: String, revision: L
                 finally { busy = false } }
         }
     }
-    LaunchedEffect(role, revision, reload) {
+    LaunchedEffect(role, revision, savedRevision, reload) {
         try { books = withContext(Dispatchers.IO) { store.books() } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { AppLogger.e("StudyPanel", "书架读取失败", failure); error = failure.message.orEmpty() }

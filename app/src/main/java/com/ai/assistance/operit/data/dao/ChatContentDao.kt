@@ -73,9 +73,28 @@ data class ChatContentCharacterCount(
     val contentCharacterCount: Long,
 )
 
+data class AssistantActivityRow(val chatId: String, val messageId: Long, val timestamp: Long,
+    val sender: String, val content: String, val completedAt: Long)
+
 /** Reads message text in bounded rows so a single large message cannot overflow CursorWindow. */
 @Dao
 abstract class ChatContentDao {
+    @Query("SELECT messages.chatId, messages.messageId, messages.timestamp, messages.sender, " +
+        "SUBSTR(CASE WHEN messages.selectedVariantIndex=0 THEN messages.content ELSE selectedVariant.content END,1,1200) AS content, " +
+        "CASE WHEN messages.selectedVariantIndex=0 THEN messages.completedAt ELSE selectedVariant.completedAt END AS completedAt " +
+        "FROM messages JOIN chats ON chats.id=messages.chatId LEFT JOIN message_variants AS selectedVariant " +
+        "ON selectedVariant.chatId=messages.chatId AND selectedVariant.messageTimestamp=messages.timestamp AND selectedVariant.variantIndex=messages.selectedVariantIndex " +
+        "WHERE chats.characterCardId=:role AND (chats.characterGroupId IS NULL OR chats.characterGroupId='') " +
+        "AND messages.displayMode='NORMAL' AND messages.sender IN ('user','ai','assistant') " +
+        "ORDER BY messages.timestamp DESC, messages.messageId DESC LIMIT 8")
+    abstract suspend fun recentAssistantActivity(role: String): List<AssistantActivityRow>
+
+    @Query(MESSAGE_CONTENT_ROW_QUERY + " WHERE messageId=:id LIMIT 1")
+    protected abstract suspend fun queryActivityMessage(id: Long): MessageContentRow?
+
+    @Transaction
+    open suspend fun activityMessage(id: Long): MessageEntity? = queryActivityMessage(id)?.let { materializeMessage(it) }
+
     @Query(MESSAGE_CONTENT_ROW_QUERY + " WHERE chatId = :chatId ORDER BY timestamp ASC")
     protected abstract suspend fun queryMessagesForChat(chatId: String): List<MessageContentRow>
 
