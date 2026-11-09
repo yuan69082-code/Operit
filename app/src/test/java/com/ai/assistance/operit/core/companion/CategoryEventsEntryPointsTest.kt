@@ -166,6 +166,35 @@ class CategoryEventsEntryPointsTest {
         assertEquals(1, episode("B").getInt("version"))
     }
 
+    @Test fun completedToolSourceIsAdoptedByTheNextNormalRequest(): Unit = runBlocking {
+        category()
+        states.tool(role, chat, "companion_study", "reply", "saved", true, "actual-reply")
+        val f = frame(second)
+        submit(f, report(f, listOf(appraisal(f, "reply-result", source = "tool:actual-reply").put("basis", "result"))))
+        assertEquals("tool_success", episode("reply-result").getJSONObject("content").getJSONObject("source_bindings")
+            .getJSONObject("tool:actual-reply").getString("source"))
+        assertTrue(CompanionContext.compose(context, second, role, JSONObject(), false).state.contains("reply-result"))
+    }
+
+    @Test fun archiveRollbackLeavesNoHalfAdoptedIndexAndJournalCanReplay() {
+        // Supplemental persistence fault test, not a substitute for the report entry-point tests.
+        val file = java.io.File(context.cacheDir, "category-rollback-${java.util.UUID.randomUUID()}.sqlite")
+        fun row(id: String) = JSONObject().put("storage_kind", "episode").put("id", id).put("parent", "emotion").put("version", 1)
+        val journal = JSONObject().put("schema", 1).put("id", "committed-frame").put("rows", JSONArray().put(row("A")).put(row("B")))
+        val broken = JSONObject(journal.toString())
+        broken.getJSONArray("rows").getJSONObject(1).remove("parent")
+        try {
+            InternalStateArchive(file, "internal-state:$role").use { it.applyCategoryJournal(broken) }
+            fail("expected interrupted transaction")
+        } catch (_: org.json.JSONException) { }
+        InternalStateArchive(file, "internal-state:$role").use { archive ->
+            assertNull(archive.categoryRow("episode", "A"))
+            archive.applyCategoryJournal(journal); archive.applyCategoryJournal(journal)
+            assertEquals(2, archive.categoryPage("episode", 0, 9, null).size)
+            assertEquals(1, archive.categoryVersions("episode:A", 0).size)
+        }
+    }
+
     @Test fun normalMaterialAndEventPagesRemainBoundedAsEpisodesAccumulate(): Unit = runBlocking {
         category()
         repeat(10) { batch ->
