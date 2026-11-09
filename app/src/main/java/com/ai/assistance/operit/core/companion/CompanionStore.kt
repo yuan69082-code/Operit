@@ -73,7 +73,12 @@ class CompanionStore(context: Context) {
             checkpoint(scope)
             write(scope, data)
         }
-        if (scope.startsWith("internal-state:")) InternalStateDocument(data, historyAccess(scope)) else data
+        if (scope.startsWith("internal-state:")) {
+            // The bounded journal is the commit point. Rebuild the index before any subsequent
+            // reader/writer; an interrupted SQL transaction can repeat without a second owner.
+            data.optJSONObject("category_commit")?.let { journal -> history(scope).use { it.applyCategoryJournal(journal) } }
+            InternalStateDocument(data, historyAccess(scope))
+        } else data
     }
 
     fun update(scope: String, change: (JSONObject) -> Unit): JSONObject {
@@ -138,6 +143,12 @@ class CompanionStore(context: Context) {
         synchronized(lock(scope)) { history(scope).use { it.page("events", offset, limit, hotIds) } }
 
     private fun historyAccess(scope: String) = object : InternalStateHistoryAccess {
+        override fun categoryRow(kind: String, id: String) = synchronized(lock(scope)) {
+            history(scope).use { it.categoryRow(kind, id) }
+        }
+        override fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?) = synchronized(lock(scope)) {
+            history(scope).use { it.categoryPage(kind, offset, limit, parent) }
+        }
         private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256
         }
@@ -169,6 +180,9 @@ class CompanionStore(context: Context) {
 
     internal fun archivedInnerHistory(scope: String, offset: Int, hotIds: Set<String>): List<JSONObject> =
         synchronized(lock(scope)) { history(scope).use { it.page("inner_history", offset, 9, hotIds) } }
+
+    internal fun categoryVersions(scope: String, id: String, offset: Int): List<JSONObject> =
+        synchronized(lock(scope)) { history(scope).use { it.categoryVersions(id, offset) } }
 
     fun setMemory(chatId: String, action: String, id: String, text: String) {
         update("summary:$chatId") { data ->

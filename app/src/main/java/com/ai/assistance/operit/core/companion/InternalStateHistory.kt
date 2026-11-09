@@ -113,6 +113,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             db.execSQL("CREATE INDEX IF NOT EXISTS history_lookup ON history(scope,kind,lookup)")
             db.execSQL("CREATE INDEX IF NOT EXISTS history_contact ON history(scope,contact_chat,contact_at)")
             db.execSQL("CREATE INDEX IF NOT EXISTS history_contact_global ON history(scope,contact_at)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS category_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, parent TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS category_parent ON category_current(scope,kind,parent,id)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS category_commits (scope TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(scope,id))")
         }
     }
 
@@ -142,6 +145,52 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return null
         db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind=? AND lookup=? ORDER BY rowid DESC LIMIT 1",
             arrayOf(scope, kind, id)).use { return if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
+    }
+
+    /** Replay only a journal already committed by AtomicFile. One SQL transaction, no network. */
+    fun applyCategoryJournal(journal: JSONObject) {
+        require(journal.getInt("schema") == 1)
+        val db = db()
+        val id = journal.getString("id")
+        val digest = InnerStructure.hash(journal)
+        db.rawQuery("SELECT digest FROM category_commits WHERE scope=? AND id=?", arrayOf(scope, id)).use {
+            if (it.moveToFirst()) { check(it.getString(0) == digest) { "事件提交标识冲突" }; return }
+        }
+        if (!writing) { db.beginTransaction(); writing = true }
+        val rows = journal.getJSONArray("rows")
+        require(rows.length() <= 64)
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val kind = row.getString("storage_kind")
+            require(kind in setOf("episode", "focus", "experience_link"))
+            put("category_versions", row)
+            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+                arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
+        }
+        db.execSQL("INSERT INTO category_commits(scope,id,digest) VALUES(?,?,?)", arrayOf(scope, id, digest))
+        commit()
+    }
+
+    fun categoryRow(kind: String, id: String): JSONObject? {
+        if (!file.exists()) return null
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? AND id=?", arrayOf(scope, kind, id))
+            .use { if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
+    }
+
+    fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?): List<JSONObject> {
+        require(offset >= 0 && limit in 1..21)
+        if (!file.exists()) return emptyList()
+        val filter = if (parent == null) "" else " AND parent=?"
+        val args = listOf(scope, kind) + listOfNotNull(parent) + listOf(limit.toString(), offset.toString())
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=?$filter ORDER BY id LIMIT ? OFFSET ?",
+            args.toTypedArray()).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
+    fun categoryVersions(id: String, offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='category_versions' AND lookup=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, id, offset.toString())).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
     }
 
     fun page(kind: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> {
@@ -181,6 +230,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         fun lookup(kind: String, row: JSONObject): String = when (kind) {
             "semantic_reports" -> row.getString("frame_id")
             "versions" -> "${row.getString("dimension")}:${row.getInt("version")}"
+            "category_versions" -> "${row.getString("storage_kind")}:${row.getString("id")}"
             else -> row.optString("id")
         }
     }

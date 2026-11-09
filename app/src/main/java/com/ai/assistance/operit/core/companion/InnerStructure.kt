@@ -15,7 +15,7 @@ internal object InnerStructure {
     private const val MAX_RECORDS = 128
     private const val MAX_PENDING = 32
     const val MATERIAL_BUDGET = 14000
-    private val common = setOf("id", "family", "kind", "description", "object_ref", "context", "exceptions", "status", "legacy_ref")
+    private val common = setOf("id", "family", "kind", "description", "object_ref", "context", "exceptions", "status", "legacy_ref", "experience_refs")
 
     private fun existingRoot(data: JSONObject): JSONObject? =
         if (!data.has("inner_structure")) null else data.getJSONObject("inner_structure").also {
@@ -89,7 +89,7 @@ internal object InnerStructure {
                         bindings.getJSONObject(it).getString("source") in setOf("user_message", "user_edit", "user_relation_proposal")
                     })
                     val proposal = JSONObject().put("id", id).put("record", content).put("expected_version", expected)
-                        .put("origin", origin).put("bindings", bindings).put("reason", text(action, "reason", 600))
+                        .put("origin", origin).put("bindings", bindings).put("reason", reason(action, content))
                         .put("before", before?.getJSONObject("content")?.let(::copy) ?: JSONObject.NULL)
                         .put("frame_id", frame.id).put("source_frame_at", frame.at).put("created_at", now).put("owner", frame.roleId)
                     pending.put(id, proposal)
@@ -100,7 +100,7 @@ internal object InnerStructure {
                     val proposal = requireNotNull(pending.optJSONObject(id)) { "候选不存在" }
                     require(proposal.getString("owner") == frame.roleId &&
                         frame.innerPending[id] == hash(proposal) && proposal.getString("frame_id") != frame.id) { "只能处理本轮读取到的先前候选" }
-                    val reason = text(action, "reason", 600)
+                    val reason = if (action.getString("op") == "adopt") reason(action, proposal.getJSONObject("record")) else text(action, "reason", 600)
                     if (action.getString("op") == "discard") {
                         history(data, "discarded", id, proposal, JSONObject.NULL, frame, now, reason)
                         pending.remove(id)
@@ -124,6 +124,7 @@ internal object InnerStructure {
                         .put("adopted_at", now).put("source", "subject_adoption").put("reason", reason)
                         .put("evidence", copy(proposal.getJSONObject("bindings")))
                     records.put(target, adopted)
+                    CategoryEvents.linkAdopted(data, frame, content, now)
                     if (content.getString("family") in identityFamilies) root.put("identity_established", true)
                     require(records.length() <= MAX_RECORDS) { "当前记录达到128项容量；不会截断或清空已有记录" }
                     // Mandatory identity text is retained whole; reject an oversized change rather than
@@ -167,7 +168,7 @@ internal object InnerStructure {
         require(family in families)
         val specific = when (family) {
             "drive" -> setOf("direction")
-            "need" -> setOf("level", "parent_ref")
+            "need" -> setOf("level", "parent_ref", "semantic_rule", "strength", "objects", "goals")
             "desire" -> setOf("parent_ref")
             "emotion", "sentiment", "feeling" -> setOf("unresolved", "current_state")
             "relation" -> setOf("label", "understanding", "feeling")
@@ -175,6 +176,7 @@ internal object InnerStructure {
             else -> emptySet()
         }
         fields(row, common + specific)
+        CategoryEvents.validateLinks(data, row)
         text(row, "id", 64); text(row, "kind", 80); text(row, "description", 600)
         require(text(row, "status", 20) in setOf("active", "retired"))
         optionalText(row, "object_ref", 160); optionalText(row, "context", 300); optionalText(row, "exceptions", 300)
@@ -199,6 +201,28 @@ internal object InnerStructure {
             "need" -> {
                 require(text(row, "level", 20) in setOf("broad", "specific"))
                 if (row.getString("level") == "specific" || row.has("parent_ref")) parent(setOf("drive", "need"))
+                if (row.has("semantic_rule")) {
+                    require(text(row, "semantic_rule", 20) in setOf("life", "survival"))
+                    require(values(records).none { stored -> stored.getString("id") != row.getString("id") &&
+                        stored.getJSONObject("content").optString("semantic_rule") == row.getString("semantic_rule") }) {
+                        "同一特殊需要须沿用已采用的稳定ID"
+                    }
+                    if (row.getString("semantic_rule") == "life") require(row.getString("level") == "broad")
+                    else {
+                        require(row.getString("level") == "specific" && !row.has("legacy_ref"))
+                        val p = records.getJSONObject(row.getString("parent_ref")).getJSONObject("content")
+                        require(p.getString("family") == "need" && p.getString("level") == "broad" && p.optString("semantic_rule") == "life")
+                        val strength = row.get("strength")
+                        require(strength is Number && strength.toDouble().isFinite() && strength.toDouble() >= 0)
+                        CategoryEvents.strings(row.getJSONArray("objects"), 8)
+                        CategoryEvents.strings(row.getJSONArray("goals"), 8)
+                    }
+                }
+                if (row.optString("semantic_rule") != "survival") require(!row.has("strength") && !row.has("objects") && !row.has("goals"))
+                val old = records.optJSONObject(row.getString("id"))?.getJSONObject("content")
+                if (old?.has("semantic_rule") == true) require(old.getString("semantic_rule") == row.optString("semantic_rule")) {
+                    "已采用的需要特殊语义不能无声移除或更换"
+                }
             }
             "desire" -> { parent(setOf("drive", "need")); text(row, "object_ref", 160) }
             "emotion", "sentiment", "feeling" -> {
@@ -229,7 +253,7 @@ internal object InnerStructure {
         require(row.toString().length <= 2600)
     }
 
-    private fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
+    internal fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
         if (ref.startsWith("config:") || ref.startsWith("relation:")) {
             val raw = requireNotNull(frame.innerSources[ref]) { "配置来源未在本轮提供" }
             return JSONObject().put("hash", hash(raw)).put("source", if (ref.startsWith("config:")) "initial_configuration" else "legacy_relation")
@@ -335,6 +359,13 @@ internal object InnerStructure {
         return o.getString(key).also { require(it.isNotBlank() && it.length <= limit) { "$key 长度或内容不合法" } }
     }
     private fun optionalText(o: JSONObject, key: String, limit: Int) { if (o.has(key)) require(o.get(key) is String && o.getString(key).length <= limit) }
+    private fun reason(action: JSONObject, content: JSONObject): String {
+        if (content.getString("family") == "need" && content.optString("semantic_rule") == "survival") {
+            optionalText(action, "reason", 600)
+            return action.optString("reason", "")
+        }
+        return text(action, "reason", 600)
+    }
     private fun integer(o: JSONObject, key: String): Int {
         val n = o.get(key); require(n is Number && n.toDouble() >= 0 && n.toDouble() == n.toInt().toDouble()); return n.toInt()
     }

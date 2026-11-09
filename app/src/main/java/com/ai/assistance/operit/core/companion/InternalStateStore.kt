@@ -223,6 +223,7 @@ class InternalStateStore(private val context: Context) {
             requireStateReport(replay || frame.eventSequence >= data.optLong("archived_event_sequence"), InternalStateReportFailure.CONFLICT)
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
             restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, report.optJSONArray("inner") ?: JSONArray()))
+            restoreEvidence(data, frame.roleId, CategoryEvents.evidence(if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray()))
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
         AppLogger.d("InternalState", "Accepted subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} saved=${SubjectStateBoundary.revision(saved)} semantic=${InternalStateEngine.semanticRevision(saved)}")
@@ -256,12 +257,32 @@ class InternalStateStore(private val context: Context) {
             (offset - innerHistory.size).coerceAtLeast(0), innerHistory.map { it.getString("id") }.toSet()).take(9 - historyPage.size))
         return JSONObject().put("definitions", JSONArray(InternalStateEngine.definitions(data)))
             .put("inner", InnerStructure.page(data, offset))
+            .put("psychological_events", CategoryEvents.page(data, "episode", offset))
+            .put("category_focus", CategoryEvents.page(data, "focus", offset))
             .put("inner_history", JSONArray(historyPage.take(8)))
             .put("inner_history_next_offset", if (historyPage.size > 8) offset + 8 else JSONObject.NULL)
             .put("states", JSONArray(InternalStateEngine.snapshot(data, chat, System.currentTimeMillis())))
             .put("events", JSONArray(page.take(20))).put("versions", JSONArray(versionPage.take(20)))
             .put("last_selection", data.optJSONObject("last_selection") ?: JSONObject.NULL)
             .put("next_offset", if (page.size > 20 || versionPage.size > 20) offset + 20 else JSONObject.NULL)
+    }
+
+    fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
+        require(offset >= 0 && kind in setOf("episode", "focus", "experience_link", "category_versions", "source"))
+        val data = snapshot(role, chat, false)
+        if (kind == "source") {
+            require(!id.isNullOrBlank())
+            val found = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == id }
+                ?: store.archivedStateRow(key(role), "events", id)
+            return JSONObject().put("item", found ?: JSONObject.NULL)
+        }
+        if (kind == "category_versions") {
+            require(!id.isNullOrBlank()) { "版本查询须给出 episode:ID 或 focus:类别ID" }
+            val rows = store.categoryVersions(key(role), id, offset)
+            return JSONObject().put("items", JSONArray(rows.take(8))).put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+        }
+        if (kind == "experience_link") return CategoryEvents.page(data, kind, offset, id)
+        return if (id == null) CategoryEvents.page(data, kind, offset) else JSONObject().put("item", CategoryEvents.row(data, kind, id) ?: JSONObject.NULL)
     }
 
     fun prompt(role: String?, chat: String, persist: Boolean, wake: Boolean = false,
@@ -310,6 +331,7 @@ class InternalStateStore(private val context: Context) {
             }
             val payload = selected.payload
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
+                .put("category_events", CategoryEvents.material(data, persist))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
             if (frame != null) {
@@ -330,7 +352,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + InnerStructure.guard(data),
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )
