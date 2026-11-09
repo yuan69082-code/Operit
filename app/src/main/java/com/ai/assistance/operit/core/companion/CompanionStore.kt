@@ -19,7 +19,7 @@ class CompanionStore(context: Context) {
     private val root = File(this.context.filesDir, "companion").apply { mkdirs() }
     val preferences = this.context.observedSharedPreferences("companion_options", Context.MODE_PRIVATE)
 
-    val emotionEnabled get() = preferences.getBoolean("emotion_enabled", false)
+    // XC settings and receipts are retained only as legacy data; restored flags cannot enable a removed runtime.
     val capabilitiesEnabled get() = preferences.getBoolean("capabilities_enabled", false)
     val proactiveEnabled get() = preferences.getBoolean("proactive_enabled", false)
     val proactiveRole get() = preferences.getString("target_role", null)
@@ -161,6 +161,24 @@ class CompanionStore(context: Context) {
     }
 
     private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
+
+    internal fun activityWrite(role: String, kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.activityWrite(kind, id, parent, change) } }
+    }
+
+    internal fun activityPage(role: String, kind: String, parent: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.categoryPage(kind, offset, 9, parent) } }
+    }
+
+    internal fun activityRead(role: String, kind: String, id: String): JSONObject? {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.categoryRow(kind, id) } }
+    }
 
     internal fun actionWrite(role: String, id: String, change: (JSONObject?) -> JSONObject): JSONObject {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())

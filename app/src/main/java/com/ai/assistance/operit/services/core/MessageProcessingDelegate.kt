@@ -1284,11 +1284,12 @@ class MessageProcessingDelegate(
                         activeChatId, requestSentAt, effectiveRoleCardId, recalledContext,
                     )
                 }
-                if (activeChatId != null) com.ai.assistance.operit.core.companion.XcEmotionBridge.beginTurn(activeChatId)
                 if (activeChatId != null && !turnOptions.proactiveWake && !turnOptions.voiceCallEvent && !turnOptions.voiceCallSilence)
                     runCatching { com.ai.assistance.operit.core.companion.AttentionGear.noteUserText(context, activeChatId, requestMessageContent) }
                 val responseStream = AIMessageManager.sendMessage(
                     enhancedAiService = service,
+                    activityId = if (turnOptions.proactiveWake)
+                        com.ai.assistance.operit.core.companion.ActivityNotes.current(activeChatId)?.id else null,
                     chatId = activeChatId,
                     messageContent = (if (turnOptions.voiceCallEnded) {
                         "${checkNotNull(turnOptions.voiceCallOutcome).modelInstruction}\n$requestMessageContent"

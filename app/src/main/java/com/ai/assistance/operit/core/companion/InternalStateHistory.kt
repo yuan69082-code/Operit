@@ -164,7 +164,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index") + SubjectRestDreams.kinds)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family") + SubjectRestDreams.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -177,6 +177,26 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return null
         return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? AND id=?", arrayOf(scope, kind, id))
             .use { if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
+    }
+
+    /** Activity facts reuse the archive. They are not psychological state changes. */
+    fun activityWrite(kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        require(kind in setOf("activity", "activity_part", "waking_note", "inner_read"))
+        val db = db()
+        if (!writing) { db.beginTransaction(); writing = true }
+        val old = categoryRow(kind, id)
+        val before = old?.toString()
+        val oldVersion = old?.getInt("version") ?: 0
+        val row = change(old)
+        require(row.getString("id") == id && row.getString("parent") == parent)
+        if (row.toString() != before) {
+            row.put("version", oldVersion + 1)
+            put("category_versions", row)
+            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+                arrayOf(scope, kind, id, parent, row.toString()))
+        }
+        commit()
+        return row
     }
 
     /** Objective operations share the existing archive, never the subjective report reducer.
@@ -226,7 +246,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?): List<JSONObject> {
         require(offset >= 0 && limit in 1..21)
         if (!file.exists()) return emptyList()
-        val privateRecent = kind in SubjectRestDreams.kinds
+        val privateRecent = kind in SubjectRestDreams.kinds || kind in setOf("activity", "activity_part", "waking_note")
         val actualParent = parent ?: if (privateRecent) "private" else null
         val filter = if (actualParent == null) "" else " AND parent=?"
         val args = listOf(scope, kind) + listOfNotNull(actualParent) + listOf(limit.toString(), offset.toString())

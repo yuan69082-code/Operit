@@ -18,6 +18,14 @@ internal class InnerRows(private val data: JSONObject, private val pending: Bool
     fun getJSONObject(id: String): JSONObject = requireNotNull(optJSONObject(id)) { "内在记录不存在: $id" }
     fun has(id: String) = optJSONObject(id) != null
     fun used(id: String) = if (archived) CategoryEvents.row(data, kind, id) != null else has(id)
+    fun familyPage(family: String, offset: Int, limit: Int = 8): List<JSONObject> {
+        require(!pending && family in InnerStructure.families && offset >= 0 && limit in 1..21)
+        return if (archived) port.categoryPage("inner_family", offset, limit, family)
+            .mapNotNull { optJSONObject(it.getString("id")) }
+        else allLegacy().filter { it.getJSONObject("content").getString("family") == family }.drop(offset).take(limit)
+    }
+    fun familyCount(family: String): Long = if (archived) port.categoryCount("inner_family", family)
+        else allLegacy().count { it.getJSONObject("content").getString("family") == family }.toLong()
     fun count(parent: String? = null): Long = if (archived) port.categoryCount(kind, parent ?: if (pending) "open" else null)
         else allLegacy().count { parent == null || parentOf(it, pending) == parent }.toLong()
     private fun allLegacy() = legacy().keys().asSequence().map { legacy().getJSONObject(it) }.toList()
@@ -39,6 +47,8 @@ internal class InnerRows(private val data: JSONObject, private val pending: Bool
         if (!pending) {
             optJSONObject(id)?.let { indexes(it.getJSONObject("content")) }?.forEach { index(it, id, true, f) }
             indexes(value.getJSONObject("content")).forEach { index(it, id, false, f) }
+            CategoryEvents.append(data, f, envelope("inner_family", id, JSONObject().put("target", id),
+                value.getJSONObject("content").getString("family"), f.id))
         }
         CategoryEvents.append(data, f, envelope(kind, id, value, parentOf(value, pending), f.id))
     }
@@ -78,7 +88,22 @@ internal class InnerRows(private val data: JSONObject, private val pending: Bool
         fun migrate(data: JSONObject, archive: InternalStateArchive): Boolean {
             val root = data.optJSONObject("inner_structure") ?: return false
             require(root.getInt("schema") == InnerStructure.SCHEMA)
-            if (root.optString("storage") == "archive_v1") return false
+            if (root.optString("storage") == "archive_v1") {
+                if (root.optInt("family_index") == 1) return false
+                // Upgrade the secondary directory page by page. Only IDs are indexed; the
+                // authority stays in inner_record. A crash repeats identical journals safely.
+                var offset = 0
+                while (true) {
+                    val page = archive.categoryPage("inner_record", offset, 20, null)
+                    if (page.isEmpty()) break
+                    val rows = JSONArray(page.map { r -> envelope("inner_family", r.getString("id"),
+                        JSONObject().put("target", r.getString("id")), r.getJSONObject("value").getJSONObject("content").getString("family"), "family-index-v1") })
+                    archive.applyCategoryJournal(JSONObject().put("schema", 1).put("id", "family-index-v1:$offset:" + InnerStructure.hash(rows)).put("rows", rows))
+                    offset += page.size
+                }
+                root.put("family_index", 1)
+                return true
+            }
             val commit = "inner-storage:" + InnerStructure.hash(root)
             val rows = JSONArray()
             listOf("records", "pending").forEach { name ->
@@ -86,14 +111,17 @@ internal class InnerRows(private val data: JSONObject, private val pending: Bool
                 values.keys().forEach { id ->
                     val value = values.getJSONObject(id)
                     rows.put(envelope(if (name == "pending") "inner_pending" else "inner_record", id, value, parentOf(value, name == "pending"), commit))
-                    if (name == "records") indexes(value.getJSONObject("content")).forEach { key ->
-                        rows.put(envelope("inner_index", key, JSONObject().put("target", id), "index", commit))
+                    if (name == "records") {
+                        rows.put(envelope("inner_family", id, JSONObject().put("target", id), value.getJSONObject("content").getString("family"), commit))
+                        indexes(value.getJSONObject("content")).forEach { key ->
+                            rows.put(envelope("inner_index", key, JSONObject().put("target", id), "index", commit))
+                        }
                     }
                 }
             }
             archive.applyCategoryJournal(JSONObject().put("schema", 1).put("id", commit).put("rows", rows))
             root.remove("records"); root.remove("pending")
-            root.put("storage", "archive_v1").put("storage_migration", commit)
+            root.put("storage", "archive_v1").put("storage_migration", commit).put("family_index", 1)
             return true
         }
     }

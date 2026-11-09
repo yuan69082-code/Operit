@@ -26,7 +26,7 @@ internal object InnerStructure {
             .put("history_sequence", 0L).put("legacy_policy", "preserved_in_original_authority")
             .also {
                 if (data is InternalStateDocument) {
-                    it.remove("records"); it.remove("pending"); it.put("storage", "archive_v1")
+                    it.remove("records"); it.remove("pending"); it.put("storage", "archive_v1").put("family_index", 1)
                 }
                 data.put("inner_structure", it)
             }
@@ -73,7 +73,7 @@ internal object InnerStructure {
             require(touched.add(id)) { "同轮不能重复处理同一候选" }
             when (text(action, "op", 20)) {
                 "propose" -> {
-                    fields(action, setOf("op", "id", "record", "expected_version", "origin", "evidence", "reason", "formed_at"))
+                    fields(action, setOf("op", "id", "record", "expected_version", "origin", "evidence", "reason", "formed_at", "replaces"))
                     require(!pending.used(id)) { "候选已存在；修订须使用新的候选版本标识" }
                     val content = copy(action.getJSONObject("record"))
                     validateContent(content, records, data, frame)
@@ -106,6 +106,15 @@ internal object InnerStructure {
                         .put("origin", origin).put("bindings", bindings).put("reason", reason(action, content))
                         .put("before", before?.getJSONObject("content")?.let(::copy) ?: JSONObject.NULL)
                         .put("frame_id", frame.id).put("source_frame_at", frame.at).put("created_at", now).put("owner", frame.roleId)
+                    if (action.has("replaces")) {
+                        val previousId = text(action, "replaces", 64)
+                        val previous = requireNotNull(pending.optJSONObject(previousId)) { "待修订候选不存在或已被采用/撤回" }
+                        require(previous.getString("owner") == frame.roleId && frame.innerPending[previousId] == hash(previous)) { "须读取待修订候选的准确版本" }
+                        require(previous.getJSONObject("record").getString("id") == target) { "修订不能换成另一条内容" }
+                        proposal.put("replaces", previousId).put("candidate_version", previous.optInt("candidate_version", 1) + 1)
+                        history(data, "superseded", previousId, previous, proposal, frame, now, proposal.getString("reason"))
+                        pending.remove(previousId)
+                    } else proposal.put("candidate_version", 1)
                     pending.put(id, proposal)
                     history(data, "proposed", id, JSONObject.NULL, proposal, frame, now, proposal.getString("reason"))
                 }
@@ -158,9 +167,13 @@ internal object InnerStructure {
     }
 
     private fun development(data: JSONObject, frame: InternalStateFrame, proposal: JSONObject, value: JSONObject) {
-        fields(value, setOf("account", "before", "after", "anchors"))
+        fields(value, setOf("account", "before", "after", "anchors", "candidate_hash", "before_version"))
         text(value, "account", 1000)
-        require(hash(value.get("before")) == hash(proposal.get("before")) &&
+        if (value.has("candidate_hash")) {
+            require(!value.has("before") && !value.has("after") &&
+                value.getString("candidate_hash") == hash(proposal) &&
+                value.getInt("before_version") == proposal.getInt("expected_version")) { "采用引用须对应已完整读取的准确候选与前态版本" }
+        } else require(hash(value.get("before")) == hash(proposal.get("before")) &&
             hash(value.getJSONObject("after")) == hash(proposal.getJSONObject("record"))) { "人格变化说明必须对应准确前态和后态" }
         val anchors = value.getJSONArray("anchors")
         // Declared established content has a real submission/adoption provenance, not a
@@ -190,6 +203,9 @@ internal object InnerStructure {
                 continue
             }
             val event = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }
+            // A user-supplied original is evidence of the submitted text, not a fabricated old occurrence.
+            if (event?.optString("source") == "user_edit" && event.has("provided_source") &&
+                event.getLong("at") == proposal.getLong("source_frame_at")) continue
             require(event != null && event.getLong("at") < proposal.getLong("source_frame_at") &&
                 event.getString("source") !in setOf("state_report", "time")) { "当前断言或状态变化不能冒充先前发展依据" }
         }
@@ -209,9 +225,9 @@ internal object InnerStructure {
         }
         fields(row, common + specific)
         CategoryEvents.validateLinks(data, row)
-        text(row, "id", 64); text(row, "kind", 80); text(row, "description", 600)
+        text(row, "id", 64); text(row, "kind", 80); text(row, "description", Int.MAX_VALUE)
         require(text(row, "status", 20) in setOf("active", "retired"))
-        optionalText(row, "object_ref", 160); optionalText(row, "context", 300); optionalText(row, "exceptions", 300)
+        optionalText(row, "object_ref", 160); optionalText(row, "context", Int.MAX_VALUE); optionalText(row, "exceptions", Int.MAX_VALUE)
         if (row.has("legacy_ref")) {
             val id = text(row, "legacy_ref", 64)
             require(InternalStateEngine.definitions(data).any { it.getString("id") == id }) { "引用的旧状态不存在" }
@@ -229,7 +245,7 @@ internal object InnerStructure {
             }
         }
         when (family) {
-            "drive" -> text(row, "direction", 300)
+            "drive" -> text(row, "direction", Int.MAX_VALUE)
             "need" -> {
                 require(text(row, "level", 20) in setOf("broad", "specific"))
                 if (row.getString("level") == "specific" || row.has("parent_ref")) parent(setOf("drive", "need"))
@@ -254,12 +270,12 @@ internal object InnerStructure {
             }
             "desire" -> { parent(setOf("drive", "need")); text(row, "object_ref", 160) }
             "emotion", "sentiment", "feeling" -> {
-                require(row.get("unresolved") is Boolean); text(row, "current_state", 300)
+                require(row.get("unresolved") is Boolean); text(row, "current_state", Int.MAX_VALUE)
             }
             "relation" -> {
                 require(text(row, "object_ref", 160) in frame.innerObjects) { "关系对象必须使用已存在的对象身份" }
                 require(row.getString("object_ref") != frame.roleId)
-                text(row, "label", 100); text(row, "understanding", 600); text(row, "feeling", 600)
+                text(row, "label", 100); text(row, "understanding", Int.MAX_VALUE); text(row, "feeling", Int.MAX_VALUE)
             }
             "preference" -> {
                 require(text(row, "orientation", 20) in setOf("like", "dislike", "neutral", "uncertain"))
@@ -271,7 +287,6 @@ internal object InnerStructure {
             }
         }
         require(!records.conflict(row)) { "同方向关系、特殊需要或同类同对象同情境的需要已有当前权威，请修订稳定ID" }
-        require(row.toString().length <= 2600)
     }
 
     internal fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
@@ -329,7 +344,13 @@ internal object InnerStructure {
         return JSONObject().put("schema", SCHEMA)
             .put("identity", JSONArray(records.rotating(cursor, "identity").map(::identityMaterial)))
             .put("selected", JSONArray(others.map(::identityMaterial)))
-            .put("pending", JSONArray(candidates))
+            .put("pending", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }))
+            .put("pending_fragments", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) > 384 && !InnerReadProgress.complete(data, it) }
+                .map { InnerReadProgress.fragment(data, it) }))
+            .put("pending_read", JSONArray(candidates.filter { InnerReadProgress.complete(data, it) }.map {
+                JSONObject().put("id", it.getString("id")).put("hash", hash(it)).put("target", it.getJSONObject("record").getString("id"))
+                    .put("notice", "该准确版本已在此前正常请求完整提供，可重新查阅后决定；不是自动采用")
+            }))
             .put("pending_ids", JSONArray(candidates.map { it.getString("id") }))
             .put("catalogue", JSONArray(catalogue.map {
                 JSONObject().put("id", it.getString("id")).put("version", it.getInt("version"))
@@ -338,8 +359,10 @@ internal object InnerStructure {
             })).put("record_count", records.count()).put("pending_count", pending.count())
             .put("selection", "完整条目按统一材料预算轮换；未选入仍有效，原文及全部候选可用 get 分页或按ID读取，实际读到后才能采用")
     }
-    private fun identityMaterial(row: JSONObject) = JSONObject().put("content", copy(row.getJSONObject("content")))
+    private fun identityMaterial(row: JSONObject) = JSONObject().put("id", row.getString("id"))
+        .put("content", copy(row.getJSONObject("content")))
         .put("version", row.getInt("version")).put("origin", row.getString("origin")).put("source", row.getString("source"))
+        .put("evidence_ids", JSONArray(row.optJSONObject("evidence")?.keys()?.asSequence()?.toList().orEmpty()))
         .also { if (SubjectRestDreams.privateProvenance(row)) it.put("subject_private_material", true) }
 
     fun page(data: JSONObject, offset: Int): JSONObject {
@@ -361,6 +384,7 @@ internal object InnerStructure {
         inner_structure 中的记录是主体自己的有来源认识，不是客观事实或他人的同意。思维方式只记录倾向与方法，不保存隐藏思维链。
         在同一 operit_state_report 增加可选 inner:[...]，缺省或空数组保持所有新结构；不增加另一份报告。
         提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["已读本主体事件ID或本轮来源ID"],reason:"简短依据"}。历史原文可经 get 分页读取后引用；不能引用本帧开始之后发生的事，也不能猜测未读经历。
+        未采用候选可修订：用新id和replaces:"旧候选ID"提出完整新版，须先读取旧版；旧版保留且撤出待处理，新版不继承已读资格。已采用记录不得直接修改；仍须以当前版本为before提出新候选。完整description/context/exceptions等原文保存，标题或预览不是替代；精简只能另提建议，不能在采用时换成自己的摘要。
         采用先前候选：{op:"adopt",id:"候选ID",reason:"明确采用理由"}；放下候选用 op:"discard"。不能同轮提出并采用；用户说“你喜欢”只是候选来源，不能当作已采用偏好。
         record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，其数值/时间仍由旧维度负责）。
         family 可为 drive,need,desire,emotion,sentiment,feeling,personality,self_knowledge,value,stance,relation,preference；kind 自由命名细分类别，不靠复制同名记录表达不同对象。
@@ -371,6 +395,7 @@ internal object InnerStructure {
         采用 personality/self_knowledge/value/stance 必须另给 development:{account:"明确发展/采用说明",before:候选before原样或null,after:候选record原样,anchors:[{ref:"候选依据ID",quote:"原文中确实存在的短引文",interpretation:"你如何理解其与变化的联系"}]}。
         来源、前后态和版本由宿主核验，观点意义由主体解释。初始配置采用保留 initial_configuration 来源；发展依据不能把当前断言冒充过往经历。每次只改变指定记录，不覆盖全部人格。
         候选、采用与保存不设业务条数上限。单次请求和模型窗口仍有限；大批内容分批提交、保留进度，不丢弃尾部。完整记录和候选用 companion_internal_state get 的 offset 按页或ID读取；未送入本轮的候选不能采用。
+        长候选的 pending_fragments 是同一完整原文的连续片段，不是摘要；hash 绑定准确候选版本。宿主只登记实际请求返回后已提供的片段，完整提供前不能采用。可用 get section=inner_chunk id=候选ID offset=next_offset 按需继续，不能用编造片段补齐。pending_read 表示该版本已完整提供，仍由你决定是否采用或重新查阅。人格采用的大段 before/after 可改为 development:{account:说明,candidate_hash:候选完整hash,before_version:候选expected_version,anchors:[...]}，保存的始终是原候选全文，不是说明的摘要。
         恢复已有确定人格、立场、关系、偏好等，可用 origin:"established_import"，evidence:[]，不伪造历史原文。只在用户明确开启的48小时窗口内提交新候选；formed_at 可省略，提交时间不代表形成时间。人格等采用时仍给 development 的准确 before/after 和 account，anchors:[]。按时提交的候选在截止后仍可采用；改写须新候选标识，不继承旧版本已读事实。get section:inner_pending 查询候选。
         整份报告仍须符合原16384字符上限，复杂变化可分轮提出。来源/对象名录只显示前16/32项，数量字段给出总量，可通过原角色/关系工具查询；未列出不是不存在。
     """.trimIndent()
@@ -400,6 +425,7 @@ internal object InnerStructure {
     }
     internal fun hash(value: Any?): String = MessageDigest.getInstance("SHA-256").digest(canonical(value).toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
+    internal fun serialized(value: Any?): String = canonical(value)
     private fun canonical(v: Any?): String = when(v) {
         null, JSONObject.NULL -> "null"
         is JSONObject -> v.keys().asSequence().sorted().joinToString(",", "{", "}") { JSONObject.quote(it) + ":" + canonical(v.get(it)) }

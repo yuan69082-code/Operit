@@ -54,7 +54,7 @@ internal object SubjectMaterialBudget {
         lane(result, "host_materials", "host_materials")
         for (key in listOf("states", "important_changes", "experiences", "thoughts", "candidates", "state_catalog"))
             lane(result, key, key)
-        for (key in listOf("pending", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
+        for (key in listOf("pending", "pending_fragments", "pending_read", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
         result.remove("selection")
         inner.put("selection", "Whole records selected under shared token estimate; omitted identity remains authoritative. Retrieve by ID before assuming its content.")
         val omitted = JSONObject()

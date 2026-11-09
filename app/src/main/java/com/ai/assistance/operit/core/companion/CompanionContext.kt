@@ -32,7 +32,7 @@ object CompanionContext {
                 it.characterGroupId.isNullOrBlank() && it.characterCardId == roleId
             } == true
         val facts = if (softwareAllowed) permissions(context)
-            .put("emotion_continuity", store.emotionEnabled)
+            .put("internal_continuity", InternalStateStore(context).enabled(roleId))
             .put("proactive_contact", store.proactiveEnabled)
             .put("call_silence_callback", store.silenceEnabled)
             .put("model_and_tools", capabilities) else null
@@ -45,8 +45,6 @@ object CompanionContext {
         }
         val internal = InternalStateStore(context)
         val internalEnabled = internal.enabled(roleId)
-        val xc = if (internalEnabled) RuntimeContextSections()
-            else XcEmotionBridge.promptSections(context, chatId, roleId, actualSend = recordSnapshot)
         // Changing snapshots belong at the request tail; host instructions retain SYSTEM priority.
         // Compose each source once so observing the state does not acknowledge events twice.
         val instructions = StringBuilder("\n[软件状态解读规则，仅作为内部上下文，不复述或朗读字段名]\n")
@@ -78,7 +76,6 @@ object CompanionContext {
         val humanThoughts = HumanThoughtAccess(context)
         instructions.append("[人类思考链]是思考者未说出口的思考过程，【正文回复】是实际发出的正文；两者保持区分。你可以自行决定是否开启阅读，也可以自然谈及所读到的心里话。用 human_thought_chain status/enable/disable/rename 查看、选择或更改称呼；用户总授权只能由用户控制。\n")
         state.append("人类思考链状态：").append(humanThoughts.status(roleId)).append("。这是").append(humanThoughts.name).append("未说出口的思考过程。\n")
-        appendSections(xc)
         if (!roleId.isNullOrBlank()) {
             val history = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
             val metadata = history.getChatMetadata(chatId)

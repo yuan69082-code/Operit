@@ -42,7 +42,7 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
     var name by remember(role) { mutableStateOf("") }
     // Keep previously published tab names usable by existing shortcuts.
     var tab by remember(role) { mutableStateOf(when (initialTab) {
-        "阅读角", "资料库", "书房" -> "书房"
+        "阅读角", "资料库", "书房", "日记" -> "书房"
         "外观" -> "房间"
         "设置" -> "布置"
         else -> initialTab
@@ -71,7 +71,7 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                         { if (tab == "书房") tab = "房间" else onDismiss() }, onDismiss, enabled = !busy)
                 }
                 if (tab != "书房") Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("房间", "日记", "书房", "布置").forEach { label ->
+                    listOf("房间", "书房", "布置").forEach { label ->
                         FilterChip(modifier = Modifier.inspectRender("room_tabs", if (label == tab) com.ai.assistance.operit.ui.theme.StudioComponents.color("room_tabs", MaterialTheme.colorScheme.secondaryContainer) else androidx.compose.ui.graphics.Color.Transparent, details = label), shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("room_tabs", RoundedCornerShape(8.dp)), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("room_tabs", MaterialTheme.colorScheme.secondaryContainer)), selected = label == tab, onClick = { tab = label; error = "" }, label = { Text(label) }, leadingIcon = { Icon(when (label) { "房间" -> Icons.Default.Home; "日记" -> Icons.Default.EditNote; "书房" -> Icons.Default.MenuBook; else -> Icons.Default.Tune }, null, Modifier.size(18.dp)) })
                     }
                 }
@@ -84,13 +84,12 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                             "房间" -> RoomHome(room, data, chat, revision, {
                                 when (it) {
                                     "外观" -> advanced = true
-                                    "阅读角" -> { bookSection = "书架"; tab = "书房" }
+                                    "阅读角", "日记" -> { bookSection = "书架"; tab = "书房" }
                                     "资料库" -> { bookSection = "资料"; tab = "书房" }
                                     "设置" -> tab = "布置"
                                     else -> tab = it
                                 }
                             }, { work(it) })
-                            "日记" -> RoomDiary(room, chat, revision, { work(it) })
                             "书房" -> ReadingPanel(role, chat, name, revision, bookSection, { work(it) })
                             "布置" -> {
                                 RoleRulesEntry(role)
@@ -164,7 +163,7 @@ private fun RoomHome(room: AssistantRoom, data: JSONObject, chat: String, revisi
                 when (id) {
                     "diary" -> { if (diaries.isEmpty()) Text("还没有日记。想写的时候再留下。")
                         diaries.take(count).forEach { Text("${it.optString("date")} · ${it.optString("title")}") }
-                        FilledTonalButton(onClick = { navigate("日记") }) { Icon(Icons.Default.EditNote, null); Spacer(Modifier.width(6.dp)); Text("打开日记") } }
+                        FilledTonalButton(onClick = { navigate("日记") }) { Icon(Icons.Default.EditNote, null); Spacer(Modifier.width(6.dp)); Text("在书房打开") } }
                     "todo" -> { if (tasks.isEmpty()) Text("暂时没有未完成的打算")
                         tasks.take(count).forEach { Text(it.optString("title")) }
                         FilledTonalButton(onClick = { showTasks = true }) { Icon(Icons.Default.Checklist, null); Spacer(Modifier.width(6.dp)); Text("打开私人打算") } }

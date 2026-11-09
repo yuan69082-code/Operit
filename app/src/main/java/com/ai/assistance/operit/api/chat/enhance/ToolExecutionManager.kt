@@ -533,6 +533,7 @@ object ToolExecutionManager {
         callerChatId: String? = null,
         callerCardId: String? = null,
         subjectFrame: InternalStateFrame? = null,
+        activityId: String? = null,
         subjectRound: Int = 0
     ): ToolExecutionBatch = coroutineScope {
         val trace = com.ai.assistance.operit.core.experience.RequestDiagnostics(context)
@@ -546,6 +547,13 @@ object ToolExecutionManager {
             SubjectActions(context, it)
         }
         val actionIds = mutableMapOf<Int, String>()
+        val activity = com.ai.assistance.operit.core.companion.ActivityNotes.current(callerChatId)
+            ?.takeIf { it.id == activityId && it.role == callerCardId }
+        suspend fun activityReceipt(index: Int, result: ToolResult?) {
+            activity?.let { ref -> com.ai.assistance.operit.core.companion.ActivityNotes.operation(context, ref,
+                actionIds[index] ?: invocations[index].hostInvocationId,
+                resolveDisplayToolName(invocations[index].tool), result) }
+        }
         val eligible = mutableListOf<IndexedValue<ToolInvocation>>()
         for ((index, invocation) in invocations.withIndex()) {
           try {
@@ -585,11 +593,14 @@ object ToolExecutionManager {
                 result.copy(success = false, error = "回执未可靠保存，执行结果未知；不得自动重试。",
                     subjectActionId = actionIds[index], executionStatus = "unknown")
             }
+            try { withContext(kotlinx.coroutines.NonCancellable) { activityReceipt(index, saved) } }
+            catch (failure: Exception) { AppLogger.e(TAG, "活动回执展示索引未保存；实际操作记录保留，禁止重跑", failure) }
             orderedResults.complete(index, saved)
         }
         suspend fun runRecorded(index: Int, invocation: ToolInvocation, runtime: ToolRuntimeContext): ToolResult {
             try {
                 actions?.started(requireNotNull(actionIds[index]))
+                activityReceipt(index, null)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 // A start-record failure must not escape into a whole-turn retry after
@@ -605,6 +616,10 @@ object ToolExecutionManager {
                 if (actions != null) withContext(kotlinx.coroutines.NonCancellable) {
                     try { actions.finish(requireNotNull(actionIds[index]), unknown, "unknown") }
                     catch (save: Exception) { AppLogger.e(TAG, "中断回执保存失败，保留待确认请求", save) }
+                }
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    try { activityReceipt(index, unknown) }
+                    catch (save: Exception) { AppLogger.e(TAG, "活动中断回执未保存；不得视为成功", save) }
                 }
                 if (failure is kotlinx.coroutines.CancellationException) throw failure
                 unknown

@@ -17,6 +17,7 @@ data class InternalStateFrame(
     val stateVersion: Long = 0L,
     val innerVersions: Map<String, Int> = emptyMap(),
     val innerPending: Map<String, String> = emptyMap(),
+    val innerReadParts: Map<String, String> = emptyMap(),
     val innerSources: Map<String, String> = emptyMap(),
     val innerObjects: Set<String> = emptySet(),
     val innerGuard: String = "",

@@ -72,7 +72,8 @@ class InnerStructureEntryPointsTest {
         .put("evidence", JSONArray().put(evidence)).put("reason", "明确提出候选，不视为已经采用")
     private suspend fun proposeRecord(record: JSONObject, expected: Int = 0): String {
         val id = "candidate:" + java.util.UUID.randomUUID()
-        val f = frame()
+        val prepared = frame()
+        val f = if (expected == 0) prepared else nativeInnerRead(context, prepared, "inner", record.getString("id"))
         InnerStructureContext.submit(context, f, report(f, propose(id, record, expected)))
         return id
     }
@@ -85,7 +86,7 @@ class InnerStructureEntryPointsTest {
     }
     private suspend fun adoptRecord(record: JSONObject, expected: Int = 0): JSONObject {
         val id = proposeRecord(record, expected)
-        val f = frame(two)
+        val f = nativeInnerRead(context, frame(two), "inner_pending", id)
         val a = adoption(id)
         if (record.getString("family") in InnerStructure.identityFamilies) a.put("development", development(id))
         InnerStructureContext.submit(context, f, report(f, a))

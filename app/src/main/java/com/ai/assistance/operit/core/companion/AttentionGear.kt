@@ -70,15 +70,6 @@ object AttentionGear {
         ledger.optInt("unanswered").takeIf { it >= 2 }?.let { out["unanswered"] = "她已经连着${it}次没回我" }
         val night = store.read("$KEY:night:$chatId").optLong("goodnight_at")
         if (night > 0 && now - night in 0..GOODNIGHT_WINDOW_MS) out["goodnight"] = "她${(now - night) / 60_000}分钟前说过晚安/要睡了"
-        if (store.emotionEnabled && !InternalStateStore(context).enabled(roleId)) {
-            val text = XcEmotionBridge.receipt(context, store.scope(chatId, roleId)).optJSONObject("snapshot")
-                ?.optString("additionalContext").orEmpty()
-            val pleasure = Regex("愉悦=(-?[0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
-            val arousal = Regex("唤醒=(-?[0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
-            val recent = Regex("最近一次波动来自「([a-z_]+)」").find(text)?.groupValues?.get(1)
-            if (recent in setOf("conflict", "slighted", "loss") || (pleasure != null && pleasure < 0.35 && (arousal ?: 0.0) > 0.5))
-                out["xc"] = "XC 里我的情绪在冲突/焦躁这一侧"
-        }
         return out
     }
 

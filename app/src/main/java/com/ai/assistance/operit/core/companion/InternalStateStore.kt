@@ -37,14 +37,16 @@ class InternalStateStore(private val context: Context) {
      * same receipt, including after its candidate was adopted or discarded. */
     suspend fun submitEstablishedContent(role: String, chat: String, submissionId: String, content: JSONObject,
                                          original: String? = null, sourceLabel: String? = null,
-                                         formedAt: Long? = null): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                         formedAt: Long? = null, replaces: String? = null,
+                                         previousHash: String? = null): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "助手提交应走正常报告候选入口" }
         requireRecipient(role, chat)
         require(enabled(role) && !recipientScope(role, chat))
         require(submissionId.isNotBlank() && submissionId.length <= 180)
-        val id = "import-" + InnerStructure.hash("$role:$submissionId")
+        val id = InnerStructure.hash("$role:$submissionId")
         val body = JSONObject().put("record", content).put("original", original ?: JSONObject.NULL)
             .put("source_label", sourceLabel ?: JSONObject.NULL).put("formed_at", formedAt ?: JSONObject.NULL)
+            .put("replaces", replaces ?: JSONObject.NULL).put("previous_hash", previousHash ?: JSONObject.NULL)
         val digest = InnerStructure.hash(body)
         var result = JSONObject()
         val objects = CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user"
@@ -66,15 +68,19 @@ class InternalStateStore(private val context: Context) {
                     refs.put(source)
                 }
                 val target = content.getString("id")
+                val previous = replaces?.let { requireNotNull(InnerStructure.candidate(data, it)) { "候选已改变或撤回" } }
+                require(previous == null || InnerStructure.hash(previous) == previousHash) { "候选已被修改，请重新打开全文" }
                 val version = InnerStructure.record(data, target)?.getInt("version") ?: 0
                 val frame = InternalStateFrame(id = "submission:$id", roleId = role, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,
                     eventIds = (0 until refs.length()).map { refs.getString(it) }.toSet(), definitionVersions = emptyMap(),
-                    eventSequence = data.optLong("sequence"), innerVersions = mapOf(target to version), innerObjects = objects)
+                    eventSequence = data.optLong("sequence"), innerVersions = mapOf(target to version), innerObjects = objects,
+                    innerPending = if (previous == null) emptyMap() else mapOf(requireNotNull(replaces) to requireNotNull(previousHash)))
                 val action = JSONObject().put("op", "propose").put("id", id).put("record", content)
                     .put("expected_version", version).put("origin", if (original == null) EstablishedContent.ORIGIN else "user_proposal")
                     .put("evidence", refs).put("reason", if (original == null) "恢复声明为已有确定的内容；提交时间不代表形成时间" else "用户提供原文和来源，请按实际材料理解")
                 if (original == null) action.put("formed_at", formedAt ?: JSONObject.NULL)
+                if (replaces != null) action.put("replaces", replaces)
                 InnerStructure.apply(data, frame, JSONArray().put(action), now)
                 val pending = InnerRows(data, true, frame)
                 val candidate = pending.getJSONObject(id).put("submission_digest", digest)
@@ -86,6 +92,25 @@ class InternalStateStore(private val context: Context) {
         }
         result
     }
+
+    suspend fun withdrawCandidate(role: String, chat: String, id: String, expectedHash: String): JSONObject =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null)
+            check(enabled(role) && !requireRecipient(role, chat))
+            update(role, "user_candidate_withdrawal") { data ->
+                val prior = requireNotNull(InnerStructure.candidate(data, id)) { "候选不存在或已不再待处理" }
+                require(InnerStructure.hash(prior) == expectedHash) { "候选已变化，请重新打开全文" }
+                val now = System.currentTimeMillis()
+                val frame = InternalStateFrame(id = "user-withdraw:" + UUID.randomUUID(), roleId = role, chatId = chat,
+                    revision = InternalStateEngine.semanticRevision(data), at = now, eventIds = emptySet(),
+                    definitionVersions = emptyMap(), eventSequence = data.optLong("sequence"),
+                    innerPending = mapOf(id to expectedHash))
+                InnerStructure.apply(data, frame, JSONArray().put(JSONObject().put("op", "discard").put("id", id)
+                    .put("reason", "用户撤回未采用候选；完整旧版与来源保留")), now)
+                data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1L))
+            }
+            JSONObject().put("withdrawn", id)
+        }
 
     suspend fun materialBudget(role: String, chat: String, tokens: Int): JSONObject =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -363,7 +388,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "inner_pending", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds)
+        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        if (kind in ActivityNotes.kinds) {
+            require(!recipientScope(role, chat)) { "活动和梦醒随记仅在本助手私域读取" }
+            return ActivityNotes.page(store.context, role, kind, id, offset)
+        }
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
         if (kind == "action_versions") {
             requireNotNull(id)
@@ -377,6 +406,19 @@ class InternalStateStore(private val context: Context) {
             (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
+        if (kind == "inner_family") {
+            val family = requireNotNull(id)
+            require(family in InnerStructure.families)
+            val rows = InnerRows(data, false)
+            val count = rows.familyCount(family)
+            return JSONObject().put("records", JSONArray(rows.familyPage(family, offset)))
+                .put("count", count).put("next_offset", if (offset + 8 < count) offset + 8 else JSONObject.NULL)
+        }
+        if (kind == "inner_chunk") {
+            require(!recipientScope(role, chat)) { "候选全文只在本助手私域读取" }
+            return JSONObject().put("fragment", InnerReadProgress.fragment(data,
+                requireNotNull(InnerStructure.candidate(data, requireNotNull(id))) { "候选已采用或撤回" }, offset))
+        }
         if (kind == "inner_pending") {
             require(!recipientScope(role, chat)) { "候选承接只在本人私域和私聊提供" }
             if (id != null) return JSONObject().put("item", InnerStructure.candidate(data, id) ?: JSONObject.NULL)
@@ -405,6 +447,7 @@ class InternalStateStore(private val context: Context) {
         }
         if (kind == "category_versions") {
             require(!id.isNullOrBlank()) { "版本查询须给出 episode:ID 或 focus:类别ID" }
+            if (id.startsWith("inner_pending:")) require(!recipientScope(role, chat)) { "候选历史仅在本人私域读取" }
             if (id.startsWith("union:")) {
                 val union = CategoryEvents.row(data, "union", id.removePrefix("union:"))
                 require(union?.optString("local_chat").orEmpty() in setOf("", chat)) { "该联合属于另一个窗口" }
@@ -492,7 +535,14 @@ class InternalStateStore(private val context: Context) {
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
-            if (groupInput) payload = SubjectRestDreams.publicMaterial(payload)
+            if (groupInput) {
+                // Candidate drafts and read-progress are private even when a future adopted
+                // belief can be expressed in a group. Serialized fragments must not evade scrub.
+                val inner = payload.getJSONObject("inner_structure")
+                for (name in listOf("pending", "pending_fragments", "pending_read", "pending_ids")) inner.put(name, JSONArray())
+                inner.remove("pending_count")
+                payload = SubjectRestDreams.publicMaterial(payload)
+            }
             payload = SubjectMaterialBudget.select(payload,
                 capabilities.optInt("subject_material_tokens", data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS))
                     .coerceIn(SubjectMaterialBudget.DEFAULT_TOKENS, SubjectMaterialBudget.MAX_TOKENS))
@@ -526,13 +576,28 @@ class InternalStateStore(private val context: Context) {
                     val rows = inner.getJSONArray(field)
                     for (i in 0 until rows.length()) {
                         val row = rows.getJSONObject(i)
-                        versions[row.getJSONObject("content").getString("id")] = row.getInt("version")
+                        if (!row.optBoolean("private_material_omitted"))
+                            versions[row.getJSONObject("content").getString("id")] = row.getInt("version")
                     }
                 }
                 val proposals = inner.getJSONArray("pending")
                 val pendingBindings = (0 until proposals.length()).map { proposals.getJSONObject(it) }
-                    .associate { it.getString("id") to InnerStructure.hash(it) }
-                frame = frame.copy(innerVersions = versions, innerPending = pendingBindings,
+                    .filter { !it.optBoolean("private_material_omitted") }
+                    .associate { it.getString("id") to InnerStructure.hash(it) }.toMutableMap()
+                val readParts = mutableMapOf<String, String>()
+                if (!groupInput) {
+                    val fragments = inner.getJSONArray("pending_fragments")
+                    for (i in 0 until fragments.length()) {
+                        val part = fragments.getJSONObject(i)
+                        readParts[part.getString("candidate_id")] = part.toString()
+                    }
+                    val previouslyRead = inner.getJSONArray("pending_read")
+                    for (i in 0 until previouslyRead.length()) {
+                        val row = previouslyRead.getJSONObject(i)
+                        pendingBindings[row.getString("id")] = row.getString("hash")
+                    }
+                }
+                frame = frame.copy(innerVersions = versions, innerPending = pendingBindings, innerReadParts = readParts,
                     materialSources = (0 until materials.length())
                     .map { materials.getJSONObject(it) }.filter { it.optString("status") == "retrieved" }
                     .associate { it.getString("id") to it.toString() })

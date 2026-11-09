@@ -108,4 +108,52 @@ class EstablishedContentEntryPointsTest {
         assertEquals(1L, EstablishedContent.status(JSONObject(data.toString()), 102).getLong("submitted"))
         assertEquals("closed", EstablishedContent.status(data, opened.getLong("closes_at")).getString("status"))
     }
+
+    @Test fun editingInvalidatesReadEligibilityAndAdoptionPreservesEveryCharacter(): Unit = runBlocking {
+        states.openEstablishedWindow(role)
+        val first = states.submitEstablishedContent(role, chat, "editable-1", preference("editable").put("description", "喜欢直说，但遇到脆弱的时候会温和；这并不表示没有自己的立场。"))
+        val id = first.getString("candidate_id")
+        val prior = requireNotNull(InnerStructure.candidate(states.read(role), id))
+        val oldRead = nativeInnerRead(context,
+            requireNotNull(InnerStructureContext.prepare(context, role, chat, true, input = "读取初稿").internalStateFrame), "inner_pending", id)
+        val revisedText = "我喜欢直说，尤其是意见不一样的时候。\n但我在乎对方脆弱的时刻，会调整表达，不等于删掉立场。\n有时两者会矛盾，我并不总能同时做好。"
+        val revised = states.submitEstablishedContent(role, chat, "editable-2", preference("editable").put("description", revisedText),
+            replaces = id, previousHash = InnerStructure.hash(prior)).getString("candidate_id")
+        assertNull(InnerStructure.candidate(states.read(role), id))
+        try { InnerStructureContext.submit(context, oldRead, report(oldRead, JSONArray().put(JSONObject().put("op", "adopt").put("id", revised).put("reason", "旧版资格无效")))); fail("old read") }
+        catch (_: IllegalArgumentException) {}
+        val next = nativeInnerRead(context,
+            requireNotNull(InnerStructureContext.prepare(context, role, chat, true, input = "读取修改版").internalStateFrame), "inner_pending", revised)
+        assertEquals(revisedText, InnerStructure.candidate(states.read(role), revised)!!.getJSONObject("record").getString("description"))
+        InnerStructureContext.submit(context, next, report(next, JSONArray().put(JSONObject().put("op", "adopt").put("id", revised).put("reason", "采用这一版完整内容"))))
+        assertEquals(revisedText, InnerStructure.record(InternalStateStore(context).read(role), "editable")!!.getJSONObject("content").getString("description"))
+        try { states.withdrawCandidate(role, chat, revised, next.innerPending.getValue(revised)); fail("cannot return adopted to draft") }
+        catch (_: IllegalArgumentException) {}
+    }
+
+    @Test fun longCandidateIsReadInActualBoundedRequestsWithoutTruncatingSavedText(): Unit = runBlocking {
+        states.openEstablishedWindow(role)
+        val description = "保留完整条件，不以卡片摘要替代全文。".repeat(170)
+        val id = states.submitEstablishedContent(role, chat, "long", preference("long").put("description", description)).getString("candidate_id")
+        var adoptedFrame: InternalStateFrame? = null
+        var seen = 0
+        repeat(90) {
+            if (adoptedFrame == null) {
+                val sections = InnerStructureContext.prepare(context, role, chat, true, input = "继续此前的事情")
+                val turns = CurrentRequestContext.project(CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, "继续此前的事情")), sections), "继续此前的事情")
+                assertNotNull(CurrentRequestContext.subjectMaterial(turns))
+                val f = requireNotNull(CurrentRequestContext.internalStateFrame(turns))
+                f.innerReadParts.values.forEach { assertTrue(turns.any { t -> t.content.contains(it) }); seen++ }
+                // Simulate receipt of a provider response after the production composition and
+                // window selection. No final values are injected into storage.
+                val delivered = InnerReadProgress.responded(context, f)
+                if (id in delivered.innerPending) adoptedFrame = delivered
+            }
+        }
+        assertTrue("must span several real request-sized fragments", seen > 1)
+        val f = requireNotNull(adoptedFrame) { "tail must not starve" }
+        InnerStructureContext.submit(context, f, report(f, JSONArray().put(JSONObject().put("op", "adopt").put("id", id).put("reason", "完整读过之后采用"))))
+        assertEquals(description, InnerStructure.record(states.read(role), "long")!!.getJSONObject("content").getString("description"))
+        assertEquals(1L, InnerRows(InternalStateStore(context).read(role), false).count())
+    }
 }

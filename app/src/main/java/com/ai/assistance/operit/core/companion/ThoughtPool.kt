@@ -48,19 +48,6 @@ object ThoughtPool {
         return saved
     }
 
-    /** 从心潮快照里读分享欲，读不到就是 null，不瞎猜。 */
-    fun shareDrive(snapshot: JSONObject?): Double? {
-        val text = snapshot?.optString("additionalContext").orEmpty()
-        return Regex("分享欲[^=]*=([0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
-    }
-
-    fun hint(share: Double?): String = when {
-        share == null -> "心潮没读到分享欲，你自己判断。"
-        share >= 0.7 -> "心潮分享欲 ${"%.2f".format(share)}，挺想说的，憋着不如现在讲。"
-        share <= 0.3 -> "心潮分享欲 ${"%.2f".format(share)}，这会儿没太想说，沉着也行。"
-        else -> "心潮分享欲 ${"%.2f".format(share)}。"
-    }
-
     /** 唤醒和聊天里提醒自己：有念头浮上来了。只列开头，不替我决定。 */
     fun prompt(items: List<JSONObject>, now: Long): String = promptSections(items, now).let {
         if (it.state.isEmpty()) "" else it.asText()
