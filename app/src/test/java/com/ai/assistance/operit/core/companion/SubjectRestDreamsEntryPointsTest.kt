@@ -91,6 +91,7 @@ class SubjectRestDreamsEntryPointsTest {
         .put("feeling", "醒后仍有一点失落").put("objects", JSONArray().put("user")).put("evidence", JSONArray().put(source))
 
     @Test fun normalPrivateDreamThenWakingUnderstandingSurvivesWindowsAndReopen(): Unit = runBlocking {
+        InternalStateStore(context).materialBudget(role, chat, 16384)
         val id = createDream()
         val dream = item("dream", id)
         assertEquals("DREAM_NOT_REALITY", dream.getJSONObject("content").getString("reality"))
@@ -103,6 +104,22 @@ class SubjectRestDreamsEntryPointsTest {
         assertEquals(1, item("dream_understanding", "first-understanding").getInt("version"))
         val next = requireNotNull(request(chat, wake = true).internalStateFrame)
         assertTrue(next.materialSources.values.any { it.contains("醒后仍有一点失落") })
+        // A simulated later interpretation can change the ordinary adopted feeling structure,
+        // without a technical dream-success signal selecting any emotion on the model's behalf.
+        val feeling = JSONObject().put("id", "after-dream").put("family", "feeling").put("kind", "梦后余波")
+            .put("description", "梦不是真实行为，但我确实还在理解它").put("status", "active")
+            .put("unresolved", true).put("current_state", "一点失落，不是对现实行为的指控")
+        val proposal = JSONObject().put("op", "propose").put("id", "feeling-proposal").put("record", feeling)
+            .put("expected_version", 0).put("origin", "subject_development").put("reason", "醒后自己的解释")
+            .put("evidence", JSONArray().put(source))
+        // Read the exact dream when a prior receipt competes for the shared material budget.
+        val proposing = readMaterial(second, "dream", id)
+        submit(proposing, JSONObject().put("inner", JSONArray().put(proposal)))
+        val adopting = requireNotNull(request().internalStateFrame)
+        submit(adopting, JSONObject().put("inner", JSONArray().put(JSONObject().put("op", "adopt")
+            .put("id", "feeling-proposal").put("reason", "明确采用这份感受解释"))))
+        val continued = request(second)
+        assertTrue(continued.state.contains("不是对现实行为的指控"))
         assertEquals("awake", item("rest", "current").getJSONObject("content").getString("state"))
         // New store/request instances reopen real persisted heads; no in-memory dream cache.
         assertEquals(id, InternalStateStore(context).inspectCategory(role, second, "dream", id, 0).getJSONObject("item").getString("id"))
@@ -153,6 +170,20 @@ class SubjectRestDreamsEntryPointsTest {
         assertFalse(f.materialSources.values.any { it.contains("海上的书房") })
     }
 
+    @Test fun groupCannotReadDreamOrSubmitPrivateRest(): Unit = runBlocking {
+        val id = createDream()
+        val group = com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+            .createCharacterGroupCard(CharacterGroupCard("", "群", members = listOf(GroupMemberConfig(role))))
+        val c = ChatHistory(title = "群聊", messages = emptyList(), characterGroupId = group)
+        ChatHistoryManager.getInstance(context).saveChatHistory(c)
+        rejected { InternalStateStore(context).inspectCategory(role, c.id, "dream", id, 0) }
+        rejected { InternalStateStore(context).inspectCategory(role, c.id, "category_versions", "dream:$id", 0) }
+        val s = InnerStructureContext.prepare(context, role, c.id, true, input = "群聊输入")
+        assertFalse(s.state.contains("海上的书房"))
+        rejected { submit(requireNotNull(s.internalStateFrame), JSONObject().put("rest", rest("awake", 1))) }
+        assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun realFullSnapshotBackupRestoresDreamAndSubsequentNormalRead(): Unit = runBlocking {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -164,9 +195,31 @@ class SubjectRestDreamsEntryPointsTest {
             val f = readMaterial(second, "rest", "current")
             submit(f, JSONObject().put("rest", rest("awake", 1)))
             RawSnapshotBackupManager.restoreFromBackupUri(context, Uri.fromFile(zip))
+            // The existing restore UI requires an application restart. Simulate only that
+            // singleton lifetime boundary; do not edit any persisted subject or chat data.
+            ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
             assertEquals(original, item("dream", id).toString())
             assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
             assertTrue(requireNotNull(request(second).internalStateFrame).materialSources.values.any { it.contains("海上的书房") })
         } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun manyDreamsStayPagedAndHotSnapshotContainsOnlyLatestCommit(): Unit = runBlocking {
+        val first = createDream()
+        repeat(10) {
+            val f = requireNotNull(request().internalStateFrame)
+            submit(f, JSONObject().put("dream", JSONObject().put("title", "第$it段梦")
+                .put("content", "想象的风景$it").put("sources", JSONArray())))
+        }
+        val store = InternalStateStore(context)
+        val one = store.inspectCategory(role, chat, "dream", null, 0)
+        val two = store.inspectCategory(role, second, "dream", null, one.getInt("next_offset"))
+        assertEquals(8, one.getJSONArray("items").length())
+        assertEquals(3, two.getJSONArray("items").length())
+        assertEquals(first, item("dream", first).getString("id"))
+        assertEquals(1, store.read(role).getJSONObject("category_commit").getJSONArray("rows").length())
+        val f = requireNotNull(request().internalStateFrame)
+        assertTrue(f.materialSources.size <= 24)
+        assertTrue(SubjectRestDreams.materials(store.read(role)).size <= 24)
     }
 }

@@ -347,6 +347,7 @@ internal object InnerStructure {
     }
     private fun identityMaterial(row: JSONObject) = JSONObject().put("content", copy(row.getJSONObject("content")))
         .put("version", row.getInt("version")).put("origin", row.getString("origin")).put("source", row.getString("source"))
+        .also { if (SubjectRestDreams.privateProvenance(row)) it.put("subject_private_material", true) }
 
     fun page(data: JSONObject, offset: Int): JSONObject = JSONObject()
         .put("records", JSONArray(records(data).drop(offset).take(8)))

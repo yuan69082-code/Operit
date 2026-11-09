@@ -258,6 +258,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspect(role: String, chat: String, offset: Int): JSONObject {
+        val result = inspectLocal(role, chat, offset)
+        return if (recipientScope(role, chat)) SubjectRestDreams.publicMaterial(result) else result
+    }
+
+    private fun inspectLocal(role: String, chat: String, offset: Int): JSONObject {
         require(offset >= 0)
         val data = snapshot(role, chat, true)
         val events = InternalStateEngine.rows(data, "events").asReversed()
@@ -286,6 +291,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
+        val result = inspectCategoryLocal(role, chat, kind, id, offset)
+        return if (recipientScope(role, chat)) SubjectRestDreams.publicMaterial(result) else result
+    }
+
+    private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
         require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds)
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
         if (kind == "action_versions") {
@@ -408,6 +418,7 @@ class InternalStateStore(private val context: Context) {
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
+            if (groupInput) payload = SubjectRestDreams.publicMaterial(payload)
             payload = SubjectMaterialBudget.select(payload,
                 capabilities.optInt("subject_material_tokens", data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS))
                     .coerceIn(SubjectMaterialBudget.DEFAULT_TOKENS, SubjectMaterialBudget.MAX_TOKENS))

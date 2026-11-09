@@ -7,6 +7,33 @@ import org.json.JSONObject
  * timer, device-state inference, public message, external memory write or model call here. */
 internal object SubjectRestDreams {
     val kinds = setOf("rest", "dream", "dream_understanding")
+    /** Provenance IDs/types, never psychological keywords. Derived descriptions inherit
+     * private provenance; publishing them requires a separate normal expression decision. */
+    fun privateProvenance(value: Any?): Boolean = when (value) {
+        is JSONObject -> value.optBoolean("subject_private_material") ||
+            value.optString("type") in setOf("dream_not_reality", "subject_rest", "subject_dream_understanding") ||
+            value.optString("storage_kind") in kinds ||
+            value.keys().asSequence().any { privateProvenance(value.opt(it)) }
+        is JSONArray -> (0 until value.length()).any { privateProvenance(value.opt(it)) }
+        is String -> value.startsWith("material:dream:") || value.startsWith("material:dream_understanding:") || value.startsWith("material:rest:")
+        else -> false
+    }
+    fun publicMaterial(value: JSONObject): JSONObject {
+        fun scrub(v: Any): Any = when (v) {
+            is JSONArray -> JSONArray((0 until v.length()).map { scrub(v.get(it)) })
+            is JSONObject -> {
+                val direct = v.optBoolean("subject_private_material") || v.optString("storage_kind") in kinds ||
+                    listOf("evidence", "bindings", "source_bindings", "material_bindings", "before", "after")
+                        .any { privateProvenance(v.opt(it)) }
+                if (direct) JSONObject().put("private_material_omitted", true).also { out ->
+                    for (key in listOf("id", "version", "at")) if (v.has(key)) out.put(key, v.get(key))
+                }
+                else JSONObject().also { out -> v.keys().forEach { out.put(it, scrub(v.get(it))) } }
+            }
+            else -> v
+        }
+        return scrub(value) as JSONObject
+    }
     fun requested(report: JSONObject) = report.has("rest") || report.has("dream") || report.has("dream_understanding")
 
     private fun text(row: JSONObject, key: String, max: Int): String {
@@ -109,7 +136,7 @@ internal object SubjectRestDreams {
             .put("owner", row.getString("owner")).put("author", row.getString("owner")).put("at", row.getLong("at"))
             .put("status", "retrieved").put("not_new_occurrence", true).put("private", true)
             .put("text", content.toString()).put("locator", JSONObject().put("kind", kind)
-                .put("id", row.getString("id")).put("version", row.getInt("version"))
+                .put("id", row.getString("id")).put("version", row.getInt("version")))
             .put("retrieval", "companion_internal_state get section=$kind id=${row.getString("id")}")
     }
     fun materials(data: JSONObject): List<JSONObject> = kinds.flatMap { kind ->
