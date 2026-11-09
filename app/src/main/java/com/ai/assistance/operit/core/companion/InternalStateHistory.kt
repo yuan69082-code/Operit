@@ -165,7 +165,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-            require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback"))
+            require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback") + SubjectRestDreams.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -229,7 +229,10 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return emptyList()
         val filter = if (parent == null) "" else " AND parent=?"
         val args = listOf(scope, kind) + listOfNotNull(parent) + listOf(limit.toString(), offset.toString())
-        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=?$filter ORDER BY id LIMIT ? OFFSET ?",
+        // Recent private generated material must not be permanently hidden behind the oldest
+        // IDs. The existing scope/kind/parent/rowid index bounds this read before deserialization.
+        val order = if (kind in SubjectRestDreams.kinds) "rowid DESC" else "id"
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",
             args.toTypedArray()).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
     }
 

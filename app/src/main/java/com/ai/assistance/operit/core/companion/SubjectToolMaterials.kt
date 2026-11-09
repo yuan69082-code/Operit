@@ -53,6 +53,14 @@ internal object SubjectToolMaterials {
             if (!receipt.privateContext || receipt.owner != frame.roleId || receipt.chatId != frame.chatId ||
                 !turn.content.contains(receipt.value)) return@forEach
             val body = JSONObject(receipt.value)
+            if (receipt.section in SubjectRestDreams.kinds) {
+                val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
+                if (rows != null) for (i in 0 until rows.length()) {
+                    val source = SubjectRestDreams.material(rows.getJSONObject(i))
+                    sources[source.getString("id")] = source.toString()
+                    actionIds.add(source.getString("id"))
+                }
+            }
             if (receipt.section == "action") {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {

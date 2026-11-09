@@ -219,7 +219,7 @@ class InternalStateStore(private val context: Context) {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
-            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0) {
+            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || SubjectRestDreams.requested(report)) {
             require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
@@ -286,7 +286,7 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback"))
+        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds)
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
         if (kind == "action_versions") {
             requireNotNull(id)
@@ -296,8 +296,8 @@ class InternalStateStore(private val context: Context) {
             return JSONObject().put("items", JSONArray(rows.take(8)))
                 .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
         }
-        if (kind in setOf("decision", "feedback") ||
-            (kind == "category_versions" && (id.orEmpty().startsWith("decision:") || id.orEmpty().startsWith("feedback:"))))
+        if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds ||
+            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "inner") {
@@ -459,7 +459,7 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + InnerStructure.guard(data),
+                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )
