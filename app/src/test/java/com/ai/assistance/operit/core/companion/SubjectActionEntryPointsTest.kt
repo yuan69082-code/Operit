@@ -38,7 +38,7 @@ class SubjectActionEntryPointsTest {
     @Before fun setup(): Unit = runBlocking {
         context = RuntimeEnvironment.getApplication()
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "主体", characterSetting = "初始参考"))
-        context.getSharedPreferences("companion_options", Context.MODE_PRIVATE).edit().putBoolean("internal_state:$role", true).commit()
+        InternalStateStore(context).configure(role, true)
         suspend fun window(): String {
             val c = ChatHistory(title = "操作测试", messages = emptyList(), characterCardId = role)
             ChatHistoryManager.getInstance(context).saveChatHistory(c); return c.id
@@ -49,7 +49,14 @@ class SubjectActionEntryPointsTest {
         com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences(context)
         handler = AIToolHandler.getInstance(context)
         handler.registerDefaultTools()
+        // Restore production delegates against this test Application, including companion reads.
+        // Fault tests replace only the already-authorized local sleep/read_file executor.
+        registerAllTools(handler, context)
         handler.getToolPermissionSystem().saveMasterSwitch(PermissionLevel.ALLOW)
+        for (name in listOf("sleep", "read_file", "companion_software", "companion_internal_state")) {
+            CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", name, true)
+            handler.getToolPermissionSystem().saveToolPermission(name, PermissionLevel.ALLOW)
+        }
     }
     private suspend fun sections(window: String = chat) =
         InnerStructureContext.prepare(context, role, window, true, input = "继续自己的研究")
@@ -78,18 +85,18 @@ class SubjectActionEntryPointsTest {
 
     @Test fun actualRequestAndReceiptSurviveFinalReportRejectionAndReparse(): Unit = runBlocking {
         val calls = AtomicInteger()
-        handler.registerTool("counted", executor = { _: AITool ->
-            calls.incrementAndGet(); ToolResult("counted", true, StringResultData("实际完成"))
+        handler.registerTool("sleep", executor = { _: AITool ->
+            calls.incrementAndGet(); ToolResult("sleep", true, StringResultData("实际完成"))
         })
         val s = sections(); val f = requireNotNull(s.internalStateFrame)
-        val first = execute(f, listOf(invocation("counted"))).results.single()
+        val first = execute(f, listOf(invocation("sleep"))).results.single()
         assertTrue(first.error, first.success)
         val row = SubjectActions.read(context, role, chat, first.subjectActionId, 0).getJSONObject("item")
         assertEquals("completed", row.getString("status"))
         assertTrue(row.isNull("declaration"))
         reject { submit(f, JSONObject().put("unexpected", true)) }
         // Re-parsed invocation has a fresh UUID, but same request frame and position.
-        val repeated = execute(f, listOf(invocation("counted"))).results.single()
+        val repeated = execute(f, listOf(invocation("sleep"))).results.single()
         assertEquals(first.subjectActionId, repeated.subjectActionId)
         assertEquals(1, calls.get())
         val continuation = delivered(s, listOf(first))
@@ -106,7 +113,7 @@ class SubjectActionEntryPointsTest {
 
     @Test fun adoptedUnderstandingIsReadLaterAndNotImpliedBySuccess(): Unit = runBlocking {
         val s = sections(); val f = requireNotNull(s.internalStateFrame)
-        val result = execute(f, listOf(invocation("calculate", mapOf("expression" to "2+3")))).results.single()
+        val result = execute(f, listOf(invocation("sleep", mapOf("duration_ms" to "0")))).results.single()
         assertTrue(result.error, result.success)
         val bound = delivered(s, listOf(result))
         val source = bound.materialSources.entries.first { JSONObject(it.value).optString("type") == "actual_operation" }.key
@@ -129,31 +136,31 @@ class SubjectActionEntryPointsTest {
 
     @Test fun permissionDenialIsPersistedWithoutExecution(): Unit = runBlocking {
         val count = AtomicInteger()
-        handler.registerTool("forbidden", executor = { _: AITool -> count.incrementAndGet(); ToolResult("forbidden", true, StringResultData("wrong")) })
-        handler.getToolPermissionSystem().saveToolPermission("forbidden", PermissionLevel.FORBID)
+        handler.registerTool("sleep", executor = { _: AITool -> count.incrementAndGet(); ToolResult("sleep", true, StringResultData("wrong")) })
+        handler.getToolPermissionSystem().saveToolPermission("sleep", PermissionLevel.FORBID)
         val f = requireNotNull(sections().internalStateFrame)
-        val result = execute(f, listOf(invocation("forbidden"))).results.single()
+        val result = execute(f, listOf(invocation("sleep"))).results.single()
         assertFalse(result.success); assertEquals("denied", result.executionStatus); assertEquals(0, count.get())
         assertEquals("denied", SubjectActions.read(context, role, chat, result.subjectActionId, 0).getJSONObject("item").getString("status"))
     }
 
     @Test fun partialAndUnknownResultsAreNotPromotedToCompletion(): Unit = runBlocking {
-        handler.registerTool("partial", executor = object : ToolExecutor {
-            override fun invoke(tool: AITool) = ToolResult("partial", true, StringResultData("part"))
+        handler.registerTool("sleep", executor = object : ToolExecutor {
+            override fun invoke(tool: AITool) = ToolResult("sleep", true, StringResultData("part"))
             override fun invokeAndStream(tool: AITool) = flow {
-                emit(invoke(tool)); emit(ToolResult("partial", false, StringResultData(""), "second part failed"))
+                emit(invoke(tool)); emit(ToolResult("sleep", false, StringResultData(""), "second part failed"))
             }
         })
-        handler.registerTool("uncertain", executor = { _: AITool -> throw IllegalStateException("transport lost after dispatch") })
+        handler.registerTool("read_file", executor = { _: AITool -> throw IllegalStateException("transport lost after dispatch") })
         val f = requireNotNull(sections().internalStateFrame)
-        val results = execute(f, listOf(invocation("partial"), invocation("uncertain"))).results
-        assertEquals("partial", results[0].executionStatus)
+        val results = execute(f, listOf(invocation("sleep"), invocation("read_file"))).results
+        assertEquals("sleep", results[0].executionStatus)
         assertEquals("unknown", results[1].executionStatus)
     }
 
     @Test fun pendingRecoveryDoesNotReplayAndExplicitNewAttemptCanRun(): Unit = runBlocking {
         val f = requireNotNull(sections().internalStateFrame)
-        val tool = AITool("calculate", listOf(ToolParameter("expression", "8+1")))
+        val tool = AITool("sleep", listOf(ToolParameter("expression", "8+1")))
         val id = InnerStructure.hash("${f.id}:0:0")
         val ledger = SubjectActions(context, f)
         assertTrue(ledger.claim(id, tool, null).execute)
@@ -165,21 +172,21 @@ class SubjectActionEntryPointsTest {
             mapOf("action" to "get", "section" to "action", "id" to id)))).results.single()
         val bound = delivered(s, listOf(read))
         val declaration = JSONObject().put("decision", "我明确再试一次").put("retry_of", id)
-        val retry = execute(bound, listOf(invocation("calculate", mapOf("expression" to "8+1",
+        val retry = execute(bound, listOf(invocation("sleep", mapOf("duration_ms" to "0",
             SubjectActions.DECLARATION to declaration.toString()))), 1).results.single()
         assertTrue(retry.error, retry.success); assertNotEquals(id, retry.subjectActionId)
     }
 
     @Test fun concurrentDuplicateAndSeparateRequestsPreserveFacts(): Unit = runBlocking {
         val count = AtomicInteger()
-        handler.registerTool("slow", executor = { _: AITool ->
-            count.incrementAndGet(); Thread.sleep(40); ToolResult("slow", true, StringResultData("once"))
+        handler.registerTool("sleep", executor = { _: AITool ->
+            count.incrementAndGet(); Thread.sleep(40); ToolResult("sleep", true, StringResultData("once"))
         })
         val f = requireNotNull(sections().internalStateFrame)
-        val results = coroutineScope { (0..1).map { async(Dispatchers.IO) { execute(f, listOf(invocation("slow"))).results.single() } }.awaitAll() }
+        val results = coroutineScope { (0..1).map { async(Dispatchers.IO) { execute(f, listOf(invocation("sleep"))).results.single() } }.awaitAll() }
         assertEquals(1, count.get()); assertTrue(results.any { it.success })
         val other = requireNotNull(sections(second).internalStateFrame)
-        execute(other, listOf(invocation("slow")))
+        execute(other, listOf(invocation("sleep")))
         assertEquals(2, count.get())
         assertEquals(2, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
     }
@@ -249,9 +256,9 @@ class SubjectActionEntryPointsTest {
     }
 
     @Test fun resultHeadsStayBoundedAndDetailsSurviveLargeReceipts(): Unit = runBlocking {
-        handler.registerTool("large", executor = { _: AITool -> ToolResult("large", true, StringResultData("x".repeat(40000))) })
+        handler.registerTool("sleep", executor = { _: AITool -> ToolResult("sleep", true, StringResultData("x".repeat(40000))) })
         val f = requireNotNull(sections().internalStateFrame)
-        repeat(10) { execute(f, listOf(invocation("large")), it) }
+        repeat(10) { execute(f, listOf(invocation("sleep")), it) }
         val page = SubjectActions.read(context, role, chat, null, 0)
         assertEquals(8, page.getJSONArray("items").length()); assertFalse(page.isNull("next_offset"))
         assertTrue(page.toString().length < 20000)
@@ -262,7 +269,7 @@ class SubjectActionEntryPointsTest {
 
     @Test fun privateResultsCannotBeReadByOtherAssistantsOrGroups(): Unit = runBlocking {
         val f = requireNotNull(sections().internalStateFrame)
-        val result = execute(f, listOf(invocation("calculate", mapOf("expression" to "7+8")))).results.single()
+        val result = execute(f, listOf(invocation("sleep", mapOf("duration_ms" to "0")))).results.single()
         assertTrue(result.error, result.success)
         val other = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "另一助手"))
         withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(other)) {
@@ -278,7 +285,7 @@ class SubjectActionEntryPointsTest {
             "section" to "action", "id" to requireNotNull(result.subjectActionId))))).results.single()
         assertFalse(denied.success)
         assertFalse(denied.result.toString().contains("15.0"))
-        val shared = execute(groupFrame, listOf(invocation("calculate", mapOf("expression" to "3+4"))), 1).results.single()
+        val shared = execute(groupFrame, listOf(invocation("sleep", mapOf("duration_ms" to "0"))), 1).results.single()
         assertTrue(shared.error, shared.success)
         val nextGroup = requireNotNull(sections(group.id).internalStateFrame)
         assertTrue(nextGroup.materialSources.values.any { it.contains(requireNotNull(shared.subjectActionId)) })
@@ -291,8 +298,8 @@ class SubjectActionEntryPointsTest {
     @Test fun invalidOperationDeclarationDoesNotAbortOtherToolsOrForgeEvidence(): Unit = runBlocking {
         val f = requireNotNull(sections().internalStateFrame)
         val bad = JSONObject().put("decision", "我的选择").put("evidence", JSONArray().put("never-provided"))
-        val batch = execute(f, listOf(invocation("calculate", mapOf("expression" to "1+2", SubjectActions.DECLARATION to bad.toString())),
-            invocation("calculate", mapOf("expression" to "3+4"))))
+        val batch = execute(f, listOf(invocation("sleep", mapOf("duration_ms" to "0", SubjectActions.DECLARATION to bad.toString())),
+            invocation("sleep", mapOf("duration_ms" to "0"))))
         assertFalse(batch.results[0].success)
         assertTrue(batch.results[1].error, batch.results[1].success)
         assertEquals(1, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
@@ -303,13 +310,13 @@ class SubjectActionEntryPointsTest {
 
     @Test fun nativeReadReplayKeepsProofAndCancellationNeverReexecutes(): Unit = runBlocking {
         val count = AtomicInteger()
-        handler.registerTool("interrupted", executor = { _: AITool ->
+        handler.registerTool("sleep", executor = { _: AITool ->
             count.incrementAndGet(); throw CancellationException("cancel after dispatch")
         })
         val f = requireNotNull(sections().internalStateFrame)
-        try { execute(f, listOf(invocation("interrupted"))); fail("cancel expected") }
+        try { execute(f, listOf(invocation("sleep"))); fail("cancel expected") }
         catch (_: CancellationException) { }
-        val retried = execute(f, listOf(invocation("interrupted"))).results.single()
+        val retried = execute(f, listOf(invocation("sleep"))).results.single()
         assertEquals(1, count.get()); assertEquals("unknown", retried.executionStatus)
         val s = sections()
         val next = requireNotNull(s.internalStateFrame)
@@ -323,12 +330,12 @@ class SubjectActionEntryPointsTest {
     }
 
     @Test fun changedRequestsCannotReuseAnAttemptAndTechnicalFailureDoesNotCreateUnderstanding(): Unit = runBlocking {
-        handler.registerTool("timeout-result", executor = { _: AITool -> ToolResult("timeout-result", true,
+        handler.registerTool("sleep", executor = { _: AITool -> ToolResult("sleep", true,
             TerminalCommandResultData("local", "partial output", -1, "session", timedOut = true)) })
         val f = requireNotNull(sections().internalStateFrame)
-        val first = execute(f, listOf(invocation("timeout-result"))).results.single()
+        val first = execute(f, listOf(invocation("sleep"))).results.single()
         assertEquals("unknown", first.executionStatus)
-        val conflict = execute(f, listOf(invocation("calculate", mapOf("expression" to "1+1")))).results.single()
+        val conflict = execute(f, listOf(invocation("sleep", mapOf("duration_ms" to "0")))).results.single()
         assertFalse(conflict.success)
         assertEquals("unknown", SubjectActions.read(context, role, second, first.subjectActionId, 0).getJSONObject("item").getString("status"))
         assertEquals(0, InternalStateStore(context).inspectCategory(role, chat, "feedback", null, 0).getJSONArray("items").length())
@@ -347,8 +354,8 @@ class SubjectActionEntryPointsTest {
         val s = sections(); val f = requireNotNull(s.internalStateFrame)
         val declaration = JSONObject().put("decision", "想检验这个计算").put("evidence", JSONArray().put(f.eventIds.first()))
         val calls = ToolExecutionManager.extractToolInvocations("""
-            <tool_A1b2 name="calculate">
-            <param name="expression">3*5</param>
+            <tool_A1b2 name="sleep">
+            <param name="duration_ms">0</param>
             <param name="__operit_action">$declaration</param>
             </tool_A1b2>
         """.trimIndent())
@@ -377,7 +384,7 @@ class SubjectActionEntryPointsTest {
         val later = delivered(next, listOf(query))
         val params = JSONObject().put("decision", "沿用已读理解做另一项核对")
             .put("intention_refs", JSONArray().put(JSONObject().put("kind", "feedback").put("id", "post-result").put("version", 1)))
-        val continuation = execute(later, listOf(invocation("calculate", mapOf("expression" to "5+1", SubjectActions.DECLARATION to params.toString()))), 1).results.single()
+        val continuation = execute(later, listOf(invocation("sleep", mapOf("duration_ms" to "0", SubjectActions.DECLARATION to params.toString()))), 1).results.single()
         assertTrue(continuation.error, continuation.success)
     }
 }
