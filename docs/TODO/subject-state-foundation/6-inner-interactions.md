@@ -1,6 +1,6 @@
 # 第4批：内在作用与统一材料预算
 
-分支 feat/subject-interactions 承接 b868b9f 与书房修复 d0701b8，依赖 PR #55 → #54 → #53。本批 PR #56；不合并、不发布。实现已接线，最终验收结果待运行结束补充，未完成的运行不能计为通过。
+分支 feat/subject-interactions 承接 b868b9f 与书房修复 d0701b8，依赖 PR #55 → #54 → #53。本批 PR #56；不合并、不发布。第4批实现及自动验收完成，具体结果和真实运行边界见下文；第5批未实施。
 
 ## 原库对应与适配
 
@@ -79,7 +79,15 @@ EnhancedAIService 在最终请求组装及工具续轮调用原通道输入估�
 
 接线测试运行生产composer、CurrentRequestContext、报告解析、提交与下一轮读取，包括相反方向和环状作用说明、原子拒绝、幂等/过期、独立成员、窗口局部联合、停用成员、求生欲、分页历史、真实聊天/书房材料到候选采用、预算与工具来源；保留前三批和独立修复测试，不删除失败测试。
 
-构造候选只验证宿主机制，不证明真实模型心理或行为。无真机、真实模型、真实MCP及系统后台调度完整实测；不保证模型必须形成联合或说预设台词。测试数量、构建签名结果在运行结束补充。
+构造候选只验证宿主机制，不证明真实模型心理或行为。无真机、真实模型、实际MCP、ObjectBox真机材料检索、本地模型分词器及系统后台调度完整实测；不保证模型必须形成联合或说预设台词。按需材料接线由真实聊天/书房存储、原生状态工具、报告解析、提交与后续读取测试验证。
+
+实现提交26402ba的运行42597335954：Android JVM测试1960项、0失败、6项原有跳过（WaifuMessageProcessorTest），compileDebugAndroidTestKotlin通过，未运行真机仪器测试。CategoryEventsEntryPointsTest 16项、ActivityContinuityEntryPointsTest 6项、SubjectMaterialBudgetTest 6项、InnerStructureEntryPointsTest 10项、InnerStructureContractsTest 5项全部通过，包括完整原生查询→实际工具返回→联合报告→下一轮读取、停用成员后结束联合及群/跨窗查询限制。Windows 24项测试、类型检查、网页构建和便携客户端打包通过。
+
+同一实现提交的Android安装包构建、Debug APK签名、应用名称与更新身份、共享版本检查均通过。未合并、未发布。最终收尾提交仅更新本交接文档，不修改已验证源码；不重复运行整套构建。
+
+- PR：[第4批 #56](https://github.com/yuan69082-code/Operit/pull/56)。
+- 已验证实现：[26402ba](https://github.com/yuan69082-code/Operit/commit/26402ba9f97ea289e2fec07c3aa113c2b1f51da2)。
+- 测试与构建：[运行42597335954](https://github.com/yuan69082-code/Operit/actions/runs/42597335954)。
 
 ## 第5批交接
 
