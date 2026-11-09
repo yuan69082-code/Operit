@@ -148,7 +148,11 @@ class CurrentRequestContextTest {
             user.content
         )
 
-        assertEquals(frame, CurrentRequestContext.internalStateFrame(projected))
+        assertEquals(frame.copy(materialText = "本轮状态"), CurrentRequestContext.internalStateFrame(projected))
+        assertTrue(requireNotNull(CurrentRequestContext.subjectMaterial(projected)).contains("本轮状态"))
+        val removed = projected.map { it.copy(content = it.content.replace("本轮状态", "被修改的材料")) }
+        try { CurrentRequestContext.subjectMaterial(removed); org.junit.Assert.fail("changed material cannot count as supplied") }
+        catch (_: IllegalStateException) { }
         assertEquals(null, CurrentRequestContext.internalStateFrame(listOf(user)))
         assertEquals(null, CurrentRequestContext.internalStateFrame(CurrentRequestContext.clearPrevious(projected)))
         assertEquals(user, CurrentRequestContext.clearPrevious(projected).single())

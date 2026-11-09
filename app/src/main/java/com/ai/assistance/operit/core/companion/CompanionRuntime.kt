@@ -306,20 +306,21 @@ object CompanionRuntime {
                     val targetRole = store.proactiveRole ?: continue
                     val target = AssistantWindowRouter.chat(app, targetRole) ?: continue
                     val scheduleKey = store.scheduleKey(targetRole)
+                    val continuous = InternalStateStore(app).enabled(targetRole)
                     var schedule = store.read(scheduleKey)
                     if (recoveredSchedules.add(scheduleKey) && schedule.has("running_ticket")) {
                         schedule = store.update(scheduleKey) {
-                            if (it.has("running_ticket")) CompanionSchedule.finish(it, it.getString("running_ticket"), false, System.currentTimeMillis())
+                            if (it.has("running_ticket")) CompanionSchedule.finish(it, it.getString("running_ticket"), false, System.currentTimeMillis(), continuous)
                         }
                     }
-                    if (!schedule.has("at") && !schedule.optBoolean("paused")) {
+                    if (!continuous && !schedule.has("at") && !schedule.optBoolean("paused")) {
                         schedule = store.update(scheduleKey) {
                             it.put("at", System.currentTimeMillis() + store.proactiveMinutes * 60_000L)
                                 .put("purpose", "首次主动联系判断：看看自己是否真的想联系她，并自行安排下次判断。").put("owner", "initial")
                         }
                         store.log(target, "安排", "首次主动联系判断已安排；此后由 AI 决定时间")
                     }
-                    if (schedule.optBoolean("paused") || schedule.optLong("at") > System.currentTimeMillis()) continue
+                    if (!CompanionSchedule.eligible(schedule, continuous) || schedule.optBoolean("paused") || schedule.optLong("at") > System.currentTimeMillis()) continue
                     val holder = ChatRuntimeHolder.getInstance(app)
                     if (holder.activeConversationCount.value > 0 || groupBusy || VoiceCallRuntime.controller != null ||
                         VoiceCallIncoming.pending != null || SystemClock.elapsedRealtime() - lastInteraction < 60_000) {
@@ -350,7 +351,7 @@ object CompanionRuntime {
                             store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
                         } finally {
                             releaseTurn(epoch)
-                            store.update(scheduleKey) { CompanionSchedule.finish(it, ticket, completed, System.currentTimeMillis()) }
+                            store.update(scheduleKey) { CompanionSchedule.finish(it, ticket, completed, System.currentTimeMillis(), continuous) }
                             if (store.read(scheduleKey).optBoolean("paused"))
                                 store.log(target, "暂停", "本次未安排下一次；可在聊天中让 AI 安排，或点击一分钟后唤醒")
                         }
@@ -519,6 +520,7 @@ object CompanionRuntime {
         }
         val scheduleInstruction = when {
             studyEvent -> "书房事件无需更改主动联系设置。记录实际阅读进度；有明确后续章节时可用 companion_study schedule，或结束。"
+            internalEnabled -> "本轮源于实际事件或已有具体安排。只有自己确实安排了要继续的事情时，才使用原有 schedule/submit 工具记录目的与时间；也可以不安排。连续性主体没有默认闲置判断或自动三小时续约。休息与梦可通过本轮私域状态报告承接，不因设备锁屏或恢复服务而推断休息、做梦或醒来。"
             explorationWork != null ->
                 "可用 companion_explore schedule 安排15分钟至7天后的下一次自由判断机会，或 pause 明说要歇；如果两者都不做，软件会在默认3小时后再给一次自由判断机会，这不代表你仍想继续同一方向。不能借其他调度工具绕过探索开关、间隔或每日上限；探索、继续和联系她是分开的决定，不要求每次有产出或消息。"
             phoneRole != null || softwareRole != null ->

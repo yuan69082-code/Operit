@@ -56,6 +56,8 @@ class TokenTrackingAIService(
         availableTools: List<ToolPrompt>?,
     ): Long = delegate.calculateInputTokens(chatHistory, availableTools)
 
+    override suspend fun countLocalTextTokens(text: String): Long? = delegate.countLocalTextTokens(text)
+
     override fun release() = delegate.release()
 
     override suspend fun sendMessage(

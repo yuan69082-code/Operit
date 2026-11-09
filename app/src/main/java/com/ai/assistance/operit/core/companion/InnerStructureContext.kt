@@ -27,13 +27,17 @@ internal object InnerStructureContext {
     }
 
     suspend fun prepare(context: Context, role: String, chat: String, persist: Boolean,
-                        wake: Boolean = false, capabilities: JSONObject = JSONObject(), input: String = "") =
+                        wake: Boolean = false, capabilities: JSONObject = JSONObject(), input: String = "",
+                        hostMaterials: List<JSONObject> = emptyList(), retrievedMaterials: List<JSONObject> = emptyList()) =
         withContext(Dispatchers.IO) {
             val store = InternalStateStore(context)
             val group = store.requireRecipient(role, chat)
             store.prepare(role, chat, persist, wake, capabilities, input, group,
                 sources(context, role),
-                CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user")
+                CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user",
+                hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
+                    if (group) emptyList() else SubjectMaterials.read(context, role, input) +
+                        ActionUnderstanding.materials(store.read(role)) + SubjectRestDreams.materials(store.read(role)))
         }
 
     suspend fun submit(context: Context, frame: InternalStateFrame, report: JSONObject): JSONObject =

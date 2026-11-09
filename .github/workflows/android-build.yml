@@ -236,6 +236,16 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Run JVM regression before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          # Keep the full regression, but run it separately from native/APK assembly.
+          # The combined invocation stalled after packageDebug in run 42626216230;
+          # the same commit's standalone JVM job passed. Emit per-test progress for evidence.
+          ./gradlew :app:testDebugUnitTest --init-script ci/script/android_test_progress.gradle --stacktrace --no-daemon
+
       - name: Run Gradle build
         env:
           DISPATCH_GRADLE_TASK: ${{ inputs.gradle_task }}
@@ -253,7 +263,7 @@ jobs:
             export OPERIT_PERSONAL_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
           fi
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest "$gradle_task" --stacktrace --no-daemon
+          ./gradlew "$gradle_task" --stacktrace --no-daemon
 
       - name: Verify final Debug APK signing certificate
         if: success()
@@ -297,12 +307,21 @@ jobs:
         run: |
           if [ -f desktop/release.json ]; then
             python3 - <<'PY'
-          import json, os
+          import json, os, re, hashlib
           release = json.load(open("desktop/release.json"))
           metadata = json.load(open("app/build/outputs/apk/debug/output-metadata.json"))
           number = int(os.environ["GITHUB_RUN_NUMBER"])
           assert metadata["elements"][0]["versionName"] == release["version"] + "+" + str(number)
           assert metadata["elements"][0]["versionCode"] == release["android_version_base"] * 100000 + number
+          badging = open(os.path.join(os.environ["RUNNER_TEMP"], "vio-life-badging.txt")).read()
+          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.M)
+          assert package, "APK package/version metadata missing"
+          assert package.group(1) == 'com.ai.assistance.operit.debug'
+          assert int(package.group(2)) == metadata["elements"][0]["versionCode"]
+          assert package.group(3) == metadata["elements"][0]["versionName"]
+          with open('app/build/outputs/apk/debug/app-debug.apk', 'rb') as apk:
+              digest = hashlib.file_digest(apk, 'sha256').hexdigest()
+          print(f'Verified actual APK: {package.group(1)} version={package.group(3)} code={package.group(2)} sha256={digest}')
           PY
           fi
 

@@ -690,7 +690,12 @@ class ConversationService(
                         .put("allowed_skills", org.json.JSONArray(roleCardToolAccess.allowedSkillNames.sorted()))
                         .put("allowed_mcp_servers", org.json.JSONArray(roleCardToolAccess.allowedMcpServerNames.sorted())),
                     recordSnapshot = recordCompanionSnapshot,
-                    currentInput = visibleInput
+                    currentInput = visibleInput,
+                    roleMaterial = if (effectiveRoleCardId.isNullOrBlank()) "" else
+                        com.ai.assistance.operit.core.experience.RoleRules(context).contextSections(
+                            effectiveRoleCardId, effectiveChatHistory.filter {
+                                it.kind == PromptTurnKind.USER || it.kind == PromptTurnKind.ASSISTANT
+                            }.map { it.content }, visibleInput).state
                 )
                 val aiName = activeCard?.name ?: context.getString(R.string.app_name)
                 runtimeSections = RuntimeContextSections(
@@ -750,7 +755,8 @@ class ConversationService(
             )
             runtimeSections = RuntimeContextSections(
                 instructions = runtimeSections.instructions + roleContext.instructions,
-                state = runtimeSections.state + roleContext.state,
+                state = runtimeSections.state + if (includeConversationIdentity && chatId != null &&
+                    com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(roleCardId)) "" else roleContext.state,
                 internalStateFrame = runtimeSections.internalStateFrame
             )
         }
@@ -768,7 +774,8 @@ class ConversationService(
                     preparedHistory = CurrentRequestContext.withoutStateBinding(historyWithRuntimeContext)
                 )
             )
-        return CurrentRequestContext.bindInternalStateFrame(visibleHistory(afterContext.preparedHistory), runtimeSections.internalStateFrame)
+        return CurrentRequestContext.bindInternalStateFrame(visibleHistory(afterContext.preparedHistory),
+            CurrentRequestContext.internalStateFrame(historyWithRuntimeContext))
     }
 
     /**

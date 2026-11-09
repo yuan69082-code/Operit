@@ -1087,6 +1087,26 @@ class MemoryRepository(private val context: Context, profileId: String) {
 
     // --- Complex Queries ---
 
+    /** Bounded lexical material query for an already resolved assistant-owned memory space.
+     * No embedding/model call and no loading the entire graph before taking a few results.
+     * Includes a rotating independent sample so current feelings cannot exclude all other views.
+     */
+    suspend fun subjectMaterials(terms: List<String>, offset: Long): List<Memory> = withContext(Dispatchers.IO) {
+        val keys = terms.filter { it.isNotBlank() }.distinct().take(6)
+        val relevant = if (keys.isEmpty()) emptyList() else {
+            val condition = keys.map { key ->
+                Memory_.title.contains(key, QueryBuilder.StringOrder.CASE_INSENSITIVE)
+                    .or(Memory_.content.contains(key, QueryBuilder.StringOrder.CASE_INSENSITIVE))
+            }.reduce { left, right -> left.or(right) }
+            memoryBox.query(condition).orderDesc(Memory_.updatedAt).build().use { it.find(0, 3) }
+        }
+        val independent = memoryBox.query().order(Memory_.id).build().use { query ->
+            val count = query.count()
+            if (count == 0L) emptyList() else query.find(offset % count, 1)
+        }
+        (if (offset % 2L == 0L) relevant + independent else independent + relevant).distinctBy { it.id }
+    }
+
     /**
      * Searches memories using semantic search if a query is provided, otherwise returns all
      * memories.

@@ -14,7 +14,6 @@ internal object InnerStructure {
     val families = identityFamilies + setOf("drive", "need", "desire", "emotion", "sentiment", "feeling", "relation", "preference")
     private const val MAX_RECORDS = 128
     private const val MAX_PENDING = 32
-    const val MATERIAL_BUDGET = 14000
     private val common = setOf("id", "family", "kind", "description", "object_ref", "context", "exceptions", "status", "legacy_ref", "experience_refs")
 
     private fun existingRoot(data: JSONObject): JSONObject? =
@@ -112,7 +111,12 @@ internal object InnerStructure {
                     require(proposal.getInt("expected_version") == (old?.getInt("version") ?: 0)) { "候选前态已变化，请重新提出明确变化" }
                     require(hash(proposal.opt("before")) == hash(old?.getJSONObject("content"))) { "候选前态不对应" }
                     proposal.getJSONObject("bindings").keys().forEach { ref ->
-                        require(hash(source(data, frame, ref)) == hash(proposal.getJSONObject("bindings").getJSONObject(ref))) { "候选原始来源已变化或不可用" }
+                        val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
+                        if (binding.optString("source") == "retrieved_material") {
+                            // This is the actual excerpt received with the original proposal,
+                            // preserved as provenance; a later memory edit is not the old source.
+                            require(hash(binding.getJSONObject("snapshot")) == binding.getString("hash"))
+                        } else require(hash(source(data, frame, ref)) == hash(binding)) { "候选原始来源已变化或不可用" }
                     }
                     validateContent(content, records, data, frame)
                     if (content.getString("family") in identityFamilies) {
@@ -157,6 +161,14 @@ internal object InnerStructure {
             require(raw.contains(text(anchor, "quote", 600))) { "人格依据引用不在原文中" }
             text(anchor, "interpretation", 600)
             if (proposal.getString("origin") == "initial_configuration" && ref.startsWith("config:")) continue
+            val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
+            if (binding.optString("source") == "retrieved_material") {
+                val snapshot = binding.getJSONObject("snapshot")
+                require(snapshot.optLong("at", Long.MAX_VALUE) < proposal.getLong("source_frame_at"))
+                // A prior material may inform development; it remains attributed material,
+                // not a claim that a memory summary is an original personal experience.
+                continue
+            }
             val event = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }
             require(event != null && event.getLong("at") < proposal.getLong("source_frame_at") &&
                 event.getString("source") !in setOf("state_report", "time")) { "当前断言或状态变化不能冒充先前发展依据" }
@@ -254,6 +266,14 @@ internal object InnerStructure {
     }
 
     internal fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
+        frame.materialSources[ref]?.let { raw ->
+            val material = JSONObject(raw)
+            return JSONObject().put("hash", hash(material)).put("source", "retrieved_material")
+                .put("snapshot", material)
+                .put("locator", material.getJSONObject("locator")).put("type", material.getString("type"))
+                .put("author", material.opt("author") ?: JSONObject.NULL).put("at", material.opt("at") ?: JSONObject.NULL)
+                .put("not_new_occurrence", true)
+        }
         if (ref.startsWith("config:") || ref.startsWith("relation:")) {
             val raw = requireNotNull(frame.innerSources[ref]) { "配置来源未在本轮提供" }
             return JSONObject().put("hash", hash(raw)).put("source", if (ref.startsWith("config:")) "initial_configuration" else "legacy_relation")
@@ -267,7 +287,11 @@ internal object InnerStructure {
     }
 
     private fun sourceText(data: JSONObject, frame: InternalStateFrame, ref: String): String =
-        if (ref.startsWith("config:") || ref.startsWith("relation:")) requireNotNull(frame.innerSources[ref])
+        if (ref in frame.materialSources) JSONObject(frame.materialSources.getValue(ref)).getString("text")
+        else if (ref.startsWith("material:")) pending(data).asSequence()
+            .mapNotNull { it.getJSONObject("bindings").optJSONObject(ref)?.optJSONObject("snapshot") }
+            .first().getString("text")
+        else if (ref.startsWith("config:") || ref.startsWith("relation:")) requireNotNull(frame.innerSources[ref])
         else InternalStateEngine.rows(data, "events").single { it.getString("id") == ref }.let {
             if (it.has("inner_source")) it.getString("inner_source") else it.getString("detail")
         }
@@ -301,26 +325,29 @@ internal object InnerStructure {
             })).put("record_count", catalogue.size).put("pending_count", pendingRows.size)
             .put("pending_ids", JSONArray((pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)).take(8).map { it.getString("id") }))
             .put("selection", "身份依据完整保留，其他完整记录与名录按预算轮换；未展示不表示删除或失效，get 可按页查阅")
-        var used = result.toString().length
         val others = all.filter { it.getJSONObject("content").getString("family") !in identityFamilies }
         val rotated = if (others.isEmpty()) others else others.drop((cursor % others.size).toInt()) + others.take((cursor % others.size).toInt())
         val relevant = rotated.sortedByDescending { row ->
             val c = row.getJSONObject("content")
             listOf(c.getString("kind"), c.optString("object_ref"), c.optString("aspect")).count { it.isNotBlank() && input.contains(it, true) }
         }
-        for (row in pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)) {
-            val text = row.toString()
-            if (used + text.length + 1 <= MATERIAL_BUDGET - 2000) { candidates.put(copy(row)); used += text.length + 1 }
+        // One bounded page per lane; the final cross-module selector owns the Token budget.
+        // A large adopted identity must not make construction fail or starve all other lanes.
+        for (row in (pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)).take(8))
+            candidates.put(copy(row))
+        for (row in relevant.take(8)) {
+            // Current meaning is complete; adoption receipts and quoted evidence remain in
+            // get/history, not duplicated beside every active record on every request.
+            val projected = identityMaterial(row).put("id", row.getString("id"))
+                .put("evidence_ids", JSONArray(row.getJSONObject("evidence").keys().asSequence().toList()))
+                .put("detail", "companion_internal_state get; original evidence/history retained")
+            details.put(projected)
         }
-        for (row in relevant) {
-            val text = row.toString()
-            if (used + text.length + 1 <= MATERIAL_BUDGET) { details.put(copy(row)); used += text.length + 1 }
-        }
-        check(result.toString().length <= MATERIAL_BUDGET)
         return result
     }
     private fun identityMaterial(row: JSONObject) = JSONObject().put("content", copy(row.getJSONObject("content")))
         .put("version", row.getInt("version")).put("origin", row.getString("origin")).put("source", row.getString("source"))
+        .also { if (SubjectRestDreams.privateProvenance(row)) it.put("subject_private_material", true) }
 
     fun page(data: JSONObject, offset: Int): JSONObject = JSONObject()
         .put("records", JSONArray(records(data).drop(offset).take(8)))
@@ -329,7 +356,7 @@ internal object InnerStructure {
 
     fun guard(data: JSONObject): String = if (identity(data).isEmpty() && data.optJSONObject("inner_structure")?.optBoolean("identity_established") != true)
         "尚未采用持续人格，原初始配置仍可用于正常身份与表达。配置、用户建议都不是主体已采用的发展。"
-    else "持续身份已建立：本轮 inner_structure.identity 中已采用的人格、自我认识、价值和立场是主要依据。" +
+    else "持续身份已建立：已采用的人格、自我认识、价值和立场是主要依据；本轮选入部分见 inner_structure.identity，预算未选入的部分仍有效，先用 get 分页查阅，不能用初始模板补写其内容。" +
         "旧人设、导入卡、世界书语气及后续用户配置仅作为初始参考或新建议，不能覆盖已采用内容；明确停用的认识也不能从模板自动恢复。" +
         "其中身份事实、工具契约、权限与运行约束仍有效；不能把人格采用当作新授权。"
 
