@@ -62,6 +62,7 @@ class GeminiHttpFailureIntegrationTest {
         }.build()
         val context = mock<Context>()
         whenever(context.getString(any<Int>())).thenReturn("status")
+        whenever(context.getString(any<Int>(), any())).thenReturn("request headers")
         whenever(context.getString(any<Int>(), any(), any())).thenReturn("HTTP 400: THINKING_LEVEL_MINIMAL")
         val provider = GeminiProvider("https://example.test", SingleApiKeyProvider("test"), "gemini-test", client)
         val retries = CopyOnWriteArrayList<String>()

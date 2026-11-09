@@ -332,24 +332,31 @@ fun <T> Stream<T>.share(
     )
     var upstreamJob: Job? = null
 
-    suspend fun collectUpstream() {
+    suspend fun completionFailure(block: suspend CoroutineScope.() -> Unit): Throwable? {
         var failure: Throwable? = null
         try {
-            // The producer owns its children as well as collect's direct exception. Without
-            // this boundary a child can cancel the root sharing job after its try has returned.
-            coroutineScope { this@share.collect { sharedStream.emit(it) } }
+            coroutineScope {
+                // Capture the job's original cause before coroutine debug stack recovery can
+                // copy it. Completion consumers rely on the same failure/cancellation identity.
+                coroutineContext[Job]!!.invokeOnCompletion { cause -> failure = cause }
+                block()
+            }
         } catch (error: Throwable) {
-            failure = error
+            if (failure == null) failure = error
         }
-        try {
-            coroutineScope { onComplete() }
-        } catch (error: Throwable) {
-            if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
-        } finally {
-            // Publish once, after producer children/cleanup finish. The owning reader observes
-            // failure; text-only UI observers still finish without crashing the application.
-            sharedStream.close(failure)
+        return failure
+    }
+
+    suspend fun collectUpstream() {
+        // Own the producer's children as well as collect's direct exception. Otherwise a child
+        // can cancel the root sharing job after its try has returned and success was published.
+        val failure = completionFailure { this@share.collect { sharedStream.emit(it) } }
+        val cleanupFailure = completionFailure { onComplete() }
+        if (failure != null && cleanupFailure != null && failure !== cleanupFailure) {
+            failure.addSuppressed(cleanupFailure)
         }
+        // Publish once after all child work/cleanup, retaining both failures when applicable.
+        sharedStream.close(failure ?: cleanupFailure)
     }
 
     when (started) {
