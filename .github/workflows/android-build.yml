@@ -236,6 +236,16 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Run JVM regression before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          # Keep the full regression, but run it separately from native/APK assembly.
+          # The combined invocation stalled after packageDebug in run 42626216230;
+          # the same commit's standalone JVM job passed. Emit per-test progress for evidence.
+          ./gradlew :app:testDebugUnitTest --init-script ci/script/android_test_progress.gradle --stacktrace --no-daemon
+
       - name: Run Gradle build
         env:
           DISPATCH_GRADLE_TASK: ${{ inputs.gradle_task }}
@@ -253,7 +263,7 @@ jobs:
             export OPERIT_PERSONAL_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
           fi
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest "$gradle_task" --stacktrace --no-daemon
+          ./gradlew "$gradle_task" --stacktrace --no-daemon
 
       - name: Verify final Debug APK signing certificate
         if: success()
