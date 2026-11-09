@@ -36,7 +36,7 @@ import org.json.JSONObject
 private val Context.modelConfigDataStore: DataStore<Preferences> by
         versionedPreferencesDataStore(
                 name = "model_configs",
-                currentVersion = 5,
+                currentVersion = 6,
         ) { appContext ->
             preferenceSchemaMigration { version, preferences ->
                 when (version) {
@@ -45,6 +45,7 @@ private val Context.modelConfigDataStore: DataStore<Preferences> by
                     2 -> ModelConfigManager.migratePreferencesFromVersionTwo(preferences)
                     3 -> ModelConfigManager.migratePreferencesFromVersionThree(preferences)
                     4 -> ModelConfigManager.migratePreferencesFromVersionFour(preferences)
+                    5 -> ModelConfigManager.migratePreferencesFromVersionFive(preferences)
                     else -> missingPreferencesSchemaMigration(version)
                 }
             }
@@ -441,7 +442,8 @@ class ModelConfigManager(
                 val config = json.decodeFromString<ModelConfigData>(stored)
                 if (config.apiProviderTypeId != ApiProviderType.VERTEX_AI.name) return@forEach
                 // Repair only the shipped built-in Vertex rules; preserve user-authored rules.
-                if (config.thinkingConfigurations != thinkingRulesForProvider(ApiProviderType.VERTEX_AI.name)) return@forEach
+                if (config.thinkingConfigurations !in setOf(thinkingRulesForProvider(ApiProviderType.VERTEX_AI.name),
+                        ModelThinkingConfigDefaults.legacyGeminiRulesForProvider(ApiProviderType.VERTEX_AI.name))) return@forEach
                 val mapping = ThinkingQualityMappingRegistry.resolve(
                         config.apiProviderTypeId, config.modelName, config.apiEndpoint, config.thinkingConfigurations)
                 val staleBudget = mapping.parameterLabel == "thinkingLevel" &&
@@ -451,6 +453,26 @@ class ModelConfigManager(
                 if (staleBudget || staleLevel) {
                     preferences[key] = json.encodeToString(config.copy(thinkingOptionId = if (staleBudget) "LOW" else "1024"))
                 }
+            }
+        }
+
+        internal fun migratePreferencesFromVersionFive(preferences: MutablePreferences) {
+            val ids = preferences[CONFIG_LIST_KEY]?.let { json.decodeFromString<List<String>>(it) } ?: emptyList()
+            ids.forEach { id ->
+                val key = stringPreferencesKey("config_$id")
+                val stored = preferences[key] ?: return@forEach
+                val config = json.decodeFromString<ModelConfigData>(stored)
+                val provider = config.apiProviderTypeId
+                if (provider !in setOf("GOOGLE", "GEMINI_GENERIC", "VERTEX_AI")) return@forEach
+                // Only untouched built-ins are migrated; custom endpoint/model contracts stay intact.
+                if (config.thinkingConfigurations != ModelThinkingConfigDefaults.legacyGeminiRulesForProvider(provider)) return@forEach
+                val rules = thinkingRulesForProvider(provider)
+                val mapping = ThinkingQualityMappingRegistry.resolve(provider, config.modelName, config.apiEndpoint, rules)
+                // The old first/default MINIMAL choice was invalid for these models. Preserve its
+                // minimum-thinking intent at configuration migration, never by retrying an API call.
+                val option = if (config.thinkingOptionId == "MINIMAL" && mapping.optionFor("MINIMAL") == null &&
+                        mapping.optionFor("LOW") != null) "LOW" else config.thinkingOptionId
+                preferences[key] = json.encodeToString(config.copy(thinkingConfigurations = rules, thinkingOptionId = option))
             }
         }
 

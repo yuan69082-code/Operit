@@ -11,6 +11,9 @@ import org.json.JSONObject
 
 internal enum class ThinkingQualityControl { LEVELS, TOGGLE_ONLY, UNSUPPORTED }
 
+internal class InvalidThinkingOptionException(provider: String, model: String, option: String) :
+    IllegalArgumentException("$provider/$model thinking option is not supported: $option")
+
 internal sealed interface ThinkingQualityWireValue {
     data class Text(val value: String) : ThinkingQualityWireValue
     data class Number(val value: Int) : ThinkingQualityWireValue
@@ -308,7 +311,7 @@ internal object ThinkingConfigurationApplier {
 
         if (thinkingEnabled && mapping.control == ThinkingQualityControl.LEVELS) {
             val selected = mapping.optionFor(optionId)
-                ?: throw IllegalArgumentException("$providerTypeId option is not supported: $optionId")
+                ?: throw InvalidThinkingOptionException(providerTypeId, modelName, optionId)
             selected.actions.forEach { applyAction(requestJson, it) }
         }
         return mapping

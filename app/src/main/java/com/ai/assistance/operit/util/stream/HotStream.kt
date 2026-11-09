@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
 
 /** 共享Stream接口，类似于SharedFlow */
 interface SharedStream<T> : Stream<T> {
@@ -331,20 +332,32 @@ fun <T> Stream<T>.share(
     )
     var upstreamJob: Job? = null
 
+    suspend fun collectUpstream() {
+        var failure: Throwable? = null
+        try {
+            // The producer owns its children as well as collect's direct exception. Without
+            // this boundary a child can cancel the root sharing job after its try has returned.
+            coroutineScope { this@share.collect { sharedStream.emit(it) } }
+        } catch (error: Throwable) {
+            failure = error
+        }
+        try {
+            coroutineScope { onComplete() }
+        } catch (error: Throwable) {
+            if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
+        } finally {
+            // Publish once, after producer children/cleanup finish. The owning reader observes
+            // failure; text-only UI observers still finish without crashing the application.
+            sharedStream.close(failure)
+        }
+    }
+
     when (started) {
         StreamStart.EAGERLY -> {
             // 这个Job现在是scope的直接子Job
             upstreamJob =
                     scope.launch {
-                        var completionCause: Throwable? = null
-                        try {
-                            this@share.collect { value -> sharedStream.emit(value) }
-                        } catch (error: Throwable) {
-                            completionCause = error
-                        } finally {
-                            sharedStream.close(completionCause)
-                            onComplete()
-                        }
+                        collectUpstream()
                     }
         }
         StreamStart.LAZILY -> {
@@ -355,17 +368,7 @@ fun <T> Stream<T>.share(
                         if (count > 0 && upstreamJob?.isActive != true) {
                             upstreamJob =
                                     scope.launch {
-                                        var completionCause: Throwable? = null
-                                        try {
-                                            this@share.collect { emittedValue ->
-                                                sharedStream.emit(emittedValue)
-                                            }
-                                        } catch (error: Throwable) {
-                                            completionCause = error
-                                        } finally {
-                                            sharedStream.close(completionCause)
-                                            onComplete()
-                                        }
+                                        collectUpstream()
                                     }
                         } else if (count == 0) {
                             // 当没有订阅者时，取消上游流的收集
@@ -379,15 +382,7 @@ fun <T> Stream<T>.share(
                     )
                     // Fallback to EAGERLY behavior
                     scope.launch {
-                        var completionCause: Throwable? = null
-                        try {
-                            this@share.collect { value -> sharedStream.emit(value) }
-                        } catch (error: Throwable) {
-                            completionCause = error
-                        } finally {
-                            sharedStream.close(completionCause)
-                            onComplete()
-                        }
+                        collectUpstream()
                     }
                 }
             }
