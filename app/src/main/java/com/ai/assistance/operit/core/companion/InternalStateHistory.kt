@@ -183,8 +183,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val db = db()
         if (!writing) { db.beginTransaction(); writing = true }
         val old = find("action_history", id)
+        val before = old?.toString()
         val row = change(old)
-        if (row.toString() != old?.toString()) {
+        if (row.toString() != before) {
             put("action_history", row)
             val head = JSONObject(row.toString())
             head.getJSONObject("request").remove("parameters")

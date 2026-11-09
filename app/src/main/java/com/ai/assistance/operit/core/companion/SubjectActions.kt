@@ -13,12 +13,13 @@ import org.json.JSONObject
  * No recovery path replays an unconfirmed external operation. */
 internal class SubjectActions(private val context: Context, val frame: InternalStateFrame) {
     private val store = CompanionStore(context)
-    private val parent: String get() =
-        if (InternalStateStore(context).requireRecipient(frame.roleId, frame.chatId)) "group:${frame.chatId}" else "private"
 
     data class Claim(val id: String, val execute: Boolean, val replay: ToolResult?)
 
     suspend fun claim(id: String, tool: AITool, declaration: String?): Claim = withContext(Dispatchers.IO) {
+        val state = InternalStateStore(context)
+        check(state.enabled(frame.roleId)) { "指定主体内部状态已关闭" }
+        val parent = if (state.requireRecipient(frame.roleId, frame.chatId)) "group:${frame.chatId}" else "private"
         val parameters = JSONArray(tool.parameters.map { JSONObject().put("name", it.name).put("value", it.value) })
         val request = JSONObject().put("tool", tool.name).put("parameters", parameters)
         val declared = declaration?.let { JSONObject(it).also { d -> validateDeclaration(d, frame) } }
@@ -112,7 +113,7 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
         }
 
         fun read(context: Context, role: String, chat: String, id: String?, offset: Int): JSONObject {
-            val group = InternalStateStore(context).requireRecipient(role, chat)
+            val group = InternalStateStore(context).recipientScope(role, chat)
             val parent = if (group) "group:$chat" else "private"
             val store = CompanionStore(context)
             if (id != null) {

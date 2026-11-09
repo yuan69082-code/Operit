@@ -72,6 +72,12 @@ class InternalStateStore(private val context: Context) {
         return !groupId.isNullOrBlank()
     }
 
+    /** Synchronous storage/tool adapters retain the executing assistant across the IO bridge.
+     * Production callers already run these adapters on IO; never perform metadata IO in a state lock. */
+    internal fun recipientScope(role: String, chat: String): Boolean = kotlinx.coroutines.runBlocking(
+        kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(
+            com.ai.assistance.operit.data.preferences.AssistantScope.callerId())) { requireRecipient(role, chat) }
+
     suspend fun configure(role: String, enable: Boolean) {
         require(role.isNotBlank())
         if (enable) CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "companion_internal_state", true)
@@ -214,7 +220,7 @@ class InternalStateStore(private val context: Context) {
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
             (report.optJSONArray("action_feedback")?.length() ?: 0) > 0) {
-            require(!requireRecipient(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
+            require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
         val saved = update(frame.roleId, "state_report") { data ->
@@ -284,7 +290,7 @@ class InternalStateStore(private val context: Context) {
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
         if (kind in setOf("decision", "feedback") ||
             (kind == "category_versions" && (id.orEmpty().startsWith("decision:") || id.orEmpty().startsWith("feedback:"))))
-            require(!requireRecipient(role, chat)) { "私人决定和理解不可向群聊提供" }
+              require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "inner") {
             if (id == null) return InnerStructure.page(data, offset)

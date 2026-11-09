@@ -15,7 +15,7 @@ internal class SoftwareCapabilityArtifacts(context: Context, private val role: S
     init {
         val state = InternalStateStore(context)
         check(state.enabled(role))
-        require(!state.requireRecipient(role, chat)) { "私人软件能力只在本助手私聊使用" }
+        require(!state.recipientScope(role, chat)) { "私人软件能力只在本助手私聊使用" }
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         root = File(context.filesDir, "companion/capability-artifacts/" + InnerStructure.hash(role)).apply { mkdirs() }
     }
@@ -53,7 +53,7 @@ internal class SoftwareCapabilityArtifacts(context: Context, private val role: S
             .put("inputs", JSONArray(names(source).sorted()))
         val version = InnerStructure.hash(artifact)
         val file = path(version)
-        synchronized(locks.computeIfAbsent(file.absolutePath) { Any() }) {
+        synchronized(locks.computeIfAbsent(root.absolutePath) { Any() }) {
             val atomic = AtomicFile(file)
             if (file.exists()) check(get(version).toString() == artifact.put("version", version).toString())
             else {

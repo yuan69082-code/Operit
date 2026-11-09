@@ -2366,7 +2366,9 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         val normalizedChatHistory =
             conversationService.normalizeConversationHistoryForModel(context.conversationHistory, roleCardId)
-                .let { com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(it, System.currentTimeMillis(), results, this@EnhancedAIService.context) }
+                .let { normalized -> withContext(Dispatchers.IO) {
+                    com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(normalized, System.currentTimeMillis(), results, this@EnhancedAIService.context)
+                } }
         context.conversationHistory.clear()
         context.conversationHistory.addAll(normalizedChatHistory)
         context.internalStateFrame = CurrentRequestContext.internalStateFrame(normalizedChatHistory)

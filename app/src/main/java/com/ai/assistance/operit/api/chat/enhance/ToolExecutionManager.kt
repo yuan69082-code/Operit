@@ -724,10 +724,11 @@ object ToolExecutionManager {
             async {
                 val result =
                     runRecorded(index, invocation, toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId))
+                // Persist before observational hooks: cancellation there must not lose an executed fact.
+                complete(index, result)
                 com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
                 com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
                 trace.tool(traceKey, result)
-                complete(index, result)
             }
         }
 
@@ -735,10 +736,10 @@ object ToolExecutionManager {
         for ((index, invocation) in serialInvocations) {
             val result =
                 runRecorded(index, invocation, toolRuntimeContext.copy(hostInvocationId = invocation.hostInvocationId))
+            complete(index, result)
             com.ai.assistance.operit.core.companion.CompanionRuntime.afterTool(context, callerChatId, resolveDisplayToolName(invocation.tool), result.success)
             com.ai.assistance.operit.core.companion.InternalStateStore.noteTool(context, callerCardId, callerChatId, resolveToolTarget(invocation.tool).tool, result.success, invocation.hostInvocationId)
             trace.tool(traceKey, result)
-                complete(index, result)
         }
 
         // 等待所有并行任务完成
@@ -808,7 +809,8 @@ object ToolExecutionManager {
                 toolName = displayToolName,
                 success = false,
                 result = StringResultData(""),
-                error = "The tool execution returned no results."
+                error = "The tool execution returned no results.",
+                executionStatus = "unknown"
             )
         }
         val lastResult = collectedResults.last()
@@ -821,7 +823,8 @@ object ToolExecutionManager {
             success = lastResult.success,
             result = StringResultData(combinedResultString),
             error = lastResult.error,
-            executionStatus = if (collectedResults.any { it.success } && collectedResults.any { !it.success }) "partial"
+            executionStatus = if (collectedResults.any { it.executionStatus == "unknown" }) "unknown"
+                else if (collectedResults.any { it.success } && collectedResults.any { !it.success }) "partial"
                 else if (lastResult.success) "completed" else "failed"
         )
     }
