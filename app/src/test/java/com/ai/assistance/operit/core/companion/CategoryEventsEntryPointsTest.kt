@@ -112,6 +112,36 @@ class CategoryEventsEntryPointsTest {
         assertEquals("影响今后的理解", episode("A").getJSONObject("content").getString("long_term_impact"))
     }
 
+    @Test fun opposingChangesAndCyclicMeaningsCommitOnceWithoutReplayingOldUnion(): Unit = runBlocking {
+        states.materialBudget(role, chat, 16384)
+        category(); category("longing")
+        val first = frame()
+        submit(first, report(first, listOf(appraisal(first, "left"), appraisal(first, "right", category = "longing"))))
+        fun union(f: InternalStateFrame) = JSONObject().put("id", "two-way").put("expected_version", 0)
+            .put("members", JSONArray(listOf("left", "right").map {
+                JSONObject().put("kind", "episode").put("id", it).put("version", f.interactionMembers.getValue("episode:$it"))
+            })).put("objects", JSONArray().put("user")).put("evidence", JSONArray().put(f.eventIds.first()))
+            .put("interpretation", "亲近和失落相互影响但方向不同").put("decision", "尚未决定").put("status", "active")
+            .put("effects", JSONArray().put(JSONObject().put("from", "episode:left").put("to", "episode:right").put("meaning", "重新认识亲近"))
+                .put(JSONObject().put("from", "episode:right").put("to", "episode:left").put("meaning", "仍然在意此事")))
+        val f = frame()
+        val stale = frame(second)
+        val candidate = report(f, listOf(appraisal(f, "left", 1).put("intensity", 0.9),
+            appraisal(f, "right", 1, "longing").put("intensity", 0.2))).put("unions", JSONArray().put(union(f)))
+        val receipt = submit(f, candidate)
+        assertEquals(receipt.toString(), submit(f, candidate).toString())
+        rejects { submit(stale, report(stale, listOf(appraisal(stale, "left", 1)))) }
+        assertEquals(0.9, episode("left").getJSONObject("content").getDouble("intensity"), 0.0001)
+        assertEquals(0.2, episode("right").getJSONObject("content").getDouble("intensity"), 0.0001)
+        val next = frame(second)
+        submit(next, report(next, listOf(appraisal(next, "left", 2).put("intensity", 0.3))))
+        repeat(3) { CompanionContext.compose(context, second, role, JSONObject(), false) }
+        assertEquals(0.3, episode("left").getJSONObject("content").getDouble("intensity"), 0.0001)
+        assertEquals(1, states.inspectCategory(role, chat, "union", "two-way", 0).getJSONObject("item").getInt("version"))
+        assertEquals(3, states.inspectCategory(role, chat, "category_versions", "episode:left", 0).getJSONArray("items").length())
+        assertTrue(CompanionContext.compose(context, second, role, JSONObject(), false).state.contains("亲近和失落相互影响"))
+    }
+
     @Test fun sameSourceDifferentCategoriesAndRecollectionDoNotCreateReality(): Unit = runBlocking {
         category(); category("longing")
         states.event(role, chat, "actual-fact", "user_message", "原始事实不可更改")

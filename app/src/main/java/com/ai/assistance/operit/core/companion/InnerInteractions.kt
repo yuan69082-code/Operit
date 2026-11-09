@@ -25,6 +25,7 @@ internal object InnerInteractions {
             val id = text(a, "id", 64)
             require(ids.add(id))
             val old = CategoryEvents.row(before, "union", id)
+            require(old?.optString("local_chat").orEmpty() in setOf("", frame.chatId)) { "窗口局部联合不能在另一窗口改写" }
             val expected = a.get("expected_version")
             require(expected is Number && expected.toDouble() == (old?.getInt("version") ?: 0).toDouble())
             require(text(a, "status", 16) in setOf("active", "ended"))
@@ -38,12 +39,14 @@ internal object InnerInteractions {
             require(members.length() in 2..8)
             val keys = mutableSetOf<String>()
             val transitions = JSONArray()
+            var local = false
             for (j in 0 until members.length()) {
                 val ref = members.getJSONObject(j)
                 require(ref.keys().asSequence().toSet() == setOf("kind", "id", "version"))
                 val kind = text(ref, "kind", 16); val target = text(ref, "id", 64)
                 require(keys.add("$kind:$target"))
                 val prior = member(before, kind, target, frame.chatId, frame.at)
+                if (kind == "state" && prior.optString("instance_scope") != "global") local = true
                 require(frame.interactionMembers["$kind:$target"] == prior.getInt("version")) { "成员未在本轮实际材料中提供，或版本已变化" }
                 val version = ref.get("version")
                 require(version is Number && version.toDouble() == prior.getInt("version").toDouble())
@@ -70,7 +73,8 @@ internal object InnerInteractions {
             CategoryEvents.append(after, frame, JSONObject().put("storage_kind", "union").put("id", id)
                 .put("parent", frame.roleId).put("version", Math.addExact(old?.getInt("version") ?: 0, 1))
                 .put("content", content).put("owner", frame.roleId).put("frame_id", frame.id)
-                .put("source_chat", frame.chatId).put("at", now).put("source", "subject_report_adoption"))
+                .put("source_chat", frame.chatId).put("local_chat", if (local) frame.chatId else old?.optString("local_chat").orEmpty())
+                .put("at", now).put("source", "subject_report_adoption"))
         }
         return actions.length() > 0
     }
@@ -80,13 +84,27 @@ internal object InnerInteractions {
         val page = CategoryEvents.page(data, "union", selection.optInt("union"))
         if (persist) selection.put("union", if (page.isNull("next_offset")) 0 else page.getInt("next_offset"))
         val rows = page.getJSONArray("items")
+        // A persistent union may refer to a session-scoped member. Keep the union/history,
+        // but never project that session's private interpretation into another window.
+        for (i in rows.length() - 1 downTo 0) {
+            val row = rows.getJSONObject(i)
+            if (row.optString("local_chat").isNotBlank() && row.optString("local_chat") != chat) rows.remove(i)
+        }
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val refs = row.getJSONObject("content").getJSONArray("members")
             val versions = JSONObject()
             for (j in 0 until refs.length()) {
                 val ref = refs.getJSONObject(j)
-                versions.put("${ref.getString("kind")}:${ref.getString("id")}", member(data, ref.getString("kind"), ref.getString("id"), chat, at).getInt("version"))
+                val kind = ref.getString("kind")
+                val id = ref.getString("id")
+                val version = when (kind) {
+                    "inner" -> InnerStructure.records(data).firstOrNull { it.getString("id") == id }?.optInt("version")
+                    "episode" -> CategoryEvents.row(data, kind, id)?.optInt("version")
+                    "state" -> InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id && it.optBoolean("active") }?.optInt("version")
+                    else -> null
+                }
+                versions.put("$kind:$id", version ?: JSONObject.NULL)
             }
             row.put("current_member_versions", versions)
             // The model receives the adopted meaning, not a replay of the transaction's hashes.

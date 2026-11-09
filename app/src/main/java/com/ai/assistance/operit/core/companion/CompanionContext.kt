@@ -22,7 +22,7 @@ object CompanionContext {
         .put("heart_rate_source", "not_connected")
 
     suspend fun compose(context: Context, chatId: String, roleId: String?, capabilities: JSONObject,
-                        recordSnapshot: Boolean, currentInput: String = ""): RuntimeContextSections = withContext(Dispatchers.IO) {
+                        recordSnapshot: Boolean, currentInput: String = "", roleMaterial: String = ""): RuntimeContextSections = withContext(Dispatchers.IO) {
         val store = CompanionStore(context)
         val scope = store.scope(chatId, roleId)
         if (recordSnapshot) store.migrateMemory(chatId, scope)
@@ -52,6 +52,7 @@ object CompanionContext {
         val instructions = StringBuilder("\n[软件状态解读规则，仅作为内部上下文，不复述或朗读字段名]\n")
         val state = StringBuilder("\n<operit_state>\n")
         val hostMaterials = mutableListOf<JSONObject>()
+        if (roleMaterial.isNotBlank()) hostMaterials.add(JSONObject().put("source", "user_configured_worldbook").put("text", roleMaterial))
         val retrievedMaterials = mutableListOf<JSONObject>()
         var internalStateFrame: InternalStateFrame? = null
         fun appendSections(sections: RuntimeContextSections) {

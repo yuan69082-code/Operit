@@ -291,6 +291,14 @@ object InternalStateReports {
             .put("source", "state_report").put("event_id", "state_report:${frame.id}")
             .put("reason", state.getString("reason")).put("evidence", JSONArray(state.getJSONArray("evidence").toString()))
             .put("field_versions", JSONObject(fieldVersions.toString()))
+        // Bind only actually supplied material, as a historical read, never a new reality event.
+        val bindings = JSONObject()
+        val evidenceIds = evidence(experience, frame)
+        for (i in 0 until evidenceIds.length()) {
+            val id = evidenceIds.getString(i)
+            if (id in frame.materialSources) bindings.put(id, InnerStructure.source(data, frame, id))
+        }
+        if (bindings.length() > 0) record.put("material_bindings", bindings)
         optionalFields.filter { state.has(it) }.forEach { record.put(it, state.get(it)) }
         state.optJSONObject("time_condition_versions")?.let {
             record.put("time_condition_versions", JSONObject(it.toString()))
@@ -307,7 +315,8 @@ object InternalStateReports {
             require(evidence.get(index) is String)
             evidence.getString(index)
         }
-        requireStateReport(ids.distinct().size == ids.size && ids.all { it in frame.eventIds }, InternalStateReportFailure.SOURCE)
+        requireStateReport(ids.distinct().size == ids.size && ids.size <= 16 &&
+            ids.all { it in frame.eventIds || it in frame.materialSources }, InternalStateReportFailure.SOURCE)
         return JSONArray(ids)
     }
 

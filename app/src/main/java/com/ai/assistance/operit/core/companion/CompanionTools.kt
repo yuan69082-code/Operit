@@ -16,7 +16,7 @@ object CompanionTools {
 
     fun prompts(): List<ToolPrompt> = com.ai.assistance.operit.core.experience.ExperienceTools.prompts() + RoomTools.prompts() + listOf(
         ToolPrompt(name = "companion_internal_state",
-            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate。get 可用 section=episode|focus|experience_link|category_versions；id 查具体事件/重点、关联的内在记录，版本用 episode:ID 或 focus:类别ID；offset 真正分页。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
+            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=episode|focus|experience_link|union|category_versions|source；id 查具体记录，版本用 episode:ID、union:ID 或 focus:类别ID；offset 真正分页。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
                 "当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
                 "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
                 "create/revise传完整definition JSON：id,name,description,kind（只能drive驱力/sentiment情感/emotion情绪/psychology心理）,baseline,min,max,scope=global|session,private,share（AI愿向本机公开）,participates,effects=[{action,weight,cue,target可选}],time_rules，可带object_ref绑定明确对象。" +
@@ -31,7 +31,7 @@ object CompanionTools {
             parametersStructured = listOf(param("action", "操作", true), param("id", "维度稳定ID"),
                 param("definition", "完整维度定义JSON；新建须有四类之一的kind及完整time_rules，不夹带value"), param("expected_version", "get读取的定义版本，新建0"),
                 param("reason", "演化经过与理由"), param("evidence", "真实事件ID的JSON数组"),
-                param("target", "merge目标维度ID"), param("offset", "历史分页起点"), param("section", "get 可选 episode/focus/experience_link/category_versions/source（原事实，含已归档）"))),
+                param("target", "merge目标维度ID"), param("tokens", "budget 本主体材料预算2048至16384"), param("offset", "历史分页起点"), param("section", "get 可选 episode/focus/experience_link/union/category_versions/source（原事实，含已归档）"))),
         ToolPrompt(name = "companion_explore",
             description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；本轮没安排也没 pause 时，软件默认3小时后再给一次自由判断机会，不代表继续同一兴趣。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材、继续旧方向或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
@@ -93,7 +93,7 @@ object CompanionTools {
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
                             val internal = InternalStateStore(context)
                             check(internal.enabled(actor)) { "内部状态未开启" }
-                            if (action != "get") {
+                            if (action != "get" && action != "budget") {
                                 val evidence = JSONArray(required(tool, "evidence"))
                                 internal.evolve(actor, chatId, requireNotNull(action), required(tool, "id"),
                                     required(tool, "expected_version").toInt(), value(tool, "definition")?.let { JSONObject(it) },
@@ -102,7 +102,8 @@ object CompanionTools {
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
                                 internal.requireRecipient(actor, chatId)
                                 val section = value(tool, "section")
-                                if (action == "get" && section != null) internal.inspectCategory(actor, chatId, section, value(tool, "id"), value(tool, "offset")?.toInt() ?: 0)
+                                if (action == "budget") internal.materialBudget(actor, chatId, required(tool, "tokens").toInt())
+                                else if (action == "get" && section != null) internal.inspectCategory(actor, chatId, section, value(tool, "id"), value(tool, "offset")?.toInt() ?: 0)
                                 else internal.inspect(actor, chatId, value(tool, "offset")?.toInt() ?: 0)
                             }
                         }

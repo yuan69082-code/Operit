@@ -59,7 +59,7 @@ internal object SubjectMaterialBudget {
             .put("method", "host_estimate_utf8_non_han_plus_25_percent")
             .put("exact", false).put("error_bound", "unknown_for_custom_tokenizers")
             .put("omitted_counts", omitted).put("omission_is_not_deletion", true)
-            .put("retrieve", "companion_internal_state get: inner/episode/focus/union/source; original memory tools")
+            .put("retrieve", "companion_internal_state get(offset) includes inner; section=episode/focus/union/source; material locator tools")
         result.put("material_budget", budget)
         lanes.forEach { omitted.put(it.path, it.rows.size) }
         // This envelope is small and bounded, regardless of the history volume.
@@ -72,12 +72,15 @@ internal object SubjectMaterialBudget {
                 omitted.put(lane.path, lane.rows.size - lane.target.length())
             }
         }
-        val identity = lanes.first()
-        identity.rows.forEach { include(identity, it) }
-        // Round robin gives every domain a chance; this is not subjective importance ranking.
+        // Identity has the first turn, not an unlimited exclusive allocation.
+        // Rotate all other domains per request so emotion/identity cannot forever exclude
+        // contrary material. This is technical exposure, never a change in subjective focus.
         val rest = lanes.drop(1)
-        for (index in 0 until (rest.maxOfOrNull { it.rows.size } ?: 0))
-            rest.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
+        val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
+        val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
+        val order = listOf(lanes.first()) + rest.drop(start) + rest.take(start)
+        for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
+            order.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
         budget.put("estimated_tokens", estimate(result.toString()) + 32)
         check(estimate(result.toString()) + 32 <= requested)
         return result
