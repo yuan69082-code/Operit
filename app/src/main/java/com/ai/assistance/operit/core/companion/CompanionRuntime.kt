@@ -283,7 +283,7 @@ object CompanionRuntime {
                                     withTimeout(300_000) { evaluate(app, work.chat, work.prompt(), epoch, taskEvent = true, studyEvent = true, triggerId = work.triggerId) }
                                     work.store.finish(work.book.getString("id"), work.ids, "handled")
                                 } catch (timeout: TimeoutCancellationException) {
-                                    work.store.finish(work.book.getString("id"), work.ids, "failed", "本轮阅读超时，可在书房重试")
+                                    work.store.finish(work.book.getString("id"), work.ids, "unknown", "本轮超时，可能已有操作保存；重新提醒时须核对真实结果")
                                 } catch (cancelled: CancellationException) {
                                     // A cancelled network round may already have performed tools. Do not
                                     // turn an unknown result into a new automatic model/tool execution.

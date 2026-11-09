@@ -117,8 +117,12 @@ class ActivityContinuityEntryPointsTest {
         assertFalse(store.claim(id, ids))
         val facts = StudyStore(context, role).recentActivity()
         assertTrue(facts.toString().contains("unknown")); assertEquals(1, facts.getJSONArray("notes").length())
+        store.retry(id); store.retry(id)
+        val retained = store.book(id).getJSONArray("events")
+        assertEquals(2, retained.length()); assertEquals("unknown", retained.getJSONObject(0).getString("state"))
+        assertEquals(ids.single(), retained.getJSONObject(1).getString("recovery_of"))
         store.annotate(id, null, 0, 0, "", "另一条新批注", "hand", "#486B65", JSONArray(), JSONArray(), "user", "two")
-        val newId = store.book(id).getJSONArray("events").getJSONObject(1).getString("id")
+        val newId = store.book(id).getJSONArray("events").getJSONObject(2).getString("id")
         assertTrue(store.claim(id, setOf(newId)))
         rejects { StudyTool.execute(context, role, "reply", id, JSONObject().put("reply_to", "missing").put("text", "未保存").put("operation_id", "bad"), 0) }
         assertFalse(store.recentActivity().toString().contains("未保存"))

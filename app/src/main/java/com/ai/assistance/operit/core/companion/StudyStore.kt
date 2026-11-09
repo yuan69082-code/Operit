@@ -129,7 +129,21 @@ class StudyStore(private val context: Context, val role: String) {
                 })).put("note_details", "完整留言、照片与手绘请用 notes 查询")
     }
     fun acknowledge(id: String) { store.update(bookKey(id)) { it.put("unread", 0) }; changed() }
-    fun retry(id: String) { store.update(bookKey(id)) { data -> data.getJSONArray("events").objects().filter { it.optString("state") == "failed" }.forEach { it.put("state", "pending") } }; changed() }
+    fun retry(id: String) {
+        store.update(bookKey(id)) { data ->
+            val rows = data.getJSONArray("events").objects()
+            rows.filter { it.optString("state") in setOf("failed", "unknown") && !it.has("recovery_requested") }.forEach { prior ->
+                val recovery = StudyPolicy.event("用户重新提醒：先核对这次触发已保存的书房回复、聊天表达和操作结果，再决定是否补充；原触发不是未执行", null, null)
+                    .put("id", "recovery:" + InnerStructure.hash(prior.getString("id"))).put("recovery_of", prior.getString("id"))
+                    .put("previous_state", prior.getString("state")).put("previous_error", prior.optString("error"))
+                prior.put("recovery_requested", recovery.getString("id"))
+                // The original failed/unknown fact is immutable. This is a new explicit user
+                // reminder, not a delivery retry; repeated clicks cannot re-run the old round.
+                queue(data, recovery)
+            }
+        }
+        changed(id)
+    }
     private fun queue(data: JSONObject, event: JSONObject) {
         val events = data.getJSONArray("events").objects()
         // Append to the JSON array after collecting retained events, not to the Kotlin list.
