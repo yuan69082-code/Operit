@@ -120,6 +120,15 @@ class SubjectRestDreamsEntryPointsTest {
             .put("id", "feeling-proposal").put("reason", "明确采用这份感受解释"))))
         val continued = request(second)
         assertTrue(continued.state.contains("不是对现实行为的指控"))
+        val group = com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+            .createCharacterGroupCard(CharacterGroupCard("", "群", members = listOf(GroupMemberConfig(role))))
+        val publicChat = ChatHistory(title = "群聊", messages = emptyList(), characterGroupId = group)
+        ChatHistoryManager.getInstance(context).saveChatHistory(publicChat)
+        val publicRequest = InnerStructureContext.prepare(context, role, publicChat.id, true, input = "群聊继续")
+        assertFalse(publicRequest.state.contains("不是对现实行为的指控"))
+        val publicRead = InternalStateStore(context).inspectCategory(role, publicChat.id, "inner", "after-dream", 0)
+        assertFalse(publicRead.toString().contains("梦不是真实行为"))
+        assertTrue(publicRead.getJSONObject("item").getBoolean("private_material_omitted"))
         assertEquals("awake", item("rest", "current").getJSONObject("content").getString("state"))
         // New store/request instances reopen real persisted heads; no in-memory dream cache.
         assertEquals(id, InternalStateStore(context).inspectCategory(role, second, "dream", id, 0).getJSONObject("item").getString("id"))
@@ -208,7 +217,7 @@ class SubjectRestDreamsEntryPointsTest {
         val first = createDream()
         repeat(10) {
             val f = requireNotNull(request().internalStateFrame)
-            submit(f, JSONObject().put("dream", JSONObject().put("title", "第$it段梦")
+            submit(f, JSONObject().put("dream", JSONObject().put("title", "第${it}段梦")
                 .put("content", "想象的风景$it").put("sources", JSONArray())))
         }
         val store = InternalStateStore(context)
