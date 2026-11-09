@@ -14,7 +14,7 @@ internal class SoftwareCapabilityArtifacts(context: Context, private val role: S
     private val root: File
     init {
         val state = InternalStateStore(context)
-        check(state.enabled(role))
+        check(state.enabled(role)) { "当前助手未开启内部状态，未执行软件能力" }
         require(!state.recipientScope(role, chat)) { "私人软件能力只在本助手私聊使用" }
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         root = File(context.filesDir, "companion/capability-artifacts/" + InnerStructure.hash(role)).apply { mkdirs() }

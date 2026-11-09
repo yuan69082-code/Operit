@@ -154,13 +154,13 @@ class SubjectActionEntryPointsTest {
         handler.registerTool("read_file", executor = { _: AITool -> throw IllegalStateException("transport lost after dispatch") })
         val f = requireNotNull(sections().internalStateFrame)
         val results = execute(f, listOf(invocation("sleep"), invocation("read_file"))).results
-        assertEquals("sleep", results[0].executionStatus)
+        assertEquals("partial", results[0].executionStatus)
         assertEquals("unknown", results[1].executionStatus)
     }
 
     @Test fun pendingRecoveryDoesNotReplayAndExplicitNewAttemptCanRun(): Unit = runBlocking {
         val f = requireNotNull(sections().internalStateFrame)
-        val tool = AITool("sleep", listOf(ToolParameter("expression", "8+1")))
+        val tool = AITool("sleep", listOf(ToolParameter("duration_ms", "0")))
         val id = InnerStructure.hash("${f.id}:0:0")
         val ledger = SubjectActions(context, f)
         assertTrue(ledger.claim(id, tool, null).execute)
@@ -303,6 +303,12 @@ class SubjectActionEntryPointsTest {
         assertFalse(batch.results[0].success)
         assertTrue(batch.results[1].error, batch.results[1].success)
         assertEquals(1, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
+        val malformed = execute(f, listOf(invocation("sleep", mapOf("duration_ms" to "0",
+            SubjectActions.DECLARATION to "{\"evidence\":\"not-an-array\"}"))), 1).results.single()
+        assertFalse(malformed.success)
+        assertEquals(1, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
+        assertTrue(runCatching { submit(f, JSONObject().put("decisions", "not-an-array")) }.isFailure)
+        assertEquals(0, InternalStateStore(context).inspectCategory(role, chat, "decision", null, 0).getJSONArray("items").length())
         reject { submit(f, JSONObject().put("action_feedback", JSONArray().put(JSONObject().put("id", "invented")
             .put("expected_version", 0).put("action_id", "none").put("result_source", "never-provided")
             .put("meaning", "没有实际读取的结果").put("evidence", JSONArray().put("never-provided"))))) }

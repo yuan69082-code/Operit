@@ -9,7 +9,8 @@ internal object ActionUnderstanding {
     fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long): Boolean {
         var changed = false
         for ((field, kind) in listOf("decisions" to "decision", "action_feedback" to "feedback")) {
-            val actions = report.optJSONArray(field) ?: continue
+            if (!report.has(field)) continue
+            val actions = report.getJSONArray(field)
             require(actions.length() <= 4)
             val touched = mutableSetOf<String>()
             for (i in 0 until actions.length()) {
@@ -24,7 +25,7 @@ internal object ActionUnderstanding {
                 require(old == null || old.getString("parent") == "private")
                 require(a.get("expected_version") is Number &&
                     a.getDouble("expected_version") == (old?.getInt("version") ?: 0).toDouble())
-                SubjectActions.validateDeclaration(JSONObject().put("intention_refs", a.optJSONArray("intention_refs") ?: JSONArray())
+                SubjectActions.validateDeclaration(JSONObject().put("intention_refs", if (a.has("intention_refs")) a.getJSONArray("intention_refs") else JSONArray())
                     .put("evidence", a.getJSONArray("evidence")), frame)
                 val evidence = CategoryEvents.strings(a.getJSONArray("evidence"), 8)
                 require(evidence.isNotEmpty())

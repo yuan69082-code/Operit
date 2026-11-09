@@ -127,6 +127,9 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
         fun validateDeclaration(d: JSONObject, frame: InternalStateFrame) {
             require(d.keys().asSequence().all { it in setOf("decision", "intention_refs", "evidence", "retry_of", "capability") })
             require(d.toString().length <= 5000)
+            for (key in listOf("intention_refs", "evidence")) if (d.has(key)) require(d.get(key) is JSONArray)
+            if (d.has("capability")) require(d.get("capability") is JSONObject)
+            if (d.has("retry_of")) require(d.get("retry_of") is String && d.getString("retry_of").isNotBlank())
             if (d.has("decision")) require(d.get("decision") is String && d.getString("decision").length <= 1000)
             val refs = d.optJSONArray("intention_refs") ?: JSONArray()
             require(refs.length() <= 8)
