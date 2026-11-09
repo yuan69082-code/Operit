@@ -176,6 +176,12 @@ class CompanionStore(context: Context) {
         return synchronized(lock(scope)) { history(scope).use { it.actionPage(parent, offset) } }
     }
 
+    internal fun actionVersions(role: String, id: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.actionVersions(id, offset) } }
+    }
+
     internal fun archivedStateRow(scope: String, kind: String, id: String): JSONObject? =
         synchronized(lock(scope)) { history(scope).use { it.find(kind, id) } }
 

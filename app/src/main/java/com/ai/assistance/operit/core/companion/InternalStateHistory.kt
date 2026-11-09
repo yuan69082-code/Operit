@@ -193,7 +193,8 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             val head = JSONObject(row.toString())
             head.getJSONObject("request").remove("parameters")
             head.optJSONObject("receipt")?.let { receipt ->
-                  receipt.remove("data")
+                receipt.remove("data")
+                if (!receipt.isNull("error")) receipt.put("error", receipt.getString("error").take(600))
                 val text = receipt.getString("text")
                 receipt.put("text", text.take(600)).put("excerpt", text.length > 600)
             }
@@ -211,6 +212,15 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         return db().rawQuery("SELECT payload FROM category_current INDEXED BY category_recent WHERE scope=? AND kind='action' AND parent=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
             arrayOf(scope, parent, offset.toString())).use { c ->
             buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) }
+        }
+    }
+
+    fun actionVersions(id: String, offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='action_history' AND lookup=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, id, offset.toString())).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(JSONObject(cursor.getString(0))) }
         }
     }
 

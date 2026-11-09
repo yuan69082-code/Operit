@@ -44,14 +44,29 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                     .put("status", "requested").put("at", System.currentTimeMillis())
             }
         }
-        if (!fresh && !row.has("receipt") && tool.name == "companion_software" &&
+        if (!fresh && (!row.has("receipt") || row.optString("status") == "unknown") && tool.name == "companion_software" &&
             tool.parameters.firstOrNull { it.name == "action" }?.value == "build") {
             try {
                 fun arg(name: String) = tool.parameters.firstOrNull { it.name == name }?.value
                 val verified = SoftwareCapabilityArtifacts(context, frame.roleId, frame.chatId).recoverBuild(
                     requireNotNull(arg("id")), requireNotNull(arg("source")), arg("previous_version"), id)
-                if (verified != null) return@withContext Claim(id, false,
-                    finish(id, ToolResult(tool.name, true, StringResultData(verified.toString())), "completed"))
+                if (verified != null) {
+                    val result = ToolResult(tool.name, true, StringResultData(verified.toString()))
+                    // Resolve uncertainty from this exact immutable output. The old unknown
+                    // receipt remains in incremental history, never overwritten in place.
+                    store.actionWrite(frame.roleId, id) { old ->
+                        val current = requireNotNull(old)
+                        if (!current.has("receipt") || current.optString("status") == "unknown") {
+                            val receipt = receipt(result)
+                            current.put("status", "completed").put("receipt", receipt)
+                                .put("receipt_hash", InnerStructure.hash(receipt))
+                                .put("version", current.getInt("version") + 1)
+                                .put("finished_at", System.currentTimeMillis())
+                                .put("verified_artifact", verified.getString("version"))
+                        }
+                        current
+                    }.let { return@withContext Claim(id, false, replay(it)) }
+                }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 com.ai.assistance.operit.util.AppLogger.e("SubjectActions", "本地产物不能证实原操作，保留未知且不重放", failure)
@@ -76,9 +91,7 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
             is com.ai.assistance.operit.core.tools.HiddenTerminalCommandResultData -> if (data.timedOut) "unknown" else if (data.exitCode != 0) "failed" else status
             else -> status
         }
-        val receipt = JSONObject().put("success", result.success).put("text", result.result.toString())
-            .put("error", result.error ?: JSONObject.NULL).put("tool", result.toolName)
-            .put("data", result.result.toJson()).put("scope", "single_tool_request_not_downstream_goal")
+        val receipt = receipt(result)
         store.actionWrite(frame.roleId, id) { old ->
             val row = requireNotNull(old)
             if (row.has("receipt")) {
@@ -91,6 +104,10 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
         }
         result.copy(subjectActionId = id, executionStatus = executionStatus)
     }
+
+    private fun receipt(result: ToolResult) = JSONObject().put("success", result.success).put("text", result.result.toString())
+        .put("error", result.error ?: JSONObject.NULL).put("tool", result.toolName)
+        .put("data", result.result.toJson()).put("scope", "single_tool_request_not_downstream_goal")
 
     private fun replay(row: JSONObject): ToolResult {
         val receipt = row.optJSONObject("receipt")
@@ -173,6 +190,7 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                     .put("declared", row.opt("declaration") ?: JSONObject.NULL).toString())
                 .put("locator", JSONObject().put("tool", "companion_internal_state get section=action")
                     .put("action_id", id).put("version", row.getInt("version"))
+                    .put("parent", row.getString("parent"))
                     .put("receipt_hash", row.opt("receipt_hash") ?: JSONObject.NULL))
         }
 

@@ -216,6 +216,38 @@ class SubjectActionEntryPointsTest {
         assertEquals("${'$'}{pages}*2", SoftwareCapabilityArtifacts(context, role, second).get(version).getString("source"))
     }
 
+    @Test fun interruptedBuildRecoversOnlyItsOwnImmutableArtifactWithoutExecution(): Unit = runBlocking {
+        val real = requireNotNull(handler.getToolExecutor("companion_software"))
+        val executions = AtomicInteger()
+        handler.registerTool("companion_software", executor = { tool: AITool ->
+            executions.incrementAndGet()
+            val result = real.invoke(tool)
+            check(result.success) { result.error.orEmpty() }
+            throw CancellationException("fault after actual artifact commit, before receipt")
+        })
+        val f = requireNotNull(sections().internalStateFrame)
+        val call = invocation("companion_software", mapOf("action" to "build", "id" to "local", "source" to "2*3"))
+        try { execute(f, listOf(call)); fail("fault expected") } catch (_: CancellationException) { }
+        val unknown = SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").getJSONObject(0)
+        assertEquals("unknown", unknown.getString("status"))
+        val verified = execute(f, listOf(call)).results.single()
+        assertTrue(verified.error, verified.success)
+        assertEquals("completed", verified.executionStatus)
+        assertEquals(1, executions.get())
+        val version = JSONObject(verified.result.toString()).getString("version")
+        val output = SoftwareCapabilityArtifacts(context, role, second).get(version)
+        assertEquals(verified.subjectActionId, output.getString("build_request_id"))
+        assertNull(SoftwareCapabilityArtifacts(context, role, second).recoverBuild("local", "2*3", null, "different-request"))
+        assertEquals(verified.result.toString(), execute(f, listOf(call)).results.single().result.toString())
+        handler.registerTool("companion_software", executor = real)
+        val history = execute(requireNotNull(sections(second).internalStateFrame), listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "action_versions", "id" to requireNotNull(verified.subjectActionId))))).results.single()
+        assertTrue(history.error, history.success)
+        val versions = JSONObject(history.result.toString()).getJSONArray("items")
+        assertEquals("completed", versions.getJSONObject(0).getString("status"))
+        assertEquals("unknown", versions.getJSONObject(1).getString("status"))
+    }
+
     @Test fun resultHeadsStayBoundedAndDetailsSurviveLargeReceipts(): Unit = runBlocking {
         handler.registerTool("large", executor = { _: AITool -> ToolResult("large", true, StringResultData("x".repeat(40000))) })
         val f = requireNotNull(sections().internalStateFrame)
@@ -246,6 +278,12 @@ class SubjectActionEntryPointsTest {
             "section" to "action", "id" to requireNotNull(result.subjectActionId))))).results.single()
         assertFalse(denied.success)
         assertFalse(denied.result.toString().contains("15.0"))
+        val shared = execute(groupFrame, listOf(invocation("calculate", mapOf("expression" to "3+4"))), 1).results.single()
+        assertTrue(shared.error, shared.success)
+        val nextGroup = requireNotNull(sections(group.id).internalStateFrame)
+        assertTrue(nextGroup.materialSources.values.any { it.contains(requireNotNull(shared.subjectActionId)) })
+        assertFalse(nextGroup.materialSources.values.any { it.contains(requireNotNull(result.subjectActionId)) })
+        reject { SubjectActions.read(context, role, second, shared.subjectActionId, 0) }
         assertEquals(0, CompanionStore(context).actionPage(other, "private", 0).size)
         reject { SoftwareCapabilityArtifacts(context, role, group.id) }
     }

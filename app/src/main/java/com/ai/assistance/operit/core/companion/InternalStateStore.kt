@@ -286,8 +286,16 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun inspectCategory(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "decision", "feedback"))
+        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback"))
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
+        if (kind == "action_versions") {
+            requireNotNull(id)
+            // Authorize the current row before exposing any archived versions of this operation.
+            SubjectActions.read(store.context, role, chat, id, 0)
+            val rows = store.actionVersions(role, id, offset)
+            return JSONObject().put("items", JSONArray(rows.take(8)))
+                .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+        }
         if (kind in setOf("decision", "feedback") ||
             (kind == "category_versions" && (id.orEmpty().startsWith("decision:") || id.orEmpty().startsWith("feedback:"))))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
@@ -390,7 +398,11 @@ class InternalStateStore(private val context: Context) {
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
                 .put("host_materials", JSONArray(hostMaterials))
-                .put("retrieved_materials", JSONArray(if (groupInput) emptyList<JSONObject>() else retrievedMaterials))
+                .put("retrieved_materials", JSONArray(if (groupInput) retrievedMaterials.filter {
+                    // Only this group's own actual operations; never private cross-window material.
+                    it.optString("type") == "actual_operation" && it.optString("owner") == actor &&
+                        it.optJSONObject("locator")?.optString("parent") == "group:$chat"
+                } else retrievedMaterials))
             if (frame != null) payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
                 .put("subject_id", actor).put("state_version", frame.stateVersion).put("at", frame.at)
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
@@ -419,8 +431,11 @@ class InternalStateStore(private val context: Context) {
                     val row = numeric.getJSONObject(i)
                     members["state:" + row.getString("id")] = row.getInt("version")
                 }
+                frame = frame.copy(interactionMembers = members)
+            }
+            if (frame != null) {
                 val materials = payload.getJSONArray("retrieved_materials")
-                frame = frame.copy(interactionMembers = members, materialSources = (0 until materials.length())
+                frame = frame.copy(materialSources = (0 until materials.length())
                     .map { materials.getJSONObject(it) }.filter { it.optString("status") == "retrieved" }
                     .associate { it.getString("id") to it.toString() })
             }

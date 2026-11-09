@@ -71,7 +71,7 @@ class ConversationMarkupManager {
                 appendImageLinksWithinResultLimit(toolResultXml, imageLinkPayload)
             } else {
                 val errorPayload = buildString {
-                      append(receiptHeader)
+                    append(receiptHeader)
                     val message = result.error.orEmpty().trim()
                     val detail = result.result.toString().trim()
                     append(message)
