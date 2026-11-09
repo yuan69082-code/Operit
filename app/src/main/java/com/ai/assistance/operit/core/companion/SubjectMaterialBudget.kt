@@ -74,10 +74,15 @@ internal object SubjectMaterialBudget {
                 omitted.put(lane.path, lane.rows.size - lane.target.length())
             }
         }
-        // Identity has the first turn, not an unlimited exclusive allocation.
+        // A compact rotating directory remains discoverable even while large details compete.
+        // It carries no psychological ranking. Reserving these IDs prevents detail selection
+        // from permanently hiding the next page of existing records.
+        val directory = lanes.firstOrNull { it.path == "inner_structure.catalogue" }
+        directory?.rows?.forEach { include(directory, it) }
+        // Identity has the first detail turn, not an unlimited exclusive allocation.
         // Rotate all other domains per request so emotion/identity cannot forever exclude
         // contrary material. This is technical exposure, never a change in subjective focus.
-        val rest = lanes.drop(1)
+        val rest = lanes.drop(1).filter { it != directory }
         val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
         val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
         val order = listOf(lanes.first()) + rest.drop(start) + rest.take(start)

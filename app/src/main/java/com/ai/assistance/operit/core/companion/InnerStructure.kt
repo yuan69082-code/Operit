@@ -338,8 +338,13 @@ internal object InnerStructure {
             if (used + text.length + 1 <= MATERIAL_BUDGET - 2000) { candidates.put(copy(row)); used += text.length + 1 }
         }
         for (row in relevant) {
-            val text = row.toString()
-            if (used + text.length + 1 <= MATERIAL_BUDGET) { details.put(copy(row)); used += text.length + 1 }
+            // Current meaning is complete; adoption receipts and quoted evidence remain in
+            // get/history, not duplicated beside every active record on every request.
+            val projected = identityMaterial(row).put("id", row.getString("id"))
+                .put("evidence_ids", JSONArray(row.getJSONObject("evidence").keys().asSequence().toList()))
+                .put("detail", "companion_internal_state get; original evidence/history retained")
+            val text = projected.toString()
+            if (used + text.length + 1 <= MATERIAL_BUDGET) { details.put(projected); used += text.length + 1 }
         }
         check(result.toString().length <= MATERIAL_BUDGET)
         return result

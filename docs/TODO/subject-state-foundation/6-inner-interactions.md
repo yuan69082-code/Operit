@@ -19,6 +19,8 @@
 
 普通聊天及已有后台活动仍经过 ConversationService.prepareConversationHistory → CompanionContext.compose → InnerStructureContext.prepare → InternalStateStore.prepare。请求读取同一 CharacterCard.id 的身份、关系、偏好、需要、体验、重点事件及联合。CurrentRequestContext.stage/project 放入本轮宿主附件，不写成用户新消息。
 
+最终请求钩子只接收去除宿主状态帧的可编辑材料；finalizeBoundRequest 在真实发送前恢复原帧。此前该处只project，没有恢复帧，会使工具续轮丢失采用绑定及预算检查。本批修复并验证从compose、钩子隔离、最终恢复、工具续轮到候选提交的连续性。最终材料原文若被钩子改写/移除，拒绝登记为已提供，不虚构材料来源。
+
 原 operit_state_report 可带 unions；InternalStateReportStream → InnerStructureContext.submit → InternalStateReport.apply 是唯一报告入口。原 updates/revise、inner propose/adopt、episodes 与 unions 在同一 detached transaction 校验，全部通过才经 CompanionStore 和原 CategoryEvents 日志提交。任一项非法整份不采用，不重跑模型、工具或已发消息。
 
 双向变化通过同一报告的原成员操作实际保存，联合记录其相互作用方向；允许反向变化、无变化和拉扯。人格/偏好仍须先候选、后续请求明确采用，联合不能绕过。读取联合不重放 effects、不调度唤醒。
@@ -45,22 +47,27 @@ union 是第3批归档 storage_kind 的扩展，当前头与增量版本沿用 S
 - 原 ChatHistoryManager.recentAssistantActivity 与 StudyStore.recentActivity 提供真实保存消息、回复、批注关联；保留作者、时间、窗口、回复ID、保存状态与locator。saved不等于已读，不以模型自述认定成功。
 - 只有实际选入的 retrieved_materials 才进入 frame.materialSources；查询失败不生成已读凭证。候选保存接收快照、哈希、类型与定位；后来原文变化不冒充过去读到的内容。数字体验也能引用本轮材料，在增量体验记录保留绑定。
 - 旧聊天、摘要、记忆不冒充新发生或自动相信的事实。原文不改写，新理解仍须采用；不靠异步长期摘要保证刚刚回复的可见性。
+- 原旧日回声标题发现移入相同预算，不再直接追加用户输入。title_index_only保留定位、未知作者/时间和body_read=false，不能当作已读正文。工具返回来源ID包含本轮与结果位置，相同文字的不同调用不会合并为一个回执。
 
-书房仍是整书文件，recentActivity单书扫描随文件增长，未在本批重写。ObjectBox返回行数有界，但单条原始记忆大小与底层文本检索耗时仍受已有库影响，不将有界行数说成恒定扫描时间。
+书房仍是整书文件，recentActivity单书扫描随文件增长，未在本批重写。旧日回声沿用资料/阅读文件和日记索引扫描，只输出至多5条标题；底层仍有既有文件读取开销，不宣称这些旧库已改成分页存储。ObjectBox返回行数有界，但单条原始记忆大小与底层文本检索耗时仍受已有库影响，不将有界行数说成恒定扫描时间。上述读取在IO线程进行；主体状态与联合的版本历史使用原SQL分页。
 
 ## 统一预算与完整模型窗口
 
 SubjectMaterialBudget 统一选择身份、关系、偏好、驱力/体验、重点事件、联合、已取得记忆、近期结果、宿主材料及匹配世界书。默认2048、上限16384；companion_internal_state action=budget/tokens 修改本主体设置，走原归属与持久更新边界。它不是完整模型窗口。
 
-已核对各通道 calculateInputTokens/TokenCacheManager：现有请求前能力为启发式估算，没有精确tokenizer。材料以 ChatUtils 汉字×1.5、其他UTF-16单元×0.25为基础，对非汉字非ASCII字符额外计UTF-8字节，再加25%余量，为固定附件外壳留128估算Token。metadata 明示 exact=false、自定义分词器误差上界未知。25%是余量，不是误差保证；代码、特殊字符、不同分词器仍可能偏离。服务端usage只能事后得到。
+已核对各通道 calculateInputTokens/TokenCacheManager：远程通道主要为启发式估算，Llama/MNN已有本地tokenizer，工具包通道自行提供计数。材料选择以 ChatUtils 汉字×1.5、其他UTF-16单元×0.25为基础，对非汉字非ASCII字符额外计UTF-8字节，再加25%余量，为固定附件外壳留128估算Token。metadata 明示 exact=false、自定义分词器误差上界未知。25%是余量，不是误差保证；代码、特殊字符、不同分词器仍可能偏离。服务端usage只能事后得到。
 
-完整对象轮流争取空间，身份先获一次机会，不独占所有轮次；其余类别按请求轮换。过大对象不截断JSON，明确 omitted_counts 和原工具取回方式。未选中身份仍为权威，不用初始人设填补。材料游标不改写主体重点。
+新增可选的countLocalTextTokens契约只允许本地分词，Llama/MNN复用原session tokenizer，TokenTracking委托原通道。实际发送前对选中的完整宿主附件再做本地分词核验，超预算明确拒绝本次发送，不偷偷截断；分词失败不冒称精确。该计数不含完整聊天模板，完整窗口另外计算。远程不追加远程计量或推理请求，仍按明确标识的估算工作。MNN完整窗口预检不再先裁剪历史再计数，避免以缩短后的数量冒充原请求。
+
+有界轮换目录先保留可发现的ID，再由完整意义对象轮流争取空间，身份先获一次详细内容机会；其余类别按请求轮换。采用回执和原文证据不会随每条当前认识反复复制，完整content、version、origin与来源ID保留，原get/history能查全部证据。过大对象不截断JSON，明确 omitted_counts 和原工具取回方式。未选中身份仍为权威，不用初始人设填补。材料游标不改写主体重点。
 
 EnhancedAIService 在最终请求组装及工具续轮调用原通道输入估算，历史、指令、工具、附件计入一次，再核对启用的输出上限与配置窗口。超出估算窗口在发送前明确失败，不重跑工具；输出未配置或通道不可识别时标未知，不宣称已精确预留。多模态编码与模型分词仍有估算边界，无额外计量模型调用。
 
 ## 验收状态与边界
 
 首轮联合草稿 ccbdfd8 的 Android Tests 42585454809 已通过。预算接线后42587376139的Windows检查与打包通过；Android测试在 syncSttModelAssets 的OCR下载校验失败，未运行到测试。后续运行结果待补，不能把前次成功当最新版本通过。
+
+67e7235运行42590929419已执行1958项，2失败、6跳过：默认预算下缺少第二联合成员，轮换目录被详细内容挤占。本轮修正当前意义投影及目录预算，保留原断言继续回归。OCR下载保留原地址、锁定大小与SHA256，增加3次有限重试及不匹配诊断；不接受未校验的模型。
 
 接线测试运行生产composer、CurrentRequestContext、报告解析、提交与下一轮读取，包括相反方向和环状作用说明、原子拒绝、幂等/过期、独立成员、窗口局部联合、停用成员、求生欲、分页历史、真实聊天/书房材料到候选采用、预算与工具来源；保留前三批和独立修复测试，不删除失败测试。
 

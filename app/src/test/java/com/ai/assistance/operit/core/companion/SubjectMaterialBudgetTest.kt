@@ -38,8 +38,8 @@ class SubjectMaterialBudgetTest {
         val original = source.toString()
         val small = SubjectMaterialBudget.select(source)
         val large = SubjectMaterialBudget.select(source, 16384)
-        assertTrue(SubjectMaterialBudget.estimate(small.toString()) + 32 <= 2048)
-        assertTrue(SubjectMaterialBudget.estimate(large.toString()) + 32 <= 16384)
+        assertTrue(SubjectMaterialBudget.estimate(small.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 2048)
+        assertTrue(SubjectMaterialBudget.estimate(large.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 16384)
         assertEquals(original, source.toString())
         assertTrue(small.getJSONObject("material_budget").getJSONObject("omitted_counts").getInt("unions.items") > 0)
         val selected = small.getJSONObject("inner_structure").getJSONArray("selected")
@@ -86,5 +86,9 @@ class SubjectMaterialBudgetTest {
         assertEquals(bound, SubjectToolMaterials.attach(bound, 21))
         assertEquals(1, bound.count { it.content.contains("query_memory failed: offline") })
         assertTrue(updated.eventIds == f.eventIds) // Not a new real-world episode.
+        val second = SubjectToolMaterials.attach(bound +
+            PromptTurn(PromptTurnKind.TOOL_RESULT, "query_memory failed: offline", toolName = "query_memory"), 22)
+        assertEquals(2, requireNotNull(CurrentRequestContext.internalStateFrame(second)).materialSources.size)
+        assertEquals(second, SubjectToolMaterials.attach(second, 23))
     }
 }

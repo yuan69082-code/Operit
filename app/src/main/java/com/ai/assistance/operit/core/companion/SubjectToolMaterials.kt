@@ -17,7 +17,9 @@ internal object SubjectToolMaterials {
         val turn = turns[index]
         if (turn.metadata["subject_material_id"] != null) return turns
         val hash = InnerStructure.hash(turn.content)
-        val id = "material:tool:$hash"
+        // Identical return text from distinct calls is not the same occurrence. Retried
+        // projection retains the metadata receipt; identity is scoped to this turn/result.
+        val id = "material:tool:" + InnerStructure.hash("${frame.id}:$index:${turn.toolName}:$hash")
         val material = JSONObject().put("id", id).put("type", "tool_result")
             .put("author", turn.toolName ?: JSONObject.NULL).put("owner", frame.roleId)
             .put("at", at).put("text", turn.content.take(1200)).put("excerpt", turn.content.length > 1200)

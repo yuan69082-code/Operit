@@ -382,7 +382,8 @@ class InternalStateStore(private val context: Context) {
             }
             if (frame != null) {
                 val changes = payload.getJSONArray("important_changes")
-                frame = frame.copy(eventIds = setOfNotNull(inputEventId) +
+                frame = frame.copy(materialTokenLimit = payload.getJSONObject("material_budget").getInt("limit_tokens"),
+                    eventIds = setOfNotNull(inputEventId) +
                     (0 until changes.length()).map { changes.getJSONObject(it).getString("id") })
                 data.put("selection_cursor", selected.nextCursor)
                 // The old selector's cursor wraps at its own item count; sharing that cursor

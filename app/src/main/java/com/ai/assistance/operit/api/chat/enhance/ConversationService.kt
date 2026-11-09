@@ -774,7 +774,8 @@ class ConversationService(
                     preparedHistory = CurrentRequestContext.withoutStateBinding(historyWithRuntimeContext)
                 )
             )
-        return CurrentRequestContext.bindInternalStateFrame(visibleHistory(afterContext.preparedHistory), runtimeSections.internalStateFrame)
+        return CurrentRequestContext.bindInternalStateFrame(visibleHistory(afterContext.preparedHistory),
+            CurrentRequestContext.internalStateFrame(historyWithRuntimeContext))
     }
 
     /**

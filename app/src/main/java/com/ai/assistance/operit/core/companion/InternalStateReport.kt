@@ -21,7 +21,9 @@ data class InternalStateFrame(
     val innerObjects: Set<String> = emptySet(),
     val innerGuard: String = "",
     val interactionMembers: Map<String, Int> = emptyMap(),
-    val materialSources: Map<String, String> = emptyMap()
+    val materialSources: Map<String, String> = emptyMap(),
+    val materialTokenLimit: Int = 2048,
+    val materialText: String = ""
 )
 
 /** Applies one subjective report atomically. This does not replay the source event or choose actions. */
