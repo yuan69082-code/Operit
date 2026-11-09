@@ -4,6 +4,8 @@ fork: https://github.com/yuan69082-code/Operit
 
 # Gemini 空内容请求与异常隔离
 
+2026-11-10接手更新：园园已明确授权随六批一起验证、合并与发布。710a9a4完整合入fe1d212，重复的读流隔离实现保持一致，无合并冲突。整合运行[124](https://github.com/yuan69082-code/Operit/actions/runs/42679070016)Android详细报告2000项、0失败、6原有跳过，其中GeminiRequestContentTest 9项、GeminiReaderFailureTest 1项全部通过。旧独立构建123已取消，由整合候选统一交付；发布仍待APK及最终整合流程，原始手机请求与真实模型效果未验证。下文“仅修代码”是原窗口交接时的历史边界，已被用户本次授权更新。
+
 设备 `1.12.2-pc.1+86` 的 2026-11-10 崩溃记录为 Gemini HTTP 400：缺少 parts。日志保留了崩溃栈和重启后的启动记录，没有失败请求正文，因此不能确认是哪条消息触发，也不能归因于尚未发布的六批改造。
 
 已定位的请求路径：媒体引用仍在而缓存内容不可读取时，buildPartsArray 会得到空数组；空白或只含已移除思考标记的历史会生成空 text。旧实现仍把它们作为 Content 发送。

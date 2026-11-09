@@ -1,11 +1,13 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: batch-six-validation-blocked-actions-outage
+status: six-batch-integration-tests-passed-release-pending
 ---
 
 # 指定助手连续状态：六批实施记录
 
 第6批在 feat/subject-time-dreams / [PR #58](https://github.com/yuan69082-code/Operit/pull/58) 接续 #57 → #56 → #55 → #54 → #53，实施与验证记录见 [时间、休息、梦与恢复](8-time-rest-dreams.md)。用户最新授权六批完成后整体合并发布；下文“不合并/不发布”是此前批次交付时的历史边界，不再限制本次最终整合。第5批操作回执、软件能力与接续入口仍见 [第5批交接](7-action-feedback.md)。
+
+2026-11-10续作：GitHub恢复后，710a9a4完整合入用户指定的PR #59（Gemini空parts和读流错误修复），没有重复异常处理入口。运行124详细报告确认2000项、0失败、6原有跳过，真实快照恢复测试与新增Gemini10项均通过。最终合并发布仍须等待同提交APK及最终整合发布流程；最终发布信息以PR #53/#58为准，不把本段测试结果当作已经发布。
 
 第3批从未合并 #54 / b456315 接续；类别内部事件、重点、求生欲特例及第4批接入点见 [类别内部事件](4-category-events.md)。此前两批记录保留为对应交付时事实。
 
