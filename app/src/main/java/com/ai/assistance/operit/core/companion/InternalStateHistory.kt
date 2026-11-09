@@ -227,12 +227,15 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?): List<JSONObject> {
         require(offset >= 0 && limit in 1..21)
         if (!file.exists()) return emptyList()
-        val filter = if (parent == null) "" else " AND parent=?"
-        val args = listOf(scope, kind) + listOfNotNull(parent) + listOf(limit.toString(), offset.toString())
+        val privateRecent = kind in SubjectRestDreams.kinds
+        val actualParent = parent ?: if (privateRecent) "private" else null
+        val filter = if (actualParent == null) "" else " AND parent=?"
+        val args = listOf(scope, kind) + listOfNotNull(actualParent) + listOf(limit.toString(), offset.toString())
         // Recent private generated material must not be permanently hidden behind the oldest
         // IDs. The existing scope/kind/parent/rowid index bounds this read before deserialization.
-        val order = if (kind in SubjectRestDreams.kinds) "rowid DESC" else "id"
-        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",
+        val order = if (privateRecent) "rowid DESC" else "id"
+        val index = if (privateRecent) " INDEXED BY category_recent" else ""
+        return db().rawQuery("SELECT payload FROM category_current$index WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",
             args.toTypedArray()).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
     }
 

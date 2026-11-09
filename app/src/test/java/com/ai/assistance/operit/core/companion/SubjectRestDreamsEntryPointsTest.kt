@@ -25,6 +25,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.SQLiteMode
 
 /** Model content below is simulated. Production request composition, hidden report parsing,
  * adoption, native query, SQLite and full snapshot backup/restore are exercised directly. */
@@ -194,19 +195,36 @@ class SubjectRestDreamsEntryPointsTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    @SQLiteMode(SQLiteMode.Mode.NATIVE)
     @Test fun realFullSnapshotBackupRestoresDreamAndSubsequentNormalRead(): Unit = runBlocking {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         try {
             val id = createDream()
             val original = item("dream", id).toString()
+            assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
+            val databasePath = context.getDatabasePath("app_database")
+            assertEquals("snapshot must include the actual Room directory", java.io.File(context.dataDir, "databases").canonicalFile, databasePath.parentFile!!.canonicalFile)
             val zip = RawSnapshotBackupManager.exportToBackupDir(context)
             assertTrue(zip.length() > 0)
+            // Check exported facts, not only the ZIP size. No writes to either database.
+            java.util.zip.ZipFile(zip).use { archive ->
+                val entry = requireNotNull(archive.getEntry("payload/databases/app_database"))
+                val copy = java.io.File(context.cacheDir, "verify-exported-chat.sqlite")
+                archive.getInputStream(entry).use { input -> copy.outputStream().use { input.copyTo(it) } }
+                android.database.sqlite.SQLiteDatabase.openDatabase(copy.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { db ->
+                    db.rawQuery("SELECT id FROM chats WHERE id = ?", arrayOf(chat)).use { rows ->
+                        assertTrue("exported database must contain the source window", rows.moveToFirst())
+                    }
+                }
+                copy.delete()
+            }
             val f = readMaterial(second, "rest", "current")
             submit(f, JSONObject().put("rest", rest("awake", 1)))
             RawSnapshotBackupManager.restoreFromBackupUri(context, Uri.fromFile(zip))
             // The existing restore UI requires an application restart. Simulate only that
             // singleton lifetime boundary; do not edit any persisted subject or chat data.
             ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
+            assertNotNull("restored Room database must contain the source window", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             assertEquals(original, item("dream", id).toString())
             assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
             assertTrue(requireNotNull(request(second).internalStateFrame).materialSources.values.any { it.contains("海上的书房") })

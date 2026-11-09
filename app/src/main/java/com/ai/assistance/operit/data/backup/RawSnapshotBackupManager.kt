@@ -129,7 +129,13 @@ object RawSnapshotBackupManager {
 
             try {
                 val sqliteDb = AppDatabase.getDatabase(context).openHelper.writableDatabase
-                sqliteDb.query("PRAGMA wal_checkpoint(FULL)").close()
+                // SQLite cursors execute lazily. Closing without stepping does not guarantee
+                // that the committed WAL pages have reached the database being archived.
+                sqliteDb.query("PRAGMA wal_checkpoint(FULL)").use { cursor ->
+                    check(cursor.moveToFirst() && cursor.getInt(0) == 0) {
+                        "Database checkpoint is busy; snapshot cannot confirm flushed pages"
+                    }
+                }
             } catch (e: Exception) {
                 AppLogger.w(TAG, "wal_checkpoint failed", e)
             }

@@ -328,7 +328,10 @@ class CategoryEventsEntryPointsTest {
         assertEquals(1, fresh.inspectCategory(role, second, "episode", "A", 0).getJSONObject("item").getInt("version"))
         val next = CompanionContext.compose(context, second, role, JSONObject(), true, "继续")
         assertTrue(next.state.contains("这是独立事情A")); assertTrue(next.instructions.contains("归零不触发停止"))
-        assertEquals(0, fresh.inspectCategory(other, second, "episode", null, 0).getJSONArray("items").length())
+        rejects { fresh.inspectCategory(other, second, "episode", null, 0) }
+        val otherWindow = ChatHistory(title = "另一助手", messages = emptyList(), characterCardId = other)
+        ChatHistoryManager.getInstance(context).saveChatHistory(otherWindow)
+        assertEquals(0, fresh.inspectCategory(other, otherWindow.id, "episode", null, 0).getJSONArray("items").length())
         withContext(AssistantScope.executionContext(other)) { rejects { fresh.inspectCategory(role, second, "episode", "A", 0) } }
     }
 
