@@ -757,7 +757,8 @@ class CharacterCardManager private constructor(private val context: Context) {
     suspend fun combinePrompts(
         characterCardId: String,
         additionalTagIds: List<String> = emptyList(),
-        promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT
+        promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT,
+        labelInitialConfiguration: Boolean = true
     ): String {
         val characterCard = getCharacterCardFlow(characterCardId).first()
         val allTagIds = (characterCard.attachedTagIds + additionalTagIds).distinct()
@@ -772,7 +773,10 @@ class CharacterCardManager private constructor(private val context: Context) {
         
         val combinedPrompt = buildString {
             if (characterCard.characterSetting.isNotBlank()) {
+                val innerStateEnabled = labelInitialConfiguration && com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(characterCardId)
+                if (innerStateEnabled) append("[角色初始配置：原文保留；人格描述由本轮持续身份规则决定是否仅作参考，身份资料与运行契约仍有效]\n")
                 append(characterCard.characterSetting)
+                if (innerStateEnabled) append("\n[角色初始配置结束]")
                 append("\n\n")
             }
             

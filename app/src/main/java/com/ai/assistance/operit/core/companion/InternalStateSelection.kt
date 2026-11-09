@@ -96,16 +96,23 @@ object InternalStateSelection {
         }
         val events = InternalStateEngine.rows(view, "events").filter { it.optLong("at") <= now }
         events.filter { it.getString("id") != currentEventId }.forEach { event ->
+            val innerProposal = event.optString("source") in setOf("user_relation_proposal", "assistant_relation_proposal")
             val changes = InternalStateEngine.rows(event, "changes").filter {
                 it.getString("scope") in setOf("global", chat)
             }
             val eventRelevance = relevance(event)
-            if ((event.optString("chat") == chat || changes.isNotEmpty()) &&
+            if (innerProposal || (event.optString("chat") == chat || changes.isNotEmpty()) &&
                 (changes.isNotEmpty() || eventRelevance > 0)) {
                 val value = JSONObject(event.toString()).put("changes", JSONArray(changes))
                     .put("disclosure", InternalStateEngine.eventDisclosure(view, event))
+                if (innerProposal) {
+                    // The complete edited text remains in get/history. A compact notice must
+                    // still fit the normal selector when a large edit exceeds its detail budget.
+                    value.remove("inner_source")
+                    value.put("source_location", "companion_internal_state get events.inner_source")
+                }
                 items += Item("event:${event.getString("id")}", "important_changes", value,
-                    eventRelevance, event.getLong("at"), false, false, false)
+                    eventRelevance, event.getLong("at"), false, innerProposal, innerProposal)
             }
         }
         InternalStateEngine.rows(view, "experiences").filter {

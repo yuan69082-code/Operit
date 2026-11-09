@@ -974,6 +974,11 @@ class MNNProvider(
         }
     }
 
+    override suspend fun countLocalTextTokens(text: String): Long = withContext(Dispatchers.IO) {
+        initModel().getOrThrow()
+        requireNotNull(llmSession).countTokens(text).toLong()
+    }
+
     override suspend fun calculateInputTokens(
         chatHistory: List<PromptTurn>,
         availableTools: List<ToolPrompt>?
@@ -988,11 +993,8 @@ class MNNProvider(
             val prompt = buildPrompt(flattenedHistory)
             return countTokens(prompt).toLong()
         }
-        val modelDir = getModelDir(context, modelName)
-        val maxAllTokens = cachedModelMaxAllTokens ?: readModelMaxAllTokens(modelDir).also { cachedModelMaxAllTokens = it }
-        val maxPromptTokens = (maxAllTokens - 512).coerceAtLeast(128)
-        val safeHistory = trimHistoryToTokenBudget(session, flattenedHistory, maxPromptTokens)
-        return kotlin.runCatching { session.countTokensWithHistory(safeHistory).toLong() }
+        // Preflight must measure the complete request, not a silently trimmed substitute.
+        return kotlin.runCatching { session.countTokensWithHistory(flattenedHistory).toLong() }
             .getOrElse {
                 val prompt = buildPrompt(flattenedHistory)
                 countTokens(prompt).toLong()

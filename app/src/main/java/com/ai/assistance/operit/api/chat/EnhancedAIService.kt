@@ -721,6 +721,22 @@ class EnhancedAIService private constructor(private val context: Context) {
         _requestWindowEstimate.value = windowSize
     }
 
+    private suspend fun checkSubjectRequestWindow(input: Long, parameters: List<ModelParameter<*>>, window: Int,
+                                          history: List<PromptTurn>, service: AIService) {
+        val frame = CurrentRequestContext.internalStateFrame(history) ?: return
+        CurrentRequestContext.subjectMaterial(history)?.let { material ->
+            val exact = service.countLocalTextTokens(material)
+            if (exact != null) {
+                require(exact > 0 && exact <= frame.materialTokenLimit) { "主体材料分词计数无效或超过本轮预算，本次请求未发送；此前工具结果保留，请检查分词器或材料预算。" }
+                AppLogger.d(TAG, "Subject material local tokenizer=$exact quota=${frame.materialTokenLimit}; text only, full window measured separately")
+            }
+        }
+        val check = com.ai.assistance.operit.core.companion.SubjectRequestWindow.check(input, parameters, window)
+        AppLogger.d(TAG, "Subject full window: inputEstimate=$input outputReserve=${check.outputReserve} window=$window; provider estimate, unknown tokenizer error")
+        require(!check.exceeds) { "完整请求估算超过模型窗口（含历史、指令、工具和已配置输出预留），请先压缩或调整窗口；未重复执行本轮。" }
+        com.ai.assistance.operit.core.experience.RecallEvidence(context).selected(frame)
+    }
+
     private suspend fun estimatePreparedRequestWindow(
         serviceForFunction: AIService,
         preparedHistory: List<PromptTurn>,
@@ -1138,15 +1154,16 @@ class EnhancedAIService private constructor(private val context: Context) {
                             previous.kind == PromptTurnKind.USER &&
                                 current.kind == PromptTurnKind.USER &&
                                 previous.toolName == current.toolName
-                        }.let { CurrentRequestContext.project(it, finalProcessedInput) }
+                        }.let { CurrentRequestContext.finalizeBoundRequest(it, finalProcessedInput, execContext.internalStateFrame) }
                     execContext.conversationHistory.clear()
                     execContext.conversationHistory.addAll(requestHistory)
-                    estimatePreparedRequestWindow(
+                    val fullInputEstimate = estimatePreparedRequestWindow(
                         serviceForFunction = serviceForFunction,
                         preparedHistory = requestHistory,
                         availableTools = availableTools,
                         publishEstimate = true
                     )
+                    checkSubjectRequestWindow(fullInputEstimate, modelParameters, maxTokens, requestHistory, serviceForFunction)
                     
                     // 使用新的Stream API
                     AppLogger.d(TAG, "sendMessage请求前准备耗时: ${tAfterGetTools - startTime}ms, 流式输出: $stream")
@@ -2093,7 +2110,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             } else {
                 try {
                     withContext(Dispatchers.IO) {
-                        InternalStateStore(this@EnhancedAIService.context).submit(frame, report)
+                        com.ai.assistance.operit.core.companion.InnerStructureContext.submit(this@EnhancedAIService.context, frame, report)
                     }
                     context.stateReportCommitted = true
                 } catch (cancelled: CancellationException) {
@@ -2213,7 +2230,9 @@ class EnhancedAIService private constructor(private val context: Context) {
                 toolExposureMode = ToolExposureMode.resolve(config.apiProviderType),
                 callerName = characterName,
                 callerChatId = chatId,
-                callerCardId = roleCardId
+                callerCardId = roleCardId,
+                subjectFrame = context.internalStateFrame,
+                subjectRound = context.conversationHistory.count { it.kind == PromptTurnKind.TOOL_RESULT }
             )
 
             if (toolBatch.results.isNotEmpty()) {
@@ -2347,8 +2366,12 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         val normalizedChatHistory =
             conversationService.normalizeConversationHistoryForModel(context.conversationHistory, roleCardId)
+                .let { normalized -> withContext(Dispatchers.IO) {
+                    com.ai.assistance.operit.core.companion.SubjectToolMaterials.attach(normalized, System.currentTimeMillis(), results, this@EnhancedAIService.context)
+                } }
         context.conversationHistory.clear()
         context.conversationHistory.addAll(normalizedChatHistory)
+        context.internalStateFrame = CurrentRequestContext.internalStateFrame(normalizedChatHistory)
 
         // Get current conversation history is now just the normalized context history
         val currentChatHistory = context.conversationHistory
@@ -2396,6 +2419,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             availableTools = availableTools,
             publishEstimate = true
         )
+        checkSubjectRequestWindow(currentTokens, modelParameters, maxTokens, currentChatHistory, serviceForFunction)
 
         // After a tool call, check if token usage exceeds the threshold
         if (maxTokens > 0) {

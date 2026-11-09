@@ -577,6 +577,7 @@ open class GeminiProvider(
      */
     private fun buildPartsArray(text: String): JSONArray {
         val partsArray = JSONArray()
+        if (text.isBlank()) return partsArray
 
         val hasImages = MediaLinkParser.hasImageLinks(text)
         val hasMedia = MediaLinkParser.hasMediaLinks(text)
@@ -684,7 +685,7 @@ open class GeminiProvider(
                 }
             logDebug("发现系统消息: ${systemContent.take(50)}...")
 
-            systemInstruction = JSONObject().apply {
+            if (systemContent.isNotBlank()) systemInstruction = JSONObject().apply {
                 put("parts", JSONArray().apply {
                     put(JSONObject().apply { put("text", systemContent) })
                 })
@@ -808,7 +809,7 @@ open class GeminiProvider(
             )
         }
 
-        for (turn in historyWithoutSystem) {
+        for ((turnIndex, turn) in historyWithoutSystem.withIndex()) {
             val rawContent =
                 if (!preserveThinkInHistory && turn.kind == PromptTurnKind.ASSISTANT) {
                     ChatUtils.removeThinkingContent(turn.content)
@@ -817,6 +818,18 @@ open class GeminiProvider(
                 }
             val content = ChatUtils.stripOpenAiResponsesProtocolMarkup(rawContent)
             val contentWithoutGeminiMeta = ChatMarkupRegex.removeGeminiThoughtSignatureMeta(content)
+
+            // Empty saved assistant placeholders and expired media-only history have no
+            // wire payload. Keep the current input, even if empty, so request validation
+            // rejects it instead of silently sending a previous question in its place.
+            fun appendTurn(role: String, parts: JSONArray) {
+                if (parts.length() == 0 &&
+                    (turnIndex != historyWithoutSystem.lastIndex || turn.kind == PromptTurnKind.ASSISTANT)) {
+                    AppLogger.w(TAG, "Omitted contentless history turn: index=$turnIndex kind=${turn.kind}")
+                    return
+                }
+                contentsArray.put(JSONObject().put("role", role).put("parts", parts))
+            }
 
             if (enableToolCall) {
                 when (turn.kind) {
@@ -833,12 +846,7 @@ open class GeminiProvider(
                             )
                         } else {
                             flushOpenFunctionCallsAsUnmatched("assistant_boundary")
-                            contentsArray.put(
-                                JSONObject().apply {
-                                    put("role", "model")
-                                    put("parts", buildPartsArray(contentWithoutGeminiMeta))
-                                }
-                            )
+                            appendTurn("model", buildPartsArray(contentWithoutGeminiMeta))
                         }
                     }
 
@@ -855,12 +863,7 @@ open class GeminiProvider(
                             )
                         } else {
                             flushOpenFunctionCallsAsUnmatched("typed_tool_call_without_payload")
-                            contentsArray.put(
-                                JSONObject().apply {
-                                    put("role", "model")
-                                    put("parts", buildPartsArray(contentWithoutGeminiMeta))
-                                }
-                            )
+                            appendTurn("model", buildPartsArray(contentWithoutGeminiMeta))
                         }
                     }
 
@@ -869,12 +872,7 @@ open class GeminiProvider(
                         val partsArray = JSONArray()
                         appendUnmatchedOpenFunctionResponses(partsArray, "user_boundary")
                         appendParts(partsArray, buildPartsArray(contentWithoutGeminiMeta))
-                        contentsArray.put(
-                            JSONObject().apply {
-                                put("role", "user")
-                                put("parts", partsArray)
-                            }
-                        )
+                        appendTurn("user", partsArray)
                     }
 
                     PromptTurnKind.TOOL_RESULT -> {
@@ -926,14 +924,7 @@ open class GeminiProvider(
                             if (textContent.isNotEmpty()) {
                                 appendParts(partsArray, buildPartsArray(textContent))
                             }
-                            if (partsArray.length() > 0) {
-                                contentsArray.put(
-                                    JSONObject().apply {
-                                        put("role", "user")
-                                        put("parts", partsArray)
-                                    }
-                                )
-                            }
+                            appendTurn("user", partsArray)
                         }
                     }
 
@@ -946,12 +937,7 @@ open class GeminiProvider(
                         PromptTurnKind.TOOL_CALL -> "model"
                         else -> "user"
                     }
-                contentsArray.put(
-                    JSONObject().apply {
-                        put("role", geminiRole)
-                        put("parts", buildPartsArray(contentWithoutGeminiMeta))
-                    }
-                )
+                appendTurn(geminiRole, buildPartsArray(contentWithoutGeminiMeta))
             }
         }
 
@@ -1154,6 +1140,7 @@ open class GeminiProvider(
         if (exception is PromptBlockedException) {
             throw exception
         }
+        if (exception is GeminiRequestContentException) throw exception
         // Replaying an unchanged invalid request cannot repair its arguments and
         // previously hid HTTP 400 behind a misleading connection-timeout message.
         if (exception is HttpStatusException && exception.statusCode in 400..499 && exception.statusCode !in setOf(408, 429)) {
@@ -1503,6 +1490,9 @@ open class GeminiProvider(
             optionId = thinkingOptionId,
         )
 
+        // Validate the final body (including custom parameters), before any HTTP call.
+        // Retrying the same missing prompt cannot fix it and must not replay tools.
+        requireGeminiRequestContent(json, context.getString(R.string.gemini_error_empty_request_content))
         val jsonString = json.toString()
         // 使用分块日志函数记录请求体（省略过长的tools字段）
         val logJson = JSONObject(jsonString)

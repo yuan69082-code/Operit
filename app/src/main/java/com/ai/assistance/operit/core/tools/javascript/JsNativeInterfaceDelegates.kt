@@ -164,6 +164,8 @@ internal object JsNativeInterfaceDelegates {
                 }
             }
             is StringResultData -> SerializedToolResultData(data = JsonPrimitive(resultData.value))
+            is com.ai.assistance.operit.core.tools.InternalStateReadResultData ->
+                SerializedToolResultData(data = JsonPrimitive(resultData.value))
             is BooleanResultData -> SerializedToolResultData(data = JsonPrimitive(resultData.value))
             is IntResultData -> SerializedToolResultData(data = JsonPrimitive(resultData.value))
             is SandboxScriptExecutionResultData -> {

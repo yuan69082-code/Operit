@@ -15,6 +15,17 @@ class RecallEvidence(private val context: Context) {
                 .put("content", content).toString()).commit()) { "记忆证据保存失败" }
         } catch (e: Exception) { AppLogger.e("RecallEvidence", "Cannot persist recall evidence", e) }
     }
+
+    /** Update the existing request receipt from actual selection; never re-run retrieval. */
+    suspend fun selected(frame: com.ai.assistance.operit.core.companion.InternalStateFrame) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val key = RequestDiagnostics(context).active(frame.chatId, frame.roleId) ?: return@withContext
+        try {
+            val content = org.json.JSONArray(frame.materialSources.values.map { JSONObject(it) }).toString()
+            check(prefs.edit().putString(key, JSONObject().put("role", frame.roleId)
+                .put("strategy", "主体统一预算材料；工具正文仍见原返回")
+                .put("content", content).put("frame_id", frame.id).toString()).commit())
+        } catch (e: Exception) { AppLogger.e("RecallEvidence", "Cannot persist selected material evidence", e) }
+    }
     fun read(chatId: String, sentAt: Long, roleId: String? = null): String? {
         val prefix = "$chatId:$sentAt:"
         val rows = prefs.all.filter { (key, _) -> key.startsWith(prefix) && (roleId == null || key == prefix + roleId) }.values

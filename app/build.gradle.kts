@@ -261,6 +261,9 @@ fun downloadSttModelAsset(asset: SttModelAsset, destination: File) {
         tempFile.delete()
     }
 
+    // The pinned upstream occasionally returns HTTP 200 with a non-model response.
+    // Retry the same source a bounded number of times; never relax size/hash validation.
+    for (attempt in 1..3) {
     val connection = URI(asset.sourceUrl).toURL().openConnection() as HttpURLConnection
     connection.instanceFollowRedirects = true
     connection.connectTimeout = 30_000
@@ -280,10 +283,14 @@ fun downloadSttModelAsset(asset: SttModelAsset, destination: File) {
         connection.disconnect()
     }
 
-    require(verifySttModelAsset(tempFile, asset)) {
-        "Downloaded STT model asset failed verification: ${asset.targetPath}"
+    if (verifySttModelAsset(tempFile, asset)) {
+        Files.move(tempFile.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        return
     }
-    Files.move(tempFile.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    println("Model asset verification attempt $attempt/3: ${asset.targetPath}; bytes=${tempFile.length()}, sha256=${sha256(tempFile)}; expectedBytes=${asset.expectedBytes}, expectedSha256=${asset.expectedSha256}")
+    if (attempt < 3) Thread.sleep(1000L * attempt)
+    }
+    error("Downloaded STT model asset failed verification after 3 attempts: ${asset.targetPath}")
 }
 
 val sttModelAssetsManifestFile = layout.projectDirectory.file("config/stt-model-assets.properties")
@@ -359,6 +366,11 @@ val syncMainAssets by tasks.registering(Sync::class) {
 android {
     namespace = "com.ai.assistance.operit"
     compileSdk = 36
+
+    testOptions {
+        // Host-entry integration tests use real card/model preference migrations and strings.
+        unitTests.isIncludeAndroidResources = true
+    }
 
     sourceSets {
         getByName("main") {
