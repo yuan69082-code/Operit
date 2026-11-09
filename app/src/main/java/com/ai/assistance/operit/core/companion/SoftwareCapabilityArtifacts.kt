@@ -42,15 +42,34 @@ internal class SoftwareCapabilityArtifacts(context: Context, private val role: S
         return expanded
     }
 
-    fun build(id: String, source: String, previous: String?): JSONObject {
+    private fun artifact(id: String, source: String, previous: String?, requestId: String): JSONObject {
         require(id.length in 1..80)
         if (previous != null) require(get(previous).getString("id") == id)
+        return JSONObject().put("runtime", "operit-calculator-arithmetic/v1").put("owner", role)
+            .put("id", id).put("source", source).put("previous_version", previous ?: JSONObject.NULL)
+            .put("build_request_id", requestId).put("inputs", JSONArray(names(source).sorted()))
+    }
+
+    private fun installed(artifact: JSONObject) = JSONObject().put("id", artifact.getString("id"))
+        .put("version", artifact.getString("version")).put("stage", "installed")
+        .put("artifact", path(artifact.getString("version")).name).put("inputs", artifact.getJSONArray("inputs"))
+        .put("runtime", artifact.getString("runtime")).put("execution", "not_run")
+
+    /** Verify this exact build's immutable output; never build again to answer recovery. */
+    fun recoverBuild(id: String, source: String, previous: String?, requestId: String): JSONObject? {
+        val expected = artifact(id, source, previous, requestId)
+        val version = InnerStructure.hash(expected)
+        return synchronized(locks.computeIfAbsent(root.absolutePath) { Any() }) {
+            if (!path(version).exists()) null else installed(get(version))
+        }
+    }
+
+    fun build(id: String, source: String, previous: String?): JSONObject {
+        val requestId = requireNotNull(com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.currentToolRuntimeContext()?.hostInvocationId)
         val probe = JSONObject()
         names(source).forEach { probe.put(it, 0) }
         ExpressionParser(expression(source, probe)).parse() // Syntax only: never run a build.
-        val artifact = JSONObject().put("runtime", "operit-calculator-arithmetic/v1").put("owner", role)
-            .put("id", id).put("source", source).put("previous_version", previous ?: JSONObject.NULL)
-            .put("inputs", JSONArray(names(source).sorted()))
+        val artifact = artifact(id, source, previous, requestId)
         val version = InnerStructure.hash(artifact)
         val file = path(version)
         synchronized(locks.computeIfAbsent(root.absolutePath) { Any() }) {
@@ -63,9 +82,7 @@ internal class SoftwareCapabilityArtifacts(context: Context, private val role: S
                 catch (failure: Throwable) { atomic.failWrite(out); throw failure }
             }
         }
-        return JSONObject().put("id", id).put("version", version).put("stage", "installed")
-            .put("artifact", file.name).put("inputs", artifact.getJSONArray("inputs"))
-            .put("runtime", artifact.getString("runtime")).put("execution", "not_run")
+        return installed(artifact)
     }
 
     fun get(version: String): JSONObject {

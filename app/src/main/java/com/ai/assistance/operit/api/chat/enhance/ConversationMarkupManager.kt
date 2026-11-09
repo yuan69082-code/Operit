@@ -52,8 +52,13 @@ class ConversationMarkupManager {
          * @return The formatted tool result message
          */
         fun formatToolResultForMessage(result: ToolResult): String {
-            return if (result.success) {
-                val (toolPayload, imageLinkPayload) = splitImageLinksForModel(result.result.toString())
+            // Put the durable ID before bounded detail so even a truncated return can be queried.
+            // A successful transport response may still contain an unknown/partial operation.
+            val receiptHeader = result.subjectActionId?.let {
+                "[操作回执 id=$it status=${result.executionStatus}；仅指本次工具请求，非愿望满足或用户已读；详情用 companion_internal_state get section=action id=$it]\n"
+            }.orEmpty()
+            return if (result.success && result.executionStatus !in setOf("unknown", "partial", "failed", "cancelled", "denied")) {
+                val (toolPayload, imageLinkPayload) = splitImageLinksForModel(receiptHeader + result.result.toString())
                 val toolResultXml =
                     createBoundedToolResultXml(
                         toolName = result.toolName,
@@ -66,6 +71,7 @@ class ConversationMarkupManager {
                 appendImageLinksWithinResultLimit(toolResultXml, imageLinkPayload)
             } else {
                 val errorPayload = buildString {
+                      append(receiptHeader)
                     val message = result.error.orEmpty().trim()
                     val detail = result.result.toString().trim()
                     append(message)

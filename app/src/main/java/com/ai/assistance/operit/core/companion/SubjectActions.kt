@@ -44,6 +44,19 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                     .put("status", "requested").put("at", System.currentTimeMillis())
             }
         }
+        if (!fresh && !row.has("receipt") && tool.name == "companion_software" &&
+            tool.parameters.firstOrNull { it.name == "action" }?.value == "build") {
+            try {
+                fun arg(name: String) = tool.parameters.firstOrNull { it.name == name }?.value
+                val verified = SoftwareCapabilityArtifacts(context, frame.roleId, frame.chatId).recoverBuild(
+                    requireNotNull(arg("id")), requireNotNull(arg("source")), arg("previous_version"), id)
+                if (verified != null) return@withContext Claim(id, false,
+                    finish(id, ToolResult(tool.name, true, StringResultData(verified.toString())), "completed"))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                com.ai.assistance.operit.util.AppLogger.e("SubjectActions", "本地产物不能证实原操作，保留未知且不重放", failure)
+            }
+        }
         Claim(id, fresh, if (fresh) null else replay(row))
     }
 

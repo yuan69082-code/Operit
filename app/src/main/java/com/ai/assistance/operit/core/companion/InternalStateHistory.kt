@@ -115,6 +115,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             db.execSQL("CREATE INDEX IF NOT EXISTS history_contact_global ON history(scope,contact_at)")
             db.execSQL("CREATE TABLE IF NOT EXISTS category_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, parent TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
             db.execSQL("CREATE INDEX IF NOT EXISTS category_parent ON category_current(scope,kind,parent,id)")
+            // Equal owner/kind/parent ranges are then ordered by SQLite's implicit rowid.
+            // Latest receipt pages must not sort every full historical result.
+            db.execSQL("CREATE INDEX IF NOT EXISTS category_recent ON category_current(scope,kind,parent)")
             db.execSQL("CREATE TABLE IF NOT EXISTS category_commits (scope TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(scope,id))")
         }
     }
@@ -205,7 +208,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     fun actionPage(parent: String, offset: Int): List<JSONObject> {
         require(offset >= 0)
         if (!file.exists()) return emptyList()
-        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind='action' AND parent=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+        return db().rawQuery("SELECT payload FROM category_current INDEXED BY category_recent WHERE scope=? AND kind='action' AND parent=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
             arrayOf(scope, parent, offset.toString())).use { c ->
             buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) }
         }

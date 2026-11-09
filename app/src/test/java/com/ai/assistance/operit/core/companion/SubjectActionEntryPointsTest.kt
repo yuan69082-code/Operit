@@ -44,6 +44,9 @@ class SubjectActionEntryPointsTest {
             ChatHistoryManager.getInstance(context).saveChatHistory(c); return c.id
         }
         chat = window(); second = window()
+        // Plain Robolectric Application does not run OperitApplication's permission bootstrap.
+        // Use the same initializer before the real default tool registrar.
+        com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences(context)
         handler = AIToolHandler.getInstance(context)
         handler.registerDefaultTools()
         handler.getToolPermissionSystem().saveMasterSwitch(PermissionLevel.ALLOW)
@@ -291,5 +294,52 @@ class SubjectActionEntryPointsTest {
         assertFalse(conflict.success)
         assertEquals("unknown", SubjectActions.read(context, role, second, first.subjectActionId, 0).getJSONObject("item").getString("status"))
         assertEquals(0, InternalStateStore(context).inspectCategory(role, chat, "feedback", null, 0).getJSONArray("items").length())
+    }
+
+    @Test fun parsedToolDeclarationAndSubjectFeedbackUseOriginalAtomicAdoption(): Unit = runBlocking {
+        val initial = requireNotNull(sections().internalStateFrame)
+        fun paused() = JSONObject().put("condition", "always").put("reason", "本测试没有时间变化")
+            .put("interval_minutes", 1).put("amount", 0)
+        val definition = JSONObject().put("id", "feeling").put("name", "感受").put("description", "主体明确报告")
+            .put("kind", "emotion").put("min", 0).put("max", 100).put("baseline", 30).put("scope", "global")
+            .put("private", true).put("share", false).put("participates", true).put("effects", JSONArray())
+            .put("time_rules", JSONObject().put("increase", paused()).put("decrease", paused()).put("floor", 0))
+        submit(initial, JSONObject().put("create", JSONArray().put(JSONObject().put("definition", definition)
+            .put("value", 30).put("reason", "模拟模型的明确报告"))))
+        val s = sections(); val f = requireNotNull(s.internalStateFrame)
+        val declaration = JSONObject().put("decision", "想检验这个计算").put("evidence", JSONArray().put(f.eventIds.first()))
+        val calls = ToolExecutionManager.extractToolInvocations("""
+            <tool_A1b2 name="calculate">
+            <param name="expression">3*5</param>
+            <param name="__operit_action">$declaration</param>
+            </tool_A1b2>
+        """.trimIndent())
+        assertEquals(1, calls.size)
+        val result = execute(f, calls).results.single()
+        assertTrue(result.error, result.success)
+        val state = InternalStateStore(context)
+        fun value() = state.inspectCategory(role, chat, "state", "feeling", 0).getJSONObject("item").getDouble("value")
+        assertEquals(30.0, value(), 0.0) // Technical success did not supply a subjective change.
+        val fact = SubjectActions.read(context, role, chat, result.subjectActionId, 0).getJSONObject("item")
+        assertEquals("想检验这个计算", fact.getJSONObject("declaration").getString("decision"))
+        val bound = delivered(s, listOf(result))
+        val source = bound.materialSources.keys.first { it.startsWith("material:action:") }
+        val feedback = JSONObject().put("id", "post-result").put("expected_version", 0).put("meaning", "有了结果，我改变了理解")
+            .put("action_id", result.subjectActionId).put("result_source", source).put("evidence", JSONArray().put(source))
+        val update = JSONObject().put("id", "feeling").put("value", 20).put("reason", "模拟模型后续选择的变化，不是技术成功映射")
+            .put("evidence", JSONArray().put(source))
+        val fields = JSONObject().put("updates", JSONArray().put(update)).put("action_feedback", JSONArray().put(feedback))
+        submit(bound, fields)
+        assertEquals(20.0, value(), 0.0)
+        reject { submit(bound, JSONObject(fields.toString()).put("updates", JSONArray().put(JSONObject(update.toString()).put("value", 90)))) }
+        assertEquals(20.0, value(), 0.0)
+        val next = sections(second)
+        val query = execute(requireNotNull(next.internalStateFrame), listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "feedback", "id" to "post-result")))).results.single()
+        val later = delivered(next, listOf(query))
+        val params = JSONObject().put("decision", "沿用已读理解做另一项核对")
+            .put("intention_refs", JSONArray().put(JSONObject().put("kind", "feedback").put("id", "post-result").put("version", 1)))
+        val continuation = execute(later, listOf(invocation("calculate", mapOf("expression" to "5+1", SubjectActions.DECLARATION to params.toString()))), 1).results.single()
+        assertTrue(continuation.error, continuation.success)
     }
 }
