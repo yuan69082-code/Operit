@@ -29,8 +29,7 @@ internal object CategoryEvents {
         return (0 until actions.length()).map { actions.getJSONObject(it) }
             .filter { it.optString("op") == "appraise" }.flatMap { strings(it.getJSONArray("evidence"), 6) }.distinct()
     }
-    private fun category(data: JSONObject, id: String): JSONObject = requireNotNull(InnerStructure.records(data)
-        .firstOrNull { it.getString("id") == id }) { "类别须先通过内在候选采用" }.getJSONObject("content").also {
+    private fun category(data: JSONObject, id: String): JSONObject = requireNotNull(InnerStructure.record(data, id)) { "类别须先通过内在候选采用" }.getJSONObject("content").also {
         require(it.getString("family") in families && it.getString("status") == "active") { "此记录不是活动的心理类别" }
     }
     internal fun append(data: JSONObject, frame: InternalStateFrame, row: JSONObject) {
@@ -40,7 +39,6 @@ internal object CategoryEvents {
             data.put("category_commit", journal)
         }
         val rows = journal.getJSONArray("rows")
-        require(rows.length() < 64) { "本轮事件写入超过容量，整份报告不采用" }
         rows.put(row)
     }
     fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {

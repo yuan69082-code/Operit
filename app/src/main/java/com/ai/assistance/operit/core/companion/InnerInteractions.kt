@@ -18,7 +18,7 @@ internal object InnerInteractions {
     }
 
     private fun member(data: JSONObject, kind: String, id: String, chat: String, at: Long): JSONObject = when (kind) {
-        "inner" -> requireNotNull(InnerStructure.records(data).firstOrNull { it.getString("id") == id })
+        "inner" -> requireNotNull(InnerStructure.record(data, id))
         "episode" -> requireNotNull(CategoryEvents.row(data, kind, id))
         "state" -> stateMember(data, id, chat, at)
         else -> throw IllegalArgumentException("联合成员类型不受支持")
@@ -115,7 +115,7 @@ internal object InnerInteractions {
                 val kind = ref.getString("kind")
                 val id = ref.getString("id")
                 val version = when (kind) {
-                    "inner" -> InnerStructure.records(data).firstOrNull { it.getString("id") == id }?.optInt("version")
+                    "inner" -> InnerStructure.record(data, id)?.optInt("version")
                     "episode" -> CategoryEvents.row(data, kind, id)?.optInt("version")
                     "state" -> InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id && it.optBoolean("active") }?.optInt("version")
                     else -> null

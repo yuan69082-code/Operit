@@ -46,6 +46,8 @@ internal object SubjectToolMaterials {
             actionIds.add(source.getString("id"))
         }
         val members = frame.interactionMembers.toMutableMap()
+        val innerVersions = frame.innerVersions.toMutableMap()
+        val pendingBindings = frame.innerPending.toMutableMap()
         results.filter { it.success && it.toolName == "companion_internal_state" }.forEach { result ->
             val receipt = result.result as? InternalStateReadResultData ?: return@forEach
             // Only complete, actually delivered native reads establish member/version proof.
@@ -53,6 +55,18 @@ internal object SubjectToolMaterials {
             if (!receipt.privateContext || receipt.owner != frame.roleId || receipt.chatId != frame.chatId ||
                 !turn.content.contains(receipt.value)) return@forEach
             val body = JSONObject(receipt.value)
+            fun candidates(values: JSONArray?) {
+                if (values == null) return
+                for (i in 0 until values.length()) {
+                    val row = values.getJSONObject(i)
+                    pendingBindings[row.getString("id")] = InnerStructure.hash(row)
+                }
+            }
+            when (receipt.section) {
+                null -> candidates(body.optJSONObject("inner")?.optJSONArray("pending"))
+                "inner" -> candidates(body.optJSONArray("pending"))
+                "inner_pending" -> candidates(body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items"))
+            }
             if (receipt.section in SubjectRestDreams.kinds) {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {
@@ -74,6 +88,7 @@ internal object SubjectToolMaterials {
                 for (i in 0 until values.length()) {
                     val row = values.getJSONObject(i)
                     members["$kind:${row.getString("id")}"] = row.getInt("version")
+                    if (kind == "inner") innerVersions[row.getString("id")] = row.getInt("version")
                 }
             }
             when (receipt.section) {
@@ -90,6 +105,7 @@ internal object SubjectToolMaterials {
             }
         }
         val bound = CurrentRequestContext.bindInternalStateFrame(turns, frame.copy(
+            innerVersions = innerVersions, innerPending = pendingBindings,
             materialSources = sources.entries.toList().takeLast(24).associate { it.key to it.value }, interactionMembers = members))
         return bound.mapIndexed { i, row ->
             if (i != index) row else row.copy(content = row.content +

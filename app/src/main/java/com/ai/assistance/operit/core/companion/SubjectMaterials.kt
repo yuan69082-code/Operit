@@ -22,8 +22,8 @@ internal object SubjectMaterials {
                 add(c.optString("understanding"))
                 add(c.optJSONArray("objects")?.toString().orEmpty())
             }
-            InnerStructure.records(data).filter { it.getJSONObject("content").getString("status") == "active" }
-                .take(8).forEach { add(it.getJSONObject("content").optString("kind")) }
+            InnerRows(data, false).rotating(data.optLong("material_query_cursor")).filter { it.getJSONObject("content").getString("status") == "active" }
+                .forEach { add(it.getJSONObject("content").optString("kind")) }
         }.joinToString(" ")
         fun terms(text: String) = com.ai.assistance.operit.util.TextSegmenter.segment(text)
             .map { it.trim() }.filter { it.length >= 2 }.distinct().take(3)

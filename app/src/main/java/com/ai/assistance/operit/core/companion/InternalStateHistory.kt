@@ -161,11 +161,10 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         }
         if (!writing) { db.beginTransaction(); writing = true }
         val rows = journal.getJSONArray("rows")
-        require(rows.length() <= 64)
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-            require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback") + SubjectRestDreams.kinds)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index") + SubjectRestDreams.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -244,6 +243,13 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return emptyList()
         return db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='category_versions' AND lookup=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
             arrayOf(scope, id, offset.toString())).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
+    fun categoryCount(kind: String, parent: String?): Long {
+        if (!file.exists()) return 0L
+        val filter = if (parent == null) "" else " AND parent=?"
+        return db().rawQuery("SELECT COUNT(*) FROM category_current WHERE scope=? AND kind=?$filter",
+            (listOf(scope, kind) + listOfNotNull(parent)).toTypedArray()).use { c -> c.moveToFirst(); c.getLong(0) }
     }
 
     fun page(kind: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> {

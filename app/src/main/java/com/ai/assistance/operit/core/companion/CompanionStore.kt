@@ -77,6 +77,10 @@ class CompanionStore(context: Context) {
             // The bounded journal is the commit point. Rebuild the index before any subsequent
             // reader/writer; an interrupted SQL transaction can repeat without a second owner.
             data.optJSONObject("category_commit")?.let { journal -> history(scope).use { it.applyCategoryJournal(journal) } }
+            if (history(scope).use { InnerRows.migrate(data, it) }) {
+                checkpoint(scope)
+                write(scope, data)
+            }
             InternalStateDocument(data, historyAccess(scope))
         } else data
     }
@@ -194,6 +198,9 @@ class CompanionStore(context: Context) {
         }
         override fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?) = synchronized(lock(scope)) {
             history(scope).use { it.categoryPage(kind, offset, limit, parent) }
+        }
+        override fun categoryCount(kind: String, parent: String?) = synchronized(lock(scope)) {
+            history(scope).use { it.categoryCount(kind, parent) }
         }
         private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256
