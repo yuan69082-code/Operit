@@ -29,7 +29,9 @@ object RoomTools {
             parametersStructured = listOf(p("action", "操作", true), p("id", "条目或来源ID"), p("details", "来源设置JSON"), p("title", "标题"), p("url", "原始来源链接"), p("text", "来源摘要或自己的随记"), p("part", "summary/body"), p("offset", "分页起点，每页10项")))
     ).map { prompt ->
         if (prompt.name == "companion_study") prompt.copy(description = prompt.description +
-            " action=activity查询实际近期书房保存/处理事实；action=note用id书目及details.note_id精确读取批注/回复。reply/annotate/review回执带book/chapter/version/reply_to/reply_id/author/saved_at；saved不代表用户已读。仅所属私聊可访问书房，群聊不可读取私人内容。") else prompt
+            " action=activity查询实际近期书房保存/处理事实；action=note用id书目及details.note_id精确读取批注/回复。reply/annotate/review回执带book/chapter/version/reply_to/reply_id/author/saved_at；saved不代表用户已读。仅所属私聊可访问书房，群聊不可读取私人内容。")
+        else if (prompt.name == "companion_room") prompt.copy(description = prompt.description +
+            " action=message 用details.message_id读取近期实际活动所列消息原文；details.offset为字符偏移默认0，每页2400个Unicode字符，next_offset继续。仅所属助手私聊可查询自己的私聊消息，不允许群聊查询。") else prompt
     }
     fun register(handler: AIToolHandler, context: Context) {
         names.forEach { name -> handler.registerTool(name, descriptionGenerator = { name }, executor = { tool ->
@@ -68,6 +70,17 @@ object RoomTools {
                             StudyTool.execute(context, actor, action, arg("id"), JSONObject(arg("details") ?: "{}"), offset)
                         }
                         "companion_room" -> when (action) {
+                            "message" -> {
+                                check(metadata.characterGroupId.isNullOrBlank()) { "群聊不能读取私聊活动原文" }
+                                val data = JSONObject(required("details"))
+                                val start = data.optInt("offset")
+                                val result = ChatHistoryManager.getInstance(context).assistantActivityDetail(actor, data.getLong("message_id"), start)
+                                val m = result.message
+                                JSONObject().put("message_id", m.messageId).put("chat_id", m.chatId).put("timestamp", m.timestamp)
+                                    .put("author", if (m.sender == "user") "user" else actor).put("text", m.content)
+                                    .put("saved", true).put("completed_at", m.completedAt).put("offset", start).put("total_chars", result.totalChars)
+                                    .put("next_offset", if (start.toLong() + 2400 < result.totalChars) start + 2400 else JSONObject.NULL)
+                            }
                             "get" -> room.read().put("widgets", RoomPolicy.layout(room.read())).put("theme_values", RoomTheme.encode(com.ai.assistance.operit.data.preferences.UserPreferencesManager.getInstance(context).resolveThemePreferenceSnapshot(characterCardId = actor).values))
                                 .put("editable", "title/subtitle/cover；widgets数组各项id,visible,size(1..3)，须包含diary,todo,reading,collection,dates各一次；dates数组各项title,date(YYYY-MM-DD)；theme可含bubble_ai_bubble_color/bubble_user_bubble_color/bubble_ai_text_color/bubble_user_text_color(#RRGGBB)，font_scale(0.8..1.5)，bubble_ai_system_font_name/bubble_user_system_font_name(default/serif/sans-serif/monospace/cursive)，background_image_uri/use_background_image/background_image_opacity(0..1)，bubble_ai_rounded_corners_enabled/bubble_rounded_corners_enabled")
                             "decorate" -> room.change(JSONObject(required("details")), true)

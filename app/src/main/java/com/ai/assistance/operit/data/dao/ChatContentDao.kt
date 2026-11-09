@@ -76,6 +76,8 @@ data class ChatContentCharacterCount(
 data class AssistantActivityRow(val chatId: String, val messageId: Long, val timestamp: Long,
     val sender: String, val content: String, val completedAt: Long)
 
+data class AssistantActivityDetail(@Embedded val message: AssistantActivityRow, val totalChars: Int)
+
 /** Reads message text in bounded rows so a single large message cannot overflow CursorWindow. */
 @Dao
 abstract class ChatContentDao {
@@ -88,6 +90,16 @@ abstract class ChatContentDao {
         "AND messages.displayMode='NORMAL' AND messages.sender IN ('user','ai','assistant') " +
         "ORDER BY messages.timestamp DESC, messages.messageId DESC LIMIT 8")
     abstract suspend fun recentAssistantActivity(role: String): List<AssistantActivityRow>
+
+    @Query("SELECT messages.chatId, messages.messageId, messages.timestamp, messages.sender, " +
+        "SUBSTR(CASE WHEN messages.selectedVariantIndex=0 THEN messages.content ELSE selectedVariant.content END,:offset+1,2400) AS content, " +
+        "LENGTH(CASE WHEN messages.selectedVariantIndex=0 THEN messages.content ELSE selectedVariant.content END) AS totalChars, " +
+        "CASE WHEN messages.selectedVariantIndex=0 THEN messages.completedAt ELSE selectedVariant.completedAt END AS completedAt " +
+        "FROM messages JOIN chats ON chats.id=messages.chatId LEFT JOIN message_variants AS selectedVariant " +
+        "ON selectedVariant.chatId=messages.chatId AND selectedVariant.messageTimestamp=messages.timestamp AND selectedVariant.variantIndex=messages.selectedVariantIndex " +
+        "WHERE messages.messageId=:id AND chats.characterCardId=:role AND (chats.characterGroupId IS NULL OR chats.characterGroupId='') " +
+        "AND messages.displayMode='NORMAL' AND messages.sender IN ('user','ai','assistant') LIMIT 1")
+    abstract suspend fun assistantActivityDetail(role: String, id: Long, offset: Int): AssistantActivityDetail?
 
     @Query(MESSAGE_CONTENT_ROW_QUERY + " WHERE messageId=:id LIMIT 1")
     protected abstract suspend fun queryActivityMessage(id: Long): MessageContentRow?

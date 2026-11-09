@@ -667,7 +667,8 @@ object CompanionRuntime {
             require(text.isNotBlank() && text.length <= 4000) { "主动消息为空或过长" }
             val saved = core.getChatHistoryDelegate().addWakeMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text),
                 chatId, roleId, "$wakeEventId:public")
-            rememberWake(raw, "聊天表达已保存，消息时间标识：${saved.timestamp}；不代表用户已读", text)
+            if (!saved.newlySaved) return@coroutineScope // A replay is not another contact or notification.
+            rememberWake(raw, "聊天表达已保存，消息时间标识：${saved.message.timestamp}；不代表用户已读", text)
             store.update("ledger:$chatId") {
                 it.put("unanswered", it.optInt("unanswered") + 1)
                 it.put("quiet_streak", 0)

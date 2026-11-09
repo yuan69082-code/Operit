@@ -962,7 +962,9 @@ class ChatHistoryManager private constructor(private val context: Context) {
     /** Stable trigger identity uses a reserved negative primary key, not text similarity.
      * Timestamp allocation and insertion share the existing chat lock; no model call holds it.
      */
-    suspend fun persistWakeMessage(chatId: String, role: String, trigger: String, message: ChatMessage): ChatMessage =
+    data class WakeMessageReceipt(val message: ChatMessage, val newlySaved: Boolean)
+
+    suspend fun persistWakeMessage(chatId: String, role: String, trigger: String, message: ChatMessage): WakeMessageReceipt =
         withContext(Dispatchers.IO) {
             require(trigger.isNotBlank() && message.sender == "ai" && message.contentStream == null && !message.isVariantPreview)
             chatMutex(chatId).withLock {
@@ -977,7 +979,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
                     check(prior.chatId == chatId && prior.sender == "ai" && prior.content == message.content && prior.displayMode == message.displayMode.name) {
                         "同一触发已有不同的已保存表达，禁止重复发送"
                     }
-                    return@withLock prior.toChatMessage()
+                    return@withLock WakeMessageReceipt(prior.toChatMessage(), false)
                 }
                 val latest = chatContentDao.getMessagesForChatDesc(chatId, 1).firstOrNull()?.timestamp ?: 0L
                 val saved = message.copy(timestamp = com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(
@@ -985,9 +987,16 @@ class ChatHistoryManager private constructor(private val context: Context) {
                 val entity = MessageEntity.fromChatMessage(chatId, saved, (messageDao.getMaxOrderIndex(chatId) ?: -1) + 1, id)
                 messageDao.insertMessage(entity)
                 chatDao.updateChatMetadata(chatId, metadata.title, System.currentTimeMillis(), metadata.inputTokens, metadata.outputTokens, metadata.currentWindowSize)
-                saved
+                WakeMessageReceipt(saved, true)
             }
         }
+
+    suspend fun assistantActivityDetail(role: String, id: Long, offset: Int) = withContext(Dispatchers.IO) {
+        require(offset >= 0)
+        com.ai.assistance.operit.core.companion.SubjectStateBoundary.authorize(role,
+            com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        requireNotNull(chatContentDao.assistantActivityDetail(role, id, offset)) { "消息不存在或不属于该助手的私聊" }
+    }
 
     suspend fun recentAssistantActivity(role: String) = withContext(Dispatchers.IO) {
         com.ai.assistance.operit.core.companion.SubjectStateBoundary.authorize(role,

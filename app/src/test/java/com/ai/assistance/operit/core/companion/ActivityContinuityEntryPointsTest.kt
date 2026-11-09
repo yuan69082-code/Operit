@@ -80,14 +80,30 @@ class ActivityContinuityEntryPointsTest {
         val message = ChatMessage(sender = "ai", roleName = "主体", content = "补答已真实保存")
         val saved = d.addWakeMessageToChat(message, chat, role, "study:stable:public")
         val replay = d.addWakeMessageToChat(message, chat, role, "study:stable:public")
-        assertEquals(saved.timestamp, replay.timestamp)
+        assertEquals(saved.message.timestamp, replay.message.timestamp)
+        assertTrue(saved.newlySaved); assertFalse(replay.newlySaved)
         assertEquals(1, d.getRuntimeChatHistory(chat).count { it.content == "补答已真实保存" })
         val next = CompanionContext.compose(context, second, role, JSONObject(), false, "继续")
         assertTrue(next.state.contains("补答已真实保存")); assertTrue(next.state.contains("reply_saved"))
         // New delegate/repository reads persistent rows rather than reusing an old UI list.
-        assertTrue(delegate(this).getRuntimeChatHistory(chat).any { it.timestamp == saved.timestamp && it.content == message.content })
+        assertTrue(delegate(this).getRuntimeChatHistory(chat).any { it.timestamp == saved.message.timestamp && it.content == message.content })
         rejects { d.addWakeMessageToChat(message.copy(content = "不能以新文字重试同一次发送"), chat, role, "study:stable:public") }
         assertEquals(1, history.recentAssistantActivity(role).count { it.content == "补答已真实保存" })
+    }
+
+    @Test fun activityOriginalsArePagedAndPrivateProjectionDoesNotEnterGroups(): Unit = runBlocking {
+        val d = delegate(this)
+        d.addWakeMessageToChat(ChatMessage(sender = "ai", content = "私聊内容".repeat(1200)), chat, role, "long-reply")
+        val activity = history.recentAssistantActivity(role).first()
+        assertEquals(1200, activity.content.length)
+        val first = history.assistantActivityDetail(role, activity.messageId, 0)
+        val next = history.assistantActivityDetail(role, activity.messageId, 2400)
+        assertEquals(2400, first.message.content.length); assertEquals(2400, next.message.content.length)
+        assertEquals(4800, first.totalChars)
+        rejects { history.assistantActivityDetail(other, activity.messageId, 0) }
+        val group = ChatHistory(title = "群", messages = emptyList(), characterGroupId = "historical-group")
+        history.saveChatHistory(group)
+        assertFalse(CompanionContext.compose(context, group.id, role, JSONObject(), false).state.contains("私聊内容"))
     }
 
     @Test fun claimIsAtomicAndCancellationDoesNotPretendTheReplySucceeded(): Unit = runBlocking {

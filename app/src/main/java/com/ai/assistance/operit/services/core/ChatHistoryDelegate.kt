@@ -1432,17 +1432,20 @@ class ChatHistoryDelegate(
         }
     }
 
-    suspend fun addWakeMessageToChat(message: ChatMessage, chatId: String, role: String, trigger: String): ChatMessage =
+    suspend fun addWakeMessageToChat(message: ChatMessage, chatId: String, role: String, trigger: String): ChatHistoryManager.WakeMessageReceipt =
         historyUpdateMutex.withLock {
-            val saved = chatHistoryManager.persistWakeMessage(chatId, role, trigger, message)
+            val receipt = chatHistoryManager.persistWakeMessage(chatId, role, trigger, message)
+            val saved = receipt.message
             // Visible state is published only after durable success, using the actual timestamp.
             if (_currentChatId.value == chatId && allowAddMessage.get()) {
                 upsertCurrentChatMessageInMemory(saved)
                 refreshCurrentChatDisplayFlags(chatId)
             }
-            ToolPkgChatMessageHookBridge.dispatchMessagePersisted(chatId, saved)
-            com.ai.assistance.operit.core.companion.InternalStateStore.noteMessage(context, chatId, saved)
-            saved
+            if (receipt.newlySaved) {
+                ToolPkgChatMessageHookBridge.dispatchMessagePersisted(chatId, saved)
+                com.ai.assistance.operit.core.companion.InternalStateStore.noteMessage(context, chatId, saved)
+            }
+            receipt
         }
 
     /**

@@ -79,7 +79,7 @@ object CompanionContext {
             val metadata = history.getChatMetadata(chatId)
             // No private cross-window material enters a group or another assistant's request.
             if (metadata?.characterCardId == roleId && metadata.characterGroupId.isNullOrBlank()) {
-                instructions.append("[近期实际活动]来自已保存记录，非模型自述。saved不代表用户已读；空回复不能否定其后已保存的补答。节选不完整，按来源ID查原文；不据此猜测新的经历。companion_study activity可查近期书房事实，note用id=书目ID/details.note_id=回复ID读原文；notes可追溯批注线程。\n")
+                instructions.append("[近期实际活动]来自已保存记录，非模型自述。saved不代表用户已读；空回复不能否定其后已保存的补答。节选不完整，companion_room message用details.message_id和offset按页查聊天原文；不据此猜测新的经历。companion_study activity可查近期书房事实，note用id=书目ID/details.note_id=回复ID读原文；notes可追溯批注线程。\n")
                 state.append("\n[近期实际活动]\n").append(JSONObject()
                     .put("chat", org.json.JSONArray(history.recentAssistantActivity(roleId).map { row ->
                         JSONObject().put("chat_id", row.chatId).put("message_id", row.messageId).put("timestamp", row.timestamp)
