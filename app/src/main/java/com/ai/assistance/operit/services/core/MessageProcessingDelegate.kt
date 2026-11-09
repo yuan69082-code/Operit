@@ -82,6 +82,17 @@ class MessageProcessingDelegate(
         private const val STREAM_PERSIST_INTERVAL_MS = 1000L
         private const val AUTO_READ_PREVIEW_MAX = 48
 
+        internal suspend fun collectResponseReaders(block: suspend CoroutineScope.() -> Unit): Throwable? = try {
+            // A try around a root launch's body does not contain failures from its children.
+            // Join/cancel every reader inside this scope before returning the failure to the turn.
+            coroutineScope { block() }
+            null
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            failure
+        }
+
         internal fun requireSuccessfulResponse(vararg streams: SharedStream<*>) {
             // Text-only observers intentionally do not throw. The owning send operation must
             // inspect the recorded cause before publishing any completion callbacks.
@@ -1450,6 +1461,7 @@ class MessageProcessingDelegate(
                 val streamCollectionJob =
                     coroutineScope.launch(Dispatchers.IO) {
                         try {
+                            val readerFailure = collectResponseReaders {
                             var hasLoggedFirstChunk = false
                             var hasPersistedStreamingMessage = false
                             var lastStreamingPersistAt = 0L
@@ -1637,18 +1649,10 @@ class MessageProcessingDelegate(
                                 }
                             }
 
-                            requireSuccessfulResponse(responseStream, sharedCharStream)
-
-                            if (isGroupOrchestrationTurn && aiMessage.content.isNotBlank()) {
-                                com.ai.assistance.operit.api.chat.AIForegroundService.notifyReplyCompleted(
-                                    context, activeChatId, characterName, aiMessage.content, avatarUri,
-                                    notifyReplyOverride = turnOptions.notifyReply)
-                            }
                             autoReadJob?.join()
                             callReadJob?.join()
-                            turnOptions.onVoiceCallComplete?.invoke(aiMessage.content)
-                            turnOptions.onCompanionComplete?.invoke(aiMessage.content)
                             waifuSegmentsJob?.join()
+                            requireSuccessfulResponse(responseStream, sharedCharStream)
 
                             if ((getIsAutoReadEnabled() && !turnOptions.proactiveWake) && !isWaifuModeEnabled) {
                                 val remaining = autoReadBuffer.toString()
@@ -1659,6 +1663,16 @@ class MessageProcessingDelegate(
                                 )
                                 flushAutoReadSegment(remaining, interrupt = isFirstAutoReadSegment)
                             }
+                            // A failed child reader must not publish a successful turn first.
+                            if (isGroupOrchestrationTurn && aiMessage.content.isNotBlank()) {
+                                com.ai.assistance.operit.api.chat.AIForegroundService.notifyReplyCompleted(
+                                    context, activeChatId, characterName, aiMessage.content, avatarUri,
+                                    notifyReplyOverride = turnOptions.notifyReply)
+                            }
+                            turnOptions.onVoiceCallComplete?.invoke(aiMessage.content)
+                            turnOptions.onCompanionComplete?.invoke(aiMessage.content)
+                            }
+                            streamCollectionResult.complete(readerFailure)
                         } catch (t: Throwable) {
                             // The send operation owns error reporting. Cancel remaining readers,
                             // then deliver the cause through the result instead of also throwing

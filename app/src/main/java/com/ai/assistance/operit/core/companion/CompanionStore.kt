@@ -41,8 +41,11 @@ class CompanionStore(context: Context) {
     private fun lock(scope: String) = locks.computeIfAbsent(File(root, key(scope)).absolutePath) { Any() }
 
     fun read(scope: String): JSONObject = synchronized(lock(scope)) {
+        val owner = SubjectStateBoundary.owner(scope)
+        if (owner != null) SubjectStateBoundary.authorize(owner,
+            com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val source = file(scope)
-        if (!source.baseFile.exists() && !File(source.baseFile.path + ".bak").exists()) JSONObject()
+        val data = if (!source.baseFile.exists() && !File(source.baseFile.path + ".bak").exists()) JSONObject()
         else if (scope.startsWith("internal-state:")) {
             var moved = false
             var archivedSequence = 0L
@@ -55,7 +58,8 @@ class CompanionStore(context: Context) {
                     }
                 }
                 state.put("archived_event_sequence", maxOf(state.optLong("archived_event_sequence"), archivedSequence))
-                attachContacts(state, archive)
+                // Old projected contacts are derived from the archive, not another authority.
+                state.remove("archived_contacts")
                 archive.commit()
                 state
             }
@@ -63,23 +67,81 @@ class CompanionStore(context: Context) {
             if (moved) write(scope, data)
             data
         } else JSONObject(source.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() })
+        if (owner != null && SubjectStateBoundary.adopt(data, owner, scope.substringBefore(':'))) {
+            // Immutable pre-adoption checkpoint. AtomicFile recovery and the same scope lock
+            // make a crash between archive commit, checkpoint and adoption safely repeatable.
+            checkpoint(scope)
+            write(scope, data)
+        }
+        if (scope.startsWith("internal-state:")) {
+            // The bounded journal is the commit point. Rebuild the index before any subsequent
+            // reader/writer; an interrupted SQL transaction can repeat without a second owner.
+            data.optJSONObject("category_commit")?.let { journal -> history(scope).use { it.applyCategoryJournal(journal) } }
+            InternalStateDocument(data, historyAccess(scope))
+        } else data
     }
 
-    fun update(scope: String, change: (JSONObject) -> Unit): JSONObject = synchronized(lock(scope)) {
+    /** Small read projection for book activity; skip chapter bodies and old notes while streaming. */
+    internal fun readArrayTail(scope: String, array: String, limit: Int): JSONArray = synchronized(lock(scope)) {
+        require(scope.startsWith("study-book:") && array in setOf("notes", "events") && limit in 1..8)
+        val input = file(scope)
+        if (!input.baseFile.exists() && !File(input.baseFile.path + ".bak").exists()) return@synchronized JSONArray()
+        val tail = java.util.ArrayDeque<JSONObject>()
+        com.google.gson.stream.JsonReader(input.openRead().bufferedReader(Charsets.UTF_8)).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() != array) { reader.skipValue(); continue }
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    tail.addLast(JSONObject(com.google.gson.JsonParser.parseReader(reader).toString()))
+                    if (tail.size > limit) tail.removeFirst()
+                }
+                reader.endArray()
+            }
+            reader.endObject()
+        }
+        JSONArray(tail.toList())
+    }
+
+    fun update(scope: String, change: (JSONObject) -> Unit): JSONObject {
+        check(SubjectStateBoundary.owner(scope) == null) { "主体状态须通过带来源的更新入口" }
+        return updateDocument(scope, null, change)
+    }
+
+    internal fun updateSubject(role: String, domain: String, source: String, change: (JSONObject) -> Unit): JSONObject =
+        updateDocument(SubjectStateBoundary.scope(role, domain), source, change)
+
+    private fun updateDocument(scope: String, source: String?, change: (JSONObject) -> Unit): JSONObject = synchronized(lock(scope)) {
         // A detached bounded document avoids mutable cache aliases and retaining every role in RAM.
         val data = read(scope)
+        val before = source?.let { JSONObject(data.toString()) }
         change(data)
+        if (before != null) SubjectStateBoundary.committed(data, before, requireNotNull(source))
         if (scope.startsWith("internal-state:")) history(scope).use { archive ->
             InternalStateHistory.compact(data) { kind, row ->
                 archive.put(kind, row)
                 if (kind == "events") data.put("archived_event_sequence",
                     maxOf(data.optLong("archived_event_sequence"), row.getLong("sequence")))
             }
-            attachContacts(data, archive)
             archive.commit()
         }
         write(scope, data)
         data
+    }
+
+    private fun checkpoint(scope: String) {
+        val original = file(scope)
+        if (!original.baseFile.exists() && !File(original.baseFile.path + ".bak").exists()) return
+        val checkpoint = AtomicFile(File(root, key(scope) + ".subject-v0"))
+        if (checkpoint.baseFile.exists() || File(checkpoint.baseFile.path + ".bak").exists()) {
+            checkpoint.openRead().close()
+            return
+        }
+        val out = checkpoint.startWrite()
+        try {
+            original.openRead().use { it.copyTo(out) }
+            checkpoint.finishWrite(out)
+        } catch (failure: Throwable) { checkpoint.failWrite(out); throw failure }
     }
 
     private fun write(scope: String, data: JSONObject) {
@@ -96,17 +158,77 @@ class CompanionStore(context: Context) {
 
     private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
 
+    internal fun actionWrite(role: String, id: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.actionWrite(id, change) } }
+    }
+
+    internal fun actionRead(role: String, id: String): JSONObject? {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.find("action_history", id) } }
+    }
+
+    internal fun actionPage(role: String, parent: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.actionPage(parent, offset) } }
+    }
+
+    internal fun actionVersions(role: String, id: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.actionVersions(id, offset) } }
+    }
+
     internal fun archivedStateRow(scope: String, kind: String, id: String): JSONObject? =
         synchronized(lock(scope)) { history(scope).use { it.find(kind, id) } }
 
     internal fun archivedStateEvents(scope: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> =
         synchronized(lock(scope)) { history(scope).use { it.page("events", offset, limit, hotIds) } }
 
-    private fun attachContacts(data: JSONObject, archive: InternalStateArchive) {
-        val start = InternalStateEngine.rows(data, "instances").minOfOrNull { it.getLong("at") }
-            ?: System.currentTimeMillis()
-        data.put("archived_contacts", archive.contacts(start))
+    private fun historyAccess(scope: String) = object : InternalStateHistoryAccess {
+        override fun categoryRow(kind: String, id: String) = synchronized(lock(scope)) {
+            history(scope).use { it.categoryRow(kind, id) }
+        }
+        override fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?) = synchronized(lock(scope)) {
+            history(scope).use { it.categoryPage(kind, offset, limit, parent) }
+        }
+        private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256
+        }
+        override fun definition(id: String, version: Int): JSONObject? {
+            val key = "$id:$version"
+            synchronized(definitions) {
+                if (definitions.containsKey(key)) return definitions[key]?.let { JSONObject(it.toString()) }
+            }
+            val found = archivedStateRow(scope, "versions", key)?.getJSONObject("after")
+            synchronized(definitions) { definitions[key] = found }
+            return found?.let { JSONObject(it.toString()) }
+        }
+        override fun latestContact(chat: String?, at: Long): Long? = synchronized(lock(scope)) {
+            history(scope).use { it.latestContact(chat, at) }
+        }
+        override fun contacts(chat: String?, after: Long, until: Long): Sequence<Long> = sequence {
+            var cursor = after
+            while (cursor < until) {
+                val page = synchronized(lock(scope)) { history(scope).use { it.contactPage(chat, cursor, until) } }
+                if (page.isEmpty()) break
+                yieldAll(page)
+                cursor = page.last()
+            }
+        }
     }
+
+    internal fun archivedStateVersions(scope: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> =
+        synchronized(lock(scope)) { history(scope).use { it.page("versions", offset, limit, hotIds) } }
+
+    internal fun archivedInnerHistory(scope: String, offset: Int, hotIds: Set<String>): List<JSONObject> =
+        synchronized(lock(scope)) { history(scope).use { it.page("inner_history", offset, 9, hotIds) } }
+
+    internal fun categoryVersions(scope: String, id: String, offset: Int): List<JSONObject> =
+        synchronized(lock(scope)) { history(scope).use { it.categoryVersions(id, offset) } }
 
     fun setMemory(chatId: String, action: String, id: String, text: String) {
         update("summary:$chatId") { data ->

@@ -105,7 +105,7 @@ object InternalStateTimeRules {
     fun activity(data: JSONObject, definition: JSONObject, state: JSONObject, chat: String, now: Long): JSONObject {
         if (!isDefined(definition)) return JSONObject()
         val rules = definition.getJSONObject("time_rules")
-        val lastContact = if (usesContact(rules)) contactTimes(data, definition, chat, now).lastOrNull() else null
+        val lastContact = if (usesContact(rules)) latestContact(data, definition, chat, now) else null
         val contact = contactActivity(rules, lastContact, now)
         return JSONObject().also { result ->
             directions.forEach { direction ->
@@ -115,25 +115,31 @@ object InternalStateTimeRules {
     }
 
     /** Integrates across real contact/expiry boundaries, so UI refresh frequency cannot change values. */
-    fun steps(data: JSONObject, definition: JSONObject, state: JSONObject, chat: String, now: Long): List<Step> {
+    fun steps(data: JSONObject, definition: JSONObject, state: JSONObject, chat: String, now: Long): List<Step> =
+        stepSequence(data, definition, state, chat, now).toList()
+
+    internal fun stepSequence(data: JSONObject, definition: JSONObject, state: JSONObject, chat: String, now: Long): Sequence<Step> = sequence {
         requireDefined(definition)
         val start = state.getLong("at")
-        if (now <= start) return emptyList()
+        if (now <= start) return@sequence
         val rules = definition.getJSONObject("time_rules")
-        val contacts = if (usesContact(rules)) contactTimes(data, definition, chat, now) else emptyList()
-        val boundaries = sortedSetOf(start, now)
+        val contacts = if (usesContact(rules)) contactsAfter(data, definition, chat, start, now) else emptySequence()
         val contactWindow = if (usesContact(rules)) windowMillis(rules) else 0L
-        contacts.forEach { at ->
-            if (at > start && at < now) boundaries.add(at)
-            val expires = expiry(at, contactWindow)
-            if (expires > start && expires < now) boundaries.add(expires)
-        }
         data class Interval(val from: Long, val at: Long, val rate: BigDecimal, val reasons: List<String>, val directions: List<String>)
-        val intervals = mutableListOf<Interval>()
-        var contactIndex = -1
-        boundaries.toList().zipWithNext().forEach { (from, at) ->
-            while (contactIndex + 1 < contacts.size && contacts[contactIndex + 1] <= from) contactIndex++
-            val contact = contactActivity(rules, contacts.getOrNull(contactIndex), from)
+        val intervals = sequence {
+          val iterator = contacts.iterator()
+          var nextContact = if (iterator.hasNext()) iterator.next() else null
+          var lastContact = if (usesContact(rules)) latestContact(data, definition, chat, start) else null
+          var from = start
+          var previous: Interval? = null
+          while (from < now) {
+            while (nextContact != null && nextContact <= from) {
+                lastContact = nextContact
+                nextContact = if (iterator.hasNext()) iterator.next() else null
+            }
+            val expires = lastContact?.let { expiry(it, contactWindow) }?.takeIf { it > from }
+            val at = minOf(now, nextContact ?: now, expires ?: now)
+            val contact = contactActivity(rules, lastContact, from)
             var rate = BigDecimal.ZERO
             val reasons = mutableListOf<String>()
             val running = mutableListOf<String>()
@@ -150,13 +156,19 @@ object InternalStateTimeRules {
                     running += direction
                 }
             }
-            val previous = intervals.lastOrNull()
-            if (previous != null && previous.rate.compareTo(rate) == 0 && previous.reasons == reasons && previous.directions == running) {
-                intervals[intervals.lastIndex] = previous.copy(at = at)
-            } else intervals += Interval(from, at, rate, reasons, running)
+            val old = previous
+            previous = if (old != null && old.rate.compareTo(rate) == 0 && old.reasons == reasons && old.directions == running) {
+                old.copy(at = at)
+            } else {
+                if (old != null) yield(old)
+                Interval(from, at, rate, reasons, running)
+            }
+            from = at
+          }
+          previous?.let { yield(it) }
         }
         var value = state.getDouble("value")
-        return buildList { intervals.forEach { interval ->
+        for (interval in intervals) {
             // Decimal arithmetic keeps even very large, opposing user-supplied rates finite
             // until the final state-range clamp; Double Infinity - Infinity would corrupt state.
             val elapsed = BigDecimal.valueOf(interval.at).subtract(BigDecimal.valueOf(interval.from))
@@ -176,11 +188,11 @@ object InternalStateTimeRules {
                     .divide(interval.rate, MathContext.DECIMAL128).multiply(BigDecimal.valueOf(60000))
                     .setScale(0, RoundingMode.CEILING).toLong()
                 val hitAt = interval.from + duration.coerceIn(0L, interval.at - interval.from)
-                add(Step(interval.from, hitAt, bounded.toDouble(), interval.rate.signum(), interval.reasons, interval.directions))
-                if (hitAt < interval.at) add(Step(hitAt, interval.at, bounded.toDouble(), 0, emptyList(), emptyList()))
-            } else add(Step(interval.from, interval.at, bounded.toDouble(), interval.rate.signum(), interval.reasons, interval.directions))
+                yield(Step(interval.from, hitAt, bounded.toDouble(), interval.rate.signum(), interval.reasons, interval.directions))
+                if (hitAt < interval.at) yield(Step(hitAt, interval.at, bounded.toDouble(), 0, emptyList(), emptyList()))
+            } else yield(Step(interval.from, interval.at, bounded.toDouble(), interval.rate.signum(), interval.reasons, interval.directions))
             value = bounded.toDouble()
-        } }
+        }
     }
 
     private fun number(value: JSONObject, key: String): Double {
@@ -203,6 +215,25 @@ object InternalStateTimeRules {
                 .filter { definition.getString("scope") == "global" || it.getString("chat") == chat }
                 .map { it.getLong("at") })
             .filter { it <= now }.distinct().sorted().toList()
+
+    private fun latestContact(data: JSONObject, definition: JSONObject, chat: String, at: Long): Long? =
+        listOfNotNull(contactTimes(data, definition, chat, at).lastOrNull(),
+            (data as? InternalStateDocument)?.history?.latestContact(
+                if (definition.getString("scope") == "global") null else chat, at)).maxOrNull()
+
+    private fun contactsAfter(data: JSONObject, definition: JSONObject, chat: String, start: Long, now: Long): Sequence<Long> = sequence {
+        val hot = contactTimes(data, definition, chat, now).filter { it > start }.iterator()
+        val archived = ((data as? InternalStateDocument)?.history?.contacts(
+            if (definition.getString("scope") == "global") null else chat, start, now) ?: emptySequence()).iterator()
+        var a = if (hot.hasNext()) hot.next() else null
+        var b = if (archived.hasNext()) archived.next() else null
+        while (a != null || b != null) {
+            val next = minOf(a ?: Long.MAX_VALUE, b ?: Long.MAX_VALUE)
+            yield(next)
+            if (a == next) a = if (hot.hasNext()) hot.next() else null
+            if (b == next) b = if (archived.hasNext()) archived.next() else null
+        }
+    }
 
     private fun windowMillis(rules: JSONObject): Long {
         val minutes = rules.getDouble("contact_window_minutes")

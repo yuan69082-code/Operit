@@ -93,6 +93,11 @@ interface AIService {
             availableTools: List<ToolPrompt>? = null
     ): Long
 
+    /** Optional local tokenizer only: never invoke an inference or remote counting service.
+     * Null means this channel has no exact local text meter; the host labels its estimate.
+     */
+    suspend fun countLocalTextTokens(text: String): Long? = null
+
     /**
      * 释放资源
      * 对于本地模型（如MNN），需要释放native内存和模型资源

@@ -41,7 +41,7 @@ internal object CurrentRequestContext {
             metadata = buildMap {
                 put(INSTRUCTIONS_KEY, true)
                 put(PENDING_STATE_KEY, sections.state)
-                sections.internalStateFrame?.let { put(INTERNAL_STATE_FRAME_KEY, it) }
+                sections.internalStateFrame?.let { put(INTERNAL_STATE_FRAME_KEY, it.copy(materialText = sections.state)) }
             }
         )
         val insertion = clean.takeWhile { it.kind == PromptTurnKind.SYSTEM }.size
@@ -55,6 +55,15 @@ internal object CurrentRequestContext {
         }.mapNotNull { it.metadata[INTERNAL_STATE_FRAME_KEY] as? InternalStateFrame }
         check(frames.size <= 1) { "Multiple internal state frames in one request" }
         return frames.singleOrNull()
+    }
+
+    /** Verify the actual projection after hooks, not merely an earlier selection receipt. */
+    fun subjectMaterial(turns: List<PromptTurn>): String? {
+        val frame = internalStateFrame(turns) ?: return null
+        if (frame.materialText.isBlank()) return null
+        check(turns.any { it.content.contains(frame.materialText) }) { "本轮主体材料被请求处理修改或移除，不能登记为已提供" }
+        return "<operit_request_context source=\"host\" scope=\"current_turn\">\n" +
+            frame.materialText + "\n</operit_request_context>"
     }
 
     /** Hooks receive serializable prompt data, never a mutable host write binding. */
@@ -71,12 +80,19 @@ internal object CurrentRequestContext {
         }
         check(owners.size == 1) { "Prompt hook must preserve the host internal state instruction turn" }
         return clean.mapIndexed { index, turn ->
-            if (index == owners.single()) turn.copy(metadata = turn.metadata + (INTERNAL_STATE_FRAME_KEY to frame))
+            if (index == owners.single()) turn.copy(
+                // Reassert the host's precedence after editable prompt hooks and role/worldbook
+                // composition; retained character text is not an adopted identity authority.
+                content = turn.content + if (frame.innerGuard.isBlank() || turn.content.endsWith(frame.innerGuard)) "" else "\n[持续人格与初始配置]\n" + frame.innerGuard,
+                metadata = turn.metadata + (INTERNAL_STATE_FRAME_KEY to frame))
             else turn
         }
     }
 
     /** Project once, after input transforms/finalize hooks, using the same layout for estimates. */
+    fun finalizeBoundRequest(turns: List<PromptTurn>, currentInput: String, frame: InternalStateFrame?): List<PromptTurn> =
+        project(bindInternalStateFrame(turns, frame), currentInput)
+
     fun project(turns: List<PromptTurn>, currentInput: String): List<PromptTurn> {
         val pending = turns.filter {
             it.kind == PromptTurnKind.SYSTEM && it.metadata[INSTRUCTIONS_KEY] == true

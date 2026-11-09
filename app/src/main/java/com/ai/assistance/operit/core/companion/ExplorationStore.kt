@@ -28,7 +28,7 @@ class ExplorationStore(private val context: Context) {
             // Index first: an interrupted configuration can leave an inert entry, never an
             // enabled assistant omitted from scheduler/keep-alive discovery.
             check(store.preferences.edit().putStringSet("exploration_roles", roles() + role).commit()) { "探索设置未能保存" }
-            store.update(scope(role)) { ExplorationPolicy.configure(it, enable, activities, limit, System.currentTimeMillis()) }
+            store.update(scope(role)) { ExplorationPolicy.configure(it, enable, activities, limit, System.currentTimeMillis(), InternalStateStore(context).enabled(role)) }
         }
         CompanionRuntime.explorationSettingsChanged(role)
         AssistantWindowRouter.chat(context, role)?.let { chat -> store.log(chat, "自主探索设置", if (enable) "已开启；仅此助手，每天最多${limit}轮" else "已关闭，探索预约已撤销；已有资料和日志保留") }
@@ -71,6 +71,10 @@ class ExplorationStore(private val context: Context) {
         val now = System.currentTimeMillis()
         val day = ExplorationPolicy.day(now)
         for ((role, candidate) in roles().map { it to read(it) }.sortedBy { it.second.optLong("at", Long.MAX_VALUE) }) {
+            if (InternalStateStore(context).enabled(role) && candidate.optInt("continuous_boundary") != 1) {
+                store.update(scope(role)) { ExplorationPolicy.adoptContinuousBoundary(it) }
+                continue
+            }
             if (!ExplorationPolicy.due(candidate, now, day)) continue
             val chat = AssistantWindowRouter.chat(context, role) ?: continue
             try { authorize(role, chat) }
@@ -96,8 +100,9 @@ class ExplorationStore(private val context: Context) {
 
     fun valid(work: Work) = AssistantWindowRouter.chat(context, work.role) == work.chat && ExplorationPolicy.valid(read(work.role), work.chat, work.revision, work.ticket)
     fun finish(work: Work, outcome: String) {
-        store.update(scope(work.role)) { ExplorationPolicy.finish(it, work.ticket, outcome) }
-        store.log(work.chat, "探索结束", when (outcome) {
+        val continuous = InternalStateStore(context).enabled(work.role)
+        store.update(scope(work.role)) { ExplorationPolicy.finish(it, work.ticket, outcome, continuous = continuous) }
+        store.log(work.chat, "探索结束", if (continuous) "本轮结果：$outcome；仅保留明确安排，不自动补排判断。" else when (outcome) {
             "completed" -> "本轮结束；阅读、整理的实际结果见资料库和私人待办；未自行安排时，软件会按默认间隔再给一次自由判断机会"
             "interrupted" -> "探索已中断；未自行安排时，软件会按默认间隔再给一次自由判断机会"
             else -> "探索未完成；未自行安排时，软件会加倍间隔后再给一次自由判断机会"
@@ -107,8 +112,9 @@ class ExplorationStore(private val context: Context) {
         for (role in roles()) {
             if (!read(role).has("running")) continue
             var interrupted = false
-            val data = store.update(scope(role)) { interrupted = ExplorationPolicy.recover(it) }
-            if (interrupted) store.log(data.optString("chat"), "探索中断", "上次运行未结束；未自行安排时已按默认间隔保留下一次自由判断机会")
+            val continuous = InternalStateStore(context).enabled(role)
+            val data = store.update(scope(role)) { interrupted = ExplorationPolicy.recover(it, continuous) }
+            if (interrupted) store.log(data.optString("chat"), "探索中断", if (continuous) "上次运行未结束，保留结果未知；不会自动重跑。" else "上次运行未结束；未自行安排时已按默认间隔保留下一次自由判断机会")
         }
     }
 

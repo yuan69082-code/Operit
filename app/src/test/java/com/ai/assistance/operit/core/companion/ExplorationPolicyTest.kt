@@ -6,6 +6,37 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ExplorationPolicyTest {
+    @Test fun continuousSubjectHasNoInitialOrAutomaticIdleWakeButKeepsOwnArrangement() {
+        val data = JSONObject()
+        ExplorationPolicy.configure(data, true, setOf("reading"), 4, 100, continuous = true)
+        assertFalse(data.has("at"))
+        ExplorationPolicy.schedule(data, 15, "把那篇文章读完", 100)
+        assertTrue(ExplorationPolicy.claim(data, 900100, "day", "run", "chat"))
+        ExplorationPolicy.finish(data, "run", "completed", 900101, continuous = true)
+        assertFalse(data.has("at"))
+        ExplorationPolicy.schedule(data, 15, "接着读", 900101)
+        assertTrue(ExplorationPolicy.claim(data, 1800101, "day", "run2", "chat"))
+        ExplorationPolicy.schedule(data, 30, "具体的下次安排", 1800102)
+        ExplorationPolicy.finish(data, "run2", "completed", 1800103, continuous = true)
+        assertEquals(3600102L, data.getLong("at"))
+    }
+
+    @Test fun adoptingContinuousBoundaryRetainsOldFactsAndDoesNotRepeatOrCancelExplicitPlans() {
+        val legacy = enabled()
+        val original = legacy.getLong("at")
+        ExplorationPolicy.adoptContinuousBoundary(legacy)
+        assertFalse(legacy.has("at"))
+        assertEquals(original, legacy.getJSONObject("suspended_automatic_arrangement").getLong("at"))
+        ExplorationPolicy.schedule(legacy, 60, "自己的具体计划", now)
+        val explicit = legacy.toString()
+        ExplorationPolicy.adoptContinuousBoundary(legacy)
+        assertEquals(explicit, legacy.toString())
+        assertTrue(ExplorationPolicy.claim(legacy, now + 3600000, day, "interrupted", "chat"))
+        assertTrue(ExplorationPolicy.recover(legacy, continuous = true))
+        assertFalse(legacy.has("at"))
+        assertEquals("interrupted", legacy.getString("last_outcome"))
+        assertFalse(ExplorationPolicy.recover(legacy, continuous = true))
+    }
     private val now = 1_800_000_000_000L
     private val day = "2026-10-14"
     private fun enabled(limit: Int = 4) = JSONObject().also {

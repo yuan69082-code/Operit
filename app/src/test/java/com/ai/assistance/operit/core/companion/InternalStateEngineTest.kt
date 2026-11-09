@@ -6,6 +6,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InternalStateEngineTest {
+    @Test fun elapsedTimeAcrossWindowsRestartAndBackwardClockDoesNotDoubleApply() {
+        val original = data()
+        InternalStateEngine.event(original, "r", "reading", "a", "actual", 0)
+        InternalStateEngine.advance(original, "a", hour)
+        val restarted = JSONObject(original.toString())
+        val before = restarted.toString()
+        InternalStateEngine.advance(restarted, "b", hour)
+        InternalStateEngine.advance(restarted, "b", hour / 2)
+        assertEquals(before, restarted.toString())
+        InternalStateEngine.advance(restarted, "b", hour * 24 * 365)
+        assertEquals(50.0, value(restarted), 1e-8)
+        val settled = restarted.toString()
+        InternalStateEngine.advance(restarted, "a", hour * 24 * 365)
+        assertEquals(settled, restarted.toString())
+        assertTrue(InternalStateEngine.rows(restarted, "events").size < 10)
+    }
     private val hour = 3600000L
     private fun definition(id: String = "curiosity", scope: String = "global") = JSONObject()
         .put("id", id).put("name", "自己定义的 $id").put("description", "反复遇见未解的问题")

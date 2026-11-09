@@ -21,7 +21,10 @@ data class ToolInvocation(
         val tool: AITool,
         val rawText: String,
         @Contextual
-        val responseLocation: IntRange // Where in the response this tool invocation was found
+        val responseLocation: IntRange, // Where in the response this tool invocation was found
+        // Host identity survives copies/context injection and result-delivery retries. Never
+        // derive this from tool arguments: identical calls in later turns are different facts.
+        val hostInvocationId: String = java.util.UUID.randomUUID().toString()
 )
 
 /** Represents the result of a tool execution */
@@ -30,7 +33,9 @@ data class ToolResult(
         val toolName: String,
         val success: Boolean,
         val result: ToolResultData,
-        val error: String? = null
+        val error: String? = null,
+        val subjectActionId: String? = null,
+        val executionStatus: String? = null
 )
 
 /** Represents the validation result for tool parameters */

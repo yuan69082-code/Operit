@@ -43,6 +43,12 @@ object AssistantAdminTools {
                     val action = arg("action") ?: error("缺少 action")
                     val targetId = arg("assistant_id")
                     if (targetId != null) require(all.any { it.id == targetId }) { "助手不存在" }
+                    if (targetId != null && action in setOf("set_role", "delete") &&
+                        com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(targetId)) {
+                        check(AssistantScope.callerId() == targetId) {
+                            "不能代写或删除已启用内部状态的其他主体；人格配置由用户或该助手明确修改"
+                        }
+                    }
                     val offset = arg("offset")?.toInt()?.also { require(it in 0..1000000) } ?: 0
                     val limit = arg("limit")?.toInt()?.also { require(it in 1..30) } ?: 10
                     val history = ChatHistoryManager.getInstance(context)

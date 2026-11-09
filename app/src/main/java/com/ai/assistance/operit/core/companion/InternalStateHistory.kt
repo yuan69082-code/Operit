@@ -17,7 +17,7 @@ import java.util.ArrayDeque
 
 /** Only historical rows leave the hot document; definitions and current values never do. */
 internal object InternalStateHistory {
-    val limits = mapOf("events" to 3000, "experiences" to 600, "semantic_reports" to 300)
+    val limits = mapOf("events" to 3000, "experiences" to 600, "semantic_reports" to 300, "versions" to 300, "inner_history" to 40)
     private const val MAX_FIELD_CHARS = 2 * 1024 * 1024
 
     // Parse one row at a time: parsing the entire old file before trimming caused startup OOMs.
@@ -27,6 +27,7 @@ internal object InternalStateHistory {
             reader.beginObject()
             while (reader.hasNext()) {
                 val name = reader.nextName()
+                if (name == "archived_contacts") { reader.skipValue(); continue }
                 val limit = limits[name]
                 if (limit == null) {
                     result.put(name, org.json.JSONTokener(JsonParser.parseReader(reader).toString()).nextValue())
@@ -111,6 +112,13 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             db.execSQL("CREATE TABLE IF NOT EXISTS history (scope TEXT NOT NULL, kind TEXT NOT NULL, hash TEXT NOT NULL, lookup TEXT NOT NULL, payload TEXT NOT NULL, contact_chat TEXT, contact_at INTEGER, PRIMARY KEY(scope,kind,hash))")
             db.execSQL("CREATE INDEX IF NOT EXISTS history_lookup ON history(scope,kind,lookup)")
             db.execSQL("CREATE INDEX IF NOT EXISTS history_contact ON history(scope,contact_chat,contact_at)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS history_contact_global ON history(scope,contact_at)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS category_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, parent TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS category_parent ON category_current(scope,kind,parent,id)")
+            // Equal owner/kind/parent ranges are then ordered by SQLite's implicit rowid.
+            // Latest receipt pages must not sort every full historical result.
+            db.execSQL("CREATE INDEX IF NOT EXISTS category_recent ON category_current(scope,kind,parent)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS category_commits (scope TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(scope,id))")
         }
     }
 
@@ -122,7 +130,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             .joinToString("") { "%02x".format(it) }
         val values = ContentValues().apply {
             put("scope", scope); put("kind", kind); put("hash", hash)
-            put("lookup", if (kind == "semantic_reports") row.getString("frame_id") else row.optString("id"))
+            put("lookup", lookup(kind, row))
             put("payload", payload)
             if (kind == "events" && row.optString("source") == "user_message" &&
                 (row.has("contact_at") || row.getString("id").startsWith("message:"))) {
@@ -142,6 +150,102 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             arrayOf(scope, kind, id)).use { return if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
     }
 
+    /** Replay only a journal already committed by AtomicFile. One SQL transaction, no network. */
+    fun applyCategoryJournal(journal: JSONObject) {
+        require(journal.getInt("schema") == 1)
+        val db = db()
+        val id = journal.getString("id")
+        val digest = InnerStructure.hash(journal)
+        db.rawQuery("SELECT digest FROM category_commits WHERE scope=? AND id=?", arrayOf(scope, id)).use {
+            if (it.moveToFirst()) { check(it.getString(0) == digest) { "事件提交标识冲突" }; return }
+        }
+        if (!writing) { db.beginTransaction(); writing = true }
+        val rows = journal.getJSONArray("rows")
+        require(rows.length() <= 64)
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val kind = row.getString("storage_kind")
+            require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback") + SubjectRestDreams.kinds)
+            put("category_versions", row)
+            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+                arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
+        }
+        db.execSQL("INSERT INTO category_commits(scope,id,digest) VALUES(?,?,?)", arrayOf(scope, id, digest))
+        commit()
+    }
+
+    fun categoryRow(kind: String, id: String): JSONObject? {
+        if (!file.exists()) return null
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? AND id=?", arrayOf(scope, kind, id))
+            .use { if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
+    }
+
+    /** Objective operations share the existing archive, never the subjective report reducer.
+     * Claim and receipt are short SQL transactions; no executor runs under this transaction. */
+    fun actionWrite(id: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        val db = db()
+        if (!writing) { db.beginTransaction(); writing = true }
+        val old = find("action_history", id)
+        val before = old?.toString()
+        val row = change(old)
+        if (row.toString() != before) {
+            put("action_history", row)
+            val head = JSONObject(row.toString())
+            head.getJSONObject("request").remove("parameters")
+            head.optJSONObject("receipt")?.let { receipt ->
+                receipt.remove("data")
+                if (!receipt.isNull("error")) receipt.put("error", receipt.getString("error").take(600))
+                val text = receipt.getString("text")
+                receipt.put("text", text.take(600)).put("excerpt", text.length > 600)
+            }
+            head.optJSONObject("declaration")?.optJSONObject("capability")?.remove("source")
+            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+                arrayOf(scope, "action", id, row.getString("parent"), head.toString()))
+        }
+        commit()
+        return row
+    }
+
+    fun actionPage(parent: String, offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM category_current INDEXED BY category_recent WHERE scope=? AND kind='action' AND parent=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, parent, offset.toString())).use { c ->
+            buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) }
+        }
+    }
+
+    fun actionVersions(id: String, offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='action_history' AND lookup=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, id, offset.toString())).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(JSONObject(cursor.getString(0))) }
+        }
+    }
+
+    fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?): List<JSONObject> {
+        require(offset >= 0 && limit in 1..21)
+        if (!file.exists()) return emptyList()
+        val privateRecent = kind in SubjectRestDreams.kinds
+        val actualParent = parent ?: if (privateRecent) "private" else null
+        val filter = if (actualParent == null) "" else " AND parent=?"
+        val args = listOf(scope, kind) + listOfNotNull(actualParent) + listOf(limit.toString(), offset.toString())
+        // Recent private generated material must not be permanently hidden behind the oldest
+        // IDs. The existing scope/kind/parent/rowid index bounds this read before deserialization.
+        val order = if (privateRecent) "rowid DESC" else "id"
+        val index = if (privateRecent) " INDEXED BY category_recent" else ""
+        return db().rawQuery("SELECT payload FROM category_current$index WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",
+            args.toTypedArray()).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
+    fun categoryVersions(id: String, offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='category_versions' AND lookup=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, id, offset.toString())).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
     fun page(kind: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> {
         require(offset >= 0 && limit in 1..21)
         if (!file.exists()) return emptyList()
@@ -159,17 +263,29 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         return result
     }
 
-    // Preserve contact integration for dormant session instances too, without reloading event bodies.
-    fun contacts(since: Long): JSONArray {
-        val result = JSONArray()
-        if (!file.exists()) return result
-        db().rawQuery("SELECT contact_chat, MAX(contact_at) FROM history WHERE scope=? AND contact_at<=? GROUP BY contact_chat UNION SELECT contact_chat, contact_at FROM history WHERE scope=? AND contact_at>? ORDER BY 2",
-            arrayOf(scope, since.toString(), scope, since.toString())).use { cursor ->
-            while (cursor.moveToNext()) if (!cursor.isNull(0) && !cursor.isNull(1)) {
-                result.put(JSONObject().put("chat", cursor.getString(0)).put("at", cursor.getLong(1)))
-            }
+    fun latestContact(chat: String?, at: Long): Long? {
+        if (!file.exists()) return null
+        val filter = if (chat == null) "" else " AND contact_chat=?"
+        val args = listOf(scope, at.toString()) + listOfNotNull(chat)
+        return db().rawQuery("SELECT MAX(contact_at) FROM history WHERE scope=? AND contact_at<=?$filter",
+            args.toTypedArray()).use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
+    }
+
+    fun contactPage(chat: String?, after: Long, until: Long): List<Long> {
+        if (!file.exists()) return emptyList()
+        val filter = if (chat == null) "" else " AND contact_chat=?"
+        val args = listOf(scope, after.toString(), until.toString()) + listOfNotNull(chat)
+        return db().rawQuery("SELECT DISTINCT contact_at FROM history WHERE scope=? AND contact_at>? AND contact_at<=?$filter ORDER BY contact_at LIMIT 256",
+            args.toTypedArray()).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getLong(0)) } }
+    }
+
+    companion object {
+        fun lookup(kind: String, row: JSONObject): String = when (kind) {
+            "semantic_reports" -> row.getString("frame_id")
+            "versions" -> "${row.getString("dimension")}:${row.getInt("version")}"
+            "category_versions" -> "${row.getString("storage_kind")}:${row.getString("id")}"
+            else -> row.optString("id")
         }
-        return result
     }
 
     fun commit() {
