@@ -120,9 +120,11 @@ class SubjectActionEntryPointsTest {
         val state = InternalStateStore(context)
         assertEquals(0, state.inspectCategory(role, chat, "feedback", null, 0).getJSONArray("items").length())
         val feedback = JSONObject().put("id", "understanding").put("expected_version", 0)
-            .put("action_id", result.subjectActionId).put("result_source", source).put("meaning", "计算符合输入，但我还想换一种方法")
+            .put("action_id", result.subjectActionId).put("result_source", source).put("meaning", "操作已返回，但我还想换一种方法")
             .put("evidence", JSONArray().put(source)).put("intention_refs", JSONArray())
-        val fields = JSONObject().put("action_feedback", JSONArray().put(feedback))
+        val decision = JSONObject().put("id", "own-direction").put("expected_version", 0).put("status", "considering")
+            .put("meaning", "想继续自己的兴趣，尚未决定具体操作").put("evidence", JSONArray().put(source))
+        val fields = JSONObject().put("action_feedback", JSONArray().put(feedback)).put("decisions", JSONArray().put(decision))
         submit(bound, fields)
         submit(bound, fields) // The original report receipt handles exact retry.
         assertEquals(1, state.inspectCategory(role, chat, "feedback", "understanding", 0).getJSONObject("item").getInt("version"))
@@ -132,6 +134,10 @@ class SubjectActionEntryPointsTest {
             mapOf("action" to "get", "section" to "feedback", "id" to "understanding")))).results.single()
         assertTrue(queried.error, queried.success)
         assertTrue(queried.result.toString().contains("换一种方法"))
+        val readDecision = execute(requireNotNull(next.internalStateFrame), listOf(invocation("companion_internal_state",
+            mapOf("action" to "get", "section" to "decision", "id" to "own-direction"))), 1).results.single()
+        assertTrue(readDecision.error, readDecision.success)
+        assertEquals("considering", JSONObject(readDecision.result.toString()).getJSONObject("item").getJSONObject("content").getString("status"))
     }
 
     @Test fun permissionDenialIsPersistedWithoutExecution(): Unit = runBlocking {
@@ -209,12 +215,18 @@ class SubjectActionEntryPointsTest {
             .put("expected_version", 0).put("meaning", "这个估计偏紧，后面可以调整；现在没有自动改")
             .put("action_id", run.subjectActionId).put("result_source", source).put("evidence", JSONArray().put(source)))))
         // A later simulated model explicitly requests adjustment; no test callback writes a next decision.
-        val next = requireNotNull(sections(second).internalStateFrame)
+        val nextSections = sections(second)
+        val next = requireNotNull(nextSections.internalStateFrame)
         val feedback = execute(next, listOf(invocation("companion_internal_state",
             mapOf("action" to "get", "section" to "feedback", "id" to "pace")))).results.single()
         assertTrue(feedback.result.toString().contains("偏紧"))
-        val adjusted = execute(next, listOf(invocation("companion_software", mapOf("action" to "build",
-            "id" to "reading_minutes", "source" to "${'$'}{pages}*3", "previous_version" to version))), 1).results.single()
+        val nextBound = delivered(nextSections, listOf(feedback))
+        val adjustment = JSONObject().put("decision", "结合已读的上次理解，明确选择调整")
+            .put("intention_refs", JSONArray().put(JSONObject().put("kind", "feedback").put("id", "pace").put("version", 1)))
+            .put("capability", JSONObject().put("id", "reading_minutes").put("version", version).put("stage", "adjust").put("target", "local arithmetic template"))
+        val adjusted = execute(nextBound, listOf(invocation("companion_software", mapOf("action" to "build",
+            "id" to "reading_minutes", "source" to "${'$'}{pages}*3", "previous_version" to version,
+            SubjectActions.DECLARATION to adjustment.toString()))), 1).results.single()
         assertTrue(adjusted.error, adjusted.success)
         val updated = JSONObject(adjusted.result.toString()).getString("version")
         val output = execute(next, listOf(invocation("companion_software", mapOf("action" to "run",
