@@ -94,8 +94,16 @@ internal object ActivityNotes {
     }
 
     suspend fun message(context: Context, ref: Ref, timestamp: Long, text: String) {
-        part(context, ref, "message:$timestamp", "message", JSONObject().put("timestamp", timestamp)
-            .put("chat", ref.chat).put("text", text).put("saved", true).put("read", JSONObject.NULL))
+        // A persisted edit is a new version of the same expression, not a replayed tool
+        // or an extra contact. The archive retains the previous complete message.
+        withContext(Dispatchers.IO) {
+            val id = ref.id + ":message:" + timestamp
+            CompanionStore(context).activityWrite(ref.role, "activity_part", id, ref.id) { old ->
+                (old ?: base(ref, "activity_part", id, ref.id)).put("kind", "message").put("content",
+                    JSONObject().put("timestamp", timestamp).put("chat", ref.chat).put("text", text)
+                        .put("saved", true).put("read", JSONObject.NULL))
+            }
+        }
         withContext(Dispatchers.IO) {
             val store = CompanionStore(context)
             val id = ref.id + ":message:" + timestamp

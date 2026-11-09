@@ -117,6 +117,11 @@ class ActivityNotesEntryPointsTest {
         val ref = ActivityNotes.begin(context, role, chat, "normal-input", "normal_input")
         val history = ChatHistoryManager.getInstance(context)
         try {
+            val repositoryContext = ChatHistoryManager::class.java.getDeclaredField("context").apply { isAccessible = true }.get(history) as Context
+            assertEquals("The real repository and request must address the same app storage",
+                context.applicationContext.filesDir.canonicalPath, repositoryContext.applicationContext.filesDir.canonicalPath)
+            assertNotNull("The chat-store hook must find the activity created by the request",
+                CompanionStore(repositoryContext).activityRead(role, "activity", ref.id))
             val empty = ChatMessage(sender = "ai", content = "", timestamp = 1234)
             history.addMessage(chat, empty)
             assertEquals(0, CompanionStore(context).activityRead(role, "activity", ref.id)!!.getInt("message_count"))
@@ -135,6 +140,14 @@ class ActivityNotesEntryPointsTest {
             assertTrue(page.toString().contains(final.content))
             assertFalse(page.toString().contains("\"read\":true"))
             assertTrue(InnerStructureContext.prepare(context, role, window(role), true, input = "继续").state.contains("写入会话"))
+            val corrected = final.copy(content = "这是已保存表达的修订，仍保留条件和例外。")
+            history.updateMessage(chat, corrected)
+            assertEquals(2, CompanionStore(context).activityRead(role, "activity", ref.id)!!.getInt("message_count"))
+            assertTrue(ActivityNotes.page(context, role, "activity_part", ref.id, 0).toString().contains(corrected.content))
+            val versions = InternalStateStore(context).inspectCategory(role, chat, "category_versions",
+                "activity_part:" + ref.id + ":message:1234", 0)
+            assertTrue(versions.toString().contains(final.content))
+            assertTrue(versions.toString().contains(corrected.content))
         } finally { ActivityNotes.release(ref) }
     }
 }

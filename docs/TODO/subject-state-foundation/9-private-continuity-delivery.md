@@ -49,3 +49,7 @@ XC 专用连接页面、事件调用仍存在。旧 companion_note 的私密承�
 继续施工：已采用的长内容也按版本分页实际送入请求；账号切换使旧请求失效，新请求读取新登录；Codex 保留已有登录，增加取消/刷新/账号边界。Kimi Code 套餐凭据、Grok 设备授权接入现有 Provider，尚待编译和模拟续轮验证，未做真实账号测试。新增凭据存设备不备份目录，Codex 凭据不进入普通快照且恢复不会覆盖当前登录。
 
 官方范围核查（2026-11-10）：Claude legal-and-compliance 不允许第三方使用会员 OAuth；Gemini CLI tos-privacy 限制第三方直接 Code Assist OAuth；BigModel Coding Plan tool/others 限定指定工具，未列 Operit。这三项保留明确限制及官方入口，不以按量 API 冒称订阅已接通。Kimi 权益限编程；Grok 账号实际资格、服务端额外费用仍需账号确认。协议参考 Kelivo，未复制其 AGPL 源码。所有渠道不得自动切换收费 API。完整交付尚未完成，PR 继续草稿，不发布。
+
+检查 145（42720797188，d6c3553）：Android 2028 项，1 失败、6 项原有跳过；Windows 25 项及打包通过。剩余失败为真实会话写入后的活动索引，仍保留失败断言并继续定位。文件备份恢复后的 48 小时窗口测试、长内容实际读取资格测试在该次通过。
+
+WebChat/Windows 手机连接界面用真实生产页面与模拟 HTTP 数据完成浏览器交互：入口、全文编辑一致、来源、历史、分页、读取失败恢复与手机宽度。证据在 screenshots/ui-check.json 和截图；不是 Android Compose 真机截图或真实模型验证。Windows 连接原手机 HTTP 服务读取同一权威状态，独立桌面聊天不另造主体数据库。

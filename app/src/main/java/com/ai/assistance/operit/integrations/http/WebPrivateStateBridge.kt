@@ -56,7 +56,8 @@ internal class WebPrivateStateBridge(private val context: Context) {
                 if (body.has("expected_target_version")) body.getInt("expected_target_version") else null)
             "withdraw" -> store.withdrawCandidate(role, chat, body.getString("id"), body.getString("candidate_hash"))
             "import" -> JSONObject().put("submitted", InnerContentImport.read(StringReader(body.getString("content")), store, role, chat,
-                body.optString("original").takeIf { it.isNotBlank() }, body.optString("source").takeIf { it.isNotBlank() }) { })
+                body.optString("original").takeIf { it.isNotBlank() }, body.optString("source").takeIf { it.isNotBlank() },
+                currentSubmission = body.optString("source_mode") == "new") { })
             else -> throw IllegalArgumentException("不支持的私域操作")
         }
     }

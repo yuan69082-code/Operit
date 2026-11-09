@@ -12,7 +12,8 @@ import java.io.Reader
  * JSON arrays and JSONL are streamed; batch size is not a limit on saved content. */
 internal object InnerContentImport {
     suspend fun read(reader: Reader, store: InternalStateStore, role: String, chat: String,
-                     original: String?, source: String?, progress: suspend (Long) -> Unit): Long = withContext(Dispatchers.IO) {
+                     original: String?, source: String?, currentSubmission: Boolean = false,
+                     progress: suspend (Long) -> Unit): Long = withContext(Dispatchers.IO) {
         var count = 0L
         JsonReader(reader).use { json ->
             json.isLenient = true
@@ -24,8 +25,10 @@ internal object InnerContentImport {
                 val row = JSONObject(parsed.toString())
                 val content = row.optJSONObject("record") ?: row
                 val provenance = row.optJSONObject("provenance")
-                val raw = provenance?.optString("original")?.takeIf { it.isNotBlank() } ?: original
-                val label = provenance?.optString("source")?.takeIf { it.isNotBlank() } ?: source
+                val raw = provenance?.optString("original")?.takeIf { it.isNotBlank() }
+                    ?: if (currentSubmission) content.toString() else original
+                val label = provenance?.optString("source")?.takeIf { it.isNotBlank() }
+                    ?: if (currentSubmission) "用户本次导入提出的完整变化" else source
                 val formedAt = provenance?.optLong("formed_at")?.takeIf { it > 0 }
                 val digest = InnerStructure.hash(JSONObject().put("record", content).put("original", raw ?: JSONObject.NULL)
                     .put("source", label ?: JSONObject.NULL).put("formed_at", formedAt ?: JSONObject.NULL))

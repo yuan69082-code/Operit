@@ -255,7 +255,7 @@ private fun PrivateContent(value: JSONObject) {
 private fun PrivateSources(role: String, row: JSONObject) {
     val context = LocalContext.current
     val content = row.optJSONObject("content") ?: row
-    val bindings = row.optJSONObject("bindings") ?: content.optJSONObject("source_bindings")
+    val bindings = row.optJSONObject("bindings") ?: row.optJSONObject("evidence") ?: content.optJSONObject("source_bindings")
         ?: row.optJSONObject("source_bindings")
     val evidence = row.optJSONArray("evidence") ?: JSONArray()
     val ids = ((0 until evidence.length()).map { index ->

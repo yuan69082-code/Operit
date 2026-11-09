@@ -115,7 +115,7 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
         <SourceChoice mode={sourceMode} change={setSourceMode} original={original} setOriginal={setOriginal} source={source} setSource={setSource} />
         <input type="file" accept=".json,.jsonl,.txt" onChange={e => { const file = e.target.files?.[0]; if (file) void file.text().then(setImportContent).catch(failure => { console.error('private.file', failure); setError('文件读取失败'); }); }} />
         <textarea aria-label="导入内容" value={importContent} onChange={e => setImportContent(e.target.value)} rows={8} />
-        <button disabled={busy || !importContent.trim()} onClick={() => { try { void mutate({ action: 'import', content: importContent, ...provenance({}) }); } catch (failure) { console.error('private.import', failure); setError(failure instanceof Error ? failure.message : '请检查来源'); } }}>提交各项候选</button>
+        <button disabled={busy || !importContent.trim()} onClick={() => { try { void mutate({ action: 'import', content: importContent, ...(sourceMode === 'new' ? { source_mode: 'new' } : provenance({})) }); } catch (failure) { console.error('private.import', failure); setError(failure instanceof Error ? failure.message : '请检查来源'); } }}>提交各项候选</button>
       </details>
     </section> : null}
     {busy ? <p role="status">正在读取或保存…</p> : !error && rows.length === 0 ? <p className="private-empty">此处暂未留存相应记录。未加载的内容不表示已遗忘或放下。</p> : null}
@@ -123,12 +123,12 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
       const item = object(row.value) ?? row;
       const content = object(item.content) ?? object(item.record) ?? item;
       return <article className="private-card" key={text(item.id) || index}><h2>{text(content.kind) || text(content.title) || section.title}</h2>
-        <Content value={content} />{content !== item ? <Content value={item} /> : null}
+        <div className="private-preview"><Content value={content} />{content !== item ? <Content value={item} /> : null}</div>
         {item.has_note === false || section.kind === 'activity' && !item.note_preview ? <p>未留存可见随记；可打开详情核对保密选择、实际操作或中断情况。</p> : typeof item.note_preview === 'string' ? <p>{item.note_preview}</p> : null}
         <button onClick={() => setDetail(item)}>查看全文与来源</button>
         {section.kind === 'activity' ? <button onClick={() => navigate({ title: '这次活动', kind: 'activity_part', id: text(item.id) })}>随记、操作与表达</button> : null}
         {section.kind === 'inner_pending' ? <><button disabled={busy} onClick={() => void edit(item)}>修改全文</button><button disabled={busy} onClick={() => void withdraw(item)}>撤回</button></> : section.kind === 'inner' || section.kind === 'inner_family' ? <button disabled={busy} onClick={() => void edit(item)}>提出修改候选</button> : null}
-        {!['activity', 'activity_part', 'waking_note', 'thought', 'source', 'category_versions', 'action_versions'].includes(section.kind) ? <button onClick={() => navigate({ title: '变化历史', kind: section.kind === 'action' ? 'action_versions' : 'category_versions', id: section.kind === 'action' ? text(item.id) : `${section.kind === 'inner_family' ? 'inner' : section.kind}:${text(item.id)}` })}>变化历史</button> : null}
+        {!['activity', 'activity_part', 'waking_note', 'thought', 'source', 'category_versions', 'action_versions', 'inner_pending'].includes(section.kind) ? <button onClick={() => navigate({ title: '变化历史', kind: section.kind === 'action' ? 'action_versions' : 'category_versions', id: section.kind === 'action' ? text(item.id) : `${['inner_family', 'inner'].includes(section.kind) ? 'inner_record' : section.kind}:${text(item.id)}` })}>变化历史</button> : null}
         {section.kind === 'state' ? <button onClick={() => navigate({ title: '这一类别里的事情', kind: 'episode_category', id: text(item.id) })}>分别查看相关事情</button> : null}
       </article>;
     })}</div>
@@ -136,7 +136,7 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
     {detail ? <div className="private-dialog"><section className="private-card"><button onClick={() => setDetail(null)}>关闭详情</button><Content value={object(detail.content) ?? object(detail.record) ?? detail} /><Content value={detail} />
       {Object.entries(object(detail.bindings) ?? object(detail.evidence) ?? {}).map(([id, evidence]) => <details key={id}><summary>来源 {id}</summary>{object(evidence) ? <Content value={object(evidence)!} /> : null}<button onClick={() => { setDetail(null); navigate({ title: '原始来源', kind: 'source', id }); }}>查阅原始材料</button><pre>{JSON.stringify(evidence, null, 2)}</pre></details>)}
       <details><summary>完整保存记录与技术信息</summary><pre>{JSON.stringify(detail, null, 2)}</pre></details></section></div> : null}
-    {form ? <CandidateForm value={form.record} setValue={record => setForm({ ...form, record })} mode={sourceMode} change={setSourceMode} original={original} setOriginal={setOriginal} source={source} setSource={setSource} close={() => setForm(null)} busy={busy} error={error} save={() => {
+    {form ? <CandidateForm value={form.record} existing={form.candidate !== undefined || form.targetVersion !== undefined} setValue={record => setForm({ ...form, record })} mode={sourceMode} change={setSourceMode} original={original} setOriginal={setOriginal} source={source} setSource={setSource} close={() => setForm(null)} busy={busy} error={error} save={() => {
       try { const record = completeRecord(form.record); void mutate({ action: 'submit', record, ...provenance(record), ...(form.candidate ? { replaces: text(form.candidate.id), previous_hash: form.hash! } : {}), ...(form.targetVersion === undefined ? {} : { expected_target_version: form.targetVersion }) }); }
       catch (failure) { console.error('private.candidate', failure); setError(failure instanceof Error ? failure.message : '提交未完成'); }
     }} /> : null}
@@ -146,11 +146,11 @@ function SourceChoice({ mode, change, original, setOriginal, source, setSource }
   return <div><label>来源<select value={mode} onChange={e => change(e.target.value)}><option value="established">已有确定内容导入/写入</option><option value="original">附实际原文与来源</option><option value="new">本次提出的新变化</option></select></label>
     {mode === 'original' ? <><label>实际原文<textarea value={original} onChange={e => setOriginal(e.target.value)} rows={5} /></label><label>来源说明<input value={source} onChange={e => setSource(e.target.value)} /></label></> : <p>{mode === 'established' ? '声明承接已有内容，不伪称找到历史原文；限已开启的 48 小时内提交。' : '以本次用户提交为来源，后续由主体读取和决定。'}</p>}</div>;
 }
-function CandidateForm({ value, setValue, close, save, busy, error, ...source }: { value: Row; setValue: (r: Row) => void; close: () => void; save: () => void; busy: boolean; error: string; mode: string; change: (s: string) => void; original: string; setOriginal: (s: string) => void; source: string; setSource: (s: string) => void }) {
-  const field = (key: string, title: string, long = false) => <label key={key}>{title}{long ? <textarea rows={6} value={text(value[key])} onChange={e => setValue({ ...value, [key]: e.target.value })} /> : <input value={text(value[key])} onChange={e => setValue({ ...value, [key]: e.target.value })} />}</label>;
+function CandidateForm({ value, existing, setValue, close, save, busy, error, ...source }: { value: Row; existing: boolean; setValue: (r: Row) => void; close: () => void; save: () => void; busy: boolean; error: string; mode: string; change: (s: string) => void; original: string; setOriginal: (s: string) => void; source: string; setSource: (s: string) => void }) {
+  const field = (key: string, title: string, long = false) => <label key={key}>{title}{long ? <textarea aria-label={title} rows={6} value={text(value[key])} onChange={e => setValue({ ...value, [key]: e.target.value })} /> : <input aria-label={title} value={text(value[key])} onChange={e => setValue({ ...value, [key]: e.target.value })} />}</label>;
   const choice = (key: string, title: string, options: string[]) => <label>{title}<select value={text(value[key])} onChange={e => setValue({ ...value, [key]: e.target.value })}><option value="">请选择</option>{options.map(o => <option key={o} value={o}>{words[o] ?? o}</option>)}</select></label>;
   return <div className="private-dialog"><section className="private-card private-form"><h2>完整候选</h2><p>提交不直接覆盖。修改版须在后续正常轮次重新读取；采用时保存这一版全文。</p>
-    <label>类别<select value={text(value.family)} onChange={e => setValue({ ...value, family: e.target.value })}>{Object.entries(familyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+    <label>类别<select disabled={existing} value={text(value.family)} onChange={e => setValue({ id: value.id, family: e.target.value, kind: value.kind, description: value.description, context: value.context, exceptions: value.exceptions, status: value.status })}>{Object.entries(familyNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
     {field('kind', '内容名称')}{field('description', '完整描述（保留条件、程度和矛盾）', true)}{field('context', '适用情境', true)}{field('exceptions', '例外', true)}{field('object_ref', '对象身份（用户为 user，其他对象用已有身份）')}
     {value.family === 'preference' ? <>{field('aspect', '偏好方面')}{choice('orientation', '倾向', ['like', 'dislike', 'neutral', 'uncertain'])}{choice('horizon', '持续范围', ['long_term', 'short_term', 'contextual'])}{choice('ownership', '自己的选择或配合', ['self', 'accommodation'])}</> : null}
     {value.family === 'relation' ? <>{field('label', '关系称谓')}{field('understanding', '对这个对象的认识', true)}{field('feeling', '对这个对象的感受', true)}</> : null}

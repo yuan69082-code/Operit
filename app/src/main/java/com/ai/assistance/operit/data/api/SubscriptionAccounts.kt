@@ -199,6 +199,9 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
     }
     fun boundClient(channel: String, session: String, base: OkHttpClient): OkHttpClient =
         base.newBuilder().followRedirects(false).followSslRedirects(false)
+            // Session and origin validation must run even when a downstream cache/interceptor
+            // supplies a response without reaching the network.
+            .apply { interceptors().clear() }
             .addInterceptor(guard(channel).interceptor(session)).addInterceptor { chain ->
                 val original = chain.request()
                 val endpoint = SubscriptionChannels.get(channel).endpoint ?: error("订阅渠道未开放")
@@ -211,7 +214,7 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
                     val refreshed = kotlinx.coroutines.runBlocking { refresh(channel, session, rejected) }
                     chain.proceed(original.newBuilder().header("Authorization", "Bearer $refreshed").build())
                 }
-            }.build()
+            }.apply { base.interceptors.forEach { addInterceptor(it) } }.build()
     fun headers(channel: String): Map<String, String> = buildMap {
         put("User-Agent", "Operit/${BuildConfig.VERSION_NAME}")
         if (channel == "grok") put("X-XAI-Token-Auth", "xai-grok-cli")

@@ -1,0 +1,14 @@
+{
+  "simulation": "HTTP fixture; no phone, real model or actual subject content",
+  "checks": [
+    "production navigation",
+    "full text exact revision",
+    "source selection",
+    "no page-time model call",
+    "history",
+    "pagination",
+    "empty and recoverable error",
+    "desktop and mobile layout"
+  ],
+  "requestCount": 42
+}
