@@ -1,11 +1,11 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: validating
+status: batch-five-validated
 ---
 
 # 指定助手连续状态：六批实施记录
 
-第5批在 feat/subject-action-feedback / [PR #57](https://github.com/yuan69082-code/Operit/pull/57) 接续未合并的 #56 → #55 → #54 → #53。操作登记、实际回执、主观理解、软件能力及验证进度见 [第5批交接](7-action-feedback.md)。第6批尚未实施，下面各批基线描述保留为历史记录，不代表当前待办。
+第5批在 feat/subject-action-feedback / [PR #57](https://github.com/yuan69082-code/Operit/pull/57) 接续未合并的 #56 → #55 → #54 → #53，已完成实现、测试及构建，未合并或发布。操作登记、实际回执、主观理解、软件能力、验证证据及第6批接续入口见 [第5批交接](7-action-feedback.md)。第6批尚未实施，下面各批基线描述保留为历史记录，不代表当前待办。
 
 第3批从未合并 #54 / b456315 接续；类别内部事件、重点、求生欲特例及第4批接入点见 [类别内部事件](4-category-events.md)。此前两批记录保留为对应交付时事实。
 
