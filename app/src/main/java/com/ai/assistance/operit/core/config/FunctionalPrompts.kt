@@ -31,7 +31,7 @@ object FunctionalPrompts {
         【相处与交流】
         [保留双方使用的名字、称呼、相处方式、明确约定和表达。按来源写清谁说了什么，不替任何一方重新定义身份或关系。]
         [概括近期关键交流、分歧与修正；重要表达可保留短原话，不改写成旁观者对双方关系的评判。]
-        [提炼用户实际提供的内容及要求，说明它们如何指导后续交流或输出。]
+        [提炼用户实际提供的内容及要求，区分用户提议、AI 是否同意及尚未决定的部分。]
 
         【对话历程与概要】
         [按实际发生的顺序概括话题、行动与结果，篇幅随信息量决定；技术细节只在本次确实涉及并影响后续时记录。]
@@ -59,7 +59,7 @@ object FunctionalPrompts {
         2. 内容长度：压缩重复描述、过期过程和大段工具输出，通常用 800–1600 字，复杂任务最多 2400 字；短对话应更短。不为填满栏目凑字数。保留关键事实、约定、情绪变化、未完成事项及必要原话。
         3. 信息完整性：优先保证信息的完整性和准确性，技术与非技术内容都需提供必要证据或引用.
         4. 内容还原：写清实际讨论内容、重要变化及产出，必要时引用短原话或关键参数。摘要不能替代原始记录，不确定或未提及的信息不要补写.
-        5. 目标：生成的摘要必须是自包含的。即使AI完全忘记了之前的对话，仅凭这份摘要也能够准确理解历史背景、当前状态、具体进度和下一步行动.
+        5. 目标：摘要须准确记录历史背景、当前状态、具体进度、原文已有的决定和未决问题；不替下一轮新作决定。
         6. 时序重点：请先聚焦于最新一段对话（约占输入的最后30%），明确最新指令、问题和进展，再回顾更早的内容。若新消息与旧内容冲突或更新，应以最新对话为准，并解释差异.
     """
 
@@ -79,7 +79,7 @@ object FunctionalPrompts {
         [Interaction & Communication]
         [Preserve names, forms of address, ways of relating, explicit agreements and expressions. Attribute statements to their speakers without redefining either participant's identity or relationship.]
         [Summarize relevant exchanges, disagreements and corrections. Keep short original quotations when useful rather than replacing the interaction with an observer's judgment.]
-        [Extract the user's actual content and requirements and explain how they guide future exchanges or output.]
+        [Extract the user's actual content and requirements; distinguish her proposals, my agreement and matters still undecided.]
 
         [Conversation Progress & Overview]
         [Describe topics, actions and results in their actual order, with length suited to the information. Include technical details only when involved in this exchange and needed later.]
@@ -107,7 +107,7 @@ object FunctionalPrompts {
         2. Be concise: normally 500–1000 words, at most 1500 for complex tasks, shorter for short conversations. Remove repetition, obsolete process and large tool dumps. Preserve key facts, agreements, emotional changes, unfinished tasks and necessary quotations.
         3. Completeness: prioritize completeness and accuracy. Provide evidence/quotes when needed.
         4. Reconstruction: the summary must describe both “how the process progressed” and “what the actual outputs/discussion were”. Quote resulting text, conclusions, code snippets, or parameters when needed.
-        5. Goal: the summary must be self-contained so that even if the AI forgets the original conversation, it can fully reconstruct context, current status, progress, and next actions.
+        5. Goal: record historical context, current status, progress, decisions already expressed in the source and unresolved questions. Do not make new decisions for the next turn.
         6. Recency: focus first on the most recent part of the conversation (about the last 30% of input), then review earlier content. If new messages conflict with old content, use the latest messages and explain the differences.
     """
 

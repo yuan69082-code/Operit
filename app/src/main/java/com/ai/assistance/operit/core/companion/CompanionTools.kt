@@ -161,9 +161,10 @@ object CompanionTools {
                             if (action == "thought") result.put("saved", ThoughtPool.save(context, actor, value(tool, "id"), value(tool, "content"),
                                 required(tool, "choice"), value(tool, "minutes")?.let { it.toIntOrNull() ?: error("minutes 须为整数") }))
                             val now = System.currentTimeMillis()
-                            val items = ThoughtPool.all(context, actor)
+                            val page = ThoughtPool.page(context, actor, value(tool, "offset")?.toInt() ?: 0)
+                            val items = page.getJSONArray("items").objects()
                             result.put("surfaced", JSONArray(ThoughtPool.surfaced(items, now)))
-                                .put("sinking", items.count { it.optString("state") == "sink" })
+                                .put("page", page).put("notice", "分页列出全部念头；未显示不表示消失，用 offset 续读")
                             result
                         } else {
                             check(action != "submit" || !CompanionRuntime.isExplorationWake(chatId)) { "本轮探索请用 companion_explore schedule 安排继续；可以保存或批注待办" }
@@ -214,7 +215,13 @@ object CompanionTools {
                                 }
                                 else -> error("未知唤醒操作")
                             }
-                            store.read(scheduleKey)
+                            store.read(scheduleKey).also { saved ->
+                                if (action != "get") ActivityNotes.current(chatId)?.let { ref ->
+                                    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                        ActivityNotes.schedule(context, ref, saved)
+                                    }
+                                }
+                            }
                         }
                         "companion_capabilities" -> {
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {

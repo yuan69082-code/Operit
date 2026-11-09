@@ -5,6 +5,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ActivityNoteStreamTest {
+    @Test fun protectedPayloadsFencesAndEscapedExamplesNeverBecomeDisplayNotes(): Unit = runBlocking {
+        val notes = mutableListOf<String>()
+        val stream = ActivityNoteStream("r", { _, text, _ -> notes.add(text) }, {}, {})
+        val inputs = listOf(
+            "<companion_note>私密 <activity_note>不能公开</activity_note></companion_note>",
+            "<operit_state_report>{\"reason\":\"<waking_note>原话</waking_note>\"}</operit_state_report>",
+            "<tool name=\"write\"><param name=\"content\"><activity_note>文件内容</activity_note></param></tool>",
+            "~~~xml\n<waking_note>示例</waking_note>\n~~~\n",
+            "\\<activity_note>转义示例</activity_note>",
+        )
+        val output = StringBuilder()
+        (inputs.joinToString("\n") + "<activity_note>现在实际写下的。</activity_note>").forEach {
+            output.append(stream.append(it.toString()))
+        }
+        output.append(stream.finish())
+        assertEquals(inputs.joinToString("\n"), output.toString())
+        assertEquals(listOf("现在实际写下的。"), notes)
+    }
     @Test fun chunkedNotesAreDurableBeforeCompletionAndNeverCopyPrivateOrReasoning(): Unit = runBlocking {
         val notes = mutableListOf<Pair<String, Boolean>>()
         val stream = ActivityNoteStream("r0", { _, text, waking -> notes.add(text to waking) }, {}, {})

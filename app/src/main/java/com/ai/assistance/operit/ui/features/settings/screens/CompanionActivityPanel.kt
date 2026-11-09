@@ -22,13 +22,16 @@ internal fun CompanionActivityPanel(store: CompanionStore, role: String) {
     var chatId by remember(role) { mutableStateOf<String?>(null) }
     var logs by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
     var schedule by remember(role) { mutableStateOf(JSONObject()) }
+    var technical by remember(role) { mutableStateOf(false) }
     LaunchedEffect(role) {
         while (true) {
             chatId = AssistantWindowRouter.chat(store.context, role)
-            withContext(Dispatchers.IO) { (chatId?.let { store.logs(it) } ?: emptyList()) to store.read(store.scheduleKey(role)) }
-                .let { logs = it.first; schedule = it.second }
+            schedule = withContext(Dispatchers.IO) { store.read(store.scheduleKey(role)) }
             delay(3000)
         }
+    }
+    LaunchedEffect(role, technical) {
+        if (technical) logs = withContext(Dispatchers.IO) { chatId?.let { store.logs(it) } ?: emptyList() }
     }
     Text("自主学习已移到“自主探索”：按助手独立开启，默认关闭，和这里的主动联系计划分别安排。")
     val at = schedule.optLong("at")
@@ -42,9 +45,10 @@ internal fun CompanionActivityPanel(store: CompanionStore, role: String) {
             chatId?.let { store.log(it, "安排", "用户安排一分钟后唤醒") }
         }
     }) { Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text("一分钟后唤醒一次") }
-    Text("活动日志（最近300条）", style = MaterialTheme.typography.titleMedium)
-    if (logs.isEmpty()) Text("尚无记录；这里会记录开始、跳过、安静、联系、学习、下次安排以及 XC 请求结果。")
-    logs.forEach { row ->
+    ActivityNotesPanel(role)
+    TextButton(onClick = { technical = !technical }) { Text(if (technical) "收起技术记录" else "技术记录与旧活动日志") }
+    if (technical) Text("旧日志没有可见随记时，保留当时记录，不补写心理过程。最近300条技术记录如下。", style = MaterialTheme.typography.bodySmall)
+    if (technical) logs.forEach { row ->
         OutlinedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp)) {
                 Text(DateFormat.getDateTimeInstance().format(Date(row.getLong("at"))) + " · " + row.getString("kind"))

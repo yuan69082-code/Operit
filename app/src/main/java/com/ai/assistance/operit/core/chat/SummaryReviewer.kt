@@ -28,7 +28,7 @@ internal class SummaryReviewer private constructor(
         val summary = mappings.getConfigMappingForFunction(FunctionType.SUMMARY)
         val configs = com.ai.assistance.operit.data.preferences.ModelConfigManager(context)
         // Hash configuration locally, including provider and parameters; never log credentials.
-        return ReviewedSummaryBatches.fingerprint(listOf(persona, modelConfigId, modelIndex,
+        return ReviewedSummaryBatches.fingerprint(listOf(SummaryFidelityPrompts.VERSION, persona, modelConfigId, modelIndex,
             ReviewedSummaryBatches.modelFingerprint(modelConfigId?.let { configs.getModelConfig(it) }), summary,
             ReviewedSummaryBatches.modelFingerprint(configs.getModelConfig(summary.configId))).joinToString("\u0000"))
     }
@@ -45,8 +45,10 @@ internal class SummaryReviewer private constructor(
             val service = EnhancedAIService.getChatInstance(context, serviceKey)
             val request = JSONObject()
                 .put("previous_summary", previousSummary ?: JSONObject.NULL)
-                .put("source", JSONArray(source.map { (speaker, content) ->
-                    JSONObject().put("speaker", speaker).put("text", if (speaker == "assistant") ChatUtils.removeThinkingContent(content) else content)
+                .put("source", JSONArray(source.mapIndexed { index, (speaker, content) ->
+                    JSONObject().put("source_index", index + 1).put("speaker", speaker)
+                        .put("kind", if (speaker == "summary") "previous_summary_unverified" else "source_message")
+                        .put("text", if (speaker == "assistant") ChatUtils.removeThinkingContent(content) else content)
                 }))
                 .put("protected_memory", protectedMemory)
                 .put("draft", proposed)

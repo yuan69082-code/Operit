@@ -165,7 +165,7 @@ object CompanionContext {
                 reminders.joinToString("；") { it.optString("title") } + "。\n")
         }
         if (!internalEnabled && !roleId.isNullOrBlank()) {
-            appendSections(ThoughtPool.promptSections(ThoughtPool.all(context, roleId), System.currentTimeMillis()))
+            appendSections(ThoughtPool.promptSections(ThoughtPool.selected(context, roleId), System.currentTimeMillis()))
         }
         if (store.proactiveEnabled && store.proactiveRole == roleId && roleId != null) {
             instructions.append("你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。\n")
@@ -174,6 +174,7 @@ object CompanionContext {
         // Internal state owns todo/thought selection when enabled. Do not reinsert the newest
         // fixed-count reminders after selection, and keep this request's live catalogue at the tail.
         val wake = CompanionRuntime.isWake(chatId)
+        if (!wake && ActivityNotes.current(chatId)?.role == roleId) instructions.append("\n").append(ActivityNotes.instructions)
         // History previews can resume on Main after rollback. State projection reads storage
         // and ranks the complete event history; doing it there freezes editing and scrolling.
         val internalSections = withContext(Dispatchers.IO) {

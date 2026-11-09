@@ -38,7 +38,7 @@ class InternalStateStore(private val context: Context) {
     suspend fun submitEstablishedContent(role: String, chat: String, submissionId: String, content: JSONObject,
                                          original: String? = null, sourceLabel: String? = null,
                                          formedAt: Long? = null, replaces: String? = null,
-                                         previousHash: String? = null): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                         previousHash: String? = null, expectedTargetVersion: Int? = null): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "助手提交应走正常报告候选入口" }
         requireRecipient(role, chat)
         require(enabled(role) && !recipientScope(role, chat))
@@ -47,6 +47,7 @@ class InternalStateStore(private val context: Context) {
         val body = JSONObject().put("record", content).put("original", original ?: JSONObject.NULL)
             .put("source_label", sourceLabel ?: JSONObject.NULL).put("formed_at", formedAt ?: JSONObject.NULL)
             .put("replaces", replaces ?: JSONObject.NULL).put("previous_hash", previousHash ?: JSONObject.NULL)
+            .apply { if (expectedTargetVersion != null) put("expected_target_version", expectedTargetVersion) }
         val digest = InnerStructure.hash(body)
         var result = JSONObject()
         val objects = CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user"
@@ -71,6 +72,7 @@ class InternalStateStore(private val context: Context) {
                 val previous = replaces?.let { requireNotNull(InnerStructure.candidate(data, it)) { "候选已改变或撤回" } }
                 require(previous == null || InnerStructure.hash(previous) == previousHash) { "候选已被修改，请重新打开全文" }
                 val version = InnerStructure.record(data, target)?.getInt("version") ?: 0
+                require(expectedTargetVersion == null || version == expectedTargetVersion) { "已采用内容已变化，请重新读取当前全文后提出修订" }
                 val frame = InternalStateFrame(id = "submission:$id", roleId = role, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,
                     eventIds = (0 until refs.length()).map { refs.getString(it) }.toSet(), definitionVersions = emptyMap(),
@@ -388,7 +390,11 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        if (kind == "thought") {
+            require(!recipientScope(role, chat)) { "念头仅在本助手私域读取" }
+            return ThoughtPool.page(context, role, offset)
+        }
         if (kind in ActivityNotes.kinds) {
             require(!recipientScope(role, chat)) { "活动和梦醒随记仅在本助手私域读取" }
             return ActivityNotes.page(store.context, role, kind, id, offset)
@@ -406,6 +412,7 @@ class InternalStateStore(private val context: Context) {
             (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
+        if (kind == "episode_category") return CategoryEvents.page(data, "episode", offset, requireNotNull(id))
         if (kind == "inner_family") {
             val family = requireNotNull(id)
             require(family in InnerStructure.families)
@@ -507,7 +514,7 @@ class InternalStateStore(private val context: Context) {
                 InternalStateEngine.advance(data, chat, now)
             }
             val selected = InternalStateSelection.select(data, chat, now, currentInput,
-                candidates(data, actor, chat, wake, capabilities), ThoughtPool.all(context, actor), inputEventId)
+                candidates(data, actor, chat, wake, capabilities), ThoughtPool.selected(context, actor, data.optLong("material_query_cursor")), inputEventId)
             var frame = requestId?.let {
                 InternalStateFrame(id = "state-frame:$it", roleId = actor, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,

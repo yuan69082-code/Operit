@@ -97,10 +97,36 @@ internal object ActivityNotes {
         part(context, ref, "message:$timestamp", "message", JSONObject().put("timestamp", timestamp)
             .put("chat", ref.chat).put("text", text).put("saved", true).put("read", JSONObject.NULL))
         withContext(Dispatchers.IO) {
-            CompanionStore(context).activityWrite(ref.role, "activity", ref.id, "private") { old ->
-                requireNotNull(old).put("message_count", 1) // one persisted expression in the current wake protocol
+            val store = CompanionStore(context)
+            val id = ref.id + ":message:" + timestamp
+            store.activityWrite(ref.role, "activity_contact", id, ref.id) { old ->
+                old ?: base(ref, "activity_contact", id, ref.id).put("timestamp", timestamp).put("chat", ref.chat)
+            }
+            // Do not open a second SQLite connection inside the head's write transaction.
+            val count = store.activityCount(ref.role, "activity_contact", ref.id)
+            store.activityWrite(ref.role, "activity", ref.id, "private") { old ->
+                requireNotNull(old).put("message_count", maxOf(old.optLong("message_count"), count))
             }
         }
+    }
+
+    /** Called only after a real chat-store write, never from provisional rendering. */
+    suspend fun savedMessage(context: Context, chat: String, message: com.ai.assistance.operit.data.model.ChatMessage) {
+        if (message.sender != "ai" || message.contentStream != null || message.content.isBlank()) return
+        val ref = current(chat) ?: return
+        try {
+            val metadata = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chat)
+            if (metadata?.characterCardId != ref.role || !metadata.characterGroupId.isNullOrBlank()) return
+            ActivityNotes.message(context, ref, message.timestamp, message.content)
+        } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+        catch (failure: Exception) {
+            com.ai.assistance.operit.util.AppLogger.e("ActivityNotes", "消息已保存，活动索引未写入；不能重发消息", failure)
+        }
+    }
+
+    suspend fun schedule(context: Context, ref: Ref, saved: JSONObject) {
+        val version = saved.optString("generation").ifBlank { InnerStructure.hash(saved) }
+        part(context, ref, "schedule:$version", "schedule", JSONObject(saved.toString()).put("saved", true))
     }
 
     suspend fun finish(context: Context, ref: Ref, status: String) = withContext(Dispatchers.IO) {

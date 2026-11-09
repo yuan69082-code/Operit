@@ -156,4 +156,25 @@ class EstablishedContentEntryPointsTest {
         assertEquals(description, InnerStructure.record(states.read(role), "long")!!.getJSONObject("content").getString("description"))
         assertEquals(1L, InnerRows(InternalStateStore(context).read(role), false).count())
     }
+
+    @Test fun fileImportResumesAfterBadItemAndKeepsOriginalsSeparateFromDeclarations(): Unit = runBlocking {
+        states.openEstablishedWindow(role)
+        val full = preference("file-full").put("description", "完整正文\n例外：我不总是这样；对象不同也可以有不同的选择。")
+        val first = JSONObject().put("record", full)
+        try {
+            InnerContentImport.read(java.io.StringReader(JSONArray().put(first).put("invalid").toString()),
+                states, role, chat, null, null) {}
+            fail("invalid row")
+        } catch (_: IllegalArgumentException) {}
+        assertEquals(1L, InnerRows(states.read(role), true).count())
+        val source = "用户提供的原文：我平常喜欢直接说，也会按情境变化。"
+        val second = JSONObject().put("record", preference("file-quote"))
+            .put("provenance", JSONObject().put("original", source).put("source", "过去的共同记录"))
+        assertEquals(2L, InnerContentImport.read(java.io.StringReader("$first\n$second"), states, role, chat, null, null) {})
+        assertEquals(2L, InnerRows(states.read(role), true).count())
+        assertEquals(2, adoptPage())
+        assertEquals(full.getString("description"), InnerStructure.record(states.read(role), "file-full")!!.getJSONObject("content").getString("description"))
+        val rows = InnerRows(states.read(role), false).page(0)
+        assertEquals(setOf(EstablishedContent.ORIGIN, "user_proposal"), rows.map { it.getString("origin") }.toSet())
+    }
 }

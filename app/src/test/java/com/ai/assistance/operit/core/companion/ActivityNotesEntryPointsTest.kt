@@ -108,4 +108,26 @@ class ActivityNotesEntryPointsTest {
         try { InternalStateStore(context).inspectCategory(role, foreign, "activity_part", ref.id, 0); fail("must isolate") }
         catch (_: IllegalArgumentException) {}
     }
+
+    @Test fun realChatWritesCountOnceAndDoNotTreatProvisionalTextAsSent(): Unit = runBlocking {
+        val ref = ActivityNotes.begin(context, role, chat, "normal-input", "normal_input")
+        val history = ChatHistoryManager.getInstance(context)
+        try {
+            val empty = ChatMessage(sender = "ai", content = "", timestamp = 1234)
+            history.addMessage(chat, empty)
+            assertEquals(0, CompanionStore(context).activityRead(role, "activity", ref.id)!!.getInt("message_count"))
+            val final = empty.copy(content = "这是已经写入会话的表达。")
+            history.updateMessage(chat, final)
+            history.updateMessage(chat, final)
+            history.addMessage(chat, ChatMessage(sender = "ai", content = "另一条实际表达。", timestamp = 1235))
+            assertEquals(2, CompanionStore(context).activityRead(role, "activity", ref.id)!!.getInt("message_count"))
+            ActivityNotes.schedule(context, ref, JSONObject().put("generation", "plan-one").put("at", 9999)
+                .put("purpose", "已经保存的继续事项").put("paused", false))
+            val page = ActivityNotes.page(context, role, "activity_part", ref.id, 0).getJSONArray("items")
+            assertEquals(2, (0 until page.length()).count { page.getJSONObject(it).getString("kind") == "message" })
+            assertTrue(page.toString().contains(final.content))
+            assertFalse(page.toString().contains("\"read\":true"))
+            assertTrue(InnerStructureContext.prepare(context, role, window(role), true, input = "继续").state.contains("写入会话"))
+        } finally { ActivityNotes.release(ref) }
+    }
 }

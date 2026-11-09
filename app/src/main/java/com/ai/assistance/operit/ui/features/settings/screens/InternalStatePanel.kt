@@ -43,7 +43,7 @@ import java.util.Date
 private data class StateEditTarget(val state: JSONObject, val chat: String, val revision: Long)
 
 @Composable
-internal fun InternalStatePanel(role: String) {
+internal fun InternalStateValuesPanel(role: String) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { InternalStateStore(context) }
     val coroutine = rememberCoroutineScope()
@@ -88,7 +88,7 @@ internal fun InternalStatePanel(role: String) {
             delay(3000)
         }
     }
-    SpaceSectionTitle("内部状态 · Internal State", "点开状态查看变化，也可编辑数值、原因、分类和时间规则。")
+    SpaceSectionTitle("当前感受与驱力", "这里读取同一份持续状态。点击变化点查看当时的来源；不由页面重新生成内心。")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("开启这位助手的内部状态", Modifier.weight(1f))
         Switch(checked = enabled, enabled = !busy, onCheckedChange = { value ->

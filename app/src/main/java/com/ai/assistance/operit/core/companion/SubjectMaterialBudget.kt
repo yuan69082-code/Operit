@@ -71,6 +71,25 @@ internal object SubjectMaterialBudget {
             lane.target.put(row)
             omitted.put(lane.path, lane.rows.size - lane.target.length())
             if (estimate(result.toString()) + ENVELOPE_RESERVE > requested) {
+                // A fragment is an explicit range of immutable text, not a shortened record.
+                // Adapt its range to the shared remaining budget, including provenance metadata.
+                if (lane.path == "inner_structure.pending_fragments" && row is JSONObject) {
+                    val original = row.getString("text")
+                    var low = 1; var high = original.length - 1; var best: JSONObject? = null
+                    while (low <= high) {
+                        val middle = (low + high) / 2
+                        var length = middle
+                        if (length < original.length && Character.isHighSurrogate(original[length - 1])) length--
+                        val part = JSONObject(row.toString()).put("text", original.substring(0, length))
+                            .put("end", row.getInt("offset") + length).put("next_offset", row.getInt("offset") + length)
+                            .put("complete_record", false)
+                        lane.target.put(lane.target.length() - 1, part)
+                        if (length > 0 && estimate(result.toString()) + ENVELOPE_RESERVE <= requested) {
+                            best = part; low = middle + 1
+                        } else high = middle - 1
+                    }
+                    if (best != null) { lane.target.put(lane.target.length() - 1, best); return }
+                }
                 lane.target.remove(lane.target.length() - 1)
                 omitted.put(lane.path, lane.rows.size - lane.target.length())
             }
@@ -83,10 +102,10 @@ internal object SubjectMaterialBudget {
         // Identity has the first detail turn, not an unlimited exclusive allocation.
         // Rotate all other domains per request so emotion/identity cannot forever exclude
         // contrary material. This is technical exposure, never a change in subjective focus.
-        val rest = lanes.drop(1).filter { it != directory }
+        val rest = lanes.filter { it != directory }
         val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
         val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
-        val order = listOf(lanes.first()) + rest.drop(start) + rest.take(start)
+        val order = rest.drop(start) + rest.take(start)
         for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
             order.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
         budget.put("estimated_tokens", estimate(result.toString()) + ENVELOPE_RESERVE)

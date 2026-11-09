@@ -116,7 +116,7 @@ class SubjectRestDreamsEntryPointsTest {
         // Read the exact dream when a prior receipt competes for the shared material budget.
         val proposing = readMaterial(second, "dream", id)
         submit(proposing, JSONObject().put("inner", JSONArray().put(proposal)))
-        val adopting = requireNotNull(request().internalStateFrame)
+        val adopting = nativeInnerRead(context, requireNotNull(request().internalStateFrame), "inner_pending", "feeling-proposal")
         submit(adopting, JSONObject().put("inner", JSONArray().put(JSONObject().put("op", "adopt")
             .put("id", "feeling-proposal").put("reason", "明确采用这份感受解释"))))
         val continued = request(second)

@@ -697,7 +697,7 @@ object AIMessageManager {
      *
      * @param enhancedAiService AI服务实例。
      * @param messages 需要总结的消息列表。
-     * @param autoContinue 是否为自动续写模式，如果是则在总结消息尾部添加续写提示。
+     * @param autoContinue 保留调用兼容；续写由调用方控制，不写入历史摘要。
      * @return 包含总结内容的ChatMessage对象，如果无需总结或总结失败则返回null。
      */
     suspend fun summarizeMemory(
@@ -716,30 +716,33 @@ object AIMessageManager {
     ): ChatMessage? = kotlinx.coroutines.withContext(
         com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(roleCardId)
     ) {
-        val base = summarizeMemoryInScope(enhancedAiService, messages, autoContinue, isGroupChat, summaryConfig,
-            chatId, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, summaryProgress, batchLabel, cachedOnly)
-        // 原有摘要不变，额外附上分段格式；只在私聊、顶层、真正提交的那次做，失败不影响原摘要
-        if (base == null || isGroupChat || chatId.isNullOrBlank() || batchLabel.isNotEmpty() || cachedOnly || !summaryProgress ||
-            !FeelingLog.segmentsEnabled(context)) return@withContext base
+        // Generate the optional segment draft BEFORE the existing review, so nothing
+        // generated is appended after approval. This reorders existing calls, not an extra review.
         val lastSummary = messages.indexOfLast { it.sender == "summary" }
         val previous = messages.getOrNull(lastSummary)?.content
         val fresh = messages.drop(lastSummary + 1).filter { it.sender == "user" || it.sender == "ai" }
-        if (fresh.isEmpty()) return@withContext base
-        val block = try {
+        var segmentSources = emptyList<Pair<String, String>>()
+        val segmentEnabled = !isGroupChat && !chatId.isNullOrBlank() && batchLabel.isEmpty() && !cachedOnly &&
+            summaryProgress && fresh.isNotEmpty() && FeelingLog.segmentsEnabled(context)
+        val block = if (segmentEnabled) try {
             com.ai.assistance.operit.core.tools.ToolProgressBus.update(
                 com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME, 0.99f, "正在整理窗口段落")
             val open = SegmentedSummary.parse(previous).open
             val from = open.firstNotNullOfOrNull { Regex("""from=(\d+)""").find(it)?.groupValues?.get(1)?.toLongOrNull() }
                 ?: fresh.first().timestamp
-            SegmentedSummary.build(enhancedAiService, chatId, fresh, previous, FeelingLog.since(context, chatId, from))
+            val feelings = FeelingLog.since(context, requireNotNull(chatId), from)
+            segmentSources = feelings.map { "subject_original_note@${it.at}" to it.text }
+            SegmentedSummary.build(enhancedAiService, chatId, fresh, previous, feelings)
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
         } catch (failure: Exception) {
             AppLogger.e(TAG, "窗口段落生成失败，只保留原摘要", failure); null
         } ?: previous?.takeIf { SegmentedSummary.hasBlock(it) }?.let {
             // 这次没生成出来，至少把旧段落带上，不让它们丢
             it.substring(it.indexOf(SegmentedSummary.HEADER), it.indexOf(SegmentedSummary.END) + SegmentedSummary.END.length)
-        }
-        if (block == null) base else base.copy(content = base.content.trimEnd() + "\n\n" + block)
+        } else null
+        summarizeMemoryInScope(enhancedAiService, messages, autoContinue, isGroupChat, summaryConfig,
+            chatId, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, summaryProgress, batchLabel, cachedOnly,
+            block, segmentSources)
     }
 
     private suspend fun summarizeMemoryInScope(
@@ -754,7 +757,9 @@ object AIMessageManager {
         chatModelIndexOverride: Int? = null,
         summaryProgress: Boolean = true,
         batchLabel: String = "",
-        cachedOnly: Boolean = false
+        cachedOnly: Boolean = false,
+        segmentDraft: String? = null,
+        segmentSources: List<Pair<String, String>> = emptyList()
     ): ChatMessage? {
         val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
         val previousSummary = if (lastSummaryIndex != -1) SegmentedSummary.stripBlock(messages[lastSummaryIndex].content).trim() else null
@@ -771,7 +776,7 @@ object AIMessageManager {
         }
 
         val batches = ReviewedSummaryBatches.plan(messagesToSummarize)
-        if (batches.size > 1 && batchLabel.isEmpty()) {
+        if (batches.size > 1 && batchLabel.isEmpty() && segmentDraft == null) {
             var approved = previousSummary?.let { ChatMessage(sender = "summary", content = it) }
             if (summaryProgress) {
                 // Reuse completed preparation, then process the remaining tail in one request.
@@ -790,8 +795,8 @@ object AIMessageManager {
                 }
                 if (reused == batches.size) {
                     val result = requireNotNull(approved)
-                    return if (autoContinue) result.copy(content = context.getString(
-                        R.string.ai_message_continue_task_if_complete, result.content)) else result
+                    // Continuation is controlled by the caller, not a new command saved in history.
+                    return result
                 }
                 return summarizeMemory(
                     enhancedAiService, listOfNotNull(approved) + batches.drop(reused).flatten(),
@@ -1168,7 +1173,7 @@ object AIMessageManager {
                 LocaleUtils.usesChineseContent(context).toString(),
                 com.ai.assistance.operit.core.chat.hooks.SummaryHookRegistry.cacheRevision().toString(),
                 messagesToSummarize.joinToString("\u0000") { "${it.timestamp}:${it.roleName}:${it.content}" },
-                previousSummary, org.json.JSONArray(conversationToSummarize.map {
+                previousSummary, segmentDraft, segmentSources.toString(), org.json.JSONArray(conversationToSummarize.map {
                     org.json.JSONArray(listOf(it.first, it.second))
                 }).toString(), isGroupChat.toString()
             ).joinToString("\u0000"))
@@ -1191,7 +1196,6 @@ object AIMessageManager {
                 AppLogger.e(TAG, "AI生成的总结内容为空，放弃本次总结")
                 error("压缩草稿为空，原上下文已保留。")
             } else {
-                // 如果是自动续写，在总结消息尾部添加续写提示
                 val trimmedSummary = draft.trim()
                 val useEnglish = !LocaleUtils.usesChineseContent(context)
                 // Package schemas are discoverable via use_package; duplicating them inside
@@ -1222,6 +1226,10 @@ object AIMessageManager {
                         append("\n\n")
                         append(packageWarmupBlock)
                     }
+                    if (segmentDraft != null) {
+                        append("\n\n")
+                        append(segmentDraft)
+                    }
                 }.trimEnd()
 
                 summaryWithQuotes
@@ -1233,7 +1241,8 @@ object AIMessageManager {
                     "AI 正在审阅 $batchLabel"
                 )
                 // Review the actual complete draft, including generated dialogue excerpts.
-                reviewer.review(proposed, conversationToSummarize, previousSummary, protectedMemory)
+                reviewer.review(proposed, conversationToSummarize + segmentSources,
+                    messages.getOrNull(lastSummaryIndex)?.content, protectedMemory)
             }, stage = { stage, hit, millis ->
                 AppLogger.d("SummaryTiming", "batch=$batchLabel stage=$stage cache=$hit elapsed_ms=$millis source_chars=${conversationToSummarize.sumOf { it.second.length }}")
             })
@@ -1242,11 +1251,7 @@ object AIMessageManager {
                     0.98f,
                     context.getString(R.string.conversation_summary_reviewed)
                 )
-                val finalSummary = if (autoContinue) {
-                    context.getString(R.string.ai_message_continue_task_if_complete, reviewedSummary)
-                } else {
-                    reviewedSummary
-                }
+                val finalSummary = reviewedSummary
                 
                 ChatMessage(
                     sender = "summary",

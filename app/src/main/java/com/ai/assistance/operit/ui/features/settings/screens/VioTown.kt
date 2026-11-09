@@ -148,18 +148,9 @@ private fun TownSheet(title: String, onDismiss: () -> Unit, content: @Composable
 /** 念头池：沉着的在水底，到时间的浮上来。只看不改，念头去留由助手自己定。 */
 @Composable
 private fun TownPond(role: String?, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val now = remember { System.currentTimeMillis() }
-    val items = remember(role) { if (role.isNullOrBlank()) emptyList() else ThoughtPool.all(context, role) }
-    val sunk = items.filter { it.optString("state") == "sink" }
-    val up = ThoughtPool.surfaced(items, now)
-    val down = sunk.filter { it !in up }.sortedBy { it.optLong("surface_at") }
     TownSheet("念头池", onDismiss) {
-        if (sunk.isEmpty()) Text("池子现在是空的，水面很平。")
-        if (up.isNotEmpty()) Text("浮上来的", style = MaterialTheme.typography.labelLarge)
-        up.forEach { Text("· " + it.optString("text")) }
-        if (down.isNotEmpty()) Text("还沉在底下的（${down.size}个）", style = MaterialTheme.typography.labelLarge)
-        down.forEach { Text("${at(it.optLong("surface_at"))} 浮上来", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) }
+        if (role.isNullOrBlank()) Text("请选择一位助手。")
+        else PrivateRows(role, "thought")
     }
 }
 

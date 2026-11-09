@@ -108,7 +108,7 @@ class ActivityContinuityEntryPointsTest {
         submit(frame, JSONObject().put("op", "propose").put("id", "material-candidate").put("record", record)
             .put("expected_version", 0).put("origin", "subject_development").put("reason", "重新理解实际材料")
             .put("evidence", JSONArray().put(source.key)))
-        val following = requireNotNull(CompanionContext.compose(context, chat, role, JSONObject(), true, "接着").internalStateFrame)
+        val following = nativeInnerRead(context, requireNotNull(CompanionContext.compose(context, chat, role, JSONObject(), true, "接着").internalStateFrame), "inner_pending", "material-candidate")
         submit(following, JSONObject().put("op", "adopt").put("id", "material-candidate").put("reason", "采用这次解释"))
         val reopened = InternalStateStore(context).read(role)
         val adopted = InnerStructure.records(reopened).single { it.getString("id") == "consideration" }

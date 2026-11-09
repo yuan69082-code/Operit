@@ -162,6 +162,34 @@ class CompanionStore(context: Context) {
 
     private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
 
+    /** Existing thought storage migrates once into the same archive; source file stays as
+     * a recovery record. All callers now use this one authority. Lock order is state -> legacy. */
+    internal fun <T> withThoughts(role: String, block: (InternalStateArchive) -> T): T {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val stateScope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(stateScope)) {
+            history(stateScope).use { archive ->
+                if (archive.categoryRow("thought_meta", "migration-v1") == null) {
+                    val old = read(SubjectStateBoundary.scope(role, "thoughts")).optJSONArray("items")
+                    for (i in 0 until (old?.length() ?: 0)) {
+                        val row = requireNotNull(old).getJSONObject(i)
+                        val id = row.getString("id")
+                        if (archive.categoryRow("thought", id) == null) archive.activityWrite("thought", id, row.getString("state")) {
+                            JSONObject(row.toString()).put("storage_kind", "thought").put("parent", row.getString("state"))
+                                .put("owner", role).put("version", 1).put("source", "legacy_thought_import")
+                                .put("migration", "thought-archive-v1")
+                        }
+                    }
+                    archive.activityWrite("thought_meta", "migration-v1", "technical") {
+                        JSONObject().put("id", "migration-v1").put("storage_kind", "thought_meta")
+                            .put("parent", "technical").put("version", 1).put("owner", role)
+                    }
+                }
+                block(archive)
+            }
+        }
+    }
+
     internal fun activityWrite(role: String, kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val scope = SubjectStateBoundary.scope(role, "internal-state")
@@ -178,6 +206,12 @@ class CompanionStore(context: Context) {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val scope = SubjectStateBoundary.scope(role, "internal-state")
         return synchronized(lock(scope)) { history(scope).use { it.categoryRow(kind, id) } }
+    }
+
+    internal fun activityCount(role: String, kind: String, parent: String): Long {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.categoryCount(kind, parent) } }
     }
 
     internal fun actionWrite(role: String, id: String, change: (JSONObject?) -> JSONObject): JSONObject {

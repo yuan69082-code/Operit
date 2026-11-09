@@ -15,7 +15,8 @@ internal class ActivityNoteStream(
         catch (failure: Exception) { throw SaveFailure(failure) }
     }
     private data class State(val probe: String, val payload: String, val note: String?,
-        val thinking: String?, val ticks: Int, val code: Int, val index: Int, val keys: List<String>)
+        val thinking: String?, val ticks: Int, val code: Int, val tickChar: Char, val codeChar: Char,
+        val escaped: Boolean, val index: Int, val keys: List<String>)
     private val checkpoints = linkedMapOf<String, State>()
     private var probe = ""
     private val payload = StringBuilder()
@@ -23,18 +24,25 @@ internal class ActivityNoteStream(
     private var thinking: String? = null
     private var ticks = 0
     private var code = 0
+    private var tickChar = '`'
+    private var codeChar = '`'
+    private var escaped = false
     private var index = 0
     private val keys = mutableListOf<String>()
-    private val opens = listOf("<activity_note>", "<waking_note>", "<activity_private/>", "<think>", "<thinking>")
+    private val protected = mapOf("<think>" to "think", "<thinking>" to "thinking",
+        "<companion_note>" to "companion_note", "<operit_state_report>" to "operit_state_report",
+        "<tool " to "tool", "<tool>" to "tool", "<tool_result " to "tool_result", "<tool_result>" to "tool_result")
+    private val opens = listOf("<activity_note>", "<waking_note>", "<activity_private/>") + protected.keys
 
     fun savepoint(id: String) {
-        checkpoints[id] = State(probe, payload.toString(), note, thinking, ticks, code, index, keys.toList())
+        checkpoints[id] = State(probe, payload.toString(), note, thinking, ticks, code, tickChar, codeChar, escaped, index, keys.toList())
     }
     suspend fun rollback(id: String) {
         val old = checkpoints[id] ?: return
         keys.filter { it !in old.keys }.forEach { durable { withdraw(it) } }
         probe = old.probe; payload.clear(); payload.append(old.payload); note = old.note
         thinking = old.thinking; ticks = old.ticks; code = old.code; index = old.index
+        tickChar = old.tickChar; codeChar = old.codeChar; escaped = old.escaped
         keys.clear(); keys.addAll(old.keys)
         var after = false
         checkpoints.keys.toList().forEach { if (after) checkpoints.remove(it); if (it == id) after = true }
@@ -65,23 +73,24 @@ internal class ActivityNoteStream(
                 if (probe == end) { out.append(probe); probe = ""; thinking = null }
                 continue
             }
-            if (ch == '`') {
+            if (escaped) { out.append(ch); escaped = false; continue }
+            if (ticks > 0 && ch != tickChar) settleFence()
+            if ((ch == '`' || ch == '~') && (code == 0 || ch == codeChar)) {
                 if (probe.isNotEmpty()) { out.append(probe); probe = "" }
-                ticks++; out.append(ch); continue
-            }
-            if (ticks > 0) {
-                if (code == 0) code = ticks else if (code == ticks || (code >= 3 && ticks >= code)) code = 0
-                ticks = 0
+                tickChar = ch; ticks++; out.append(ch); continue
             }
             if (code != 0) { out.append(ch); continue }
+            if (ch == '\\') {
+                out.append(probe); probe = ""; out.append(ch); escaped = true; continue
+            }
             probe += ch
             while (probe.isNotEmpty() && opens.none { it.startsWith(probe) }) {
                 out.append(probe.first()); probe = probe.drop(1)
             }
             if (probe in opens) {
-                when (probe) {
-                    "<think>", "<thinking>" -> { thinking = probe.removePrefix("<").removeSuffix(">"); out.append(probe) }
-                    "<activity_private/>" -> {
+                when {
+                    probe in protected -> { thinking = protected.getValue(probe); out.append(probe) }
+                    probe == "<activity_private/>" -> {
                         val key = "$round:private:${index++}"
                         durable { privateChoice(key) }; keys.add(key)
                     }
@@ -91,6 +100,11 @@ internal class ActivityNoteStream(
             }
         }
         return out.toString()
+    }
+    private fun settleFence() {
+        if (code == 0 && (tickChar == '`' || ticks >= 3)) { code = ticks; codeChar = tickChar }
+        else if (codeChar == tickChar && (code == ticks || (code >= 3 && ticks >= code))) code = 0
+        ticks = 0
     }
     /** Incomplete note content is never substituted with an invented final paragraph. */
     fun finish(): String {

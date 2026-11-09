@@ -264,7 +264,8 @@ class InnerStructureEntryPointsTest {
     @Test fun concurrentAdoptionsAcceptOneVersionWithoutLosingOtherCandidate(): Unit = runBlocking {
         val first = proposeRecord(preference("first"))
         val second = proposeRecord(preference("second"))
-        val a = frame(one); val b = frame(two)
+        val a = nativeInnerRead(context, frame(one), "inner_pending", first)
+        val b = nativeInnerRead(context, frame(two), "inner_pending", second)
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val start = java.util.concurrent.CountDownLatch(1)
         try {
@@ -277,7 +278,7 @@ class InnerStructureEntryPointsTest {
             assertEquals(1, writes.count { it.get(30, java.util.concurrent.TimeUnit.SECONDS) })
             assertEquals(1, InnerStructure.records(states.read(role)).size)
             val remaining = InnerStructure.pending(states.read(role)).single().getString("id")
-            val refreshed = frame()
+            val refreshed = nativeInnerRead(context, frame(), "inner_pending", remaining)
             InnerStructureContext.submit(context, refreshed, report(refreshed, adoption(remaining)))
             assertEquals(2, InnerStructure.records(states.read(role)).size)
             assertTrue(InnerStructure.pending(states.read(role)).isEmpty())
