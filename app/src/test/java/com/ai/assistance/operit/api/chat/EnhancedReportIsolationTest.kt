@@ -50,6 +50,7 @@ class EnhancedReportIsolationTest {
         var calls = 0
         var executions = 0
         var wake = false
+        val frames = CopyOnWriteArrayList<InternalStateFrame>()
         var output: suspend StreamCollector<String>.(Int, InternalStateFrame) -> Unit = { _, f -> emit("下一条正常回复。" + report(f)) }
         val uncaught = CopyOnWriteArrayList<Throwable>()
         val warnings = CopyOnWriteArrayList<String>()
@@ -78,6 +79,7 @@ class EnhancedReportIsolationTest {
                     @Suppress("UNCHECKED_CAST")
                     val history = call.arguments[1] as List<PromptTurn>
                     val frame = requireNotNull(CurrentRequestContext.internalStateFrame(history))
+                    frames.add(frame)
                     val index = ++calls
                     stream { output(index, frame) }
                 }
@@ -88,18 +90,29 @@ class EnhancedReportIsolationTest {
                 "acquireServiceForFunction", "acquireServiceForConfig" -> MultiServiceManager.ServiceLease({}, provider, model, emptyList())
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             } }
-            val composer = Mockito.mock(ConversationService::class.java) { call ->
-                if (call.method.name == "prepareConversationHistory") runBlocking {
+            val realComposer = field("conversationService") as ConversationService
+            val composer = Mockito.mock(ConversationService::class.java) { call -> when (call.method.name) {
+                "prepareConversationHistory" -> runBlocking {
                     val input = call.arguments[1] as String
                     CurrentRequestContext.stage(listOf(PromptTurn(PromptTurnKind.USER, input)),
                         InnerStructureContext.prepare(app, role, chat, true, wake = wake, input = input))
-                } else Mockito.RETURNS_DEFAULTS.answer(call)
-            }
+                }
+                "normalizeConversationHistoryForModel" -> {
+                    // Tool continuation must retain the actual request frame and privacy
+                    // projection, not Mockito's empty-list default for an unstubbed method.
+                    @Suppress("UNCHECKED_CAST")
+                    realComposer.normalizeConversationHistoryForModel(call.arguments[0] as List<PromptTurn>, call.arguments[1] as String?)
+                }
+                else -> Mockito.RETURNS_DEFAULTS.answer(call)
+            } }
             set("multiServiceManager", manager); set("conversationService", composer); set("isServiceManagerInitialized", true)
             handler.registerTool("sleep", executor = { _: AITool -> executions++; ToolResult("sleep", true, StringResultData("本地实际回执")) })
         }
         private fun field(name: String): Any = EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.get(service)
         private fun set(name: String, value: Any) { EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value) }
+        fun savedReport(frame: InternalStateFrame): JSONObject? =
+            CompanionStore(app).archivedStateRow("internal-state:$role", "semantic_reports", frame.id)
+                ?: InternalStateEngine.rows(InternalStateStore(app).read(role), "semantic_reports").firstOrNull { it.getString("frame_id") == frame.id }
         suspend fun send(): Pair<String, Throwable?> {
             val ref = ActivityNotes.begin(app, role, chat, "request:${calls + 1}", if (wake) "background" else "normal_input")
             try {
@@ -108,7 +121,12 @@ class EnhancedReportIsolationTest {
                     disableWarning = true, onNonFatalError = { warnings.add(it) })).share(host, replay = Int.MAX_VALUE, propagateCompletionCause = false)
                 val text = StringBuilder()
                 val error = withTimeout(30_000) { MessageProcessingDelegate.collectResponseReaders {
-                    launch { response.collect { text.append(it) }; MessageProcessingDelegate.requireSuccessfulResponse(response) }
+                    val observer = launch { response.collect { /* UI text-only observer */ } }
+                    response.collect { text.append(it) }
+                    observer.join()
+                    // Match the production owning consumer: cancellation in a child launch
+                    // alone does not cancel its parent or classify the send as interrupted.
+                    MessageProcessingDelegate.requireSuccessfulResponse(response)
                 } }
                 // Same owning consumer contract as a failed/partial UI message: confirmed
                 // text remains, no successful timestamp is invented, no automatic resend.
@@ -139,6 +157,7 @@ class EnhancedReportIsolationTest {
                     else "正文在前。" + Fixture.report(frame)) }
                 val (text, error) = f.send()
                 assertNull(error); assertFalse(text.contains("operit_state_report")); assertTrue(f.warnings.isEmpty())
+                assertNotNull("Successful parsing must actually reach normal report adoption", f.savedReport(f.frames.last()))
             }
             assertEquals(2, f.calls); assertEquals(0, f.executions); assertTrue(f.uncaught.isEmpty())
         } finally { f.close() }
@@ -147,15 +166,22 @@ class EnhancedReportIsolationTest {
     @Test fun malformedFirstAndToolContinuationKeepFactsAndNextMessageStillRuns(): Unit = runBlocking {
         val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
         try {
-            f.output = { _, _ -> emit("已经生成的正文。<operit_state_report>invalid</operit_state_report>") }
+            f.output = { _, _ -> emit("已经生成的正文。<operit_state_report broken><activity_note>坏报告里的内容不能变成随记</activity_note></operit_state_report>") }
             val first = f.send()
             assertTrue(first.second is InternalStateReportStream.ProtocolException)
             assertTrue(first.first.contains("已经生成的正文。")); assertEquals(1, f.calls)
+            assertNull(f.savedReport(f.frames.last()))
+            val failedActivity = ActivityNotes.page(f.app, f.role, "activity", null, 0).getJSONArray("items").getJSONObject(0)
+            val failedParts = ActivityNotes.page(f.app, f.role, "activity_part", failedActivity.getString("id"), 0).toString()
+            assertFalse(failedParts.contains("坏报告里的内容不能变成随记"))
+            assertTrue(failedParts.contains("report_failure"))
             f.output = { n, _ -> if (n == 2) emit("<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>")
                 else emit("已拿到工具结果。<operit_state_report>{") }
             val second = f.send()
-            assertTrue(second.second is InternalStateReportStream.ProtocolException)
+            assertTrue(second.second?.stackTraceToString() ?: "No failure; provider calls=${f.calls}",
+                second.second is InternalStateReportStream.ProtocolException)
             assertEquals(3, f.calls); assertEquals(1, f.executions)
+            assertNull(f.savedReport(f.frames.last()))
             val actions = SubjectActions.read(f.app, f.role, f.chat, null, 0).getJSONArray("items")
             assertTrue((0 until actions.length()).any { actions.getJSONObject(it).optString("status") == "completed" })
             f.output = { _, frame -> emit("失败后的下一条仍可回复。" + Fixture.report(frame)) }
@@ -171,6 +197,7 @@ class EnhancedReportIsolationTest {
             f.output = { _, _ -> emit("<activity_note>中断前完整留下的随记。</activity_note><operit_state_report>{")
                 throw CancellationException("模拟网络或用户中断") }
             try { f.send(); fail("cancellation") } catch (_: CancellationException) { }
+            assertNull(f.savedReport(f.frames.last()))
             val activity = ActivityNotes.page(f.app, f.role, "activity", null, 0).getJSONArray("items").getJSONObject(0)
             assertTrue(ActivityNotes.page(f.app, f.role, "activity_part", activity.getString("id"), 0).toString().contains("中断前完整留下的随记"))
             f.output = { _, frame -> emit("中断后的下一次。" + Fixture.report(frame)) }

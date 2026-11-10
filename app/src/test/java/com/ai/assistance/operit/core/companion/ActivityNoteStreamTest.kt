@@ -10,6 +10,7 @@ class ActivityNoteStreamTest {
         val stream = ActivityNoteStream("r", { _, text, _ -> notes.add(text) }, {}, {})
         val inputs = listOf(
             "<companion_note>私密 <activity_note>不能公开</activity_note></companion_note>",
+            "<companion_message>给她的消息中引用 <activity_note>示例</activity_note></companion_message>",
             "<operit_state_report>{\"reason\":\"<waking_note>原话</waking_note>\"}</operit_state_report>",
             "<tool name=\"write\"><param name=\"content\"><activity_note>文件内容</activity_note></param></tool>",
             "~~~xml\n<waking_note>示例</waking_note>\n~~~\n",

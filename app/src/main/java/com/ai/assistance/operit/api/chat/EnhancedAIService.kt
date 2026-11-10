@@ -1306,8 +1306,10 @@ class EnhancedAIService private constructor(private val context: Context) {
                                 }
 
                                 revisionMutex.withLock {
-                                    val withoutNotes = notes?.append(content) ?: content
-                                    val publicContent = stateReportStream?.appendDeferringFailure(withoutNotes) ?: withoutNotes
+                                    // Reject private report framing before collecting display notes:
+                                    // malformed report payloads must never become activity cards.
+                                    val withoutReport = stateReportStream?.appendDeferringFailure(content) ?: content
+                                    val publicContent = notes?.append(withoutReport) ?: withoutReport
                                     revisionTracker.append(publicContent)
                                     // A rollback must observe the same private parser and public
                                     // buffers; otherwise a withdrawn chunk could reappear afterward.
@@ -1329,9 +1331,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                         }
                         // Only a normally completed provider response can publish its final
                         // report draft. The revision collector must stop before finish().
-                        val noteTail = notes?.finish().orEmpty()
-                        val tail = (stateReportStream?.appendDeferringFailure(noteTail) ?: noteTail) +
-                            (stateReportStream?.finish() ?: "")
+                        val reportTail = stateReportStream?.finish().orEmpty()
+                        val tail = (notes?.append(reportTail) ?: reportTail) + notes?.finish().orEmpty()
                         revisionTracker.append(tail)
                         execContext.streamBuffer.append(tail)
                         execContext.roundManager.appendChunk(tail)
@@ -2585,8 +2586,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                             }
 
                             revisionMutex.withLock {
-                                val withoutNotes = notes?.append(content) ?: content
-                                val publicContent = stateReportStream?.appendDeferringFailure(withoutNotes) ?: withoutNotes
+                                val withoutReport = stateReportStream?.appendDeferringFailure(content) ?: content
+                                val publicContent = notes?.append(withoutReport) ?: withoutReport
                                 revisionTracker.append(publicContent)
                                 context.streamBuffer.append(publicContent)
                                 context.roundManager.appendChunk(publicContent)
@@ -2612,9 +2613,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                     } finally {
                         revisionJob?.cancelAndJoin()
                     }
-                    val noteTail = notes?.finish().orEmpty()
-                    val tail = (stateReportStream?.appendDeferringFailure(noteTail) ?: noteTail) +
-                        (stateReportStream?.finish() ?: "")
+                    val reportTail = stateReportStream?.finish().orEmpty()
+                    val tail = (notes?.append(reportTail) ?: reportTail) + notes?.finish().orEmpty()
                     revisionTracker.append(tail)
                     context.streamBuffer.append(tail)
                     context.roundManager.appendChunk(tail)

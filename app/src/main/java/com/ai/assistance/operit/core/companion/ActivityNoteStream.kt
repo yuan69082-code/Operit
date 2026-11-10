@@ -30,7 +30,8 @@ internal class ActivityNoteStream(
     private var index = 0
     private val keys = mutableListOf<String>()
     private val protectedTags = mapOf("<think>" to "think", "<thinking>" to "thinking",
-        "<companion_note>" to "companion_note", "<operit_state_report>" to "operit_state_report",
+        "<companion_note>" to "companion_note", "<companion_message>" to "companion_message",
+        "<operit_state_report>" to "operit_state_report",
         "<tool " to "tool", "<tool>" to "tool", "<tool_result " to "tool_result", "<tool_result>" to "tool_result")
     private val opens = listOf("<activity_note>", "<waking_note>", "<activity_private/>") + protectedTags.keys
 
