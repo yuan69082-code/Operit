@@ -44,7 +44,7 @@ object ChatConfigReadiness {
     ): ChatConfigReadinessResult {
         val providerTypeId = config.apiProviderTypeId.trim()
         if (config.subscriptionChannel.isNotEmpty()) {
-            if (config.subscriptionChannel !in setOf("kimi", "grok")) return ChatConfigReadinessResult(ChatConfigReadinessIssue.PROVIDER_UNAVAILABLE)
+            if (config.subscriptionChannel !in com.ai.assistance.operit.data.api.SubscriptionChannels.directChannels) return ChatConfigReadinessResult(ChatConfigReadinessIssue.PROVIDER_UNAVAILABLE)
             if (!subscriptionAuthenticated) return ChatConfigReadinessResult(ChatConfigReadinessIssue.SUBSCRIPTION_LOGIN_REQUIRED)
             return ChatConfigReadinessResult(if (config.modelName.isBlank()) ChatConfigReadinessIssue.MODEL_MISSING else null)
         }

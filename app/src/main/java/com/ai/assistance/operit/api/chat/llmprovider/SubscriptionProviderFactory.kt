@@ -16,7 +16,7 @@ internal object SubscriptionProviderFactory {
     }
     internal fun create(accounts: SubscriptionAccounts, config: ModelConfigData, client: OkHttpClient): AIService {
         val channel = config.subscriptionChannel
-        require(channel in setOf("kimi", "grok")) { "该订阅没有开放直接接入" }
+        require(channel in SubscriptionChannels.directChannels) { "该订阅没有开放直接接入" }
         val session = requireNotNull(accounts.sessionId(channel)) { "请在模型配置中连接订阅账号" }
         val endpoint = requireNotNull(SubscriptionChannels.get(channel).endpoint)
         val keys = object : ApiKeyProvider {
@@ -25,6 +25,7 @@ internal object SubscriptionProviderFactory {
         }
         val bound = accounts.boundClient(channel, session, client)
         val headers = accounts.headers(channel)
+        if (channel == "gemini") return GeminiSubscriptionProvider(accounts, session, config, keys, bound)
         return if (channel == "grok") OpenAIResponsesProvider(
             responsesApiEndpoint = endpoint, apiKeyProvider = keys, modelName = config.modelName,
             client = bound, customHeaders = headers, responsesProviderType = ApiProviderType.OPENAI_RESPONSES_GENERIC,

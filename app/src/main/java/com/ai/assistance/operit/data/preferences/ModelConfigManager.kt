@@ -584,11 +584,15 @@ class ModelConfigManager(
     }
 
     suspend fun updateSubscription(configId: String, channel: String, model: String, contextTokens: Long? = null): ModelConfigData {
-        require(channel in setOf("", "kimi", "grok"))
+        require(channel.isEmpty() || channel in com.ai.assistance.operit.data.api.SubscriptionChannels.directChannels)
         if (channel.isEmpty()) return updateConfigInternal(configId) { it.copy(subscriptionChannel = "") }
         val endpoint = requireNotNull(com.ai.assistance.operit.data.api.SubscriptionChannels.get(channel).endpoint)
-        val protocol = if (channel == "grok") ApiProviderType.OPENAI_RESPONSES_GENERIC else ApiProviderType.OPENAI_GENERIC
-        require(model.isNotBlank()) { "请先从账号模型目录选择模型" }
+        val protocol = when (channel) {
+            "grok" -> ApiProviderType.OPENAI_RESPONSES_GENERIC
+            "gemini" -> ApiProviderType.GOOGLE
+            else -> ApiProviderType.OPENAI_GENERIC
+        }
+        require(model.isNotBlank() && model.none(Char::isWhitespace)) { "请选择或填写账号支持的模型名称" }
         require(contextTokens == null || contextTokens > 0) { "服务返回的模型窗口无效" }
         return updateConfigInternal(configId) { it.copy(subscriptionChannel = channel, apiProviderType = protocol,
             apiProviderTypeId = protocol.name, apiEndpoint = endpoint, modelName = model,

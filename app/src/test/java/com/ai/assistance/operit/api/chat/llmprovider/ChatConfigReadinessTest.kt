@@ -10,6 +10,18 @@ import org.junit.Test
 
 class ChatConfigReadinessTest {
     @Test
+    fun subscriptionChannelsUseTheirOwnAccountReadinessWithoutOrdinaryApiKeys() {
+        for (channel in listOf("gemini", "glm")) {
+            val config = ModelConfigData("same-assistant-config", "订阅", modelName = "service-model", subscriptionChannel = channel)
+            assertEquals(ChatConfigReadinessIssue.SUBSCRIPTION_LOGIN_REQUIRED,
+                ChatConfigReadiness.evaluate(config, 0, emptySet(), subscriptionAuthenticated = false).issue)
+            assertTrue(ChatConfigReadiness.evaluate(config, 0, emptySet(), subscriptionAuthenticated = true).isReady)
+            assertEquals(ChatConfigReadinessIssue.MODEL_MISSING,
+                ChatConfigReadiness.evaluate(config.copy(modelName = ""), 0, emptySet(), subscriptionAuthenticated = true).issue)
+        }
+    }
+
+    @Test
     fun deepSeekWithValidKey_isReady() {
         assertReady(remoteConfig(ApiProviderType.DEEPSEEK, apiKey = "sk-valid"))
     }

@@ -19,6 +19,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.coroutines.resume
@@ -79,14 +81,15 @@ object SubscriptionChannels {
         SubscriptionChannel("grok", "Grok 订阅授权", "https://api.x.ai/v1/responses",
             "https://docs.x.ai/build/enterprise", "https://grok.com",
             "通过 xAI 设备授权登录，实际可用模型和套餐由服务端决定。服务端可能启用额外付费；Operit 无法关闭该设置，不会切换普通 API 或其他账号。"),
-        SubscriptionChannel("gemini", "Gemini 会员", null,
+        SubscriptionChannel("gemini", "Gemini / Google AI", GeminiSubscriptionProtocol.ENDPOINT,
             "https://geminicli.com/docs/resources/tos-privacy/", "https://gemini.google.com",
-            "官方限制第三方直接使用 Gemini CLI 的 Code Assist OAuth。Google AI 会员不等于 Gemini 按量 API 授权，当前不能直接接入此会员。"),
-        SubscriptionChannel("glm", "GLM Coding Plan", null,
+            "实验性 Code Assist 接入，使用 Google 账号授权，权益由服务端判断。Google 当前明确限制第三方使用 CLI OAuth，可能暂停账号；此入口不代表官方允许。不会切换按量 API，也不请求启用额外 AI credits。"),
+        SubscriptionChannel("glm", "GLM Coding Plan", "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
             "https://docs.bigmodel.cn/cn/coding-plan/tool/others", "https://bigmodel.cn",
-            "官方套餐仅限指定工具，当前列表未包含 Operit。普通 API 单独收费，不能当成套餐额度；需服务方开放此应用后接入。")
+            "使用个人/团队编程套餐页面创建的专用 Key，固定调用 Coding Plan 端点。官方支持名单目前没有 Operit，能否使用由服务方决定；不会伪装成名单中的工具，也不会切换普通按量 API。")
     )
     fun get(id: String) = entries.first { it.id == id }
+    val directChannels = setOf("kimi", "grok", "gemini", "glm")
 }
 
 data class DeviceAuthorization(val attempt: String, val userCode: String, val url: String,
@@ -118,10 +121,67 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
         guard(channel).changed()
     }
     fun saveKimiKey(key: String) {
-        require(key.isNotBlank() && key.none { it.isWhitespace() }) { "请填写控制台创建的完整 Kimi Code Key" }
-        save("kimi", JSONObject().put("session", UUID.randomUUID().toString()).put("access", key)
-            .put("label", "Kimi Code 凭据").put("created_at", System.currentTimeMillis()))
+        savePlanKey("kimi", key)
     }
+    fun savePlanKey(channel: String, key: String) {
+        require(channel in setOf("kimi", "glm"))
+        require(key.isNotBlank() && key.none { it.isWhitespace() }) { "请填写套餐控制台创建的完整 Key" }
+        save(channel, JSONObject().put("session", UUID.randomUUID().toString()).put("access", key)
+            .put("label", "${SubscriptionChannels.get(channel).title} 凭据").put("created_at", System.currentTimeMillis()))
+    }
+    fun beginGemini(): GeminiAuthorization = GeminiSubscriptionProtocol.begin(System.currentTimeMillis()).also {
+        synchronized(lock) { loginAttempt = it.attempt }
+    }
+    suspend fun completeGemini(auth: GeminiAuthorization, code: String, project: String = "") {
+        checkAttempt(auth.attempt)
+        val result = json(Request.Builder().url(GeminiSubscriptionProtocol.TOKEN)
+            .post(GeminiSubscriptionProtocol.exchange(auth, code, System.currentTimeMillis())).build())
+        checkAttempt(auth.attempt)
+        val saved = credentials(result, null).put("session", UUID.randomUUID().toString())
+            .put("label", "Google Code Assist 授权账号").put("created_at", System.currentTimeMillis())
+        // Eligibility and project come from the service, never from a fabricated project ID.
+        val metadata = JSONObject().put("ideType", "IDE_UNSPECIFIED").put("platform", "PLATFORM_UNSPECIFIED")
+            .put("pluginType", "GEMINI").put("ideName", "Operit")
+        val setup = JSONObject().put("metadata", metadata)
+        if (project.isNotBlank()) setup.put("cloudaicompanionProject", project.trim())
+        suspend fun setupRequest(method: String, data: JSONObject): JSONObject {
+            checkAttempt(auth.attempt)
+            val value = json(Request.Builder().url("${GeminiSubscriptionProtocol.ENDPOINT}:$method")
+                .header("Authorization", "Bearer ${saved.getString("access")}")
+                .post(data.toString().toRequestBody("application/json".toMediaType())).build())
+            checkAttempt(auth.attempt)
+            return value
+        }
+        val eligibility = setupRequest("loadCodeAssist", setup)
+        var projectId = eligibility.optString("cloudaicompanionProject").takeUnless { it == "null" }.orEmpty()
+        if (projectId.isBlank() && eligibility.optJSONObject("currentTier") != null && project.isNotBlank()) projectId = project.trim()
+        if (projectId.isBlank() && eligibility.optJSONObject("currentTier") == null) {
+            val tiers = eligibility.optJSONArray("allowedTiers") ?: throw IOException("此 Google 账号未获 Code Assist 资格，请查看官方账号页")
+            val tier = (0 until tiers.length()).map { tiers.getJSONObject(it) }.firstOrNull { it.optBoolean("isDefault") }
+                ?: throw IOException("服务未提供可启用的默认套餐，请先在官方 Code Assist 完成开通")
+            val onboarding = JSONObject().put("tierId", tier.getString("id")).put("metadata", metadata)
+            if (tier.getString("id") != "free-tier" && project.isNotBlank()) onboarding.put("cloudaicompanionProject", project.trim())
+            var operation = setupRequest("onboardUser", onboarding)
+            val deadline = minOf(auth.expiresAt, System.currentTimeMillis() + 180_000)
+            while (!operation.optBoolean("done") && System.currentTimeMillis() < deadline) {
+                val name = operation.optString("name")
+                require(name.matches(Regex("operations/[A-Za-z0-9._/-]+")) && !name.contains("..")) { "服务返回的开通任务地址无效" }
+                delay(5000); checkAttempt(auth.attempt)
+                operation = json(Request.Builder().url("${GeminiSubscriptionProtocol.ENDPOINT}/$name")
+                    .header("Authorization", "Bearer ${saved.getString("access")}").build())
+            }
+            checkAttempt(auth.attempt)
+            if (!operation.optBoolean("done")) throw IOException("Code Assist 开通尚未完成，请稍后重新登录；未保存不完整账号")
+            projectId = operation.optJSONObject("response")?.optJSONObject("cloudaicompanionProject")?.optString("id").orEmpty()
+        }
+        require(projectId.isNotBlank()) { "此账号需要 Google Cloud 项目 ID，或尚未完成官方 Code Assist 开通" }
+        saved.put("project", projectId).put("tier", eligibility.optJSONObject("paidTier") ?: eligibility.optJSONObject("currentTier"))
+        synchronized(lock) {
+            checkAttempt(auth.attempt); vault.put("gemini", saved); loginAttempt = null; snapshots.remove("gemini")
+        }
+        guard("gemini").changed()
+    }
+    fun geminiProject(session: String): String = state("gemini", session).getString("project")
     fun logout(channel: String) {
         synchronized(lock) { loginAttempt = null; vault.put(channel, null); snapshots.remove(channel) }
         guard(channel).changed()
@@ -184,15 +244,18 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
     }
     suspend fun token(channel: String, session: String): String {
         val current = state(channel, session)
-        if (channel == "kimi" || current.getLong("expires_at") - System.currentTimeMillis() > 300_000) return current.getString("access")
+        if (channel in setOf("kimi", "glm") || current.getLong("expires_at") - System.currentTimeMillis() > 300_000) return current.getString("access")
         return refresh(channel, session, current.getString("access"))
     }
     private suspend fun refresh(channel: String, session: String, rejected: String): String = refreshMutex.withLock {
         val current = state(channel, session)
         if (current.getString("access") != rejected) return@withLock current.getString("access")
-        require(channel == "grok")
-        val result = json(Request.Builder().url("$ISSUER/oauth2/token").post(form(
-            "client_id" to GROK_CLIENT, "grant_type" to "refresh_token", "refresh_token" to current.getString("refresh"))).build())
+        require(channel in setOf("grok", "gemini"))
+        val request = if (channel == "gemini") Request.Builder().url(GeminiSubscriptionProtocol.TOKEN)
+            .post(GeminiSubscriptionProtocol.refresh(current.getString("refresh")))
+        else Request.Builder().url("$ISSUER/oauth2/token").post(form(
+            "client_id" to GROK_CLIENT, "grant_type" to "refresh_token", "refresh_token" to current.getString("refresh")))
+        val result = json(request.build())
         val updated = credentials(result, current)
         synchronized(lock) { state(channel, session); vault.put(channel, updated) }
         updated.getString("access")
@@ -206,9 +269,12 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
                 val original = chain.request()
                 val endpoint = SubscriptionChannels.get(channel).endpoint ?: error("订阅渠道未开放")
                 val approved = endpoint.toHttpUrl()
-                require(original.url.host == approved.host && original.url.isHttps) { "订阅凭据不能发送到其他地址" }
+                require(original.url.host == approved.host && original.url.isHttps && original.url.port == approved.port) { "订阅凭据不能发送到其他地址" }
+                val allowedPaths = if (channel == "gemini") setOf("/v1internal:generateContent", "/v1internal:streamGenerateContent")
+                    else setOf(approved.encodedPath)
+                require(original.url.encodedPath in allowedPaths) { "订阅请求不能切换计费端点" }
                 val response = chain.proceed(original)
-                if (channel != "grok" || response.code != 401) response else {
+                if (channel !in setOf("grok", "gemini") || response.code != 401) response else {
                     response.close()
                     val rejected = original.header("Authorization").orEmpty().removePrefix("Bearer ")
                     val refreshed = kotlinx.coroutines.runBlocking { refresh(channel, session, rejected) }
@@ -223,7 +289,17 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
      * lookup leaves the account usable and does not infer an entitlement or balance. */
     suspend fun models(channel: String): List<JSONObject> {
         val session = sessionId(channel) ?: throw IOException("请先连接订阅账号")
-        val endpoint = if (channel == "grok") "https://cli-chat-proxy.grok.com/v1/models-v2" else "https://api.kimi.com/coding/v1/models"
+        if (channel == "gemini") {
+            val quota = geminiQuota(session).optJSONArray("buckets") ?: throw IOException("服务未提供模型列表，可按官方账号的模型名称手动填写")
+            return (0 until quota.length()).mapNotNull { quota.getJSONObject(it).optString("modelId").takeIf(String::isNotBlank) }
+                .distinct().map { JSONObject().put("id", it).put("context_window", JSONObject.NULL).put("max_output_tokens", JSONObject.NULL) }
+        }
+        val endpoint = when (channel) {
+            "grok" -> "https://cli-chat-proxy.grok.com/v1/models-v2"
+            "kimi" -> "https://api.kimi.com/coding/v1/models"
+            "glm" -> "https://open.bigmodel.cn/api/coding/paas/v4/models"
+            else -> throw IOException("该渠道不提供此模型查询")
+        }
         val result = authorizedJson(channel, session, endpoint)
         val array = result.optJSONArray("data") ?: result.optJSONArray("models")
             ?: throw IOException("服务未返回可识别的模型目录")
@@ -236,6 +312,20 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
     }
     suspend fun usage(channel: String): JSONObject {
         val session = sessionId(channel) ?: throw IOException("请先连接订阅账号")
+        if (channel == "glm") {
+            // Official ZCode monitor uses the complete plan key WITHOUT a Bearer prefix.
+            // This read does not change billing or reset a quota. Missing fields stay unknown.
+            val result = json(Request.Builder().url("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
+                .header("Authorization", token(channel, session)).build())
+            state(channel, session)
+            if (result.has("success") && !result.optBoolean("success")) throw IOException("GLM 额度查询未成功；不影响已配置聊天")
+            val data = result.optJSONObject("data") ?: throw IOException("GLM 未返回可识别额度；请在官方套餐页面查看")
+            return JSONObject().put("queried_at", System.currentTimeMillis()).put("channel", channel)
+                .put("data", redactQuota(data))
+        }
+        if (channel == "gemini") return JSONObject().put("queried_at", System.currentTimeMillis()).put("channel", channel)
+            .put("buckets", redactQuota(geminiQuota(session).optJSONArray("buckets") ?: JSONArray()))
+            .put("extra_credits_requested", false)
         val endpoint = if (channel == "grok") "https://cli-chat-proxy.grok.com/v1/billing?format=credits" else "https://api.kimi.com/coding/v1/usages"
         val result = authorizedJson(channel, session, endpoint)
         // Retain server fields as a quota response, not fabricated percentages. Only explicitly
@@ -251,7 +341,7 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
     }
     private fun redactQuota(value: Any): Any = when (value) {
         is JSONObject -> JSONObject().also { output -> value.keys().forEach { key ->
-            if (!Regex("token|secret|key|authorization|cookie|email", RegexOption.IGNORE_CASE).containsMatchIn(key))
+            if (!Regex("secret|authorization|cookie|email|api.?key|access.?token|refresh.?token|id.?token|^token$|^key$", RegexOption.IGNORE_CASE).containsMatchIn(key))
                 output.put(key, redactQuota(value.get(key)))
         } }
         is JSONArray -> JSONArray().also { out -> (0 until value.length()).forEach { out.put(redactQuota(value.get(it))) } }
@@ -264,6 +354,12 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
         state(channel, session)
         return result
     }
+    private suspend fun geminiQuota(session: String): JSONObject {
+        val request = Request.Builder().url("${GeminiSubscriptionProtocol.ENDPOINT}:retrieveUserQuota")
+            .header("Authorization", "Bearer ${token("gemini", session)}")
+            .post(JSONObject().put("project", geminiProject(session)).toString().toRequestBody("application/json".toMediaType())).build()
+        val result = json(request); state("gemini", session); return result
+    }
     private suspend fun json(request: Request): JSONObject {
         val (status, body) = raw(request)
         if (status !in 200..299) throw IOException(when (status) {
@@ -272,7 +368,9 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
             429 -> "服务端额度或频率限制（429），不会切换收费通道"
             else -> "订阅服务请求失败（HTTP $status）"
         })
-        return JSONObject(body)
+        // OAuth replies can contain credentials. JSONObject parse errors quote their input,
+        // so they must never escape into the settings UI or ordinary application logs.
+        return try { JSONObject(body) } catch (_: Exception) { throw IOException("订阅服务返回了无法解析的元数据，未保存新凭据") }
     }
     private suspend fun raw(request: Request): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
         val call = client.newCall(request.newBuilder().header("User-Agent", "Operit/${BuildConfig.VERSION_NAME}").build())
