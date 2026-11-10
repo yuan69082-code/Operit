@@ -46,9 +46,9 @@ internal fun InnerCandidateDialog(role: String, close: () -> Unit) {
     }
     suspend fun importText(reader: java.io.Reader) {
         val target = chat()
-        val raw = if (sourceMode == "已有确定内容") null else original.also { require(it.isNotBlank()) { "请填写实际原文" } }
+        val raw = if (sourceMode in setOf("已有确定内容", "提出新的变化")) null else original.also { require(it.isNotBlank()) { "请填写实际原文" } }
         val label = if (raw == null) null else sourceLabel.also { require(it.isNotBlank()) { "请填写实际来源" } }
-        val count = InnerContentImport.read(reader, store, role, target, raw, label) { done ->
+        val count = InnerContentImport.read(reader, store, role, target, raw, label, currentSubmission = sourceMode == "提出新的变化") { done ->
             withContext(Dispatchers.Main) { message = "已保存 $done 项候选；中断后可重新导入同一内容续接。" }
         }
         withContext(Dispatchers.Main) {
@@ -135,7 +135,7 @@ internal fun InnerCandidateDialog(role: String, close: () -> Unit) {
                         else -> {
                             FilledTonalButton(enabled = !busy, onClick = { editing = null; editingAdopted = false; form = true }) { Text("直接填写完整内容") }
                             Text("文件和粘贴支持 JSON 对象、JSON 数组或逐行 JSON。每项是完整 record；可附 provenance.original / source / formed_at。按项保存，没有总条数上限。普通文字请用直接填写，全文作为一条内容保存。", style = MaterialTheme.typography.bodySmall)
-                            SourceChoice(sourceMode, { sourceMode = it }, original, { original = it }, sourceLabel, { sourceLabel = it }, allowNew = false)
+                            SourceChoice(sourceMode, { sourceMode = it }, original, { original = it }, sourceLabel, { sourceLabel = it }, allowNew = true)
                             OutlinedButton(enabled = !busy, onClick = { filePicker.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }) { Text("导入文件") }
                             OutlinedTextField(paste, { paste = it }, Modifier.fillMaxWidth(), label = { Text("粘贴完整内容对象") }, minLines = 5)
                             FilledTonalButton(enabled = !busy && paste.isNotBlank(), onClick = { scope.launch {
@@ -229,6 +229,9 @@ private fun InnerCandidateForm(role: String, previous: JSONObject?, adopted: Boo
                         try {
                             val row = InnerContentImport.record(family, kind, description, objectRef, situation, exceptions,
                                 JSONObject(specific), old?.getString("id"))
+                            // Editing text must not silently reactivate an explicitly retired
+                            // understanding. Its status is part of the full candidate version.
+                            if (old != null) row.put("status", old.getString("status"))
                             val raw = when (sourceMode) { "已有确定内容" -> null; "提出新的变化" -> row.toString(); else -> original }
                             val label = if (sourceMode == "提出新的变化") "用户在私域提出的完整内容或修订" else source
                             val digest = InnerStructure.hash(JSONObject().put("record", row).put("raw", raw ?: JSONObject.NULL)

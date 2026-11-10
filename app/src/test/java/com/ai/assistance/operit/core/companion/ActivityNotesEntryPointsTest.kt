@@ -36,6 +36,9 @@ class ActivityNotesEntryPointsTest {
         // singleton can retain the preceding test's Context. Recreate the normal repository,
         // not its data, so its post-save activity hook uses this test's actual application.
         ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
+        // createCharacterCard calls the repository using its own retained Context. Reset
+        // that owner too before it can repopulate the repository with an old sandbox.
+        CharacterCardManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "随记"))
         InternalStateStore(context).configure(role, true)
         chat = window(role)

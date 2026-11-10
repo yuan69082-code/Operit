@@ -106,9 +106,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
         fun getInstance(context: Context): ChatHistoryManager {
             return INSTANCE
                 ?: synchronized(this) {
-                    val instance = ChatHistoryManager(context.applicationContext)
-                    INSTANCE = instance
-                    instance
+                    INSTANCE ?: ChatHistoryManager(context.applicationContext).also { INSTANCE = it }
                 }
         }
     }

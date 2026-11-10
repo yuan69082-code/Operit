@@ -24,6 +24,7 @@ internal class WebPrivateStateBridge(private val context: Context) {
             "status" -> JSONObject().put("owner", role).put("name", card.name).put("enabled", store.enabled(role))
                 .put("window", store.establishedStatus(role))
             "open_window" -> store.openEstablishedWindow(role)
+            "initial_reference" -> JSONObject().put("text", card.characterSetting).put("source", "initial_configuration")
             "page" -> {
                 val kind = body.getString("kind")
                 // Existing private dream text and companion_note retain their old audience.
@@ -47,7 +48,7 @@ internal class WebPrivateStateBridge(private val context: Context) {
                 if (kind == "inner_pending") {
                     result.optJSONObject("item")?.let { result.put("candidate_hash", InnerStructure.hash(it)) }
                 }
-                result
+                PrivateStateView.project(result)
             }
             "submit" -> store.submitEstablishedContent(role, chat, "web:" + InnerStructure.hash(JSONObject(body.toString()).apply { remove("chat_id") }), body.getJSONObject("record"),
                 body.optString("original").takeIf { it.isNotBlank() }, body.optString("source").takeIf { it.isNotBlank() },

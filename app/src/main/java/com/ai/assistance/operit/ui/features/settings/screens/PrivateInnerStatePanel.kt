@@ -124,7 +124,7 @@ internal fun PrivateRows(role: String, kind: String, id: String? = null, history
             page = withContext(Dispatchers.IO) {
                 val chat = AssistantWindowRouter.chat(context, role).orEmpty()
                 check(chat.isNotBlank()) { "请先为这位助手建立一个私聊窗口" }
-                InternalStateStore(context).inspectCategory(role, chat, kind, id, offset)
+                PrivateStateView.project(InternalStateStore(context).inspectCategory(role, chat, kind, id, offset))
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (failure: Exception) { error = failure.message ?: "读取失败"; page = null }
@@ -174,6 +174,23 @@ private fun PrivateRecordCard(role: String, kind: String, row: JSONObject, histo
 
 @Composable
 internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, history: Boolean = false, close: () -> Unit) {
+    val context = LocalContext.current
+    var full by remember(role, kind, row) { mutableStateOf(row) }
+    var loadError by remember(role, kind, row) { mutableStateOf("") }
+    var retry by remember { mutableIntStateOf(0) }
+    LaunchedEffect(role, kind, row, retry) {
+        if (kind != "action" || history) return@LaunchedEffect
+        loadError = ""
+        try {
+            full = withContext(Dispatchers.IO) {
+                // List heads deliberately omit large inputs/results. Detail reads the
+                // durable receipt by ID, never expands a preview into invented content.
+                PrivateStateView.project(requireNotNull(InternalStateStore(context).inspectCategory(role,
+                    AssistantWindowRouter.chat(context, role).orEmpty(), "action", row.getString("id"), 0).optJSONObject("item")))
+            }
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (failure: Exception) { loadError = failure.message ?: "完整回执读取失败" }
+    }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.92f), shape = MaterialTheme.shapes.extraLarge) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -182,11 +199,22 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
                     TextButton(onClick = close) { Text("关闭") }
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(privateOrigin(row))
-                    PrivateContent(row.optJSONObject("content") ?: row.optJSONObject("record") ?: row)
-                    row.optJSONObject("declaration")?.let { PrivateFold("当时明确形成的操作打算") { PrivateContent(it) } }
-                    row.optJSONObject("receipt")?.let { PrivateFold("实际回执 · 不代表愿望满足") { PrivateContent(it) } }
-                    PrivateSources(role, row)
+                    if (loadError.isNotBlank()) {
+                        Text("完整回执尚未读取：$loadError", color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = { retry++ }) { Text("重试") }
+                    }
+                    Text(privateOrigin(full))
+                    PrivateContent(full.optJSONObject("content") ?: full.optJSONObject("record") ?: full)
+                    full.optJSONObject("request")?.let { PrivateFold("实际操作请求") { PrivateContent(it) } }
+                    full.optJSONObject("declaration")?.let { PrivateFold("当时明确形成的操作打算") { PrivateContent(it) } }
+                    full.optJSONObject("receipt")?.let { PrivateFold("实际回执 · 不代表愿望满足") { PrivateContent(it) } }
+                    if (kind == "union") {
+                        Text("联合记录的是当时成员版本；查看当前成员不会将旧联合投影回去。", style = MaterialTheme.typography.bodySmall)
+                        jsonRows(full.optJSONObject("content")?.optJSONArray("members")).forEach { member ->
+                            PrivateMember(role, member)
+                        }
+                    }
+                    PrivateSources(role, full)
                     val target = row.optString("id")
                     if (!history && target.isNotBlank()) {
                         val rowKind = when (kind) { "inner_family", "inner" -> "inner_record"; else -> kind }
@@ -201,11 +229,31 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
                             }
                         }
                     }
-                    PrivateFold("版本与完整技术信息") { SelectionContainer { Text(row.toString(2), style = MaterialTheme.typography.bodySmall) } }
+                    PrivateFold("版本与完整技术信息") { SelectionContainer { Text(full.toString(2), style = MaterialTheme.typography.bodySmall) } }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun PrivateMember(role: String, member: JSONObject) {
+    val context = LocalContext.current
+    var current by remember(role, member.toString()) { mutableStateOf<JSONObject?>(null) }
+    var requested by remember { mutableIntStateOf(0) }
+    var error by remember { mutableStateOf("") }
+    LaunchedEffect(requested) {
+        if (requested == 0) return@LaunchedEffect
+        try {
+            current = withContext(Dispatchers.IO) { InternalStateStore(context).inspectCategory(role,
+                AssistantWindowRouter.chat(context, role).orEmpty(), member.getString("kind"), member.getString("id"), 0).optJSONObject("item")?.let(PrivateStateView::project) }
+            error = if (current == null) "成员未能读取，关联仍保留。" else ""
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (failure: Exception) { error = failure.message ?: "成员读取失败" }
+    }
+    TextButton(onClick = { requested++ }) { Text("查看成员 ${member.getString("id")} · 关联时 v${member.getInt("version")}") }
+    if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    current?.let { PrivateContent(it.optJSONObject("content") ?: it) }
 }
 
 @Composable
@@ -228,7 +276,9 @@ private val readableFields = linkedMapOf("kind" to "类别", "description" to "�
     "state" to "当前选择", "capacity" to "重点位置", "events" to "重点次序", "text" to "当时原文", "choice" to "选择",
     "members" to "独立成员", "effects" to "实际采用的影响", "related" to "事情之间的联系", "interpretation" to "对结果的理解",
     "account" to "变化说明", "decision" to "决定", "next" to "后续想法", "error" to "实际限制", "execution_status" to "执行情况",
-    "capability" to "软件能力", "target" to "作用对象", "stage" to "构建或运行阶段", "version" to "版本")
+    "capability" to "软件能力", "target" to "作用对象", "stage" to "构建或运行阶段", "version" to "版本",
+    "tool" to "实际能力", "parameters" to "实际输入", "data" to "实际输出", "success" to "技术操作成功",
+    "from" to "作用来自", "to" to "作用到", "reality" to "材料性质", "available" to "当前可读取", "visibility_notice" to "可见范围")
 
 @Composable
 private fun PrivateContent(value: JSONObject) {
@@ -237,7 +287,7 @@ private fun PrivateContent(value: JSONObject) {
             val item = value.get(field)
             Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             when (item) {
-                is JSONObject -> PrivateContent(item)
+                is JSONObject -> if (field in setOf("parameters", "data")) SelectionContainer { Text(item.toString(2)) } else PrivateContent(item)
                 is JSONArray -> for (i in 0 until item.length()) {
                     val entry = item.get(i)
                     if (entry is JSONObject) {
@@ -281,13 +331,15 @@ private fun PrivateSources(role: String, row: JSONObject) {
             LaunchedEffect(request) {
                 if (!request) return@LaunchedEffect
                 try { source = withContext(Dispatchers.IO) { InternalStateStore(context).inspectCategory(role,
-                    AssistantWindowRouter.chat(context, role).orEmpty(), "source", id, 0).optJSONObject("item") }
+                    AssistantWindowRouter.chat(context, role).orEmpty(), "source", id, 0).optJSONObject("item")?.let(PrivateStateView::project) }
                     if (source == null) error = "此引用不是聊天事件，完整来源快照在技术信息中保留。"
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) { error = failure.message ?: "来源读取失败" }
             }
             TextButton(onClick = { request = true }) { Text("查阅来源 $id") }
-            source?.let { original -> SelectionContainer { Text(original.optString("inner_source").ifBlank { original.optString("detail") }) } }
+            source?.let { original -> SelectionContainer { Text(original.optString("visibility_notice").ifBlank {
+                original.optString("inner_source").ifBlank { original.optString("detail") }
+            }) } }
             if (error.isNotBlank()) Text(error, style = MaterialTheme.typography.bodySmall)
         }
         if (ids.isEmpty() && bindings == null) Text("这条记录没有额外原文依据；不补造经历。")

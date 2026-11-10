@@ -30,6 +30,7 @@ class WebPrivateStateBridgeTest {
     @Before fun setup(): Unit = runBlocking {
         context = RuntimeEnvironment.getApplication()
         ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
+        CharacterCardManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "网页私域"))
         val history = ChatHistory(title = "当前助手", messages = emptyList(), characterCardId = role)
         ChatHistoryManager.getInstance(context).saveChatHistory(history)
@@ -44,7 +45,7 @@ class WebPrivateStateBridgeTest {
     private suspend fun candidate(id: String) = call("page", JSONObject().put("kind", "inner_pending").put("id", id))
     private fun record(family: String, id: String) = JSONObject().put("id", id).put("family", family)
         .put("kind", "完整认识").put("description", "我有自己的立场。\n但也可能犹豫，不能删掉条件和矛盾。")
-        .put("status", "active").apply {
+        .put("status", "active").put("context", "尚未限定适用情境").put("exceptions", "仍允许例外").apply {
             if (family == "relation") put("object_ref", "user").put("label", "相处")
                 .put("understanding", "她提出的信息和我的认识仍有区别").put("feeling", "在乎")
             if (family == "preference") put("aspect", "思维方式").put("horizon", "long_term")

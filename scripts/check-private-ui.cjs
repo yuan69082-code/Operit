@@ -33,6 +33,7 @@ const person = { id: 'p1', owner: 'fixture', version: 1, origin: 'established_im
       assert.equal(b.chat_id, 'chat-fixture');
       if (b.action === 'status') return reply({ name: '界面验证助手（模拟记录）', owner: 'fixture', enabled: true, window: opened ? { status: 'open', opened_at: Date.now() - 3600000, closes_at: Date.now() + 47 * 3600000, submitted: pending.length } : { status: 'not_opened' } });
       if (b.action === 'open_window') { opened = true; return reply({ saved: true }); }
+      if (b.action === 'initial_reference') return reply({ text: '原有设置，作为初始参考保留。', source: 'initial_configuration' });
       if (b.action === 'submit') {
         if (b.replaces) pending = pending.filter(x => x.id !== b.replaces);
         pending.push({ id: 'candidate-' + pending.length, owner: 'fixture', candidate_version: 1, record: b.record, origin: b.original ? 'user_proposal' : 'established_import', created_at: Date.now(), bindings: {} });
@@ -41,6 +42,9 @@ const person = { id: 'p1', owner: 'fixture', version: 1, origin: 'established_im
       if (b.action === 'withdraw') { pending = pending.filter(x => x.id !== b.id); return reply({ withdrawn: b.id }); }
       if (failRead) return reply({ error: '模拟读取失败：原有内容仍保留' }, 503);
       if (b.kind === 'inner_pending') return b.id ? reply({ item: pending.find(x => x.id === b.id), candidate_hash: 'exact-ui-version' }) : reply({ items: pending, next_offset: null });
+      if (b.kind === 'inner' && b.id) return reply({ item: person });
+      if (b.kind === 'action') return b.id ? reply({ item: { id: b.id, request: { tool: 'local_test', parameters: { expression: '1+1' } }, receipt: { text: '完整回执，仅为界面测试记录。', data: { result: 2 }, status: 'completed' } } }) : reply({ items: [{ id: 'a1', request: { tool: 'local_test' }, receipt: { text: '回执预览', excerpt: true } }], next_offset: null });
+      if (b.kind === 'union') return reply({ items: [{ id: 'u1', content: { meaning: '这些认识一起参与理解，保留各自的不同。', members: [{ kind: 'inner', id: 'p1', version: 1 }] } }], next_offset: null });
       if (b.kind === 'inner_family' && b.id === 'personality' || b.kind === 'inner') return reply({ records: [person], next_offset: null });
       if (b.kind === 'category_versions') { assert.equal(b.id, 'inner_record:p1'); return reply({ items: [{ ...person, reason: '模拟采用记录：用于检查历史导航' }], next_offset: null }); }
       if (b.kind === 'state') return reply({ items: [{ id: 'curious', name: '好奇', current_state: '想把那个问题弄明白', intensity: 0.6, attention: 'background', resolution: 'unresolved', reason: '模拟状态：不代表真实助手' }], next_offset: null });
@@ -59,7 +63,13 @@ const person = { id: 'p1', owner: 'fixture', version: 1, origin: 'established_im
     await tab('人格与自我'); await button('查看全文与来源').click();
     assert.ok((await page.locator('.private-dialog').innerText()).includes(full));
     await shot('private-desktop-fulltext'); await button('关闭详情').click();
+    await page.getByText('初始设置 · 仅供参考', { exact: true }).click(); await page.getByText('原有设置，作为初始参考保留。', { exact: true }).waitFor();
     await button('变化历史').click(); await page.getByText('模拟采用记录：用于检查历史导航').waitFor();
+    await tab('打算与行动'); await button('实际操作与能力').click(); await button('查看全文与来源').click();
+    await page.locator('.private-dialog').getByText('完整回执，仅为界面测试记录。', { exact: true }).first().waitFor();
+    assert.ok(requests.some(x => x.kind === 'action' && x.id === 'a1')); await button('关闭详情').click();
+    await tab('相互影响'); await button('查看全文与来源').click(); await button('查看成员 p1 · 关联时 v1').click();
+    assert.ok((await page.locator('.private-dialog').innerText()).includes(full)); await button('关闭详情').click();
     await tab('内容承接'); await button('由我开启 48 小时承接窗口').click();
     await page.getByText(/剩余 47 小时/).waitFor();
     await button('直接填写').click(); await page.getByLabel('内容名称', { exact: true }).fill('完整的已有立场');
@@ -81,7 +91,7 @@ const person = { id: 'p1', owner: 'fixture', version: 1, origin: 'established_im
     failRead = false; await button('重新读取').click(); await empty.waitFor();
     assert.equal(await page.locator('.private-page').evaluate(e => e.scrollWidth > e.clientWidth), false);
     assert.deepEqual(errors, []); assert.ok(!requests.some(x => /stream|send/.test(x.path)));
-    const evidence = { simulation: 'HTTP fixture; no phone, real model or actual subject content', checks: ['production navigation', 'full text exact revision', 'source selection', 'no page-time model call', 'history', 'pagination', 'empty and recoverable error', 'desktop and mobile layout'], requestCount: requests.length };
+    const evidence = { simulation: 'HTTP fixture; no phone, real model or actual subject content', checks: ['production navigation', 'full text exact revision', 'source selection', 'no page-time model call', 'history', 'pagination', 'initial reference', 'full action receipt by ID', 'independent union member detail', 'empty and recoverable error', 'desktop and mobile layout'], requestCount: requests.length };
     fs.writeFileSync(path.join(out, 'ui-check.json'), JSON.stringify(evidence, null, 2)); console.log(JSON.stringify(evidence));
   } catch (e) {
     await page.screenshot({ path: path.join(out, 'ui-failure.png') });

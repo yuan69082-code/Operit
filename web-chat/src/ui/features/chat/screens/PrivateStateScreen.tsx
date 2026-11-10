@@ -34,6 +34,18 @@ function Content({ value }: { value: Row }) {
   return <dl className="private-fields">{Object.entries(value).filter(([key]) => key in labels).map(([key, item]) => <div key={key}><dt>{labels[key]}</dt><dd>{typeof item === 'number' && /(^at$|_at$)/.test(key) ? date(item) : typeof item === 'string' ? (words[item] ?? familyNames[item] ?? item) : item === null ? '未记录' : typeof item === 'boolean' ? (item ? '是' : '否') : typeof item === 'number' ? item : Array.isArray(item) ? item.map((entry, index) => <div key={index}>{object(entry) ? <Content value={object(entry)!} /> : text(entry)}</div>) : <Content value={item} />}</dd></div>)}</dl>;
 }
 
+Object.assign(labels, { version: '版本', effects: '实际采用的影响', from: '作用来自', to: '作用到', request: '实际操作请求', declaration: '明确形成的操作打算', receipt: '实际回执（不代表愿望满足）', execution_status: '执行情况', success: '技术操作成功', capability: '软件能力', stage: '构建或运行阶段', target: '作用对象', available: '当前可读取', choice: '选择', next: '后续想法', visibility_notice: '可见范围' });
+
+function InitialReference({ token, chat }: { token: string; chat: string }) {
+  const [reference, setReference] = useState<Row | null>(null);
+  const [error, setError] = useState('');
+  async function read() {
+    try { setReference(await call<Row>(token, chat, { action: 'initial_reference' })); setError(''); }
+    catch (failure) { console.error('private.initial', failure); setError(failure instanceof Error ? failure.message : '读取失败'); }
+  }
+  return <details onToggle={event => { if (event.currentTarget.open && reference === null) void read(); }}><summary>初始设置 · 仅供参考</summary><p>已采用的人格是持续依据；初始设置不冒充今天形成的新认识。</p>{reference ? <Content value={reference} /> : error ? <p role="alert">{error}<button onClick={() => void read()}>重试</button></p> : <p>正在读取…</p>}</details>;
+}
+
 export function PrivateStateScreen({ token, chat, close }: { token: string; chat: string; close: () => void }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [tab, setTab] = useState('当前');
@@ -97,6 +109,23 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
       await mutate({ action: 'withdraw', id: text(row.id), candidate_hash: exact.candidate_hash });
     } catch (failure) { console.error('private.withdraw', failure); setError(failure instanceof Error ? failure.message : '撤回失败'); }
   }
+  async function showDetail(row: Row, kind: string) {
+    setError('');
+    try {
+      if (kind === 'action') {
+        const result = await call<Page>(token, chat, { action: 'page', kind, id: text(row.id) });
+        if (!result.item) throw new Error('完整回执未能读取，列表仅为概要');
+        setDetail(result.item);
+      } else setDetail(row);
+    } catch (failure) { console.error('private.detail', failure); setError(failure instanceof Error ? failure.message : '读取失败'); }
+  }
+  async function showMember(member: Row) {
+    try {
+      const result = await call<Page>(token, chat, { action: 'page', kind: text(member.kind), id: text(member.id) });
+      if (!result.item) throw new Error('成员未能读取，原有联合关联仍保留');
+      setDetail(result.item);
+    } catch (failure) { console.error('private.member', failure); setError(failure instanceof Error ? failure.message : '成员读取失败'); }
+  }
   const rows = page.items ?? page.records ?? (page.item ? [page.item] : []);
   const window = status?.window;
   const remaining = window?.closes_at === undefined ? 0 : Math.max(0, window.closes_at - now);
@@ -107,6 +136,7 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
     {status && !status.enabled ? <p className="private-notice">此助手尚未开启内部状态。已有资料保留；请在手机该助手的内部状态设置中开启。</p> : null}
     {error ? <p role="alert" className="private-error">{error}<button onClick={() => setRevision(n => n + 1)}>重新读取</button></p> : null}
     {notice ? <p role="status" className="private-notice">{notice}</p> : null}
+    {tab === '人格与自我' ? <InitialReference key={chat} token={token} chat={chat} /> : null}
     {tab === '内容承接' ? <section className="private-card">
       <h2>承接已有的自己</h2><p>完整保存原文。预览、摘要和展示长度不会覆盖已保存内容。</p>
       {window?.status === 'not_opened' ? <button disabled={busy} onClick={() => void mutate({ action: 'open_window' })}>由我开启 48 小时承接窗口</button> : window?.opened_at !== undefined && window.closes_at !== undefined ? <p>开始 {date(window.opened_at)} · 截止 {date(window.closes_at)}<br />剩余 {Math.floor(remaining / 3600000)} 小时 {Math.floor(remaining / 60000) % 60} 分钟 · 已提交 {window.submitted} 次<br />按时提交的未改动候选仍可在截止后采用。之后的新变化继续使用正常来源。</p> : null}
@@ -125,7 +155,7 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
       return <article className="private-card" key={text(item.id) || index}><h2>{text(content.kind) || text(content.title) || section.title}</h2>
         <div className="private-preview"><Content value={content} />{content !== item ? <Content value={item} /> : null}</div>
         {item.has_note === false || section.kind === 'activity' && !item.note_preview ? <p>未留存可见随记；可打开详情核对保密选择、实际操作或中断情况。</p> : typeof item.note_preview === 'string' ? <p>{item.note_preview}</p> : null}
-        <button onClick={() => setDetail(item)}>查看全文与来源</button>
+        <button onClick={() => void showDetail(item, section.kind)}>查看全文与来源</button>
         {section.kind === 'activity' ? <button onClick={() => navigate({ title: '这次活动', kind: 'activity_part', id: text(item.id) })}>随记、操作与表达</button> : null}
         {section.kind === 'inner_pending' ? <><button disabled={busy} onClick={() => void edit(item)}>修改全文</button><button disabled={busy} onClick={() => void withdraw(item)}>撤回</button></> : section.kind === 'inner' || section.kind === 'inner_family' ? <button disabled={busy} onClick={() => void edit(item)}>提出修改候选</button> : null}
         {!['activity', 'activity_part', 'waking_note', 'thought', 'source', 'category_versions', 'action_versions', 'inner_pending'].includes(section.kind) ? <button onClick={() => navigate({ title: '变化历史', kind: section.kind === 'action' ? 'action_versions' : 'category_versions', id: section.kind === 'action' ? text(item.id) : `${['inner_family', 'inner'].includes(section.kind) ? 'inner_record' : section.kind}:${text(item.id)}` })}>变化历史</button> : null}
@@ -134,6 +164,9 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
     })}</div>
     <footer><button disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - 8))}>上一页</button><span>第 {Math.floor(offset / 8) + 1} 页</span><button disabled={busy || page.next_offset == null} onClick={() => { if (page.next_offset != null) setOffset(page.next_offset); }}>下一页</button><button onClick={() => setRevision(n => n + 1)}>刷新</button></footer>
     {detail ? <div className="private-dialog"><section className="private-card"><button onClick={() => setDetail(null)}>关闭详情</button><Content value={object(detail.content) ?? object(detail.record) ?? detail} /><Content value={detail} />
+      {Array.isArray(object(detail.content)?.members) ? <section><p>关联保留当时版本；点开读取成员自己的当前状态，旧联合不会覆盖它。</p>{(object(detail.content)!.members as Value[]).map((value, i) => { const member = object(value); return member ? <button key={i} onClick={() => void showMember(member)}>查看成员 {text(member.id)} · 关联时 v{typeof member.version === 'number' ? member.version : '未记录'}</button> : null; })}</section> : null}
+      {object(detail.request)?.parameters ? <details><summary>实际输入参数</summary><pre>{JSON.stringify(object(detail.request)!.parameters, null, 2)}</pre></details> : null}
+      {object(detail.receipt)?.data ? <details><summary>完整实际输出</summary><pre>{JSON.stringify(object(detail.receipt)!.data, null, 2)}</pre></details> : null}
       {Object.entries(object(detail.bindings) ?? object(detail.evidence) ?? {}).map(([id, evidence]) => <details key={id}><summary>来源 {id}</summary>{object(evidence) ? <Content value={object(evidence)!} /> : null}<button onClick={() => { setDetail(null); navigate({ title: '原始来源', kind: 'source', id }); }}>查阅原始材料</button><pre>{JSON.stringify(evidence, null, 2)}</pre></details>)}
       <details><summary>完整保存记录与技术信息</summary><pre>{JSON.stringify(detail, null, 2)}</pre></details></section></div> : null}
     {form ? <CandidateForm value={form.record} existing={form.candidate !== undefined || form.targetVersion !== undefined} setValue={record => setForm({ ...form, record })} mode={sourceMode} change={setSourceMode} original={original} setOriginal={setOriginal} source={source} setSource={setSource} close={() => setForm(null)} busy={busy} error={error} save={() => {
