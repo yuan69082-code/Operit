@@ -5,6 +5,9 @@ import android.content.Context
 import com.ai.assistance.operit.api.chat.enhance.ConversationService
 import com.ai.assistance.operit.api.chat.enhance.MultiServiceManager
 import com.ai.assistance.operit.api.chat.llmprovider.AIService
+import com.ai.assistance.operit.api.chat.llmprovider.GeminiProvider
+import com.ai.assistance.operit.api.chat.llmprovider.SingleApiKeyProvider
+import com.ai.assistance.operit.api.chat.llmprovider.TokenTrackingAIService
 import com.ai.assistance.operit.core.chat.CurrentRequestContext
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
@@ -33,6 +36,11 @@ import org.mockito.Mockito
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 /** Real EnhancedAIService.sendMessage, shared stream, message-reader boundary, tool executor
  * and persisted state/results. Provider output is simulated; prompt preparation uses the real
@@ -60,6 +68,7 @@ class EnhancedReportIsolationTest {
         var wake = false
         val frames = CopyOnWriteArrayList<InternalStateFrame>()
         var output: suspend StreamCollector<String>.(Int, InternalStateFrame) -> Unit = { _, f -> emit("下一条正常回复。" + report(f)) }
+        var requestStream: ((List<PromptTurn>, Int) -> Stream<String>)? = null
         val uncaught = CopyOnWriteArrayList<Throwable>()
         val warnings = CopyOnWriteArrayList<String>()
         val host = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> uncaught.add(e) })
@@ -89,13 +98,23 @@ class EnhancedReportIsolationTest {
                     val frame = requireNotNull(CurrentRequestContext.internalStateFrame(history))
                     frames.add(frame)
                     val index = ++calls
-                    stream { output(index, frame) }
+                    val suppliedStream = requestStream
+                    if (suppliedStream != null) {
+                        suppliedStream(history, index)
+                    } else {
+                        // Real native providers expose a separate revision channel. The old
+                        // fixture skipped that collector entirely, including its failure path.
+                        revisableOutput(index, frame)
+                    }
                 }
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             } }
             val model = ModelConfigData("simulated", "本地模拟", enableToolCall = false)
+            // The saved crash crosses TrackingRevisableStream before EnhancedAIService.
+            // Exercise the production wrapper and its start/finish/cancellation lifecycle.
+            val trackedProvider = TokenTrackingAIService(provider, app, model.id)
             val manager = Mockito.mock(MultiServiceManager::class.java) { call -> when (call.method.name) {
-                "acquireServiceForFunction", "acquireServiceForConfig" -> MultiServiceManager.ServiceLease({}, provider, model, emptyList())
+                "acquireServiceForFunction", "acquireServiceForConfig" -> MultiServiceManager.ServiceLease({}, trackedProvider, model, emptyList())
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             } }
             val realComposer = field("conversationService") as ConversationService
@@ -118,6 +137,13 @@ class EnhancedReportIsolationTest {
         }
         private fun field(name: String): Any = EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.get(service)
         private fun set(name: String, value: Any) { EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value) }
+        fun revisableOutput(index: Int, frame: InternalStateFrame): Stream<String> {
+            val events = MutableSharedStream<TextStreamEvent>(replay = Int.MAX_VALUE)
+            return stream<String> {
+                events.emit(TextStreamEvent(TextStreamEventType.SAVEPOINT, "response:$index"))
+                output(index, frame)
+            }.withEventChannel(events)
+        }
         fun savedReport(frame: InternalStateFrame): JSONObject? =
             CompanionStore(app).archivedStateRow("internal-state:$role", "semantic_reports", frame.id)
                 ?: InternalStateEngine.rows(InternalStateStore(app).read(role), "semantic_reports").firstOrNull { it.getString("frame_id") == frame.id }
@@ -126,15 +152,20 @@ class EnhancedReportIsolationTest {
             try {
                 val response = service.sendMessage(EnhancedAIService.SendMessageOptions(message = "继续", chatId = chat,
                     roleCardId = role, activityId = ref.id, isSubTask = true, enableMemoryAutoUpdate = false,
-                    disableWarning = true, onNonFatalError = { warnings.add(it) })).share(host, replay = Int.MAX_VALUE, propagateCompletionCause = false)
+                    disableWarning = true, onNonFatalError = { warnings.add(it) })).shareRevisable(host, replay = Int.MAX_VALUE, propagateCompletionCause = false)
                 val text = StringBuilder()
                 val error = withTimeout(30_000) { MessageProcessingDelegate.collectResponseReaders {
                     val observer = launch { response.collect { /* UI text-only observer */ } }
-                    response.collect { text.append(it) }
-                    observer.join()
-                    // Match the production owning consumer: cancellation in a child launch
-                    // alone does not cancel its parent or classify the send as interrupted.
-                    MessageProcessingDelegate.requireSuccessfulResponse(response)
+                    val revisions = launch { (response as TextStreamEventCarrier).eventChannel.collect { } }
+                    try {
+                        response.collect { text.append(it) }
+                        observer.join()
+                        // Match the production owning consumer: cancellation in a child launch
+                        // alone does not cancel its parent or classify the send as interrupted.
+                        MessageProcessingDelegate.requireSuccessfulResponse(response)
+                    } finally {
+                        revisions.cancelAndJoin()
+                    }
                 } }
                 // Same owning consumer contract as a failed/partial UI message: confirmed
                 // text remains, no successful timestamp is invented, no automatic resend.
@@ -211,5 +242,57 @@ class EnhancedReportIsolationTest {
             f.output = { _, frame -> emit("中断后的下一次。" + Fixture.report(frame)) }
             assertNull(f.send().second); assertEquals(2, f.calls); assertTrue(f.uncaught.isEmpty())
         } finally { f.close() }
+    }
+
+    @Test fun nativeHttp400And402InFirstOrToolResponseRemainFailedTurns(): Unit = runBlocking {
+        for (status in listOf(400, 402)) {
+            for (afterTool in listOf(false, true)) {
+                val scenario = "HTTP $status, " + if (afterTool) "tool continuation" else "first response"
+                val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+                val httpCalls = AtomicInteger()
+                val client = OkHttpClient.Builder().addInterceptor { chain ->
+                    httpCalls.incrementAndGet()
+                    val body = if (status == 400) {
+                        """{"error":{"code":400,"message":"Thinking level is unsupported: THINKING_LEVEL_MINIMAL","status":"INVALID_ARGUMENT"}}"""
+                    } else {
+                        """[{"error":{"code":402,"message":"Your prepayment credits are depleted.","status":"RESOURCE_EXHAUSTED"}}]"""
+                    }
+                    Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                        .code(status).message("Request rejected").body(body.toResponseBody()).build()
+                }.build()
+                val provider = GeminiProvider("https://example.test", SingleApiKeyProvider("test"), "gemini-test", client)
+                try {
+                    f.output = { _, _ -> emit("<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>") }
+                    f.requestStream = { history, index ->
+                        if (afterTool && index == 1) {
+                            f.revisableOutput(index, f.frames.last())
+                        } else {
+                            // Fake only HTTP. The actual Gemini serializer, revision stream,
+                            // EnhancedAIService first/continuation readers and owner all run.
+                            runBlocking {
+                                provider.sendMessage(f.app, history, emptyList(), false, true, null,
+                                    false, { _, _, _ -> }, null, { f.warnings.add(it) }, true, false, null)
+                            }
+                        }
+                    }
+                    val (_, failure) = f.send()
+                    assertTrue("$scenario: ${failure?.stackTraceToString()}", failure is GeminiProvider.HttpStatusException)
+                    assertEquals(scenario, status, (failure as GeminiProvider.HttpStatusException).statusCode)
+                    assertEquals(scenario, 1, httpCalls.get())
+                    assertTrue("$scenario: must not be retried", f.warnings.isEmpty())
+                    assertEquals(scenario, if (afterTool) 1 else 0, f.executions)
+                    assertNull(scenario, f.savedReport(f.frames.last()))
+                    assertTrue("$scenario: ${f.uncaught}", f.uncaught.isEmpty())
+                    assertTrue(scenario, f.host.isActive)
+
+                    // A later user turn succeeds, and a completed tool is not executed again.
+                    f.requestStream = null
+                    f.output = { _, frame -> emit("下一轮仍可回复。" + Fixture.report(frame)) }
+                    assertNull("$scenario: next user turn", f.send().second)
+                    assertEquals("$scenario: no tool replay", if (afterTool) 1 else 0, f.executions)
+                    assertTrue("$scenario: ${f.uncaught}", f.uncaught.isEmpty())
+                } finally { f.close() }
+            }
+        }
     }
 }

@@ -1287,15 +1287,26 @@ open class GeminiProvider(
                                 if (!response.isSuccessful) {
                                     val errorBody = response.body?.string() ?: context.getString(R.string.gemini_error_no_error_details)
                                     logError("API请求失败: ${response.code}, $errorBody")
+                                    val apiError = context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody)
+                                    // Keep the exact service error for diagnosis, but put the actionable
+                                    // explanation first. A billing/configuration failure ends this turn.
+                                    val explanation = when {
+                                        response.code == 402 && errorBody.contains("prepayment credits", ignoreCase = true) ->
+                                            context.getString(R.string.gemini_error_prepaid_credits_exhausted)
+                                        response.code == 400 && errorBody.contains("Thinking level is unsupported", ignoreCase = true) ->
+                                            context.getString(R.string.gemini_error_unsupported_thinking_level, modelName)
+                                        else -> null
+                                    }
+                                    val failureMessage = explanation?.let { "$it\n$apiError" } ?: apiError
                                     // 状态码错误保留状态码信息，随后进入统一重试循环。
                                     if (response.code in 400..499) {
                                         throw HttpStatusException(
-                                            context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody),
+                                            failureMessage,
                                             statusCode = response.code,
                                             retryAfterMs = GeminiRetryDelay.retryAfterMillis(response.header("Retry-After"), System.currentTimeMillis())
                                         )
                                     }
-                                    throw IOException(context.getString(R.string.gemini_error_api_request_failed, response.code, errorBody))
+                                    throw IOException(failureMessage)
                                 }
 
                                 // 根据stream参数处理响应

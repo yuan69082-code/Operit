@@ -8,7 +8,7 @@ on:
         default: ""
   workflow_dispatch:
   push:
-    branches: [feat/assistant-workspaces, feat/group-continuity-games]
+    branches: [feat/assistant-workspaces, feat/group-continuity-games, fix/chat-context-and-stream-errors]
     paths:
       - .github/workflows/android-tests.yml
       - .gitmodules
@@ -164,7 +164,24 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Run JVM unit tests
-        run: ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
+        env:
+          TARGETED_CHAT_REGRESSION: ${{ github.ref == 'refs/heads/fix/chat-context-and-stream-errors' }}
+        run: |
+          if [ "$TARGETED_CHAT_REGRESSION" = 'true' ]; then
+            ./gradlew :app:testDebugUnitTest \
+              --tests '*EnhancedReportIsolationTest' \
+              --tests '*GeminiHttpFailureIntegrationTest' \
+              --tests '*GeminiReaderFailureTest' \
+              --tests '*HotStreamTest' \
+              --tests '*GeminiLevelCompatibilityTest' \
+              --tests '*HistoricalToolResultContextTest' \
+              --tests '*InnerMaterialSelectionTest' \
+              --tests '*InnerMaterialArchiveTest' \
+              --tests '*SubjectMaterialBudgetTest' \
+              --init-script ci/script/android_test_progress.gradle --stacktrace --no-daemon
+          else
+            ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
+          fi
 
       - name: Upload Android test reports
         if: always()
@@ -173,6 +190,7 @@ jobs:
           name: operit-android-test-reports-${{ github.run_number }}
           path: |
             app/build/reports/**
+            app/build/test-results/**
             build/reports/**
           if-no-files-found: warn
           retention-days: 14

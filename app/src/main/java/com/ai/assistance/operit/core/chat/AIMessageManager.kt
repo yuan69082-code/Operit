@@ -1479,7 +1479,10 @@ object AIMessageManager {
         // request preparation so switching Gemini backends cannot replay the old backend's state.
         val sourceMetadata = mapOf(
             PromptTurn.SOURCE_PROVIDER_METADATA_KEY to message.provider.substringBefore('/').trim(),
-            PromptTurn.SOURCE_MODEL_METADATA_KEY to message.modelName.trim()
+            PromptTurn.SOURCE_MODEL_METADATA_KEY to message.modelName.trim(),
+            // Keep an exact locator for request-only tool excerpts; never replace saved content.
+            PromptTurn.SOURCE_MESSAGE_AT_METADATA_KEY to message.timestamp,
+            PromptTurn.SOURCE_COMPLETED_AT_METADATA_KEY to message.completedAt
         )
 
         // 非角色隔离模式：直接返回 assistant 消息

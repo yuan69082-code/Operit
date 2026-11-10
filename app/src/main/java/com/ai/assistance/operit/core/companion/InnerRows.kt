@@ -41,6 +41,14 @@ internal class InnerRows(private val data: JSONObject, private val pending: Bool
         val first = page(start, 8, parent)
         return if (first.size == 8 || start == 0) first else first + page(0, minOf(8 - first.size, start), parent)
     }
+    fun relevant(input: String, parent: String): List<JSONObject> {
+        require(!pending && parent in setOf("identity", "other"))
+        if (input.isBlank()) return emptyList()
+        if (archived) return port.relevantInnerRows(input, parent, 8)
+        val ids = InnerMaterialSelection.ranked(allLegacy().asSequence().mapNotNull(InnerMaterialSelection::entry),
+            InnerMaterialSelection.terms(input), parent, 8)
+        return ids.map(::getJSONObject)
+    }
     fun put(id: String, value: JSONObject) {
         if (!archived) { legacy().put(id, value); return }
         val f = requireNotNull(frame)
