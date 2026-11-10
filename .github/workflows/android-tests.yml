@@ -17,6 +17,7 @@ on:
       - build.gradle.kts
       - ci/script/download_android_dependencies.sh
       - ci/script/prepare_android_dependencies.py
+      - ci/script/build_streamnative_host.sh
       - cmake/**
       - avator/**
       - examples/**
@@ -163,10 +164,14 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Build host stream parser for JVM tests
+        run: bash ci/script/build_streamnative_host.sh "$RUNNER_TEMP/operit-native"
+
       - name: Run JVM unit tests
         env:
           TARGETED_CHAT_REGRESSION: ${{ github.ref == 'refs/heads/fix/chat-context-and-stream-errors' }}
         run: |
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/operit-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           if [ "$TARGETED_CHAT_REGRESSION" = 'true' ]; then
             ./gradlew :app:testDebugUnitTest \
               --tests '*EnhancedReportIsolationTest' \
@@ -174,10 +179,12 @@ jobs:
               --tests '*GeminiReaderFailureTest' \
               --tests '*HotStreamTest' \
               --tests '*GeminiLevelCompatibilityTest' \
+              --tests '*GeminiThoughtSignatureHistoryTest' \
               --tests '*HistoricalToolResultContextTest' \
               --tests '*InnerMaterialSelectionTest' \
               --tests '*InnerMaterialArchiveTest' \
               --tests '*SubjectMaterialBudgetTest' \
+              --tests '*WaifuMessageProcessorTest' \
               --init-script ci/script/android_test_progress.gradle --stacktrace --no-daemon
           else
             ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon

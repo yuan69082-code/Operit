@@ -8,6 +8,7 @@ import com.ai.assistance.operit.api.chat.llmprovider.AIService
 import com.ai.assistance.operit.api.chat.llmprovider.GeminiProvider
 import com.ai.assistance.operit.api.chat.llmprovider.SingleApiKeyProvider
 import com.ai.assistance.operit.api.chat.llmprovider.TokenTrackingAIService
+import com.ai.assistance.operit.core.chat.AIMessageManager
 import com.ai.assistance.operit.core.chat.CurrentRequestContext
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
@@ -15,10 +16,13 @@ import com.ai.assistance.operit.core.companion.*
 import com.ai.assistance.operit.core.tools.*
 import com.ai.assistance.operit.data.model.*
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
+import com.ai.assistance.operit.data.preferences.ModelConfigManager
+import com.ai.assistance.operit.data.preferences.WaifuPreferences
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.services.core.MessageProcessingDelegate
 import com.ai.assistance.operit.ui.permissions.PermissionLevel
 import com.ai.assistance.operit.util.stream.*
+import com.ai.assistance.operit.util.streamnative.NativeMarkdownSplitter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.setMain
@@ -72,6 +76,8 @@ class EnhancedReportIsolationTest {
         val uncaught = CopyOnWriteArrayList<Throwable>()
         val warnings = CopyOnWriteArrayList<String>()
         val host = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> uncaught.add(e) })
+        private val previousUncaughtHandler = Thread.getDefaultUncaughtExceptionHandler()
+        private var messageManagerJob: Job? = null
 
         suspend fun init() {
             ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
@@ -115,6 +121,9 @@ class EnhancedReportIsolationTest {
             val trackedProvider = TokenTrackingAIService(provider, app, model.id)
             val manager = Mockito.mock(MultiServiceManager::class.java) { call -> when (call.method.name) {
                 "acquireServiceForFunction", "acquireServiceForConfig" -> MultiServiceManager.ServiceLease({}, trackedProvider, model, emptyList())
+                "getServiceForFunction", "getServiceForConfig" -> trackedProvider
+                "getModelConfigForFunction", "getModelConfigForConfig" -> model
+                "getModelParametersForFunction", "getModelParametersForConfig" -> emptyList<ModelParameter<*>>()
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             } }
             val realComposer = field("conversationService") as ConversationService
@@ -134,6 +143,9 @@ class EnhancedReportIsolationTest {
             } }
             set("multiServiceManager", manager); set("conversationService", composer); set("isServiceManagerInitialized", true)
             handler.registerTool("sleep", executor = { _: AITool -> executions++; ToolResult("sleep", true, StringResultData("本地实际回执")) })
+            // AIMessageManager and toolProcessingScope are independent of host. Observe the
+            // same JVM boundary as the app's crash handler, not just our owning test scope.
+            Thread.setDefaultUncaughtExceptionHandler { _, failure -> uncaught.add(failure) }
         }
         private fun field(name: String): Any = EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.get(service)
         private fun set(name: String, value: Any) { EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value) }
@@ -177,9 +189,66 @@ class EnhancedReportIsolationTest {
             } finally { ActivityNotes.release(ref) }
         }
         suspend fun close() {
-            host.coroutineContext[Job]!!.cancelAndJoin()
-            (field("toolProcessingScope") as CoroutineScope).coroutineContext[Job]!!.cancelAndJoin()
-            EnhancedAIService.releaseChatInstance(chat)
+            try {
+                host.coroutineContext[Job]!!.cancelAndJoin()
+                (field("toolProcessingScope") as CoroutineScope).coroutineContext[Job]!!.cancelAndJoin()
+                // Shared revision collectors outlive the response text. Stop only this
+                // fixture's manager children so later scenarios keep the singleton usable.
+                messageManagerJob?.children?.toList()?.forEach { it.cancelAndJoin() }
+                EnhancedAIService.releaseChatInstance(chat)
+            } finally {
+                Thread.setDefaultUncaughtExceptionHandler(previousUncaughtHandler)
+            }
+        }
+        suspend fun delegate(errors: MutableList<String>, completed: AtomicInteger): MessageProcessingDelegate {
+            AIMessageManager.initialize(app)
+            messageManagerJob = (AIMessageManager::class.java.getDeclaredField("scope")
+                .apply { isAccessible = true }.get(null) as CoroutineScope).coroutineContext[Job]
+            ModelConfigManager(app).saveModelConfig(ModelConfigData("simulated", "本地模拟", enableToolCall = false))
+            WaifuPreferences.getInstance(app).saveEnableWaifuMode(false)
+            val history = ChatHistoryManager.getInstance(app)
+            // A pre-existing user turn prevents an unrelated asynchronous title request.
+            history.addMessage(chat, ChatMessage(sender = "user", content = "上一条消息", timestamp = 1L))
+            return MessageProcessingDelegate(
+                context = app,
+                coroutineScope = host,
+                getEnhancedAiService = { service },
+                getFullChatHistory = { history.loadChatMessages(it) },
+                getRuntimeChatHistory = { history.loadChatMessages(it) },
+                hasUserMessage = { id -> history.loadChatMessages(id).any { it.sender == "user" } },
+                addMessageToChat = { id, message -> history.addMessage(id, message) },
+                saveCurrentChat = {},
+                showErrorMessage = { errors.add(it) },
+                updateChatTitle = { _, _ -> fail("Existing conversations must not generate a title") },
+                getChatTitle = { "正常入口" },
+                onTurnComplete = { _, _, _, _ -> completed.incrementAndGet(); Unit },
+                onTokenLimitExceeded = { _, _, _, _ -> fail("Summary is disabled for this fixture") },
+                getIsAutoReadEnabled = { false },
+                speakMessageHandler = { _, _ -> fail("Speech is disabled, but its native reader must still run") },
+            )
+        }
+        suspend fun sendThroughDelegate(delegate: MessageProcessingDelegate, phase: String) {
+            delegate.sendUserMessage(
+                chatId = chat,
+                roleCardId = role,
+                messageTextOverride = "继续",
+                prebuiltMessageContent = "继续",
+                chatModelConfigIdOverride = "simulated",
+                maxTokens = 131_072,
+                tokenUsageThreshold = 0.9,
+                enableMemoryAutoUpdate = false,
+                enableSummary = false,
+                turnOptions = ChatTurnOptions(notifyReply = false, disableWarning = true),
+            )
+            // This production gate joins the actual send job, including persistence and
+            // runtime cleanup, instead of treating stream closure as a completed turn.
+            try {
+                withTimeout(30_000) { delegate.withSummaryAfterTurn(chat) {} }
+            } catch (timeout: TimeoutCancellationException) {
+                throw AssertionError("$phase: delegate did not finish; providerCalls=$calls, " +
+                    "loading=${delegate.isChatLoading(chat)}, state=${delegate.inputProcessingStateByChatId.value[chat]}, " +
+                    "uncaught=${uncaught.map { it.stackTraceToString() }}", timeout)
+            }
         }
         companion object {
             fun report(f: InternalStateFrame) = "<operit_state_report>" + JSONObject().put("frame_id", f.id)
@@ -292,7 +361,84 @@ class EnhancedReportIsolationTest {
                     assertEquals("$scenario: no tool replay", if (afterTool) 1 else 0, f.executions)
                     assertTrue("$scenario: ${f.uncaught}", f.uncaught.isEmpty())
                 } finally { f.close() }
+                assertTrue("$scenario after cleanup: ${f.uncaught.map { it.stackTraceToString() }}", f.uncaught.isEmpty())
             }
         }
+    }
+
+    @Test fun delegateHttp400ClearsFailedTurnAndAllowsNextSend(): Unit = runBlocking {
+        assertDelegateHttpFailure(400)
+    }
+
+    @Test fun delegateHttp402ClearsFailedTurnAndAllowsNextSend(): Unit = runBlocking {
+        assertDelegateHttpFailure(402)
+    }
+
+    private suspend fun assertDelegateHttpFailure(status: Int) {
+        // Do not skip the actual autoRead/Waifu parser when JNI is unavailable. CI builds
+        // the production streamnative sources for the host JVM before running this test.
+        NativeMarkdownSplitter.createBlockSession().destroy()
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        val errors = CopyOnWriteArrayList<String>()
+        val completed = AtomicInteger()
+        val httpCalls = AtomicInteger()
+        val scenario = "Delegate HTTP $status"
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            httpCalls.incrementAndGet()
+            val body = if (status == 400) {
+                """{"error":{"code":400,"message":"Thinking level is unsupported: THINKING_LEVEL_MINIMAL","status":"INVALID_ARGUMENT"}}"""
+            } else {
+                """[{"error":{"code":402,"message":"Your prepayment credits are depleted.","status":"RESOURCE_EXHAUSTED"}}]"""
+            }
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(status).message("Request rejected").body(body.toResponseBody()).build()
+        }.build()
+        val provider = GeminiProvider("https://example.test", SingleApiKeyProvider("test"), "gemini-test", client)
+        try {
+            val delegate = f.delegate(errors, completed)
+            f.requestStream = { history, _ -> runBlocking {
+                provider.sendMessage(f.app, history, emptyList(), false, true, null,
+                    false, { _, _, _ -> }, null, { f.warnings.add(it) }, true, false, null)
+            } }
+            f.sendThroughDelegate(delegate, scenario)
+
+            val failedState = delegate.inputProcessingStateByChatId.value[f.chat]
+            assertTrue("$scenario: $failedState; errors=$errors; uncaught=${f.uncaught}", failedState is InputProcessingState.Error)
+            assertTrue("$scenario: $failedState", (failedState as InputProcessingState.Error).message.contains(status.toString()))
+            assertTrue("$scenario: error must reach the UI", errors.any { it.contains(status.toString()) })
+            assertEquals("$scenario: one HTTP request", 1, httpCalls.get())
+            assertTrue("$scenario: must not be retried", f.warnings.isEmpty())
+            assertEquals("$scenario: no successful callback", 0, completed.get())
+            assertEquals("$scenario: no successful turn", 0L, delegate.getTurnCompleteCounter(f.chat))
+            assertFalse("$scenario: chat loading", delegate.isChatLoading(f.chat))
+            assertFalse("$scenario: global loading", delegate.isLoading.value)
+            assertFalse("$scenario: active stream", f.chat in delegate.activeStreamingChatIds.value)
+            assertNull("$scenario: detached response", delegate.getResponseStream(f.chat))
+            assertTrue("$scenario: rejected request must not create an AI reply",
+                ChatHistoryManager.getInstance(f.app).loadChatMessages(f.chat).none { it.sender == "ai" })
+            assertTrue("$scenario: uncaught exceptions=${f.uncaught.map { it.stackTraceToString() }}", f.uncaught.isEmpty())
+            assertTrue("$scenario: host remains active", f.host.isActive)
+
+            errors.clear()
+            f.requestStream = null
+            f.output = { _, frame -> emit("后续消息正常回复。" + Fixture.report(frame)) }
+            f.sendThroughDelegate(delegate, "$scenario next send")
+            assertEquals("$scenario: next turn completed", InputProcessingState.Completed,
+                delegate.inputProcessingStateByChatId.value[f.chat])
+            assertEquals("$scenario: successful callback", 1, completed.get())
+            assertEquals("$scenario: successful counter", 1L, delegate.getTurnCompleteCounter(f.chat))
+            assertEquals("$scenario: no automatic resends", 1, httpCalls.get())
+            assertEquals("$scenario: exactly two provider calls", 2, f.calls)
+            assertFalse("$scenario: next turn loading", delegate.isChatLoading(f.chat))
+            assertFalse("$scenario: next global loading", delegate.isLoading.value)
+            assertNull("$scenario: next response detached", delegate.getResponseStream(f.chat))
+            val reply = ChatHistoryManager.getInstance(f.app).loadChatMessages(f.chat).single { it.sender == "ai" }
+            assertEquals("后续消息正常回复。", reply.content)
+            assertTrue("$scenario: saved completion", reply.completedAt > 0L)
+            assertNull("$scenario: saved stream detached", reply.contentStream)
+            assertTrue("$scenario: next UI errors=$errors", errors.isEmpty())
+            assertTrue("$scenario: uncaught exceptions=${f.uncaught.map { it.stackTraceToString() }}", f.uncaught.isEmpty())
+        } finally { f.close() }
+        assertTrue("$scenario after cleanup: ${f.uncaught.map { it.stackTraceToString() }}", f.uncaught.isEmpty())
     }
 }

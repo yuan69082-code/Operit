@@ -216,10 +216,11 @@ class GeminiThoughtSignatureHistoryTest {
     }
 
     @Test
-    fun `both assistant history branches retain the persisted provider and model`() {
+    fun `both assistant history branches retain persisted provenance and source locator`() {
         val content = call("echo") + signature("stored-signature")
         val message = ChatMessage(
-            sender = "ai", content = content, timestamp = 1L, roleName = "Assistant",
+            sender = "ai", content = content, timestamp = 1L,
+            completedAt = 2L, roleName = "Assistant",
             provider = "VERTEX_AI / saved configuration", modelName = " $MODEL "
         )
         val method = AIMessageManager::class.java.declaredMethods.single {
@@ -231,7 +232,13 @@ class GeminiThoughtSignatureHistoryTest {
             val turn = method.invoke(AIMessageManager, message, roleScoped, "Assistant", keepStatus) as PromptTurn
             assertEquals(PromptTurnKind.ASSISTANT, turn.kind)
             assertEquals(content, turn.content)
-            assertEquals(source(ApiProviderType.VERTEX_AI), turn.metadata)
+            assertEquals(
+                source(ApiProviderType.VERTEX_AI) + mapOf(
+                    PromptTurn.SOURCE_MESSAGE_AT_METADATA_KEY to message.timestamp,
+                    PromptTurn.SOURCE_COMPLETED_AT_METADATA_KEY to message.completedAt
+                ),
+                turn.metadata
+            )
         }
     }
 
