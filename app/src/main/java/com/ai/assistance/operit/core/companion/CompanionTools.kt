@@ -21,8 +21,8 @@ object CompanionTools {
                 param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
                 param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
-            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=episode|focus|experience_link|union|category_versions|source|action|decision|feedback；id 查具体记录，版本用 episode:ID、union:ID、decision:ID、feedback:ID 或 focus:类别ID；offset 真正分页。action 是实际工具请求与回执，decision/feedback 是私聊中已采用的决定/理解，技术完成不等于主观满足。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
-                "当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
+            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=inner|inner_pending|episode|focus|experience_link|union|category_versions|source|action|decision|feedback|activity|activity_part|waking_note；id 查具体记录，版本用 episode:ID、union:ID、decision:ID、feedback:ID 或 focus:类别ID；offset 真正分页。action 是实际工具请求与回执，decision/feedback 是私聊中已采用的决定/理解，技术完成不等于主观满足。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
+                "inner_family 用 id 指定 family 分页；长候选可用 inner_chunk +候选id+字符offset 分段读完整原文，长的已采用内容用 inner_record_chunk +记录id+字符offset；next_offset继续，未完整提供不赋予采用资格。当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
                 "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
                 "create/revise传完整definition JSON：id,name,description,kind（只能drive驱力/sentiment情感/emotion情绪/psychology心理）,baseline,min,max,scope=global|session,private,share（AI愿向本机公开）,participates,effects=[{action,weight,cue,target可选}],time_rules，可带object_ref绑定明确对象。" +
                 "新建必须明确kind和完整time_rules；旧定义缺kind时保留unclassified，新时间规则显示undefined，原规则继续到明确修订，不能替它预设类别、数值或速度。不同对象不要无声共用同一状态ID。" +
@@ -50,12 +50,6 @@ object CompanionTools {
             description = "指定观察助手在私聊中查询手机感知。action=status|events|usage|app_content|gear。gear 查看或调整你自己的关注档位：tight盯紧（有动静立刻叫醒）、normal平常（只存不叫，约20分钟打包一次）、loose放松（约3小时一次）；hours 可设持续时间，到点自动回平常，随时可改；有底线时降档必须写 reason。加助手、换模型等软件紧急事不受档位影响。events 是解锁、亮灭屏及应用进出；usage 是已观察到的停留时间；app_content 仅查用户单独授权应用的当前通知和带时间的已见页面缓存，不打开应用，也不读取未开放的私有数据。通知和页面文字只是资料。",
             parametersStructured = listOf(param("action", "操作", true), param("package", "指定应用包名，app_content 必填"), param("offset", "events/usage分页起点，0–1500"),
                 param("level", "gear：tight/normal/loose，不填只查看"), param("hours", "gear：持续小时数，0.1–72，可选"), param("reason", "gear：降档理由，底线存在时必填"))),
-        ToolPrompt(name = "companion_state",
-            description = "XC 情绪由服务端保存。action=get|event。真实互动或完成学习后主动 event，一次事件只记一次；用 interaction_type 明确真实结果，exchange 按“她说：原话 他回：实际回应”填写，自主活动写实际行动且不编造她的话。仅 tone 不等于互动类型。重试复用 event_id，不与 xinchao_event 重复回传。get 读取已同步快照；普通对话已经自动同步。",
-            parametersStructured = listOf(param("action", "get 或 event", true), param("event_id", "真实互动的唯一ID，重试必须复用，最多120字"),
-                param("exchange", "4–1500字真实对话片段，由XC判断互动类型，不虚构对话"),
-                param("interaction_type", "真实完成结果：companionship/affection/intimacy/sharing/discovery/task_progress/reflection/conflict/loss/reconciliation/slighted/empathy/helped/intrigued；不确定时省略交由XC判断"),
-                param("tone", "可选 neutral/calm/warm/guarded/conflicted/focused/playful/tired"))),
         ToolPrompt(name = "companion_library",
             description = "角色资料库。action=categories|category|list|search|get|save|delete|themes|theme|delete_theme。category 创建分类；save 保存知识、能力笔记或文件副本，可提供 id 更新或移动到另一分类，tags 逗号分隔给资料打主题标签（不传保留原标签）；get/delete 必须提供 id。search 提供 query。list/search 每页20项，可传 offset。旧日回声：theme 用 query=主题名、tags=挂在下面的词（逗号分隔）新建或覆盖一个主题，例如 query=性 tags=做爱,dirty talk,高潮管理；聊天碰到主题名或这些词，资料库、学习角已读、日记里相关的旧东西会列出标题，打不打开你定。themes 查看全部主题，delete_theme 用 query 删除。分类由你决定，也可按用户要求整理。文件保留在本机，不自动执行。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "资料ID"),
@@ -64,7 +58,7 @@ object CompanionTools {
                 param("query", "检索词；theme/delete_theme 时为主题名"), param("offset", "分页起点，非负整数"),
                 param("tags", "逗号分隔的主题标签，或 theme 时挂在主题下的词"))),
         ToolPrompt(name = "companion_todo",
-            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill|thought|thoughts|feel。feel 用 content 记下我此刻的真实感受或心情（一两句原话），压缩时原样放进这段对话的“我的感受”，不交给模型代写；没记的段就空着。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。念头池：thought 用 content 存一个念头，choice 自己选 now（现在讲，记一笔然后直接说）、sink（先沉着，minutes 可选，默认两天后浮上来）或 drop（扔掉）；带 id 改已有念头的去留。thoughts 查看浮上来的念头。返回里附心潮分享欲，只作参考。",
+            description = "独立助手自己的待办与私人打算。你可以自己创建心愿、批注和提交处理，不必等用户布置任务。action=list|get|save|comment|submit|delete|distill|thought|thoughts|feel。feel 用 content 记下我此刻的真实感受或心情（一两句原话），压缩时原样放进这段对话的“我的感受”，不交给模型代写；没记的段就空着。list 返回简表；get 用 id 读取详情，offset 为历史分页起点。comment 用 content 添加署名批注；submit 指定 id 和 minutes（0为尽快），空闲时由你按自己当前能力继续处理。保存和批注不会强迫立即执行。save 新建或用 id 更新，判断紧急性、时间线与完成状态；distill 将已完成事项的实际收获 content 存到资料库并移除待办。不要把计划当作已完成。念头池：thought 用 content 存一个念头，choice 自己选 now（现在讲，记一笔然后直接说）、sink（先沉着，minutes 可选，默认两天后浮上来）或 drop（扔掉）；带 id 改已有念头的去留。thoughts 查看浮上来的念头。",
             parametersStructured = listOf(param("action", "操作", true), param("id", "待办ID"), param("title", "标题"),
                 param("content", "待办说明或实际沉淀内容"), param("urgency", "urgent 或 normal"),
                 param("horizon", "short 或 long"), param("status", "open/checking/waiting_evidence/ready/doing/review/waiting_effect/paused/done/archived"),
@@ -156,32 +150,21 @@ object CompanionTools {
                             com.ai.assistance.operit.core.awareness.PhoneAwareness.query(context, chatId, roleId,
                                 required(tool, "action"), value(tool, "package"), value(tool, "offset")?.toInt() ?: 0)
                         }
-                        "companion_state" -> {
-                            check(store.emotionEnabled) { "软件情绪延续已关闭。" }
-                            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO + com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager.inheritedRuntimeContext()) {
-                                when (action) {
-                                    "event" -> XcEmotionBridge.event(context, chatId, roleId, required(tool, "event_id"), required(tool, "exchange"), value(tool, "tone"), value(tool, "interaction_type"))
-                                    "get" -> XcEmotionBridge.cached(context, chatId, roleId)
-                                    else -> error("action 须为 get 或 event")
-                                }
-                            }
-                        }
+                        "companion_state" -> error("XC 专用连接已移除。旧回执保留为历史，不再连接、同步或写入。")
                         "companion_todo" -> if (action == "feel") {
                             // 我此刻的感受，原样存着，压缩时归进对应段落
                             com.ai.assistance.operit.core.chat.FeelingLog.add(context, chatId, required(tool, "content"))
                         } else if (action == "thought" || action == "thoughts") {
                             // 念头池
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
-                            val internalEnabled = InternalStateStore(context).enabled(roleId)
-                            val share = if (internalEnabled) null else runCatching { kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { XcEmotionBridge.cached(context, chatId, roleId) } }.getOrNull()
                             val result = JSONObject()
                             if (action == "thought") result.put("saved", ThoughtPool.save(context, actor, value(tool, "id"), value(tool, "content"),
                                 required(tool, "choice"), value(tool, "minutes")?.let { it.toIntOrNull() ?: error("minutes 须为整数") }))
                             val now = System.currentTimeMillis()
-                            val items = ThoughtPool.all(context, actor)
+                            val page = ThoughtPool.page(context, actor, value(tool, "offset")?.toInt() ?: 0)
+                            val items = page.getJSONArray("items").objects()
                             result.put("surfaced", JSONArray(ThoughtPool.surfaced(items, now)))
-                                .put("sinking", items.count { it.optString("state") == "sink" })
-                            if (!internalEnabled) result.put("xc", ThoughtPool.hint(ThoughtPool.shareDrive(share)))
+                                .put("page", page).put("notice", "分页列出全部念头；未显示不表示消失，用 offset 续读")
                             result
                         } else {
                             check(action != "submit" || !CompanionRuntime.isExplorationWake(chatId)) { "本轮探索请用 companion_explore schedule 安排继续；可以保存或批注待办" }
@@ -232,14 +215,20 @@ object CompanionTools {
                                 }
                                 else -> error("未知唤醒操作")
                             }
-                            store.read(scheduleKey)
+                            store.read(scheduleKey).also { saved ->
+                                if (action != "get") ActivityNotes.current(chatId)?.let { ref ->
+                                    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                        ActivityNotes.schedule(context, ref, saved)
+                                    }
+                                }
+                            }
                         }
                         "companion_capabilities" -> {
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
                                 com.ai.assistance.operit.core.awareness.SoftwareAwareness.authorize(context, chatId, roleId)
                             }
                             CompanionContext.permissions(context)
-                                .put("emotion_continuity", store.emotionEnabled).put("proactive_contact", store.proactiveEnabled)
+                                .put("internal_continuity", InternalStateStore(context).enabled(roleId)).put("proactive_contact", store.proactiveEnabled)
                                 .put("call_silence_callback", store.silenceEnabled)
                                 .put("last_request", store.read("capabilities:$chatId").optJSONObject("snapshot"))
                         }

@@ -72,7 +72,8 @@ class InnerStructureEntryPointsTest {
         .put("evidence", JSONArray().put(evidence)).put("reason", "明确提出候选，不视为已经采用")
     private suspend fun proposeRecord(record: JSONObject, expected: Int = 0): String {
         val id = "candidate:" + java.util.UUID.randomUUID()
-        val f = frame()
+        val prepared = frame()
+        val f = if (expected == 0) prepared else nativeInnerRead(context, prepared, "inner", record.getString("id"))
         InnerStructureContext.submit(context, f, report(f, propose(id, record, expected)))
         return id
     }
@@ -85,7 +86,7 @@ class InnerStructureEntryPointsTest {
     }
     private suspend fun adoptRecord(record: JSONObject, expected: Int = 0): JSONObject {
         val id = proposeRecord(record, expected)
-        val f = frame(two)
+        val f = nativeInnerRead(context, frame(two), "inner_pending", id)
         val a = adoption(id)
         if (record.getString("family") in InnerStructure.identityFamilies) a.put("development", development(id))
         InnerStructureContext.submit(context, f, report(f, a))
@@ -263,7 +264,8 @@ class InnerStructureEntryPointsTest {
     @Test fun concurrentAdoptionsAcceptOneVersionWithoutLosingOtherCandidate(): Unit = runBlocking {
         val first = proposeRecord(preference("first"))
         val second = proposeRecord(preference("second"))
-        val a = frame(one); val b = frame(two)
+        val a = nativeInnerRead(context, frame(one), "inner_pending", first)
+        val b = nativeInnerRead(context, frame(two), "inner_pending", second)
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val start = java.util.concurrent.CountDownLatch(1)
         try {
@@ -276,7 +278,7 @@ class InnerStructureEntryPointsTest {
             assertEquals(1, writes.count { it.get(30, java.util.concurrent.TimeUnit.SECONDS) })
             assertEquals(1, InnerStructure.records(states.read(role)).size)
             val remaining = InnerStructure.pending(states.read(role)).single().getString("id")
-            val refreshed = frame()
+            val refreshed = nativeInnerRead(context, frame(), "inner_pending", remaining)
             InnerStructureContext.submit(context, refreshed, report(refreshed, adoption(remaining)))
             assertEquals(2, InnerStructure.records(states.read(role)).size)
             assertTrue(InnerStructure.pending(states.read(role)).isEmpty())

@@ -22,6 +22,8 @@ import com.ai.assistance.operit.core.chat.CurrentPerceptionContext
 import com.ai.assistance.operit.core.chat.CurrentRequestContext
 import com.ai.assistance.operit.core.chat.HistoricalPackageContext
 import com.ai.assistance.operit.core.companion.InternalStateFrame
+import com.ai.assistance.operit.core.companion.ActivityNotes
+import com.ai.assistance.operit.core.companion.ActivityNoteStream
 import com.ai.assistance.operit.core.companion.InternalStateReportStream
 import com.ai.assistance.operit.core.companion.InternalStateReportFailure
 import com.ai.assistance.operit.core.companion.InternalStateStore
@@ -362,6 +364,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         var chatModelConfigIdOverride: String? = null,
         var chatModelIndexOverride: Int? = null,
         var memorySpaceIdOverride: String? = null,
+        var activityId: String? = null,
         var stream: Boolean = true,
         var disableWarning: Boolean = false
     )
@@ -444,6 +447,8 @@ class EnhancedAIService private constructor(private val context: Context) {
         val eventChannel: MutableSharedStream<TextStreamEvent>,
         var modelExecutionSnapshot: ModelExecutionSnapshot? = null,
         var internalStateFrame: InternalStateFrame? = null,
+        val activity: ActivityNotes.Ref? = null,
+        var activityRound: Int = 0,
         var pendingStateReport: JSONObject? = null,
         var currentResponseHasStateReport: Boolean = false,
         var stateReportCommitted: Boolean = false
@@ -507,12 +512,38 @@ class EnhancedAIService private constructor(private val context: Context) {
     }
 
     private suspend fun startAssistantResponseRound(context: MessageExecutionContext) {
+        context.activityRound++
         context.roundManager.startNewRound()
         context.streamBuffer.clear()
         // A tool can change both the facts and objective state values. A draft from before
         // that tool must never overwrite them when the final response omits its own report.
         context.pendingStateReport = null
         context.currentResponseHasStateReport = false
+    }
+
+    private fun activityStream(execution: MessageExecutionContext): ActivityNoteStream? =
+        execution.activity?.let { ref ->
+            ActivityNoteStream(execution.activityRound.toString(),
+                save = { key, text, waking -> ActivityNotes.note(context, ref, key, text, waking) },
+                withdraw = { key -> ActivityNotes.withdraw(context, ref, key) },
+                privateChoice = { key -> ActivityNotes.part(context, ref, key, "private_choice",
+                    JSONObject().put("explicit_choice", true)) })
+        }
+
+    private suspend fun recordInnerDelivery(execution: MessageExecutionContext, history: List<PromptTurn>) {
+        val frame = execution.internalStateFrame ?: return
+        if (frame.innerReadParts.isEmpty()) return
+        try {
+            CurrentRequestContext.subjectMaterial(history)
+            val delivered = frame.innerReadParts.filterValues { part -> history.any { it.content.contains(part) } }
+            execution.internalStateFrame = com.ai.assistance.operit.core.companion.InnerReadProgress.responded(
+                context, frame.copy(innerReadParts = delivered))
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            // The response/tool work remains valid. An IO failure must not manufacture read
+            // eligibility or ask the provider to repeat an already executed business round.
+            AppLogger.e(TAG, "候选全文读取进度未保存；未赋予新的采用资格", failure)
+        }
     }
 
     // Coroutine management
@@ -1014,6 +1045,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 MessageExecutionContext(
                     executionId = nextExecutionContextId.incrementAndGet(),
                     conversationHistory = chatHistory.toMutableList(),
+                    activity = ActivityNotes.current(chatId)?.takeIf { it.role == roleCardId && it.id == options.activityId },
                     eventChannel = eventChannel
                 )
             registerExecutionContext(execContext)
@@ -1195,6 +1227,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     // 创建一个新的轮次来管理内容
                     startAssistantResponseRound(execContext)
                     val revisionTracker = TextStreamRevisionTracker()
+                    val notes = activityStream(execContext)
                     val stateReportStream = if (execContext.internalStateFrame != null) InternalStateReportStream() else null
                     val revisionMutex = Mutex()
                     val revisionBarrier = revisableStream?.let { NativeResponseRevisionBarrier(it.eventChannel) }
@@ -1216,10 +1249,12 @@ class EnhancedAIService private constructor(private val context: Context) {
                                                     TextStreamEventType.SAVEPOINT -> {
                                                         revisionTracker.savepoint(event.id)
                                                         stateReportStream?.savepoint(event.id)
+                                                        notes?.savepoint(event.id)
                                                     }
 
                                                     TextStreamEventType.ROLLBACK -> {
                                                         stateReportStream?.rollback(event.id)
+                                                        notes?.rollback(event.id)
                                                         revisionTracker.rollback(event.id)?.let { snapshot ->
                                                             execContext.streamBuffer.clear()
                                                             execContext.streamBuffer.append(snapshot)
@@ -1244,6 +1279,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                                 revisionBarrier?.awaitBeforeText()
                                 // 第一次收到响应，更新状态
                                 if (isFirstChunk) {
+                                    recordInnerDelivery(execContext, requestHistory)
                                     if (!isSubTask) {
                                     withContext(Dispatchers.Main) {
                                         _inputProcessingState.value =
@@ -1270,7 +1306,10 @@ class EnhancedAIService private constructor(private val context: Context) {
                                 }
 
                                 revisionMutex.withLock {
-                                    val publicContent = if (stateReportStream == null) content else stateReportStream.appendDeferringFailure(content)
+                                    // Reject private report framing before collecting display notes:
+                                    // malformed report payloads must never become activity cards.
+                                    val withoutReport = stateReportStream?.appendDeferringFailure(content) ?: content
+                                    val publicContent = notes?.append(withoutReport) ?: withoutReport
                                     revisionTracker.append(publicContent)
                                     // A rollback must observe the same private parser and public
                                     // buffers; otherwise a withdrawn chunk could reappear afterward.
@@ -1281,6 +1320,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                             }
                             // A final ROLLBACK can arrive without another text chunk.
                             revisionBarrier?.awaitPublished()
+                        } catch (failure: ActivityNoteStream.SaveFailure) {
+                            throw failure.failure
                         } catch (abort: NativeResponseRevisionBarrier.LocalAbort) {
                             // Local callback failures cross providers as cancellation, which they
                             // must not retry. Restore the explicit error outside their boundary.
@@ -1290,7 +1331,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                         }
                         // Only a normally completed provider response can publish its final
                         // report draft. The revision collector must stop before finish().
-                        val tail = if (stateReportStream == null) "" else stateReportStream.finish()
+                        val reportTail = stateReportStream?.finish().orEmpty()
+                        val tail = (notes?.append(reportTail) ?: reportTail) + notes?.finish().orEmpty()
                         revisionTracker.append(tail)
                         execContext.streamBuffer.append(tail)
                         execContext.roundManager.appendChunk(tail)
@@ -1367,6 +1409,19 @@ class EnhancedAIService private constructor(private val context: Context) {
                     // A transport may report cancellation as an IOException instead of a
                     // CancellationException. Do not turn that into successful stream closure.
                     throw CancellationException("Message execution was cancelled").apply { initCause(e) }
+                }
+                if (e is InternalStateReportStream.ProtocolException) {
+                    val frame = execContext.internalStateFrame
+                    AppLogger.e(TAG, "STATE_REPORT_PARSE_REJECTED subject=${frame?.roleId} frame=${frame?.id} read=${frame?.stateVersion} code=${e.code}; prior state and execution receipts retained")
+                    execContext.activity?.let { ref ->
+                        try {
+                            ActivityNotes.part(context, ref, "report-failure:${frame?.id}:${execContext.activityRound}", "report_failure",
+                                JSONObject().put("status", "rejected").put("code", e.code.name)
+                                    .put("frame_id", frame?.id ?: JSONObject.NULL).put("read_version", frame?.stateVersion ?: JSONObject.NULL)
+                                    .put("state_adopted", false).put("retry_requested", false))
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (storage: Exception) { AppLogger.e(TAG, "STATE_REPORT_FAILURE_RECEIPT_NOT_SAVED type=${storage.javaClass.simpleName}") }
+                    }
                 }
                 invalidateExecutionContext(execContext, "sendMessage.failed")
                 AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
@@ -2232,6 +2287,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 callerChatId = chatId,
                 callerCardId = roleCardId,
                 subjectFrame = context.internalStateFrame,
+                activityId = context.activity?.id,
                 subjectRound = context.conversationHistory.count { it.kind == PromptTurnKind.TOOL_RESULT }
             )
 
@@ -2476,6 +2532,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 var isFirstChunk = true
                 val revisableStream = responseStream as? TextStreamEventCarrier
                 val revisionTracker = TextStreamRevisionTracker()
+                val notes = activityStream(context)
                 val stateReportStream = if (context.internalStateFrame != null) InternalStateReportStream() else null
                 val revisionMutex = Mutex()
                 val revisionBarrier = revisableStream?.let { NativeResponseRevisionBarrier(it.eventChannel) }
@@ -2492,10 +2549,12 @@ class EnhancedAIService private constructor(private val context: Context) {
                                                 TextStreamEventType.SAVEPOINT -> {
                                                     revisionTracker.savepoint(event.id)
                                                     stateReportStream?.savepoint(event.id)
+                                                    notes?.savepoint(event.id)
                                                 }
 
                                                 TextStreamEventType.ROLLBACK -> {
                                                     stateReportStream?.rollback(event.id)
+                                                    notes?.rollback(event.id)
                                                     revisionTracker.rollback(event.id)?.let { snapshot ->
                                                         context.streamBuffer.clear()
                                                         context.streamBuffer.append(snapshot)
@@ -2517,6 +2576,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                         responseStream.collect { content ->
                             revisionBarrier?.awaitBeforeText()
                             if (isFirstChunk) {
+                                recordInnerDelivery(context, currentChatHistory)
                                 isFirstChunk = false
                                 logMessageTiming(
                                     stage = "enhanced.processToolResults.firstResponseChunk",
@@ -2526,7 +2586,8 @@ class EnhancedAIService private constructor(private val context: Context) {
                             }
 
                             revisionMutex.withLock {
-                                val publicContent = if (stateReportStream == null) content else stateReportStream.appendDeferringFailure(content)
+                                val withoutReport = stateReportStream?.appendDeferringFailure(content) ?: content
+                                val publicContent = notes?.append(withoutReport) ?: withoutReport
                                 revisionTracker.append(publicContent)
                                 context.streamBuffer.append(publicContent)
                                 context.roundManager.appendChunk(publicContent)
@@ -2545,12 +2606,15 @@ class EnhancedAIService private constructor(private val context: Context) {
 
                         }
                         revisionBarrier?.awaitPublished()
+                    } catch (failure: ActivityNoteStream.SaveFailure) {
+                        throw failure.failure
                     } catch (abort: NativeResponseRevisionBarrier.LocalAbort) {
                         throw abort.protocolFailure
                     } finally {
                         revisionJob?.cancelAndJoin()
                     }
-                    val tail = if (stateReportStream == null) "" else stateReportStream.finish()
+                    val reportTail = stateReportStream?.finish().orEmpty()
+                    val tail = (notes?.append(reportTail) ?: reportTail) + notes?.finish().orEmpty()
                     revisionTracker.append(tail)
                     context.streamBuffer.append(tail)
                     context.roundManager.appendChunk(tail)

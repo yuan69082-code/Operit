@@ -1,9 +1,13 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: six-batch-integration-tests-passed-release-pending
+status: private-continuity-followup-validation
 ---
 
 # 指定助手连续状态：六批实施记录
+
+当前续作见 [私域连续性七项整合](9-private-continuity-delivery.md)。前六批和 #59 已包含在 +136，后续 +140 保留并补 Gemini 档位与共享流边界。本轮 #61 接续 +140，新增私域呈现、活动/梦醒随记、全文候选承接和报告顺序兼容。以下“不合并/未发布/未实施”均为历史批次交接时状态，不能作为当前缺失判断。
+
+新归档布局和候选流程不再使用旧 8/32/128 条数上限；已有确定内容声明不需要伪造历史原文。旧文档的严格正文前报告约定由本轮明确兼容规则取代，来源、版本和有效采用校验仍保留。七项及最终发布证据统一续在第 9 号记录，不另建冲突规划。
 
 第6批在 feat/subject-time-dreams / [PR #58](https://github.com/yuan69082-code/Operit/pull/58) 接续 #57 → #56 → #55 → #54 → #53，实施与验证记录见 [时间、休息、梦与恢复](8-time-rest-dreams.md)。用户最新授权六批完成后整体合并发布；下文“不合并/不发布”是此前批次交付时的历史边界，不再限制本次最终整合。第5批操作回执、软件能力与接续入口仍见 [第5批交接](7-action-feedback.md)。
 

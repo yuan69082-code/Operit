@@ -216,6 +216,14 @@ class ConversationService(
                     )
                 }
 
+            // Custom sections/hooks can change layout, not turn past records into new decisions.
+            val fidelity = com.ai.assistance.operit.core.config.SummaryFidelityPrompts.forLanguage(useEnglish).trimIndent()
+            preparedHistory = preparedHistory.toMutableList().apply {
+                val system = indexOfFirst { it.kind == PromptTurnKind.SYSTEM }
+                if (system >= 0) {
+                    set(system, get(system).copy(content = get(system).content.replace(fidelity, "").trimEnd() + "\n\n" + fidelity))
+                } else add(0, PromptTurn(kind = PromptTurnKind.SYSTEM, content = fidelity))
+            }
             // 使用summaryService发送请求，收集完整响应
             val contentBuilder = StringBuilder()
 

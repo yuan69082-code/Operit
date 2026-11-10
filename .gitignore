@@ -71,6 +71,7 @@ __pycache__/
 
 # generated React web-chat build outputs
 web-chat/dist/
+web-chat/*.tsbuildinfo
 app/src/main/assets/web-chat/
 
 

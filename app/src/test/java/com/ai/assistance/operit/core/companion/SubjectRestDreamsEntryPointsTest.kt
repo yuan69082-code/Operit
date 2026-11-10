@@ -116,7 +116,7 @@ class SubjectRestDreamsEntryPointsTest {
         // Read the exact dream when a prior receipt competes for the shared material budget.
         val proposing = readMaterial(second, "dream", id)
         submit(proposing, JSONObject().put("inner", JSONArray().put(proposal)))
-        val adopting = requireNotNull(request().internalStateFrame)
+        val adopting = nativeInnerRead(context, requireNotNull(request().internalStateFrame), "inner_pending", "feeling-proposal")
         submit(adopting, JSONObject().put("inner", JSONArray().put(JSONObject().put("op", "adopt")
             .put("id", "feeling-proposal").put("reason", "明确采用这份感受解释"))))
         val continued = request(second)
@@ -213,6 +213,7 @@ class SubjectRestDreamsEntryPointsTest {
             assertEquals("snapshot must include the actual Room directory", java.io.File(context.dataDir, "databases").canonicalFile, databasePath.parentFile!!.canonicalFile)
             val zip = RawSnapshotBackupManager.exportToBackupDir(context)
             assertTrue(zip.length() > 0)
+            val window = InternalStateStore(context).openEstablishedWindow(role)
             // Check exported facts, not only the ZIP size. No writes to either database.
             java.util.zip.ZipFile(zip).use { archive ->
                 val entry = requireNotNull(archive.getEntry("payload/databases/app_database")) {
@@ -234,6 +235,11 @@ class SubjectRestDreamsEntryPointsTest {
             // singleton lifetime boundary; do not edit any persisted subject or chat data.
             ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
             assertNotNull("restored Room database must contain the source window", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
+            // This backup predates the user's one-time opening. The local opening receipt
+            // must keep its exact deadline instead of silently creating another 48 hours.
+            val restoredWindow = InternalStateStore(context).openEstablishedWindow(role)
+            assertEquals(window.getLong("opened_at"), restoredWindow.getLong("opened_at"))
+            assertEquals(window.getLong("closes_at"), restoredWindow.getLong("closes_at"))
             assertEquals(original, item("dream", id).toString())
             assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
             assertTrue(requireNotNull(request(second).internalStateFrame).materialSources.values.any { it.contains("海上的书房") })

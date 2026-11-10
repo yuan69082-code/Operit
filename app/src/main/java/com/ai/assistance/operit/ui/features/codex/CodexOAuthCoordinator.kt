@@ -15,6 +15,7 @@ internal data class CodexOAuthLoginSession(
     internal val state: String,
     val authorizationUrl: String,
     val expiresAt: Long,
+    val attempt: String,
 ) {
     val redirectUri: String
         get() = callbackServer.redirectUri
@@ -45,6 +46,7 @@ internal class CodexOAuthCoordinator(context: Context) {
                 state = state,
             ),
             expiresAt = expiresAt,
+            attempt = authManager.beginLogin(),
         )
     }
 
@@ -70,7 +72,8 @@ internal class CodexOAuthCoordinator(context: Context) {
             redirectUri = session.redirectUri,
             verifier = session.pkce.verifier,
         )
-        return authManager.saveLoginTokens(tokens)
+        if (System.currentTimeMillis() >= session.expiresAt) throw IOException("Codex 登录已超时")
+        return authManager.saveLoginTokens(tokens, session.attempt)
     }
 
     suspend fun logout() {
@@ -78,6 +81,7 @@ internal class CodexOAuthCoordinator(context: Context) {
     }
 
     fun cancel(session: CodexOAuthLoginSession) {
+        authManager.cancelLogin(session.attempt)
         session.callbackServer.close()
     }
 }

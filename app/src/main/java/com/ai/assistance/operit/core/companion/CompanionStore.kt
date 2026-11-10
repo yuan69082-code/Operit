@@ -19,7 +19,7 @@ class CompanionStore(context: Context) {
     private val root = File(this.context.filesDir, "companion").apply { mkdirs() }
     val preferences = this.context.observedSharedPreferences("companion_options", Context.MODE_PRIVATE)
 
-    val emotionEnabled get() = preferences.getBoolean("emotion_enabled", false)
+    // XC settings and receipts are retained only as legacy data; restored flags cannot enable a removed runtime.
     val capabilitiesEnabled get() = preferences.getBoolean("capabilities_enabled", false)
     val proactiveEnabled get() = preferences.getBoolean("proactive_enabled", false)
     val proactiveRole get() = preferences.getString("target_role", null)
@@ -74,9 +74,14 @@ class CompanionStore(context: Context) {
             write(scope, data)
         }
         if (scope.startsWith("internal-state:")) {
+            if (EstablishedWindowReceipt.reconcile(context, requireNotNull(owner), data)) write(scope, data)
             // The bounded journal is the commit point. Rebuild the index before any subsequent
             // reader/writer; an interrupted SQL transaction can repeat without a second owner.
             data.optJSONObject("category_commit")?.let { journal -> history(scope).use { it.applyCategoryJournal(journal) } }
+            if (history(scope).use { InnerRows.migrate(data, it) }) {
+                checkpoint(scope)
+                write(scope, data)
+            }
             InternalStateDocument(data, historyAccess(scope))
         } else data
     }
@@ -145,6 +150,9 @@ class CompanionStore(context: Context) {
     }
 
     private fun write(scope: String, data: JSONObject) {
+        if (scope.startsWith("internal-state:")) {
+            EstablishedWindowReceipt.reconcile(context, requireNotNull(SubjectStateBoundary.owner(scope)), data)
+        }
         val target = file(scope)
         val out = target.startWrite()
         try {
@@ -157,6 +165,58 @@ class CompanionStore(context: Context) {
     }
 
     private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
+
+    /** Existing thought storage migrates once into the same archive; source file stays as
+     * a recovery record. All callers now use this one authority. Lock order is state -> legacy. */
+    internal fun <T> withThoughts(role: String, block: (InternalStateArchive) -> T): T {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val stateScope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(stateScope)) {
+            history(stateScope).use { archive ->
+                if (archive.categoryRow("thought_meta", "migration-v1") == null) {
+                    val old = read(SubjectStateBoundary.scope(role, "thoughts")).optJSONArray("items")
+                    for (i in 0 until (old?.length() ?: 0)) {
+                        val row = requireNotNull(old).getJSONObject(i)
+                        val id = row.getString("id")
+                        if (archive.categoryRow("thought", id) == null) archive.activityWrite("thought", id, row.getString("state")) {
+                            JSONObject(row.toString()).put("storage_kind", "thought").put("parent", row.getString("state"))
+                                .put("owner", role).put("version", 1).put("source", "legacy_thought_import")
+                                .put("migration", "thought-archive-v1")
+                        }
+                    }
+                    archive.activityWrite("thought_meta", "migration-v1", "technical") {
+                        JSONObject().put("id", "migration-v1").put("storage_kind", "thought_meta")
+                            .put("parent", "technical").put("version", 1).put("owner", role)
+                    }
+                }
+                block(archive)
+            }
+        }
+    }
+
+    internal fun activityWrite(role: String, kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.activityWrite(kind, id, parent, change) } }
+    }
+
+    internal fun activityPage(role: String, kind: String, parent: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.categoryPage(kind, offset, 9, parent) } }
+    }
+
+    internal fun activityRead(role: String, kind: String, id: String): JSONObject? {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.categoryRow(kind, id) } }
+    }
+
+    internal fun activityCount(role: String, kind: String, parent: String): Long {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.categoryCount(kind, parent) } }
+    }
 
     internal fun actionWrite(role: String, id: String, change: (JSONObject?) -> JSONObject): JSONObject {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
@@ -194,6 +254,9 @@ class CompanionStore(context: Context) {
         }
         override fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?) = synchronized(lock(scope)) {
             history(scope).use { it.categoryPage(kind, offset, limit, parent) }
+        }
+        override fun categoryCount(kind: String, parent: String?) = synchronized(lock(scope)) {
+            history(scope).use { it.categoryCount(kind, parent) }
         }
         private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256

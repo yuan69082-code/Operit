@@ -101,12 +101,12 @@ class InternalStateReportStreamTest {
         }
     }
 
-    @Test fun leavingCodeDoesNotAllowALateReport() {
+    @Test fun outsideCodeFinalReportCanFollowEarlierOutput() {
         for (quoted in listOf("`example`", "```text\nexample\n```\n", "~~~\nexample\n~~~\n")) {
             val parser = InternalStateReportStream()
             assertEquals(quoted, parser.append(quoted))
-            error(InternalStateReportStream.ErrorCode.LATE_REPORT) { parser.append(framed()) }
-            assertNull(parser.report)
+            assertEquals("", collect(parser, listOf(framed())))
+            assertNotNull(parser.report)
         }
     }
 
@@ -168,7 +168,7 @@ class InternalStateReportStreamTest {
         }
     }
 
-    @Test fun duplicateAndLateReportsAreNotPublishedOrAvailableForCommit() {
+    @Test fun duplicateIsRejectedButCompleteFinalReportCanFollowProse() {
         val duplicate = InternalStateReportStream()
         assertEquals("", duplicate.append(framed()))
         assertNotNull(duplicate.report)
@@ -177,11 +177,27 @@ class InternalStateReportStreamTest {
 
         val late = InternalStateReportStream()
         val output = StringBuilder()
-        error(InternalStateReportStream.ErrorCode.LATE_REPORT) {
-            ("Hello " + framed()).forEach { output.append(late.append(it.toString())) }
-        }
+        ("Hello " + framed()).forEach { output.append(late.append(it.toString())) }
+        output.append(late.finish())
         assertEquals("Hello ", output.toString())
-        assertNull(late.report)
+        assertEquals("host-nonce", late.report!!.getString("frame_id"))
+    }
+
+    @Test fun companionAndToolPayloadsCannotStageNestedReportButFinalSiblingCan() {
+        for ((start, end) in listOf("<companion_note>" to "</companion_note>", "<companion_message>" to "</companion_message>",
+            "<tool name=\"local\">" to "</tool>", "<activity_note>" to "</activity_note>")) {
+            val quoted = start + framed("{\"frame_id\":\"not-host-framing\"}") + end
+            val parser = InternalStateReportStream()
+            assertEquals(quoted + "<companion_quiet/>", collect(parser, (quoted + "<companion_quiet/>" + framed()).map(Char::toString)))
+            assertEquals("host-nonce", parser.report!!.getString("frame_id"))
+        }
+    }
+
+    @Test fun malformedTailPreservesEarlierPublicTextInTheSameChunk() {
+        val parser = InternalStateReportStream()
+        assertEquals("已生成的正文。", parser.appendDeferringFailure("已生成的正文。" + framed("invalid") + "unknown tail"))
+        assertNull(parser.report)
+        error(InternalStateReportStream.ErrorCode.INVALID_JSON) { parser.finish() }
     }
 
     @Test fun reportSizeLimitFailsExplicitlyInsteadOfTruncatingJson() {

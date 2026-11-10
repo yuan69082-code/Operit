@@ -283,6 +283,7 @@ object AIServiceFactory {
         modelConfigManager: ModelConfigManager,
         context: Context
     ): AIService {
+        if (config.subscriptionChannel.isNotEmpty()) return SubscriptionProviderFactory.create(context, config, SharedHttpClient.instance)
         val providerTypeId = config.apiProviderTypeId.trim()
         ToolPkgAiProviderRegistry.get(providerTypeId)?.let { provider ->
             return ToolPkgJsAiProviderService(

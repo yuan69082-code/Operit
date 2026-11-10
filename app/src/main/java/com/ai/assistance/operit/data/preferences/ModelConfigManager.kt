@@ -583,6 +583,20 @@ class ModelConfigManager(
         }
     }
 
+    suspend fun updateSubscription(configId: String, channel: String, model: String, contextTokens: Long? = null): ModelConfigData {
+        require(channel in setOf("", "kimi", "grok"))
+        if (channel.isEmpty()) return updateConfigInternal(configId) { it.copy(subscriptionChannel = "") }
+        val endpoint = requireNotNull(com.ai.assistance.operit.data.api.SubscriptionChannels.get(channel).endpoint)
+        val protocol = if (channel == "grok") ApiProviderType.OPENAI_RESPONSES_GENERIC else ApiProviderType.OPENAI_GENERIC
+        require(model.isNotBlank()) { "请先从账号模型目录选择模型" }
+        require(contextTokens == null || contextTokens > 0) { "服务返回的模型窗口无效" }
+        return updateConfigInternal(configId) { it.copy(subscriptionChannel = channel, apiProviderType = protocol,
+            apiProviderTypeId = protocol.name, apiEndpoint = endpoint, modelName = model,
+            contextLength = contextTokens?.let { tokens -> minOf(it.contextLength, tokens / 1024f) } ?: it.contextLength,
+            maxContextLength = contextTokens?.let { tokens -> tokens / 1024f } ?: it.maxContextLength,
+            apiKey = "", apiKeyPool = emptyList(), useMultipleApiKeys = false, customHeaders = "{}") }
+    }
+
     private suspend fun updateConfigInternal(
             configId: String,
             transform: (ModelConfigData) -> ModelConfigData

@@ -106,9 +106,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
         fun getInstance(context: Context): ChatHistoryManager {
             return INSTANCE
                 ?: synchronized(this) {
-                    val instance = ChatHistoryManager(context.applicationContext)
-                    INSTANCE = instance
-                    instance
+                    INSTANCE ?: ChatHistoryManager(context.applicationContext).also { INSTANCE = it }
                 }
         }
     }
@@ -949,14 +947,16 @@ class ChatHistoryManager private constructor(private val context: Context) {
 
     // 添加单条消息，并返回最终持久化的消息
     suspend fun addMessage(chatId: String, message: ChatMessage): ChatMessage {
-        chatMutex(chatId).withLock {
+        val saved = chatMutex(chatId).withLock {
             try {
-                return persistMessageLocked(chatId, message)
+                persistMessageLocked(chatId, message)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to add message for chat $chatId", e)
                 throw e
             }
         }
+        com.ai.assistance.operit.core.companion.ActivityNotes.savedMessage(context, chatId, saved)
+        return saved
     }
 
     /** Stable trigger identity uses a reserved negative primary key, not text similarity.
@@ -1333,6 +1333,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
                 throw e
             }
         }
+        com.ai.assistance.operit.core.companion.ActivityNotes.savedMessage(context, chatId, message)
     }
 
     suspend fun setMessageFavorite(chatId: String, timestamp: Long, isFavorite: Boolean) {

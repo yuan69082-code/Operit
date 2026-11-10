@@ -43,6 +43,7 @@ class MultiServiceManager(private val context: Context) {
     private class ManagedService(
         val service: AIService,
         val modelConfig: ModelConfigData,
+        val accountSession: String? = null,
         var activeLeases: Int = 0,
         var retired: Boolean = false,
         var released: Boolean = false
@@ -145,13 +146,25 @@ class MultiServiceManager(private val context: Context) {
         val normalizedIndex = modelIndex.coerceAtLeast(0)
         val actor = com.ai.assistance.operit.data.preferences.AssistantScope.currentId(context)
         val cacheKey = ServiceKey(actor, functionType, configId, normalizedIndex)
-        customServiceInstances[cacheKey]?.let { return it }
-
         val config = modelConfigManager.getModelConfigFlow(configId).first()
+        val accountSession = when {
+            config.subscriptionChannel.isNotEmpty() -> com.ai.assistance.operit.data.api.SubscriptionAccounts.get(context).sessionId(config.subscriptionChannel)
+            config.apiProviderType == com.ai.assistance.operit.data.model.ApiProviderType.OPENAI_CODEX ->
+                com.ai.assistance.operit.data.api.CodexAuthManager.getInstance(context).authState.value?.sessionId
+            else -> null
+        }
+        customServiceInstances[cacheKey]?.let {
+            if (it.modelConfig == config && it.accountSession == accountSession) return it
+            // Existing leases keep their original identity; the next request gets the new
+            // account. Never swap credentials underneath a tool continuation.
+            customServiceInstances.remove(cacheKey)
+            retireManagedServiceLocked(it)
+        }
         val service = createServiceFromConfig(config, normalizedIndex)
         val managedService = ManagedService(
             service = service,
-            modelConfig = config
+            modelConfig = config,
+            accountSession = accountSession
         )
         customServiceInstances[cacheKey] = managedService
 

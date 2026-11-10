@@ -9,6 +9,7 @@ internal interface InternalStateHistoryAccess {
     fun contacts(chat: String?, after: Long, until: Long): Sequence<Long>
     fun categoryRow(kind: String, id: String): JSONObject? = null
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String? = null): List<JSONObject> = emptyList()
+    fun categoryCount(kind: String, parent: String? = null): Long = 0L
 }
 
 internal class InternalStateDocument(data: JSONObject, val history: InternalStateHistoryAccess) : JSONObject(data.toString()) {

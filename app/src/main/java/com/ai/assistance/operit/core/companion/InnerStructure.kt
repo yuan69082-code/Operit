@@ -12,8 +12,6 @@ internal object InnerStructure {
     const val SCHEMA = 1
     val identityFamilies = setOf("personality", "self_knowledge", "value", "stance")
     val families = identityFamilies + setOf("drive", "need", "desire", "emotion", "sentiment", "feeling", "relation", "preference")
-    private const val MAX_RECORDS = 128
-    private const val MAX_PENDING = 32
     private val common = setOf("id", "family", "kind", "description", "object_ref", "context", "exceptions", "status", "legacy_ref", "experience_refs")
 
     private fun existingRoot(data: JSONObject): JSONObject? =
@@ -26,13 +24,28 @@ internal object InnerStructure {
         // No psychological values are inferred from old numbers or free-form character text.
         return JSONObject().put("schema", SCHEMA).put("records", JSONObject()).put("pending", JSONObject())
             .put("history_sequence", 0L).put("legacy_policy", "preserved_in_original_authority")
-            .also { data.put("inner_structure", it) }
+            .also {
+                if (data is InternalStateDocument) {
+                    it.remove("records"); it.remove("pending"); it.put("storage", "archive_v1").put("family_index", 1)
+                }
+                data.put("inner_structure", it)
+            }
     }
 
-    fun records(data: JSONObject): List<JSONObject> =
-        existingRoot(data)?.getJSONObject("records")?.let(::values).orEmpty()
-    fun pending(data: JSONObject): List<JSONObject> =
-        existingRoot(data)?.getJSONObject("pending")?.let(::values).orEmpty()
+    // Explicit full enumeration is for export/contract inspection, never normal request assembly.
+    private fun enumerate(rows: InnerRows): List<JSONObject> = buildList {
+        var offset = 0
+        while (true) {
+            val page = rows.page(offset, 20)
+            addAll(page)
+            if (page.size < 20) break
+            offset += page.size
+        }
+    }
+    fun records(data: JSONObject): List<JSONObject> = enumerate(InnerRows(data, false))
+    fun pending(data: JSONObject): List<JSONObject> = enumerate(InnerRows(data, true))
+    fun record(data: JSONObject, id: String) = InnerRows(data, false).optJSONObject(id)
+    fun candidate(data: JSONObject, id: String) = InnerRows(data, true).optJSONObject(id)
     fun identity(data: JSONObject) = records(data).filter {
         it.getJSONObject("content").getString("family") in identityFamilies &&
             it.getJSONObject("content").getString("status") == "active"
@@ -40,21 +53,19 @@ internal object InnerStructure {
     fun versions(data: JSONObject) = records(data).associate { it.getString("id") to it.getInt("version") }
     fun pendingBindings(data: JSONObject) = pending(data).associate { it.getString("id") to hash(it) }
     fun evidenceToRestore(data: JSONObject, actions: JSONArray): List<String> {
-        require(actions.length() <= 8)
         val ids = (0 until actions.length()).map { actions.getJSONObject(it).optString("id") }.toSet()
         val proposed = (0 until actions.length()).map { actions.getJSONObject(it) }.filter { it.optString("op") == "propose" }
             .flatMap { strings(it.getJSONArray("evidence"), 6) }
-        return (proposed + pending(data).filter { it.getString("id") in ids }.flatMap {
+        return (proposed + ids.mapNotNull { candidate(data, it) }.flatMap {
             it.getJSONObject("bindings").keys().asSequence().filter { key -> !key.startsWith("config:") && !key.startsWith("relation:") }.toList()
-        }).filter { !it.startsWith("config:") && !it.startsWith("relation:") }.distinct()
+        }).filter { !it.startsWith("config:") && !it.startsWith("relation:") && !it.startsWith("declaration:") }.distinct()
     }
 
     fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {
-        require(actions.length() <= 8) { "每轮最多8个内在候选操作" }
         if (actions.length() == 0) return false
         val root = root(data)
-        val records = root.getJSONObject("records")
-        val pending = root.getJSONObject("pending")
+        val records = InnerRows(data, false, frame)
+        val pending = InnerRows(data, true, frame)
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
             val action = actions.getJSONObject(i)
@@ -62,8 +73,8 @@ internal object InnerStructure {
             require(touched.add(id)) { "同轮不能重复处理同一候选" }
             when (text(action, "op", 20)) {
                 "propose" -> {
-                    fields(action, setOf("op", "id", "record", "expected_version", "origin", "evidence", "reason"))
-                    require(!pending.has(id) && pending.length() < MAX_PENDING) { "候选已存在或待处理候选已满；请先处理已有候选" }
+                    fields(action, setOf("op", "id", "record", "expected_version", "origin", "evidence", "reason", "formed_at", "replaces"))
+                    require(!pending.used(id)) { "候选已存在；修订须使用新的候选版本标识" }
                     val content = copy(action.getJSONObject("record"))
                     validateContent(content, records, data, frame)
                     val target = content.getString("id")
@@ -78,11 +89,15 @@ internal object InnerStructure {
                         }
                     }
                     val origin = text(action, "origin", 40)
-                    require(origin in setOf("initial_configuration", "subject_development", "user_proposal", "model_suggestion"))
+                    require(origin in setOf("initial_configuration", "subject_development", "user_proposal", "model_suggestion", EstablishedContent.ORIGIN))
                     val refs = strings(action.getJSONArray("evidence"), 6)
-                    require(refs.isNotEmpty()) { "候选需要真实来源" }
+                    require(refs.isNotEmpty() || origin == EstablishedContent.ORIGIN) { "候选需要真实来源" }
                     val bindings = JSONObject()
                     refs.forEach { ref -> bindings.put(ref, source(data, frame, ref)) }
+                    if (origin == EstablishedContent.ORIGIN) {
+                        val formedAt = if (action.has("formed_at") && !action.isNull("formed_at")) action.getLong("formed_at") else null
+                        bindings.put("declaration:$id", EstablishedContent.declaration(data, frame.roleId, id, content.getString("family"), now, formedAt))
+                    } else require(!action.has("formed_at")) { "历史形成时间仅用于已有内容声明" }
                     if (origin == "initial_configuration") require(refs.any { it.startsWith("config:") })
                     if (origin == "user_proposal") require(refs.any {
                         bindings.getJSONObject(it).getString("source") in setOf("user_message", "user_edit", "user_relation_proposal")
@@ -91,6 +106,15 @@ internal object InnerStructure {
                         .put("origin", origin).put("bindings", bindings).put("reason", reason(action, content))
                         .put("before", before?.getJSONObject("content")?.let(::copy) ?: JSONObject.NULL)
                         .put("frame_id", frame.id).put("source_frame_at", frame.at).put("created_at", now).put("owner", frame.roleId)
+                    if (action.has("replaces")) {
+                        val previousId = text(action, "replaces", 64)
+                        val previous = requireNotNull(pending.optJSONObject(previousId)) { "待修订候选不存在或已被采用/撤回" }
+                        require(previous.getString("owner") == frame.roleId && frame.innerPending[previousId] == hash(previous)) { "须读取待修订候选的准确版本" }
+                        require(previous.getJSONObject("record").getString("id") == target) { "修订不能换成另一条内容" }
+                        proposal.put("replaces", previousId).put("candidate_version", previous.optInt("candidate_version", 1) + 1)
+                        history(data, "superseded", previousId, previous, proposal, frame, now, proposal.getString("reason"))
+                        pending.remove(previousId)
+                    } else proposal.put("candidate_version", 1)
                     pending.put(id, proposal)
                     history(data, "proposed", id, JSONObject.NULL, proposal, frame, now, proposal.getString("reason"))
                 }
@@ -112,7 +136,9 @@ internal object InnerStructure {
                     require(hash(proposal.opt("before")) == hash(old?.getJSONObject("content"))) { "候选前态不对应" }
                     proposal.getJSONObject("bindings").keys().forEach { ref ->
                         val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
-                        if (binding.optString("source") == "retrieved_material") {
+                        if (binding.optString("source") == EstablishedContent.ORIGIN) {
+                            require(binding.getString("owner") == frame.roleId && binding.getString("candidate_id") == id)
+                        } else if (binding.optString("source") == "retrieved_material") {
                             // This is the actual excerpt received with the original proposal,
                             // preserved as provenance; a later memory edit is not the old source.
                             require(hash(binding.getJSONObject("snapshot")) == binding.getString("hash"))
@@ -130,10 +156,6 @@ internal object InnerStructure {
                     records.put(target, adopted)
                     CategoryEvents.linkAdopted(data, frame, content, now)
                     if (content.getString("family") in identityFamilies) root.put("identity_established", true)
-                    require(records.length() <= MAX_RECORDS) { "当前记录达到128项容量；不会截断或清空已有记录" }
-                    // Mandatory identity text is retained whole; reject an oversized change rather than
-                    // silently losing identity at request selection time.
-                    require(identity(data).sumOf { identityMaterial(it).toString().length } <= 6000) { "持续身份材料超过6000字预算，请明确整理候选后再采用" }
                     history(data, "adopted", id, old ?: JSONObject.NULL, adopted, frame, now, reason,
                         action.optJSONObject("development"))
                     pending.remove(id)
@@ -145,11 +167,21 @@ internal object InnerStructure {
     }
 
     private fun development(data: JSONObject, frame: InternalStateFrame, proposal: JSONObject, value: JSONObject) {
-        fields(value, setOf("account", "before", "after", "anchors"))
+        fields(value, setOf("account", "before", "after", "anchors", "candidate_hash", "before_version"))
         text(value, "account", 1000)
-        require(hash(value.get("before")) == hash(proposal.get("before")) &&
+        if (value.has("candidate_hash")) {
+            require(!value.has("before") && !value.has("after") &&
+                value.getString("candidate_hash") == hash(proposal) &&
+                value.getInt("before_version") == proposal.getInt("expected_version")) { "采用引用须对应已完整读取的准确候选与前态版本" }
+        } else require(hash(value.get("before")) == hash(proposal.get("before")) &&
             hash(value.getJSONObject("after")) == hash(proposal.getJSONObject("record"))) { "人格变化说明必须对应准确前态和后态" }
         val anchors = value.getJSONArray("anchors")
+        // Declared established content has a real submission/adoption provenance, not a
+        // fabricated old quotation. Explicit adoption still occurs only after a later read.
+        if (proposal.getString("origin") == EstablishedContent.ORIGIN) {
+            require(anchors.length() == 0) { "声明承接不冒充找到了旧原文；原文路径请使用实际来源" }
+            return
+        }
         require(anchors.length() in 1..6)
         val seen = mutableSetOf<String>()
         for (i in 0 until anchors.length()) {
@@ -157,7 +189,8 @@ internal object InnerStructure {
             fields(anchor, setOf("ref", "quote", "interpretation"))
             val ref = text(anchor, "ref", 180)
             require(seen.add(ref) && proposal.getJSONObject("bindings").has(ref)) { "人格依据必须绑定候选的原始来源" }
-            val raw = sourceText(data, frame, ref)
+            val raw = proposal.getJSONObject("bindings").getJSONObject(ref).optJSONObject("snapshot")?.getString("text")
+                ?: sourceText(data, frame, ref)
             require(raw.contains(text(anchor, "quote", 600))) { "人格依据引用不在原文中" }
             text(anchor, "interpretation", 600)
             if (proposal.getString("origin") == "initial_configuration" && ref.startsWith("config:")) continue
@@ -170,12 +203,15 @@ internal object InnerStructure {
                 continue
             }
             val event = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }
+            // A user-supplied original is evidence of the submitted text, not a fabricated old occurrence.
+            if (event?.optString("source") == "user_edit" && event.has("provided_source") &&
+                event.getLong("at") == proposal.getLong("source_frame_at")) continue
             require(event != null && event.getLong("at") < proposal.getLong("source_frame_at") &&
                 event.getString("source") !in setOf("state_report", "time")) { "当前断言或状态变化不能冒充先前发展依据" }
         }
     }
 
-    private fun validateContent(row: JSONObject, records: JSONObject, data: JSONObject, frame: InternalStateFrame) {
+    private fun validateContent(row: JSONObject, records: InnerRows, data: JSONObject, frame: InternalStateFrame) {
         val family = text(row, "family", 30)
         require(family in families)
         val specific = when (family) {
@@ -189,9 +225,9 @@ internal object InnerStructure {
         }
         fields(row, common + specific)
         CategoryEvents.validateLinks(data, row)
-        text(row, "id", 64); text(row, "kind", 80); text(row, "description", 600)
+        text(row, "id", 64); text(row, "kind", 80); text(row, "description", Int.MAX_VALUE)
         require(text(row, "status", 20) in setOf("active", "retired"))
-        optionalText(row, "object_ref", 160); optionalText(row, "context", 300); optionalText(row, "exceptions", 300)
+        optionalText(row, "object_ref", 160); optionalText(row, "context", Int.MAX_VALUE); optionalText(row, "exceptions", Int.MAX_VALUE)
         if (row.has("legacy_ref")) {
             val id = text(row, "legacy_ref", 64)
             require(InternalStateEngine.definitions(data).any { it.getString("id") == id }) { "引用的旧状态不存在" }
@@ -209,16 +245,12 @@ internal object InnerStructure {
             }
         }
         when (family) {
-            "drive" -> text(row, "direction", 300)
+            "drive" -> text(row, "direction", Int.MAX_VALUE)
             "need" -> {
                 require(text(row, "level", 20) in setOf("broad", "specific"))
                 if (row.getString("level") == "specific" || row.has("parent_ref")) parent(setOf("drive", "need"))
                 if (row.has("semantic_rule")) {
                     require(text(row, "semantic_rule", 20) in setOf("life", "survival"))
-                    require(values(records).none { stored -> stored.getString("id") != row.getString("id") &&
-                        stored.getJSONObject("content").optString("semantic_rule") == row.getString("semantic_rule") }) {
-                        "同一特殊需要须沿用已采用的稳定ID"
-                    }
                     if (row.getString("semantic_rule") == "life") require(row.getString("level") == "broad")
                     else {
                         require(row.getString("level") == "specific" && !row.has("legacy_ref"))
@@ -238,15 +270,12 @@ internal object InnerStructure {
             }
             "desire" -> { parent(setOf("drive", "need")); text(row, "object_ref", 160) }
             "emotion", "sentiment", "feeling" -> {
-                require(row.get("unresolved") is Boolean); text(row, "current_state", 300)
+                require(row.get("unresolved") is Boolean); text(row, "current_state", Int.MAX_VALUE)
             }
             "relation" -> {
                 require(text(row, "object_ref", 160) in frame.innerObjects) { "关系对象必须使用已存在的对象身份" }
                 require(row.getString("object_ref") != frame.roleId)
-                text(row, "label", 100); text(row, "understanding", 600); text(row, "feeling", 600)
-                require(values(records).none { it.getString("id") != row.getString("id") &&
-                    it.getJSONObject("content").let { c -> c.getString("family") == "relation" &&
-                        c.optString("object_ref") == row.getString("object_ref") } }) { "同一方向的关系只能有一份当前权威" }
+                text(row, "label", 100); text(row, "understanding", Int.MAX_VALUE); text(row, "feeling", Int.MAX_VALUE)
             }
             "preference" -> {
                 require(text(row, "orientation", 20) in setOf("like", "dislike", "neutral", "uncertain"))
@@ -257,12 +286,7 @@ internal object InnerStructure {
                 require(row.has("context") && row.has("exceptions"))
             }
         }
-        if (family in setOf("drive", "need") && row.getString("status") == "active") require(values(records).none { stored ->
-            val c = stored.getJSONObject("content")
-            stored.getString("id") != row.getString("id") && c.getString("status") == "active" &&
-                listOf("family", "kind", "parent_ref", "object_ref", "context").all { c.optString(it) == row.optString(it) }
-        }) { "同类同对象同情境的需要已有当前记录，请明确修订而非复制类别" }
-        require(row.toString().length <= 2600)
+        require(!records.conflict(row)) { "同方向关系、特殊需要或同类同对象同情境的需要已有当前权威，请修订稳定ID" }
     }
 
     internal fun source(data: JSONObject, frame: InternalStateFrame, ref: String): JSONObject {
@@ -288,9 +312,6 @@ internal object InnerStructure {
 
     private fun sourceText(data: JSONObject, frame: InternalStateFrame, ref: String): String =
         if (ref in frame.materialSources) JSONObject(frame.materialSources.getValue(ref)).getString("text")
-        else if (ref.startsWith("material:")) pending(data).asSequence()
-            .mapNotNull { it.getJSONObject("bindings").optJSONObject(ref)?.optJSONObject("snapshot") }
-            .first().getString("text")
         else if (ref.startsWith("config:") || ref.startsWith("relation:")) requireNotNull(frame.innerSources[ref])
         else InternalStateEngine.rows(data, "events").single { it.getString("id") == ref }.let {
             if (it.has("inner_source")) it.getString("inner_source") else it.getString("detail")
@@ -308,53 +329,53 @@ internal object InnerStructure {
             .put("frame_id", frame.id).put("source_chat", frame.chatId))
     }
 
-    /** Required identity stays whole; other complete records rotate under an explicit budget. */
+    /** Whole records rotate before the shared Token selector. No all-history or all-belief read. */
     fun material(data: JSONObject, input: String, cursor: Long): JSONObject {
-        val all = records(data).filter { it.getJSONObject("content").getString("status") == "active" }
-        val core = JSONArray(identity(data).map(::identityMaterial))
-        val details = JSONArray()
-        val candidates = JSONArray()
-        val catalogue = records(data)
-        val start = if (catalogue.isEmpty()) 0 else (cursor % catalogue.size).toInt()
-        val pendingRows = pending(data)
-        val pendingStart = if (pendingRows.isEmpty()) 0 else (cursor % pendingRows.size).toInt()
-        val result = JSONObject().put("schema", SCHEMA).put("identity", core).put("selected", details).put("pending", candidates)
-            .put("catalogue", JSONArray((catalogue.drop(start) + catalogue.take(start)).take(8).map {
+        val records = InnerRows(data, false)
+        val pending = InnerRows(data, true)
+        val catalogue = records.rotating(cursor)
+        val candidates = pending.rotating(cursor)
+        val others = records.rotating(cursor, "other").filter { it.getJSONObject("content").getString("status") == "active" }
+            .sortedByDescending { row ->
+                val c = row.getJSONObject("content")
+                listOf(c.getString("kind"), c.optString("object_ref"), c.optString("aspect"))
+                    .count { it.isNotBlank() && input.contains(it, true) }
+            }
+        return JSONObject().put("schema", SCHEMA)
+            .put("identity", JSONArray(records.rotating(cursor, "identity").filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
+            .put("selected", JSONArray(others.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
+            .put("record_fragments", JSONArray((records.rotating(cursor, "identity") + others).distinctBy { it.getString("id") }
+                .filter { SubjectMaterialBudget.estimate(it.toString()) > 384 }.map { InnerReadProgress.recordFragment(data, it) }))
+            .put("pending", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }))
+            .put("pending_fragments", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) > 384 && !InnerReadProgress.complete(data, it) }
+                .map { InnerReadProgress.fragment(data, it) }))
+            .put("pending_read", JSONArray(candidates.filter { InnerReadProgress.complete(data, it) }.map {
+                JSONObject().put("id", it.getString("id")).put("hash", hash(it)).put("target", it.getJSONObject("record").getString("id"))
+                    .put("notice", "该准确版本已在此前正常请求完整提供，可重新查阅后决定；不是自动采用")
+            }))
+            .put("pending_ids", JSONArray(candidates.map { it.getString("id") }))
+            .put("catalogue", JSONArray(catalogue.map {
                 JSONObject().put("id", it.getString("id")).put("version", it.getInt("version"))
-                    .put("family", it.getJSONObject("content").getString("family")).put("status", it.getJSONObject("content").getString("status"))
-            })).put("record_count", catalogue.size).put("pending_count", pendingRows.size)
-            .put("pending_ids", JSONArray((pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)).take(8).map { it.getString("id") }))
-            .put("selection", "身份依据完整保留，其他完整记录与名录按预算轮换；未展示不表示删除或失效，get 可按页查阅")
-        val others = all.filter { it.getJSONObject("content").getString("family") !in identityFamilies }
-        val rotated = if (others.isEmpty()) others else others.drop((cursor % others.size).toInt()) + others.take((cursor % others.size).toInt())
-        val relevant = rotated.sortedByDescending { row ->
-            val c = row.getJSONObject("content")
-            listOf(c.getString("kind"), c.optString("object_ref"), c.optString("aspect")).count { it.isNotBlank() && input.contains(it, true) }
-        }
-        // One bounded page per lane; the final cross-module selector owns the Token budget.
-        // A large adopted identity must not make construction fail or starve all other lanes.
-        for (row in (pendingRows.drop(pendingStart) + pendingRows.take(pendingStart)).take(8))
-            candidates.put(copy(row))
-        for (row in relevant.take(8)) {
-            // Current meaning is complete; adoption receipts and quoted evidence remain in
-            // get/history, not duplicated beside every active record on every request.
-            val projected = identityMaterial(row).put("id", row.getString("id"))
-                .put("evidence_ids", JSONArray(row.getJSONObject("evidence").keys().asSequence().toList()))
-                .put("detail", "companion_internal_state get; original evidence/history retained")
-            details.put(projected)
-        }
-        return result
+                    .put("family", it.getJSONObject("content").getString("family"))
+                    .put("status", it.getJSONObject("content").getString("status"))
+            })).put("record_count", records.count()).put("pending_count", pending.count())
+            .put("selection", "完整条目按统一材料预算轮换；未选入仍有效，原文及全部候选可用 get 分页或按ID读取，实际读到后才能采用")
     }
-    private fun identityMaterial(row: JSONObject) = JSONObject().put("content", copy(row.getJSONObject("content")))
+    private fun identityMaterial(row: JSONObject) = JSONObject().put("id", row.getString("id"))
+        .put("content", copy(row.getJSONObject("content")))
         .put("version", row.getInt("version")).put("origin", row.getString("origin")).put("source", row.getString("source"))
+        .put("evidence_ids", JSONArray(row.optJSONObject("evidence")?.keys()?.asSequence()?.toList().orEmpty()))
         .also { if (SubjectRestDreams.privateProvenance(row)) it.put("subject_private_material", true) }
 
-    fun page(data: JSONObject, offset: Int): JSONObject = JSONObject()
-        .put("records", JSONArray(records(data).drop(offset).take(8)))
-        .put("pending", JSONArray(pending(data).drop(offset).take(8)))
-        .put("next_offset", if (maxOf(records(data).size, pending(data).size) > offset + 8) offset + 8 else JSONObject.NULL)
+    fun page(data: JSONObject, offset: Int): JSONObject {
+        val records = InnerRows(data, false)
+        val pending = InnerRows(data, true)
+        return JSONObject().put("records", JSONArray(records.page(offset))).put("pending", JSONArray(pending.page(offset)))
+            .put("record_count", records.count()).put("pending_count", pending.count())
+            .put("next_offset", if (maxOf(records.count(), pending.count()) > offset + 8) offset + 8 else JSONObject.NULL)
+    }
 
-    fun guard(data: JSONObject): String = if (identity(data).isEmpty() && data.optJSONObject("inner_structure")?.optBoolean("identity_established") != true)
+    fun guard(data: JSONObject): String = if (InnerRows(data, false).count("identity") == 0L && data.optJSONObject("inner_structure")?.optBoolean("identity_established") != true)
         "尚未采用持续人格，原初始配置仍可用于正常身份与表达。配置、用户建议都不是主体已采用的发展。"
     else "持续身份已建立：已采用的人格、自我认识、价值和立场是主要依据；本轮选入部分见 inner_structure.identity，预算未选入的部分仍有效，先用 get 分页查阅，不能用初始模板补写其内容。" +
         "旧人设、导入卡、世界书语气及后续用户配置仅作为初始参考或新建议，不能覆盖已采用内容；明确停用的认识也不能从模板自动恢复。" +
@@ -365,6 +386,7 @@ internal object InnerStructure {
         inner_structure 中的记录是主体自己的有来源认识，不是客观事实或他人的同意。思维方式只记录倾向与方法，不保存隐藏思维链。
         在同一 operit_state_report 增加可选 inner:[...]，缺省或空数组保持所有新结构；不增加另一份报告。
         提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["已读本主体事件ID或本轮来源ID"],reason:"简短依据"}。历史原文可经 get 分页读取后引用；不能引用本帧开始之后发生的事，也不能猜测未读经历。
+        未采用候选可修订：用新id和replaces:"旧候选ID"提出完整新版，须先读取旧版；旧版保留且撤出待处理，新版不继承已读资格。已采用记录不得直接修改；仍须以当前版本为before提出新候选。完整description/context/exceptions等原文保存，标题或预览不是替代；精简只能另提建议，不能在采用时换成自己的摘要。
         采用先前候选：{op:"adopt",id:"候选ID",reason:"明确采用理由"}；放下候选用 op:"discard"。不能同轮提出并采用；用户说“你喜欢”只是候选来源，不能当作已采用偏好。
         record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，其数值/时间仍由旧维度负责）。
         family 可为 drive,need,desire,emotion,sentiment,feeling,personality,self_knowledge,value,stance,relation,preference；kind 自由命名细分类别，不靠复制同名记录表达不同对象。
@@ -374,7 +396,10 @@ internal object InnerStructure {
         preference 必须 aspect（自由类别，如语言方式/思维方式/爱好）、orientation:"like|dislike|neutral|uncertain"、horizon:"long_term|short_term|contextual"、ownership:"self|accommodation"、context、exceptions；后两项可为空，配合行为不是自身喜好。
         采用 personality/self_knowledge/value/stance 必须另给 development:{account:"明确发展/采用说明",before:候选before原样或null,after:候选record原样,anchors:[{ref:"候选依据ID",quote:"原文中确实存在的短引文",interpretation:"你如何理解其与变化的联系"}]}。
         来源、前后态和版本由宿主核验，观点意义由主体解释。初始配置采用保留 initial_configuration 来源；发展依据不能把当前断言冒充过往经历。每次只改变指定记录，不覆盖全部人格。
-        最多8个操作/轮、32个待处理候选、128个当前记录，身份材料最多6000字；容量不足会拒绝而不会静默截断。先处理候选、明确修订现有记录；完整记录和历史用 companion_internal_state get 的 offset 按页读取。
+        候选、采用与保存不设业务条数上限。单次请求和模型窗口仍有限；大批内容分批提交、保留进度，不丢弃尾部。完整记录和候选用 companion_internal_state get 的 offset 按页或ID读取；未送入本轮的候选不能采用。
+        长候选的 pending_fragments 是同一完整原文的连续片段，不是摘要；hash 绑定准确候选版本。宿主只登记实际请求返回后已提供的片段，完整提供前不能采用。可用 get section=inner_chunk id=候选ID offset=next_offset 按需继续，不能用编造片段补齐。pending_read 表示该版本已完整提供，仍由你决定是否采用或重新查阅。人格采用的大段 before/after 可改为 development:{account:说明,candidate_hash:候选完整hash,before_version:候选expected_version,anchors:[...]}，保存的始终是原候选全文，不是说明的摘要。
+        恢复已有确定人格、立场、关系、偏好等，可用 origin:"established_import"，evidence:[]，不伪造历史原文。只在用户明确开启的48小时窗口内提交新候选；formed_at 可省略，提交时间不代表形成时间。人格等采用时仍给 development 的准确 before/after 和 account，anchors:[]。按时提交的候选在截止后仍可采用；改写须新候选标识，不继承旧版本已读事实。get section:inner_pending 查询候选。
+        record_fragments 是已采用完整内容的连续原文片段，绝不是替换原文的摘要；同一hash/version的片段共同属于一份内容。可用 get section=inner_record_chunk id=记录ID offset=next_offset 继续读取。片段未出现的限定和例外仍有效，不能猜测它们或退回初始模板。
         整份报告仍须符合原16384字符上限，复杂变化可分轮提出。来源/对象名录只显示前16/32项，数量字段给出总量，可通过原角色/关系工具查询；未列出不是不存在。
     """.trimIndent()
 
@@ -403,6 +428,7 @@ internal object InnerStructure {
     }
     internal fun hash(value: Any?): String = MessageDigest.getInstance("SHA-256").digest(canonical(value).toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
+    internal fun serialized(value: Any?): String = canonical(value)
     private fun canonical(v: Any?): String = when(v) {
         null, JSONObject.NULL -> "null"
         is JSONObject -> v.keys().asSequence().sorted().joinToString(",", "{", "}") { JSONObject.quote(it) + ":" + canonical(v.get(it)) }

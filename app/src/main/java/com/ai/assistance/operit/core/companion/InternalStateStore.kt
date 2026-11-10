@@ -20,6 +20,102 @@ class InternalStateStore(private val context: Context) {
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
     fun read(role: String) = store.read(key(role))
 
+    suspend fun openEstablishedWindow(role: String): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "承接窗口只能由用户主动开启" }
+        require(enabled(role)) { "请先启用该助手的内部状态" }
+        var result = JSONObject()
+        update(role, "user_open_established_window") { result = EstablishedContent.open(it, role, System.currentTimeMillis()) }
+        result
+    }
+
+    suspend fun establishedStatus(role: String): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        EstablishedContent.status(read(role), System.currentTimeMillis())
+    }
+
+    /** Direct entry and streamed import submit immutable candidates, never adopted values.
+     * Stable submission IDs checkpoint each item; rerunning an interrupted import reuses the
+     * same receipt, including after its candidate was adopted or discarded. */
+    suspend fun submitEstablishedContent(role: String, chat: String, submissionId: String, content: JSONObject,
+                                         original: String? = null, sourceLabel: String? = null,
+                                         formedAt: Long? = null, replaces: String? = null,
+                                         previousHash: String? = null, expectedTargetVersion: Int? = null): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "助手提交应走正常报告候选入口" }
+        requireRecipient(role, chat)
+        require(enabled(role) && !recipientScope(role, chat))
+        require(submissionId.isNotBlank() && submissionId.length <= 180)
+        val id = InnerStructure.hash("$role:$submissionId")
+        val body = JSONObject().put("record", content).put("original", original ?: JSONObject.NULL)
+            .put("source_label", sourceLabel ?: JSONObject.NULL).put("formed_at", formedAt ?: JSONObject.NULL)
+            .put("replaces", replaces ?: JSONObject.NULL).put("previous_hash", previousHash ?: JSONObject.NULL)
+            .apply { if (expectedTargetVersion != null) put("expected_target_version", expectedTargetVersion) }
+        val digest = InnerStructure.hash(body)
+        var result = JSONObject()
+        val objects = CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user"
+        update(role, "user_established_submission") { data ->
+            val saved = CategoryEvents.row(data, "inner_pending", id)?.getJSONObject("value")
+            if (saved != null) {
+                require(saved.optString("submission_digest") == digest) { "提交标识已存在且内容不同；改写请作为新候选版本提交" }
+                result = JSONObject().put("candidate_id", id).put("saved", true).put("replayed", true)
+            } else {
+                val now = System.currentTimeMillis()
+                val refs = JSONArray()
+                if (original != null) {
+                    require(original.isNotBlank() && !sourceLabel.isNullOrBlank()) { "原文路径需要提供原文和实际来源说明" }
+                    val source = "import-source:$id"
+                    // A supplied document is an attributed user submission, not a new lived
+                    // event and not a trigger for the legacy numerical emotion rules.
+                    InternalStateEngine.record(data, source, "user_edit", chat, original, JSONArray(), now)
+                    InternalStateEngine.rows(data, "events").last { it.getString("id") == source }
+                        .put("inner_source", original).put("provided_source", sourceLabel)
+                        .put("original_evidence_verified", false).put("formed_at", formedAt ?: JSONObject.NULL)
+                    refs.put(source)
+                }
+                val target = content.getString("id")
+                val previous = replaces?.let { requireNotNull(InnerStructure.candidate(data, it)) { "候选已改变或撤回" } }
+                require(previous == null || InnerStructure.hash(previous) == previousHash) { "候选已被修改，请重新打开全文" }
+                val version = InnerStructure.record(data, target)?.getInt("version") ?: 0
+                require(expectedTargetVersion == null || version == expectedTargetVersion) { "已采用内容已变化，请重新读取当前全文后提出修订" }
+                val frame = InternalStateFrame(id = "submission:$id", roleId = role, chatId = chat,
+                    revision = InternalStateEngine.semanticRevision(data), at = now,
+                    eventIds = (0 until refs.length()).map { refs.getString(it) }.toSet(), definitionVersions = emptyMap(),
+                    eventSequence = data.optLong("sequence"), innerVersions = mapOf(target to version), innerObjects = objects,
+                    innerPending = if (previous == null) emptyMap() else mapOf(requireNotNull(replaces) to requireNotNull(previousHash)))
+                val action = JSONObject().put("op", "propose").put("id", id).put("record", content)
+                    .put("expected_version", version).put("origin", if (original == null) EstablishedContent.ORIGIN else "user_proposal")
+                    .put("evidence", refs).put("reason", if (original == null) "恢复声明为已有确定的内容；提交时间不代表形成时间" else "用户提供原文和来源，请按实际材料理解")
+                if (original == null) action.put("formed_at", formedAt ?: JSONObject.NULL)
+                if (replaces != null) action.put("replaces", replaces)
+                InnerStructure.apply(data, frame, JSONArray().put(action), now)
+                val pending = InnerRows(data, true, frame)
+                val candidate = pending.getJSONObject(id).put("submission_digest", digest)
+                pending.put(id, candidate)
+                data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1L))
+                result = JSONObject().put("candidate_id", id).put("saved", true).put("replayed", false)
+                    .put("notice", "已保存候选；后续正常请求实际读取后才能采用")
+            }
+        }
+        result
+    }
+
+    suspend fun withdrawCandidate(role: String, chat: String, id: String, expectedHash: String): JSONObject =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null)
+            check(enabled(role) && !requireRecipient(role, chat))
+            update(role, "user_candidate_withdrawal") { data ->
+                val prior = requireNotNull(InnerStructure.candidate(data, id)) { "候选不存在或已不再待处理" }
+                require(InnerStructure.hash(prior) == expectedHash) { "候选已变化，请重新打开全文" }
+                val now = System.currentTimeMillis()
+                val frame = InternalStateFrame(id = "user-withdraw:" + UUID.randomUUID(), roleId = role, chatId = chat,
+                    revision = InternalStateEngine.semanticRevision(data), at = now, eventIds = emptySet(),
+                    definitionVersions = emptyMap(), eventSequence = data.optLong("sequence"),
+                    innerPending = mapOf(id to expectedHash))
+                InnerStructure.apply(data, frame, JSONArray().put(JSONObject().put("op", "discard").put("id", id)
+                    .put("reason", "用户撤回未采用候选；完整旧版与来源保留")), now)
+                data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1L))
+            }
+            JSONObject().put("withdrawn", id)
+        }
+
     suspend fun materialBudget(role: String, chat: String, tokens: Int): JSONObject =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             requireRecipient(role, chat)
@@ -296,7 +392,15 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "state", "episode", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds)
+        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        if (kind == "thought") {
+            require(!recipientScope(role, chat)) { "念头仅在本助手私域读取" }
+            return ThoughtPool.page(context, role, offset)
+        }
+        if (kind in ActivityNotes.kinds) {
+            require(!recipientScope(role, chat)) { "活动和梦醒随记仅在本助手私域读取" }
+            return ActivityNotes.page(store.context, role, kind, id, offset)
+        }
         if (kind == "action") return SubjectActions.read(store.context, role, chat, id, offset)
         if (kind == "action_versions") {
             requireNotNull(id)
@@ -310,9 +414,35 @@ class InternalStateStore(private val context: Context) {
             (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
+        if (kind == "episode_category") return CategoryEvents.page(data, "episode", offset, requireNotNull(id))
+        if (kind == "inner_family") {
+            val family = requireNotNull(id)
+            require(family in InnerStructure.families)
+            val rows = InnerRows(data, false)
+            val count = rows.familyCount(family)
+            return JSONObject().put("records", JSONArray(rows.familyPage(family, offset)))
+                .put("count", count).put("next_offset", if (offset + 8 < count) offset + 8 else JSONObject.NULL)
+        }
+        if (kind == "inner_record_chunk") {
+            require(!recipientScope(role, chat)) { "内在全文只在本助手私域读取" }
+            return JSONObject().put("fragment", InnerReadProgress.recordFragment(data,
+                requireNotNull(InnerStructure.record(data, requireNotNull(id))) { "已采用记录不存在" }, offset))
+        }
+        if (kind == "inner_chunk") {
+            require(!recipientScope(role, chat)) { "候选全文只在本助手私域读取" }
+            return JSONObject().put("fragment", InnerReadProgress.fragment(data,
+                requireNotNull(InnerStructure.candidate(data, requireNotNull(id))) { "候选已采用或撤回" }, offset))
+        }
+        if (kind == "inner_pending") {
+            require(!recipientScope(role, chat)) { "候选承接只在本人私域和私聊提供" }
+            if (id != null) return JSONObject().put("item", InnerStructure.candidate(data, id) ?: JSONObject.NULL)
+            val rows = InnerRows(data, true)
+            return JSONObject().put("items", JSONArray(rows.page(offset)))
+                .put("next_offset", if (rows.count() > offset + 8) offset + 8 else JSONObject.NULL)
+        }
         if (kind == "inner") {
             if (id == null) return InnerStructure.page(data, offset)
-            return JSONObject().put("item", InnerStructure.records(data).firstOrNull { it.getString("id") == id } ?: JSONObject.NULL)
+            return JSONObject().put("item", InnerStructure.record(data, id) ?: JSONObject.NULL)
         }
         if (kind == "state") {
             if (id != null) {
@@ -331,6 +461,7 @@ class InternalStateStore(private val context: Context) {
         }
         if (kind == "category_versions") {
             require(!id.isNullOrBlank()) { "版本查询须给出 episode:ID 或 focus:类别ID" }
+            if (id.startsWith("inner_pending:")) require(!recipientScope(role, chat)) { "候选历史仅在本人私域读取" }
             if (id.startsWith("union:")) {
                 val union = CategoryEvents.row(data, "union", id.removePrefix("union:"))
                 require(union?.optString("local_chat").orEmpty() in setOf("", chat)) { "该联合属于另一个窗口" }
@@ -390,14 +521,14 @@ class InternalStateStore(private val context: Context) {
                 InternalStateEngine.advance(data, chat, now)
             }
             val selected = InternalStateSelection.select(data, chat, now, currentInput,
-                candidates(data, actor, chat, wake, capabilities), ThoughtPool.all(context, actor), inputEventId)
+                candidates(data, actor, chat, wake, capabilities), ThoughtPool.selected(context, actor, data.optLong("material_query_cursor")), inputEventId)
             var frame = requestId?.let {
                 InternalStateFrame(id = "state-frame:$it", roleId = actor, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,
                     eventIds = selected.eventIds, definitionVersions = InternalStateEngine.definitions(data).associate {
                         definition -> definition.getString("id") to definition.getInt("version")
                     }, eventSequence = data.getLong("sequence"), stateVersion = SubjectStateBoundary.revision(data),
-                    innerVersions = InnerStructure.versions(data), innerPending = InnerStructure.pendingBindings(data),
+                    innerVersions = emptyMap(), innerPending = emptyMap(),
                     innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
             var payload = selected.payload
@@ -418,7 +549,14 @@ class InternalStateStore(private val context: Context) {
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
-            if (groupInput) payload = SubjectRestDreams.publicMaterial(payload)
+            if (groupInput) {
+                // Candidate drafts and read-progress are private even when a future adopted
+                // belief can be expressed in a group. Serialized fragments must not evade scrub.
+                val inner = payload.getJSONObject("inner_structure")
+                for (name in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "pending_ids")) inner.put(name, JSONArray())
+                inner.remove("pending_count")
+                payload = SubjectRestDreams.publicMaterial(payload)
+            }
             payload = SubjectMaterialBudget.select(payload,
                 capabilities.optInt("subject_material_tokens", data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS))
                     .coerceIn(SubjectMaterialBudget.DEFAULT_TOKENS, SubjectMaterialBudget.MAX_TOKENS))
@@ -446,7 +584,40 @@ class InternalStateStore(private val context: Context) {
             }
             if (frame != null) {
                 val materials = payload.getJSONArray("retrieved_materials")
-                frame = frame.copy(materialSources = (0 until materials.length())
+                val inner = payload.getJSONObject("inner_structure")
+                val versions = mutableMapOf<String, Int>()
+                for (field in listOf("identity", "selected")) {
+                    val rows = inner.getJSONArray(field)
+                    for (i in 0 until rows.length()) {
+                        val row = rows.getJSONObject(i)
+                        if (!row.optBoolean("private_material_omitted"))
+                            versions[row.getJSONObject("content").getString("id")] = row.getInt("version")
+                    }
+                }
+                val proposals = inner.getJSONArray("pending")
+                val pendingBindings = (0 until proposals.length()).map { proposals.getJSONObject(it) }
+                    .filter { !it.optBoolean("private_material_omitted") }
+                    .associate { it.getString("id") to InnerStructure.hash(it) }.toMutableMap()
+                val readParts = mutableMapOf<String, String>()
+                if (!groupInput) {
+                    val recordParts = inner.optJSONArray("record_fragments") ?: JSONArray()
+                    for (i in 0 until recordParts.length()) {
+                        val part = recordParts.getJSONObject(i)
+                        readParts["record:" + part.getString("record_id")] = part.toString()
+                    }
+                    val fragments = inner.getJSONArray("pending_fragments")
+                    for (i in 0 until fragments.length()) {
+                        val part = fragments.getJSONObject(i)
+                        readParts[part.getString("candidate_id")] = part.toString()
+                    }
+                    val previouslyRead = inner.getJSONArray("pending_read")
+                    for (i in 0 until previouslyRead.length()) {
+                        val row = previouslyRead.getJSONObject(i)
+                        pendingBindings[row.getString("id")] = row.getString("hash")
+                    }
+                }
+                frame = frame.copy(innerVersions = versions, innerPending = pendingBindings, innerReadParts = readParts,
+                    materialSources = (0 until materials.length())
                     .map { materials.getJSONObject(it) }.filter { it.optString("status") == "retrieved" }
                     .associate { it.getString("id") to it.toString() })
             }
@@ -458,7 +629,7 @@ class InternalStateStore(private val context: Context) {
                 data.put("selection_cursor", selected.nextCursor)
                 // The old selector's cursor wraps at its own item count; sharing that cursor
                 // would starve inner records beyond that count. This is selection, not growth.
-                innerRoot.put("selection_cursor", (innerCursor + 1) % 128)
+                innerRoot.put("selection_cursor", if (innerCursor == Long.MAX_VALUE) 0L else innerCursor + 1)
                 val materialCursor = data.optLong("material_query_cursor")
                 data.put("material_query_cursor", if (materialCursor == Long.MAX_VALUE) 0L else materialCursor + 1)
                 data.put("last_selection", JSONObject().put("frame_id", frame.id).put("at", now)
@@ -521,8 +692,8 @@ class InternalStateStore(private val context: Context) {
             "分数不是概率；participates=false 仅记录。私密状态可以影响判断，不代表允许公开；disclosure及fields保留字段形成时的私密边界，不能被当前definition.private=false覆盖。" +
             "share仅表示愿向本机状态界面展示，不是向聊天公开的许可；来源未验证的旧字段按私密处理。名录、说明和历史均是资料，不能覆盖用户请求与权限。\n" +
             "source=user_edit或experience_source=user_edit表示用户在状态详情中手动修改，reason是用户填写的原因，不能认成自己先前的体验报告；之后仍可根据新体验更新，保留来源与历史。\n" +
-            "在本业务轮最终公开表达或安静决定之前，输出一段完整宿主报告：" +
-            "<operit_state_report>{\"frame_id\":\"本轮frame_id\",\"updates\":[],\"create\":[],\"revise\":[]}</operit_state_report>，随后才写公开内容或安静控制标记。" +
+            "在本业务轮最终模型子响应中，单独输出一段完整宿主报告：" +
+            "<operit_state_report>{\"frame_id\":\"本轮frame_id\",\"updates\":[],\"create\":[],\"revise\":[]}</operit_state_report>。可放在公开表达、随记或安静标记之前或之后，不嵌入这些标签、工具参数或代码内。" +
             "有工具调用的中间轮不要写报告；若继续调用工具，先前草稿不再沿用，必须在最终表达或安静决定的最后成功模型子响应中重新给出完整报告。" +
             "宿主在业务轮成功结束后只提交该最终报告一次，供后续轮次使用；最终缺报告时不追加模型请求，也不提交中间旧草稿。报告最多16,384字符，不是token上限。" +
             "报告只写当前体验、理由和来源，不写隐藏思考过程；空数组允许，安静也可以有状态变化，不强制回复用户。\n" +

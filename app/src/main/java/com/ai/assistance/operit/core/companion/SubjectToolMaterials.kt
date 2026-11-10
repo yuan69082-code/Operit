@@ -46,6 +46,9 @@ internal object SubjectToolMaterials {
             actionIds.add(source.getString("id"))
         }
         val members = frame.interactionMembers.toMutableMap()
+        val innerVersions = frame.innerVersions.toMutableMap()
+        val pendingBindings = frame.innerPending.toMutableMap()
+        val readParts = frame.innerReadParts.toMutableMap()
         results.filter { it.success && it.toolName == "companion_internal_state" }.forEach { result ->
             val receipt = result.result as? InternalStateReadResultData ?: return@forEach
             // Only complete, actually delivered native reads establish member/version proof.
@@ -53,6 +56,35 @@ internal object SubjectToolMaterials {
             if (!receipt.privateContext || receipt.owner != frame.roleId || receipt.chatId != frame.chatId ||
                 !turn.content.contains(receipt.value)) return@forEach
             val body = JSONObject(receipt.value)
+            if (receipt.section == "inner_record_chunk") body.optJSONObject("fragment")?.let {
+                readParts["record:" + it.getString("record_id")] = it.toString()
+            }
+            if (receipt.section == "inner_chunk") body.optJSONObject("fragment")?.let {
+                readParts[it.getString("candidate_id")] = it.toString()
+            }
+            fun candidates(values: JSONArray?) {
+                if (values == null) return
+                for (i in 0 until values.length()) {
+                    val row = values.getJSONObject(i)
+                    pendingBindings[row.getString("id")] = InnerStructure.hash(row)
+                }
+            }
+            when (receipt.section) {
+                null -> candidates(body.optJSONObject("inner")?.optJSONArray("pending"))
+                "inner" -> candidates(body.optJSONArray("pending"))
+                "inner_pending" -> candidates(body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items"))
+            }
+            if (receipt.section in setOf("activity_part", "waking_note")) {
+                val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
+                if (rows != null) for (i in 0 until rows.length()) {
+                    val row = rows.getJSONObject(i)
+                    if (!row.optBoolean("withdrawn") && row.optString("kind") in setOf("note", "waking", "message")) {
+                        val source = ActivityNotes.material(row)
+                        sources[source.getString("id")] = source.toString()
+                        actionIds.add(source.getString("id"))
+                    }
+                }
+            }
             if (receipt.section in SubjectRestDreams.kinds) {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {
@@ -74,6 +106,7 @@ internal object SubjectToolMaterials {
                 for (i in 0 until values.length()) {
                     val row = values.getJSONObject(i)
                     members["$kind:${row.getString("id")}"] = row.getInt("version")
+                    if (kind == "inner") innerVersions[row.getString("id")] = row.getInt("version")
                 }
             }
             when (receipt.section) {
@@ -82,14 +115,15 @@ internal object SubjectToolMaterials {
                     rows("episode", body.optJSONObject("psychological_events")?.optJSONArray("items"))
                     rows("state", body.optJSONArray("states"))
                 }
-                "inner", "state", "episode", "decision", "feedback" -> {
+                "inner", "inner_family", "state", "episode", "decision", "feedback" -> {
                     val one = body.optJSONObject("item")
-                    rows(receipt.section, if (one != null) JSONArray().put(one)
-                        else body.optJSONArray(if (receipt.section == "inner") "records" else "items"))
+                    rows(if (receipt.section == "inner_family") "inner" else receipt.section, if (one != null) JSONArray().put(one)
+                        else body.optJSONArray(if (receipt.section in setOf("inner", "inner_family")) "records" else "items"))
                 }
             }
         }
         val bound = CurrentRequestContext.bindInternalStateFrame(turns, frame.copy(
+            innerVersions = innerVersions, innerPending = pendingBindings, innerReadParts = readParts,
             materialSources = sources.entries.toList().takeLast(24).associate { it.key to it.value }, interactionMembers = members))
         return bound.mapIndexed { i, row ->
             if (i != index) row else row.copy(content = row.content +

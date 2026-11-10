@@ -161,11 +161,10 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         }
         if (!writing) { db.beginTransaction(); writing = true }
         val rows = journal.getJSONArray("rows")
-        require(rows.length() <= 64)
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-            require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback") + SubjectRestDreams.kinds)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family") + SubjectRestDreams.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -178,6 +177,26 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return null
         return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? AND id=?", arrayOf(scope, kind, id))
             .use { if (it.moveToFirst()) JSONObject(it.getString(0)) else null }
+    }
+
+    /** Activity facts reuse the archive. They are not psychological state changes. */
+    fun activityWrite(kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
+        require(kind in setOf("activity", "activity_part", "activity_contact", "waking_note", "inner_read", "thought", "thought_meta"))
+        val db = db()
+        if (!writing) { db.beginTransaction(); writing = true }
+        val old = categoryRow(kind, id)
+        val before = old?.toString()
+        val oldVersion = old?.getInt("version") ?: 0
+        val row = change(old)
+        require(row.getString("id") == id && row.getString("parent") == parent)
+        if (row.toString() != before) {
+            row.put("version", oldVersion + 1)
+            put("category_versions", row)
+            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+                arrayOf(scope, kind, id, parent, row.toString()))
+        }
+        commit()
+        return row
     }
 
     /** Objective operations share the existing archive, never the subjective report reducer.
@@ -227,7 +246,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?): List<JSONObject> {
         require(offset >= 0 && limit in 1..21)
         if (!file.exists()) return emptyList()
-        val privateRecent = kind in SubjectRestDreams.kinds
+        val privateRecent = kind in SubjectRestDreams.kinds || kind in setOf("activity", "activity_part", "waking_note")
         val actualParent = parent ?: if (privateRecent) "private" else null
         val filter = if (actualParent == null) "" else " AND parent=?"
         val args = listOf(scope, kind) + listOfNotNull(actualParent) + listOf(limit.toString(), offset.toString())
@@ -244,6 +263,13 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (!file.exists()) return emptyList()
         return db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='category_versions' AND lookup=? ORDER BY rowid DESC LIMIT 9 OFFSET ?",
             arrayOf(scope, id, offset.toString())).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
+    fun categoryCount(kind: String, parent: String?): Long {
+        if (!file.exists()) return 0L
+        val filter = if (parent == null) "" else " AND parent=?"
+        return db().rawQuery("SELECT COUNT(*) FROM category_current WHERE scope=? AND kind=?$filter",
+            (listOf(scope, kind) + listOfNotNull(parent)).toTypedArray()).use { c -> c.moveToFirst(); c.getLong(0) }
     }
 
     fun page(kind: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> {

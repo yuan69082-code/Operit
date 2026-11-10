@@ -1100,7 +1100,16 @@ class MessageProcessingDelegate(
             var turnCachedInputTokens = 0L
             var calculateNextWindowSize: (suspend () -> Long?)? = null
             var cancellationToPropagate: kotlinx.coroutines.CancellationException? = null
+            var ownedActivity: com.ai.assistance.operit.core.companion.ActivityNotes.Ref? = null
             try {
+                if (!turnOptions.proactiveWake && effectivePersistTurn && !effectiveRoleCardId.isNullOrBlank() && activeChatId != null) {
+                    val state = com.ai.assistance.operit.core.companion.InternalStateStore(context)
+                    if (state.enabled(effectiveRoleCardId) && !state.recipientScope(effectiveRoleCardId, activeChatId)) {
+                        ownedActivity = com.ai.assistance.operit.core.companion.ActivityNotes.begin(context, effectiveRoleCardId,
+                            activeChatId, "message:$activeChatId:${userMessage.timestamp}", "normal_input")
+                        com.ai.assistance.operit.core.companion.ActivityNotes.started(context, requireNotNull(ownedActivity))
+                    }
+                }
                 // if (!NetworkUtils.isNetworkAvailable(context)) {
                 //     withContext(Dispatchers.Main) { showErrorMessage("网络连接不可用") }
                 //     _isLoading.value = false
@@ -1284,11 +1293,11 @@ class MessageProcessingDelegate(
                         activeChatId, requestSentAt, effectiveRoleCardId, recalledContext,
                     )
                 }
-                if (activeChatId != null) com.ai.assistance.operit.core.companion.XcEmotionBridge.beginTurn(activeChatId)
                 if (activeChatId != null && !turnOptions.proactiveWake && !turnOptions.voiceCallEvent && !turnOptions.voiceCallSilence)
                     runCatching { com.ai.assistance.operit.core.companion.AttentionGear.noteUserText(context, activeChatId, requestMessageContent) }
                 val responseStream = AIMessageManager.sendMessage(
                     enhancedAiService = service,
+                    activityId = com.ai.assistance.operit.core.companion.ActivityNotes.current(activeChatId)?.id,
                     chatId = activeChatId,
                     messageContent = (if (turnOptions.voiceCallEnded) {
                         "${checkNotNull(turnOptions.voiceCallOutcome).modelInstruction}\n$requestMessageContent"
@@ -1797,7 +1806,7 @@ class MessageProcessingDelegate(
                 val finalizeMessageStartTime = messageTimingNow()
                 val interruptedTurn =
                     if (shouldFinalizeInterruptedMessage) chatRuntime.activeStreamingTurn else null
-                val deferTurnCompleteToAsyncJob =
+                val deferTurnCompleteToAsyncJob = try {
                     if (interruptedTurn != null && chatId != null) {
                         // Network errors can arrive after partial output; do not overwrite it as a completed reply.
                         detachStreamingAiMessage(
@@ -1824,6 +1833,15 @@ class MessageProcessingDelegate(
                         AppLogger.d(TAG, "失败或取消回合不执行成功收尾: chatId=$activeChatId")
                         false
                     }
+                } finally { ownedActivity?.let { ref ->
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        try {
+                            com.ai.assistance.operit.core.companion.ActivityNotes.finish(context, ref,
+                                if (cancellationToPropagate != null) "cancelled" else if (shouldFinalizeInterruptedMessage) "failed" else "finished")
+                        } catch (failure: Exception) { AppLogger.e(TAG, "活动结束状态未保存；不重跑已完成消息", failure) }
+                        finally { com.ai.assistance.operit.core.companion.ActivityNotes.release(ref) }
+                    }
+                } }
                 logMessageTiming(
                     stage = "delegate.finalizeMessage",
                     startTimeMs = finalizeMessageStartTime,

@@ -236,9 +236,13 @@ class CodexOAuthClient(
         }
         return try {
             val json = JSONObject(body)
-            json.optString("error_description", "")
-                .ifBlank { json.optString("error", "") }
-                .ifBlank { "invalid response" }
+            // An upstream error description may echo credentials. Keep only recognized
+            // protocol codes; the raw body never belongs in the application log.
+            when (val code = json.optString("error")) {
+                "invalid_grant", "invalid_client", "invalid_request", "access_denied",
+                "temporarily_unavailable", "server_error" -> code
+                else -> "authorization request rejected"
+            }
         } catch (_: Exception) {
             "invalid response"
         }

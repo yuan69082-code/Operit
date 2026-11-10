@@ -242,7 +242,20 @@ private fun PrivatePage() {
         AssistantTargetPicker(role, true) { role = it }
         val selected = role
         if (selected == null) Text("先选择一位助手。")
-        else key(selected) { InternalStatePanel(selected) }
+        else key(selected) {
+            var privateSection by remember { mutableStateOf("内部状态") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("内部状态", "梦醒随记").forEach { label ->
+                    FilterChip(selected = privateSection == label, onClick = { privateSection = label }, label = { Text(label) })
+                }
+            }
+            if (privateSection == "内部状态") InternalStatePanel(selected)
+            else {
+                Text("这里保留他在醒来时明确留下的随记，片段或感受也可以。查看不等于他已在聊天中分享。")
+                com.ai.assistance.operit.ui.features.settings.screens.ActivityNotesPanel(selected, wakingOnly = true)
+                TextButton(onClick = { privateSection = "内部状态" }) { Text("返回内部状态 · 休息与承接") }
+            }
+        }
     }
 }
 

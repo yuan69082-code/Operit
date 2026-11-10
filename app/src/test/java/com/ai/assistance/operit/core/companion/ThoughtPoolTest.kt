@@ -1,22 +1,17 @@
 package com.ai.assistance.operit.core.companion
 import android.content.Context
-import android.content.SharedPreferences
+import android.app.Application
 import org.json.JSONObject
 import org.junit.Assert.*
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.whenever
+import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(OperitStorageTestRunner::class)
+@Config(sdk = [28], application = Application::class)
 class ThoughtPoolTest {
-    @get:Rule val folder = TemporaryFolder()
-    private fun context(): Context {
-        val context = mock<Context>(); val prefs = mock<SharedPreferences>()
-        whenever(context.applicationContext).thenReturn(context); whenever(context.filesDir).thenReturn(folder.root)
-        whenever(context.getSharedPreferences("companion_options", Context.MODE_PRIVATE)).thenReturn(prefs)
-        return context
-    }
+    private fun context(): Context = RuntimeEnvironment.getApplication()
 
     @Test fun sinkFloatsUpAfterItsTimeAndDefaultsToTwoDays() {
         val context = context()
@@ -46,11 +41,12 @@ class ThoughtPoolTest {
         assertThrows(IllegalArgumentException::class.java) { ThoughtPool.save(context, "r", "nope", null, "drop", null) }
     }
 
-    @Test fun readsShareDriveFromXc() {
-        val snap = JSONObject().put("additionalContext", "当前驱力：牵挂=0.780；分享欲：有话想说=0.550；情欲=0.5")
-        assertEquals(0.55, ThoughtPool.shareDrive(snap)!!, 1e-9)
-        assertNull(ThoughtPool.shareDrive(null))
-        assertTrue(ThoughtPool.hint(0.8).contains("现在讲"))
-        assertTrue(ThoughtPool.hint(null).contains("自己判断"))
+    @Test fun retiredXcIsNotAdvertisedOrUsedToDecideThoughts() {
+        val prompts = CompanionTools.prompts()
+        assertFalse(prompts.any { it.name == "companion_state" })
+        assertFalse(prompts.any { it.description.contains("心潮") || it.description.contains("回传 XC") })
+        val text = ThoughtPool.promptSections(emptyList(), 1).instructions
+        assertTrue(text.contains("自己定"))
+        assertFalse(text.contains("分享欲"))
     }
 }

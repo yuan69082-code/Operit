@@ -73,7 +73,7 @@ internal object SegmentedSummary {
                 .replace(ChatMarkupRegex.toolOrToolResultBlock) { it.value.take(200) + "…" }
                 .trim()
             if (text.isBlank()) return@forEachIndexed
-            val who = if (message.sender == "user") "她" else "我"
+            val who = when (message.sender) { "user" -> "她"; "summary" -> "旧摘要（原文待核对）"; else -> "我" }
             append("#${index + 1} [${time(message.timestamp)}] $who：${text.take(4000)}\n\n")
         }
     }
@@ -208,8 +208,8 @@ internal object SegmentedSummary {
     }
 
     /** 只收短实际模型输入，不修改数据库摘要或原聊天。 */
-    fun forPrompt(summary: String): String {
-        if (!hasBlock(summary)) return SummaryPromptBudget.project(summary, SummaryPromptBudget.MAX_CHARS)
+    fun forPrompt(summary: String, budget: Int = SummaryPromptBudget.MAX_CHARS): String {
+        if (!hasBlock(summary)) return SummaryPromptBudget.project(summary, budget)
         val parsed = parse(summary)
         val all = (parsed.closed + parsed.open).sortedBy { block ->
             index(block)?.to ?: 0L
@@ -236,12 +236,16 @@ internal object SegmentedSummary {
             if (display(selected + directoryEntry).length <= SummaryPromptBudget.EVENT_CHARS) selected += directoryEntry
         }
         val replacement = display(selected)
-        val body = SummaryPromptBudget.project(stripBlock(summary), SummaryPromptBudget.MAX_CHARS - replacement.length - 2)
+        val body = SummaryPromptBudget.project(stripBlock(summary), budget - replacement.length - 2)
         return if (body.isBlank()) replacement else "$body\n\n$replacement"
     }
 
     fun promptTurns(turns: List<PromptTurn>): List<PromptTurn> = turns.map { turn ->
-        if (turn.kind == PromptTurnKind.SUMMARY) turn.copy(content = forPrompt(turn.content)) else turn
+        if (turn.kind == PromptTurnKind.SUMMARY) {
+            val content = turn.content.removePrefix(SummaryFidelityPrompts.READING_BOUNDARY).trimStart()
+            turn.copy(content = SummaryFidelityPrompts.forReading(forPrompt(content,
+                SummaryPromptBudget.MAX_CHARS - SummaryFidelityPrompts.READING_BOUNDARY.length - 1)))
+        } else turn
     }
 
     private fun brief(block: String) = block.lines().filter { it.startsWith("§") || it.startsWith("时间：") || it.startsWith("索引：") }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, session, ipcMain } = require('electron');
 const net = require('node:net');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -31,9 +31,11 @@ else {
     window.webContents.on('will-navigate', (event, url) => {
       if (!isInternal(url, origin)) { event.preventDefault(); if (mayOpenExternal(url)) shell.openExternal(url); }
     });
+    const openPhone = require('./phone-window.cjs').registerPhoneWindow({ BrowserWindow, ipcMain, shell, dialog });
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'Operit', submenu: [
         { label: '聊天', click: () => window.loadURL(origin + '/?shared=1') },
+        { label: '连接手机中的助手与私域', click: openPhone },
         { label: '模型与连接设置', click: () => window.loadURL(origin + '/setup') },
         { label: '项目与磁盘同步', click: () => window.loadURL(origin + '/workspace') },
         { type: 'separator' }, { role: 'quit', label: '退出并停止共享服务' }

@@ -16,11 +16,12 @@ import org.json.JSONObject
 
 private class CodexAccessTokenProvider(
     private val authManager: CodexAuthManager,
+    private val session: String,
 ) : ApiKeyProvider {
-    override suspend fun getApiKey(): String = authManager.getValidAccessToken()
+    override suspend fun getApiKey(): String = authManager.validState(session).accessToken
 
     override suspend fun getCandidateKeyCount(): Int =
-        if (authManager.authState.value == null) 0 else 1
+        if (authManager.authState.value?.sessionId == session) 1 else 0
 }
 
 class CodexProvider(
@@ -36,12 +37,13 @@ class CodexProvider(
     private val enableWebSearch: Boolean = false,
     thinkingConfigurations: String = "",
     thinkingOptionId: String = "",
+    private val accountSession: String = requireNotNull(authManager.authState.value) { "Codex 尚未登录" }.sessionId,
 ) : OpenAIResponsesProvider(
     responsesApiEndpoint = CodexOAuthProtocol.CODEX_RESPONSES_ENDPOINT,
-    apiKeyProvider = CodexAccessTokenProvider(authManager),
+    apiKeyProvider = CodexAccessTokenProvider(authManager, accountSession),
     modelName = modelName,
-    client = httpClient,
-    customHeaders = customHeaders,
+    client = authManager.boundClient(httpClient, accountSession),
+    customHeaders = customHeaders.filterKeys { it.lowercase() !in setOf("authorization", "chatgpt-account-id", "originator", "session-id", "x-openai-internal-codex-residency") },
     responsesProviderType = ApiProviderType.OPENAI_CODEX,
     supportsVision = supportsVision,
     supportsAudio = supportsAudio,
@@ -51,15 +53,16 @@ class CodexProvider(
     thinkingConfigurations = thinkingConfigurations,
     thinkingOptionId = thinkingOptionId,
 ) {
+    private val conversationSession = UUID.randomUUID().toString()
     override fun applyAuthenticationHeaders(builder: Request.Builder, currentApiKey: String) {
-        super.applyAuthenticationHeaders(builder, currentApiKey)
-        val accountId = authManager.currentAccountId()
-            ?: throw IllegalStateException("Codex account ID is unavailable")
-        builder.header("ChatGPT-Account-ID", accountId)
+        val state = authManager.requireSession(accountSession)
+        // Account identity and bearer are one snapshot; never combine old tokens with new headers.
+        super.applyAuthenticationHeaders(builder, state.accessToken)
+        builder.header("ChatGPT-Account-ID", state.accountId)
         builder.header("originator", "operit")
         builder.header("User-Agent", "Operit/${BuildConfig.VERSION_NAME}")
-        builder.header("session-id", UUID.randomUUID().toString())
-        authManager.currentResidency()?.let { residency ->
+        builder.header("session-id", conversationSession)
+        state.residency?.let { residency ->
             builder.header("x-openai-internal-codex-residency", residency)
         }
     }
