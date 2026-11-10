@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: regression-in-progress
+status: verified-on-repair-branch
 ---
 
 # 聊天资料携带与请求失败修复
@@ -29,8 +29,24 @@ status: regression-in-progress
 ## 验证与交付
 
 新增有针对性的回归用例，并进行差异和调用链审阅；`git diff --check` 通过。
-用户已明确授权运行针对性测试并推送修复分支；使用现有 Android Tests 环境执行定向 JVM 回归。
-本批不触发自动合并发布。
+用户已明确授权运行针对性测试并推送修复分支。本批已推送到
+`fix/chat-context-and-stream-errors`，不触发自动合并发布。
+
+已在现有 Android Tests 环境实际执行定向 JVM 回归：
+
+- [第 186 次运行](https://github.com/yuan69082-code/Operit/actions/runs/42805465539)：34 项通过，0 失败，0 跳过。
+- 第 187 次运行补入真实发送入口后发现测试夹具未设置三个 suspend Boolean 配置开关，
+  Mockito 返回 null 导致请求前解箱失败；已补齐夹具，生产代码和错误断言未因此改变。
+- [第 188 次运行](https://github.com/yuan69082-code/Operit/actions/runs/42809625932)，提交
+  `d2178907e38d4f05ca3af4b7cf31ce5b80728ac6`：56 项通过，0 失败，6 项跳过。
+  跳过项均为既有 `WaifuMessageProcessorTest` 中以原生库加载条件控制的集成用例；
+  新增的真实发送入口测试强制建立原生 Markdown session，未设置跳过分支，均实际执行通过。
+
+第 188 次运行验证了实际 `MessageProcessingDelegate.sendUserMessage`、AIMessageManager 共享流、
+TokenTrackingAIService、EnhancedAIService、原生文本解析、并行读流、结果传递及状态收尾。
+400 和 402 均作为本回合错误到达 UI，不重试、不创建空 AI 回复、不触发成功回调；
+加载和回复流状态清理后，同一会话的下一次发送成功并保存正文。
+测试同时监测宿主 handler 与线程全局未捕获异常，关闭并 join 已知协程后再次检查，均无泄漏。
 
 前两项及旧配置迁移已经完成代码修改。筛选属于本地字词检索，使用当前输入；没有增加语义模型调用，不能声称实现了语义唤起。
 相关性顺序还须穿过统一预算：最佳匹配的人格及关系/偏好正文或片段，先于轮换目录得到预算机会，
@@ -38,17 +54,20 @@ status: regression-in-progress
 历史工具节选仅适用于可通过现有 `group_chat history_message` 工具读取原文的已完成私聊消息；
 群聊、禁止工具、没有完成时间的旧导入记录和仍在进行的工具链保留原文。超过 4096 字符的成功结果保留首 768 与尾 256 字符及回查位置。
 
-崩溃尚未确诊并验证修复。已发布的 Shared `+156` 源码包含共享流、生产子协程和主订阅的错误边界；
+本次没有在当前源码的真实发送回归中重现手机上的进程崩溃，不能把 JVM 通过当成用户 APK 的实机通过。
+已发布的 Shared `+156` 源码包含共享流、生产子协程和主订阅的错误边界；
 `+157` 相对它没有修改这些边界。单凭手机版本后缀不能验证实际 APK 的源码提交，
 因为不同工作流的运行编号可能相同。两次独立调用链审阅没有发现可以据此确认的遗漏点，
 因此没有再添加全局吞错、重试或未经证实的处理分支。
 
 原有 HTTP 400 测试绕过了 `EnhancedAIService`。本批让 `EnhancedReportIsolationTest` 的 fixture
-使用原生修订事件流及真实 TokenTrackingAIService，并新增真实 Gemini 序列化加模拟 HTTP 响应的测试，覆盖 400、402、
-首次请求、工具续轮、工具不重做、失败状态不采用和下一轮可继续。该用例尚未执行，不能把新增源码当成测试通过。
+使用原生修订事件流及真实 TokenTrackingAIService，并以真实 Gemini 序列化加模拟 HTTP 响应覆盖 400、402、
+首次请求、工具续轮、工具不重做、失败状态不采用和下一轮可继续；这些用例已通过。
 
-本分支暂时通过 Android Tests 的分支限定触发执行定向回归；普通工作流仍保留完整测试命令。
-验证结束后移除这条临时分支触发，并记录实际结果。
+验证结束后移除了临时分支触发和定向过滤，普通工作流保留原有完整测试命令。
+CI 新增 `ci/script/build_streamnative_host.sh`，将现有 11 个 streamnative C++ 源文件构建为
+Linux JVM 可加载的库，并在测试进程的 `LD_LIBRARY_PATH` 前追加产物目录；不改变 Android APK 的原生库打包。
+CI 继续上传 HTML 报告，并增加 XML 结果，便于读取完整失败证据。
 
 ## 代码外的依据
 
