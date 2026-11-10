@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 @Config(sdk = [28], application = Application::class)
 class PackageInitializationFailureTest {
     private fun manager(listFailure: Boolean): PackageManager {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val assets = Mockito.mock(AssetManager::class.java) { call -> when (call.method.name) {
             "list" -> if (listFailure) throw UnsatisfiedLinkError("catalog loader unavailable") else arrayOf("broken.js")
             "open" -> throw UnsatisfiedLinkError("script runtime unavailable")
