@@ -99,7 +99,7 @@ class SubscriptionAccountsTest {
                 }
                 else -> {
                     assertEquals("Bearer google-token", request.header("Authorization"))
-                    assertFalse(accountsPlaceholder(vault))
+                    assertNull(vault.get("gemini"))
                     """{"currentTier":{"id":"standard-tier"},"paidTier":{"id":"g1-pro-tier"},"cloudaicompanionProject":"provided-project"}"""
                 }
             }
@@ -114,8 +114,6 @@ class SubscriptionAccountsTest {
         assertEquals("provided-project", accounts.geminiProject(session))
         assertEquals("google-token", accounts.token("gemini", session))
     }
-
-    private fun accountsPlaceholder(vault: Vault) = vault.get("gemini") != null
 
     @Test fun googleCancellationExpiryAndStateMismatchNeverPersistCredentials(): Unit = runBlocking {
         val vault = Vault(); val calls = AtomicInteger()
@@ -149,15 +147,81 @@ class SubscriptionAccountsTest {
         try { accounts.token("gemini", "one"); fail("logout") } catch (_: IOException) {}
     }
 
-    @Test fun glmCannotSendPlanKeyToPaidEndpointAndUnknownQuotaDoesNotDisableChat(): Unit = runBlocking {
+    @Test fun glmCannotSendPlanKeyToPaidEndpointAndQuotaFailureDoesNotDisableChat(): Unit = runBlocking {
         val vault = Vault(); val calls = AtomicInteger()
-        val client = OkHttpClient.Builder().addInterceptor { chain -> calls.incrementAndGet(); response(chain.request(), 200, "{}") }.build()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            calls.incrementAndGet()
+            assertEquals("/api/monitor/usage/quota/limit", chain.request().url.encodedPath)
+            assertEquals("plan-key", chain.request().header("Authorization"))
+            response(chain.request(), 503, "{}")
+        }.build()
         val accounts = SubscriptionAccounts(vault, client); accounts.savePlanKey("glm", "plan-key")
         val session = accounts.sessionId("glm")!!
         val bound = accounts.boundClient("glm", session, client)
         assertThrows(IllegalArgumentException::class.java) { bound.newCall(Request.Builder()
             .url("https://open.bigmodel.cn/api/paas/v4/chat/completions").header("Authorization", "Bearer plan-key").build()).execute() }
-        assertEquals(0, calls.get()); assertTrue(accounts.usage("glm").getString("status").startsWith("未知"))
+        assertEquals(0, calls.get())
+        try { accounts.usage("glm"); fail("must report unavailable metadata") } catch (_: IOException) {}
+        assertEquals(1, calls.get())
         assertEquals("plan-key", accounts.token("glm", session))
+    }
+
+    @Test fun glmQuotaRetainsServerWindowsAndTokenCountsButNotCredentials(): Unit = runBlocking {
+        val vault = Vault()
+        val client = OkHttpClient.Builder().addInterceptor { chain -> response(chain.request(), 200,
+            """{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","usage":1000,"remaining":70,"nextResetTime":1234}],"token_limit":1000,"accessToken":"private"}}""") }.build()
+        val accounts = SubscriptionAccounts(vault, client); accounts.savePlanKey("glm", "plan-key")
+        val result = accounts.usage("glm").getJSONObject("data")
+        assertEquals(1000, result.getInt("token_limit"))
+        assertEquals(1234, result.getJSONArray("limits").getJSONObject(0).getInt("nextResetTime"))
+        assertFalse(result.has("accessToken")); assertFalse(result.has("unlimited"))
+    }
+
+    @Test fun googleTransportRejectsOtherCloudMethodsAndDoesNotRetryRateLimits(): Unit = runBlocking {
+        val vault = Vault(); val calls = AtomicInteger()
+        vault.put("gemini", JSONObject().put("session", "one").put("access", "a").put("refresh", "r")
+            .put("project", "p").put("expires_at", System.currentTimeMillis() + 3_600_000))
+        val server = OkHttpClient.Builder().addInterceptor { chain -> calls.incrementAndGet(); response(chain.request(), 429, "{}") }.build()
+        val bound = SubscriptionAccounts(vault, server).boundClient("gemini", "one", server)
+        assertThrows(IllegalArgumentException::class.java) { bound.newCall(Request.Builder()
+            .url("https://cloudcode-pa.googleapis.com/v1internal:unrelated").build()).execute() }
+        assertEquals(0, calls.get())
+        bound.newCall(Request.Builder().url("https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse").build())
+            .execute().use { assertEquals(429, it.code) }
+        assertEquals(1, calls.get())
+    }
+
+    @Test fun googleMetadataParseFailureNeverLeaksTokenResponse(): Unit = runBlocking {
+        val vault = Vault()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            response(chain.request(), 200, "{access_token: SECRET-RESPONSE, broken")
+        }.build()
+        val accounts = SubscriptionAccounts(vault, client)
+        try { accounts.completeGemini(accounts.beginGemini(), "code"); fail("malformed authorization") }
+        catch (e: IOException) { assertFalse(e.toString().contains("SECRET-RESPONSE")); assertNull(e.cause) }
+        assertFalse(accounts.connected("gemini"))
+    }
+
+    @Test fun googleRejectedAccessRefreshesOnceOnSameSessionAndPreservesRequest(): Unit = runBlocking {
+        val vault = Vault(); val refreshes = AtomicInteger(); val attempts = AtomicInteger()
+        vault.put("gemini", JSONObject().put("session", "one").put("access", "old").put("refresh", "r")
+            .put("project", "p").put("expires_at", System.currentTimeMillis() + 3_600_000))
+        val server = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            if (request.url.host == "oauth2.googleapis.com") {
+                refreshes.incrementAndGet(); response(request, 200, """{"access_token":"new","expires_in":3600}""")
+            } else {
+                attempts.incrementAndGet()
+                assertEquals("same-request", request.header("X-Test-Request"))
+                response(request, if (request.header("Authorization") == "Bearer old") 401 else 200, "{}")
+            }
+        }.build()
+        val accounts = SubscriptionAccounts(vault, server)
+        accounts.boundClient("gemini", "one", server).newCall(Request.Builder()
+            .url("https://cloudcode-pa.googleapis.com/v1internal:generateContent")
+            .header("Authorization", "Bearer old").header("X-Test-Request", "same-request").build())
+            .execute().use { assertEquals(200, it.code) }
+        assertEquals(1, refreshes.get()); assertEquals(2, attempts.get())
+        assertEquals("p", accounts.geminiProject("one"))
     }
 }

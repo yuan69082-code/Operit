@@ -81,7 +81,13 @@ internal class GeminiSubscriptionProvider(
                 if (byteCount == 0L) return 0
                 while (output.size == 0L && !ended) {
                     if (input.exhausted()) { flush(); ended = true; break }
-                    val line = input.readUtf8LineStrict(16 * 1024 * 1024L)
+                    val limit = 16 * 1024 * 1024L
+                    val newline = input.indexOf('\n'.code.toByte(), 0L, limit + 1)
+                    val line = if (newline == -1L) {
+                        if (input.buffer.size > limit) throw IOException("Gemini 单个流事件超过处理大小")
+                        // SSE permits the last event to end at EOF without a blank line.
+                        input.readUtf8().removeSuffix("\r")
+                    } else input.readUtf8LineStrict(limit)
                     when {
                         line.isEmpty() -> flush()
                         line.startsWith("data:") -> {

@@ -270,7 +270,9 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
                 val endpoint = SubscriptionChannels.get(channel).endpoint ?: error("订阅渠道未开放")
                 val approved = endpoint.toHttpUrl()
                 require(original.url.host == approved.host && original.url.isHttps && original.url.port == approved.port) { "订阅凭据不能发送到其他地址" }
-                require(original.url.encodedPath.startsWith(approved.encodedPath.substringBeforeLast('/'))) { "订阅请求不能切换计费端点" }
+                val allowedPaths = if (channel == "gemini") setOf("/v1internal:generateContent", "/v1internal:streamGenerateContent")
+                    else setOf(approved.encodedPath)
+                require(original.url.encodedPath in allowedPaths) { "订阅请求不能切换计费端点" }
                 val response = chain.proceed(original)
                 if (channel !in setOf("grok", "gemini") || response.code != 401) response else {
                     response.close()
@@ -310,8 +312,17 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
     }
     suspend fun usage(channel: String): JSONObject {
         val session = sessionId(channel) ?: throw IOException("请先连接订阅账号")
-        if (channel == "glm") return JSONObject().put("queried_at", System.currentTimeMillis()).put("channel", channel)
-            .put("status", "未知：未接入经过官方文档确认的额度查询接口，请在个人/团队编程套餐页面查看；不影响已配置聊天")
+        if (channel == "glm") {
+            // Official ZCode monitor uses the complete plan key WITHOUT a Bearer prefix.
+            // This read does not change billing or reset a quota. Missing fields stay unknown.
+            val result = json(Request.Builder().url("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
+                .header("Authorization", token(channel, session)).build())
+            state(channel, session)
+            if (result.has("success") && !result.optBoolean("success")) throw IOException("GLM 额度查询未成功；不影响已配置聊天")
+            val data = result.optJSONObject("data") ?: throw IOException("GLM 未返回可识别额度；请在官方套餐页面查看")
+            return JSONObject().put("queried_at", System.currentTimeMillis()).put("channel", channel)
+                .put("data", redactQuota(data))
+        }
         if (channel == "gemini") return JSONObject().put("queried_at", System.currentTimeMillis()).put("channel", channel)
             .put("buckets", redactQuota(geminiQuota(session).optJSONArray("buckets") ?: JSONArray()))
             .put("extra_credits_requested", false)
@@ -330,7 +341,7 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
     }
     private fun redactQuota(value: Any): Any = when (value) {
         is JSONObject -> JSONObject().also { output -> value.keys().forEach { key ->
-            if (!Regex("token|secret|key|authorization|cookie|email", RegexOption.IGNORE_CASE).containsMatchIn(key))
+            if (!Regex("secret|authorization|cookie|email|api.?key|access.?token|refresh.?token|id.?token|^token$|^key$", RegexOption.IGNORE_CASE).containsMatchIn(key))
                 output.put(key, redactQuota(value.get(key)))
         } }
         is JSONArray -> JSONArray().also { out -> (0 until value.length()).forEach { out.put(redactQuota(value.get(it))) } }
@@ -357,7 +368,9 @@ class SubscriptionAccounts internal constructor(private val vault: SubscriptionV
             429 -> "服务端额度或频率限制（429），不会切换收费通道"
             else -> "订阅服务请求失败（HTTP $status）"
         })
-        return JSONObject(body)
+        // OAuth replies can contain credentials. JSONObject parse errors quote their input,
+        // so they must never escape into the settings UI or ordinary application logs.
+        return try { JSONObject(body) } catch (_: Exception) { throw IOException("订阅服务返回了无法解析的元数据，未保存新凭据") }
     }
     private suspend fun raw(request: Request): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
         val call = client.newCall(request.newBuilder().header("User-Agent", "Operit/${BuildConfig.VERSION_NAME}").build())

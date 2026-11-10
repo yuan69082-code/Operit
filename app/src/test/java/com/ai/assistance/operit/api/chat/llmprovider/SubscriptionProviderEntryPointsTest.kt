@@ -123,6 +123,7 @@ class SubscriptionProviderEntryPointsTest {
                 """{"functionCall":{"id":"google-call","name":"sleep","args":{}},"thoughtSignature":"preserve-signature"}"""
             else """{"text":"已看到准确回执。"}"""
             val body = sse("""{"response":{"candidates":[{"content":{"role":"model","parts":[$part]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3}},"traceId":"trace"}""")
+                .let { if (requests.size == 2) it.trimEnd() else it }
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("mocked")
                 .body(body.toResponseBody()).build()
         }.build()

@@ -86,7 +86,11 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
                     TextButton(onClick = { uri.openUri(channel.accountPage) }) { Text("账号与额度") }
                 }
                 if (selected == "codex") {
-                    TextButton(onClick = onCodex) { Text("使用下方原有 Codex 登录") }
+                    if (config.subscriptionChannel.isNotEmpty()) {
+                        TextButton(onClick = { run { manager.updateSubscription(config.id, "", config.modelName) } }, enabled = !busy) {
+                            Text("解除当前绑定，打开原有 Codex 配置")
+                        }
+                    } else TextButton(onClick = onCodex) { Text("使用下方原有 Codex 登录") }
                 } else if (channel.endpoint == null) {
                     Text("当前未开放，未保存会员凭据；按量 API 仍是单独的配置。", style = MaterialTheme.typography.labelMedium)
                 } else {
@@ -113,7 +117,7 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
                             Text("完成 Google 授权后，将网页显示的授权码填在这里。有效至 ${java.util.Date(pending.expiresAt)}。", style = MaterialTheme.typography.bodySmall)
                             OutlinedTextField(googleCode, { googleCode = it }, label = { Text("本次 Google 授权码") },
                                 modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), enabled = !busy)
-                            Row {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 TextButton(onClick = { uri.openUri(pending.url) }, enabled = !busy) { Text("打开授权网页") }
                                 Button(onClick = { run {
                                     accounts.completeGemini(pending, googleCode, googleProject)

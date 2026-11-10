@@ -9,6 +9,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 /** Wire protocol reference: google-gemini/gemini-cli code_assist/oauth2.ts.
  * The installed-app client values are public in Google's source, not account secrets.
  * User credentials stay in SubscriptionVault; no credential is accepted through chat. */
+@ConsistentCopyVisibility
 data class GeminiAuthorization internal constructor(
     val attempt: String, val url: String, val expiresAt: Long,
     internal val verifier: String, internal val state: String,
