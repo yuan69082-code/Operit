@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: verified-on-repair-branch
+status: release-authorized
 ---
 
 # 聊天资料携带与请求失败修复
@@ -29,8 +29,10 @@ status: verified-on-repair-branch
 ## 验证与交付
 
 新增有针对性的回归用例，并进行差异和调用链审阅；`git diff --check` 通过。
-用户已明确授权运行针对性测试并推送修复分支。本批已推送到
-`fix/chat-context-and-stream-errors`，不触发自动合并发布。
+用户已明确授权运行针对性测试并推送修复分支，并于 2026-11-10 进一步明确要求
+“发布合并，把今天修的”。本批通过 `fix/chat-context-and-stream-errors` 向 `main`
+发起正式发布 PR，沿用 Shared desktop preview 的同一候选测试、双端构建、合并及发布流程。
+只有全部构建检查成功、合并后的源码树与已验证候选一致，才发布对应安装包。
 
 已在现有 Android Tests 环境实际执行定向 JVM 回归：
 
@@ -94,7 +96,9 @@ CI 继续上传 HTML 报告，并增加 XML 结果，便于读取完整失败证
 失败状态清理后同会话可继续发送。所有场景监测全局未捕获异常，未记录到泄漏。
 
 验证后撤除临时分支触发和定向过滤。最终收尾仅修改 CI 触发范围与本记录，生产及测试源码
-与上述通过的提交相同。本分支恢复了客户端超限提醒后的继续发送语义；尚未发布新 APK 或进行用户手机实机验证。
+与上述通过的提交相同。本分支恢复了客户端超限提醒后的继续发送语义。上述定向测试没有生成 APK；
+正式安装包由本次授权的 Shared desktop preview 发布流程构建，最终交付以该流程和 Release 资产为准。
+尚未进行用户手机实机验证。
 
 ## 代码外的依据
 
