@@ -71,6 +71,8 @@ class EnhancedReportIsolationTest {
         var calls = 0
         var executions = 0
         var wake = false
+        @Volatile var inputEstimate = 100L
+        val requestInputEstimates = CopyOnWriteArrayList<Long>()
         val frames = CopyOnWriteArrayList<InternalStateFrame>()
         var output: suspend StreamCollector<String>.(Int, InternalStateFrame) -> Unit = { _, f -> emit("下一条正常回复。" + report(f)) }
         var requestStream: ((List<PromptTurn>, Int) -> Stream<String>)? = null
@@ -98,12 +100,13 @@ class EnhancedReportIsolationTest {
             initScope.coroutineContext[Job]!!.cancelAndJoin()
             val provider = Mockito.mock(AIService::class.java) { call -> when (call.method.name) {
                 "getProviderModel" -> "OPENAI:simulated"
-                "calculateInputTokens" -> 100L
+                "calculateInputTokens" -> inputEstimate
                 "sendMessage" -> {
                     @Suppress("UNCHECKED_CAST")
                     val history = call.arguments[1] as List<PromptTurn>
                     val frame = requireNotNull(CurrentRequestContext.internalStateFrame(history))
                     frames.add(frame)
+                    requestInputEstimates.add(inputEstimate)
                     val index = ++calls
                     val suppliedStream = requestStream
                     if (suppliedStream != null) {
@@ -239,14 +242,14 @@ class EnhancedReportIsolationTest {
                 speakMessageHandler = { _, _ -> fail("Speech is disabled, but its native reader must still run") },
             )
         }
-        suspend fun sendThroughDelegate(delegate: MessageProcessingDelegate, phase: String) {
+        suspend fun sendThroughDelegate(delegate: MessageProcessingDelegate, phase: String, maxTokens: Int = 131_072) {
             delegate.sendUserMessage(
                 chatId = chat,
                 roleCardId = role,
                 messageTextOverride = "继续",
                 prebuiltMessageContent = "继续",
                 chatModelConfigIdOverride = "simulated",
-                maxTokens = 131_072,
+                maxTokens = maxTokens,
                 tokenUsageThreshold = 0.9,
                 enableMemoryAutoUpdate = false,
                 enableSummary = false,
@@ -386,6 +389,72 @@ class EnhancedReportIsolationTest {
         assertDelegateHttpFailure(402)
     }
 
+    @Test fun delegateAboveConfiguredWindowStillSendsAndPersistsReply(): Unit = runBlocking {
+        assertDelegateWindowAdvisory(afterTool = false)
+    }
+
+    @Test fun delegateToolContinuationAboveConfiguredWindowRunsToolOnce(): Unit = runBlocking {
+        assertDelegateWindowAdvisory(afterTool = true)
+    }
+
+    private suspend fun assertDelegateWindowAdvisory(afterTool: Boolean) {
+        NativeMarkdownSplitter.createBlockSession().destroy()
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        val errors = CopyOnWriteArrayList<String>()
+        val completed = AtomicInteger()
+        val scenario = if (afterTool) "Delegate over-window tool continuation" else "Delegate over-window first request"
+        val replyText = "超过提醒预算后仍正常回复。"
+        try {
+            val delegate = f.delegate(errors, completed)
+            f.inputEstimate = if (afterTool) 100L else 70_361L
+            if (afterTool) {
+                // The first request fits. Only the completed tool receipt pushes the next
+                // request over the configured advisory window, matching a growing turn.
+                f.handler.registerTool("sleep", executor = { _: AITool ->
+                    f.executions++
+                    f.inputEstimate = 70_361L
+                    ToolResult("sleep", true, StringResultData("本地实际回执"))
+                })
+            }
+            f.output = { index, frame ->
+                if (afterTool && index == 1) {
+                    emit("<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>")
+                } else {
+                    emit(replyText + Fixture.report(frame))
+                }
+            }
+            f.sendThroughDelegate(delegate, scenario, maxTokens = 65_536)
+
+            val evidence = "$scenario; errors=$errors; estimates=${f.requestInputEstimates}\n${f.failureDiagnostics()}"
+            assertEquals(evidence, if (afterTool) listOf(100L, 70_361L) else listOf(70_361L), f.requestInputEstimates.toList())
+            assertEquals(evidence, if (afterTool) 2 else 1, f.calls)
+            assertEquals("$scenario: completed tools must not run again", if (afterTool) 1 else 0, f.executions)
+            assertEquals(evidence, InputProcessingState.Completed, delegate.inputProcessingStateByChatId.value[f.chat])
+            assertEquals("$scenario: one successful callback", 1, completed.get())
+            assertEquals("$scenario: one successful turn", 1L, delegate.getTurnCompleteCounter(f.chat))
+            assertFalse("$scenario: chat loading", delegate.isChatLoading(f.chat))
+            assertFalse("$scenario: global loading", delegate.isLoading.value)
+            assertFalse("$scenario: active stream", f.chat in delegate.activeStreamingChatIds.value)
+            assertNull("$scenario: detached response", delegate.getResponseStream(f.chat))
+            val reply = ChatHistoryManager.getInstance(f.app).loadChatMessages(f.chat).single { it.sender == "ai" }
+            assertTrue("$scenario: saved reply", reply.content.contains(replyText))
+            assertFalse("$scenario: report is not public reply text", reply.content.contains("operit_state_report"))
+            assertTrue("$scenario: saved completion", reply.completedAt > 0L)
+            assertNull("$scenario: saved stream detached", reply.contentStream)
+            assertNotNull("$scenario: state report adopted", f.savedReport(f.frames.last()))
+            if (afterTool) {
+                val actions = SubjectActions.read(f.app, f.role, f.chat, null, 0).getJSONArray("items")
+                assertTrue("$scenario: completed receipt remains available",
+                    (0 until actions.length()).any { actions.getJSONObject(it).optString("status") == "completed" })
+            }
+            assertTrue(evidence, errors.isEmpty())
+            assertTrue("$scenario: no retries", f.warnings.isEmpty())
+            assertTrue(evidence, f.uncaught.isEmpty())
+            assertTrue("$scenario: host remains active", f.host.isActive)
+        } finally { f.close() }
+        assertTrue("$scenario after cleanup: ${f.uncaught.map { it.stackTraceToString() }}", f.uncaught.isEmpty())
+    }
+
     private suspend fun assertDelegateHttpFailure(status: Int) {
         // Do not skip the actual autoRead/Waifu parser when JNI is unavailable. CI builds
         // the production streamnative sources for the host JVM before running this test.
@@ -408,11 +477,14 @@ class EnhancedReportIsolationTest {
         val provider = GeminiProvider("https://example.test", SingleApiKeyProvider("test"), "gemini-test", client)
         try {
             val delegate = f.delegate(errors, completed)
+            // Exceeding the client budget must reach the provider; a genuine HTTP error
+            // still belongs to this failed turn and must not reach the global handler.
+            f.inputEstimate = 70_361L
             f.requestStream = { history, _ -> runBlocking {
                 provider.sendMessage(f.app, history, emptyList(), false, true, null,
                     false, { _, _, _ -> }, null, { f.warnings.add(it) }, true, false, null)
             } }
-            f.sendThroughDelegate(delegate, scenario)
+            f.sendThroughDelegate(delegate, scenario, maxTokens = 65_536)
 
             val failedState = delegate.inputProcessingStateByChatId.value[f.chat]
             val failureEvidence = "$scenario: $failedState; errors=$errors; HTTP calls=${httpCalls.get()}\n${f.failureDiagnostics()}"
@@ -420,6 +492,7 @@ class EnhancedReportIsolationTest {
             assertTrue(failureEvidence, (failedState as InputProcessingState.Error).message.contains(status.toString()))
             assertTrue("Error must reach the UI: $failureEvidence", errors.any { it.contains(status.toString()) })
             assertEquals("One HTTP request: $failureEvidence", 1, httpCalls.get())
+            assertEquals("$scenario: provider reached above the advisory window", listOf(70_361L), f.requestInputEstimates.toList())
             assertTrue("$scenario: must not be retried", f.warnings.isEmpty())
             assertEquals("$scenario: no successful callback", 0, completed.get())
             assertEquals("$scenario: no successful turn", 0L, delegate.getTurnCompleteCounter(f.chat))
@@ -435,7 +508,7 @@ class EnhancedReportIsolationTest {
             errors.clear()
             f.requestStream = null
             f.output = { _, frame -> emit("后续消息正常回复。" + Fixture.report(frame)) }
-            f.sendThroughDelegate(delegate, "$scenario next send")
+            f.sendThroughDelegate(delegate, "$scenario next send", maxTokens = 65_536)
             assertEquals("$scenario: next turn completed", InputProcessingState.Completed,
                 delegate.inputProcessingStateByChatId.value[f.chat])
             assertEquals("$scenario: successful callback", 1, completed.get())

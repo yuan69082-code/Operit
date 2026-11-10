@@ -8,7 +8,7 @@ on:
         default: ""
   workflow_dispatch:
   push:
-    branches: [feat/assistant-workspaces, feat/group-continuity-games]
+    branches: [feat/assistant-workspaces, feat/group-continuity-games, fix/chat-context-and-stream-errors]
     paths:
       - .github/workflows/android-tests.yml
       - .gitmodules
@@ -168,9 +168,21 @@ jobs:
         run: bash ci/script/build_streamnative_host.sh "$RUNNER_TEMP/operit-native"
 
       - name: Run JVM unit tests
+        env:
+          TARGETED_WINDOW_REGRESSION: ${{ github.ref == 'refs/heads/fix/chat-context-and-stream-errors' }}
         run: |
           export LD_LIBRARY_PATH="$RUNNER_TEMP/operit-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
+          if [ "$TARGETED_WINDOW_REGRESSION" = 'true' ]; then
+            ./gradlew :app:testDebugUnitTest \
+              --tests '*EnhancedReportIsolationTest' \
+              --tests '*SubjectMaterialBudgetTest' \
+              --tests '*HotStreamTest' \
+              --tests '*GeminiHttpFailureIntegrationTest' \
+              --tests '*GeminiReaderFailureTest' \
+              --init-script ci/script/android_test_progress.gradle --stacktrace --no-daemon
+          else
+            ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
+          fi
 
       - name: Upload Android test reports
         if: always()

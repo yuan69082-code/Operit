@@ -764,7 +764,12 @@ class EnhancedAIService private constructor(private val context: Context) {
         }
         val check = com.ai.assistance.operit.core.companion.SubjectRequestWindow.check(input, parameters, window)
         AppLogger.d(TAG, "Subject full window: inputEstimate=$input outputReserve=${check.outputReserve} window=$window; provider estimate, unknown tokenizer error")
-        require(!check.exceeds) { "完整请求估算超过模型窗口（含历史、指令、工具和已配置输出预留），请先压缩或调整窗口；未重复执行本轮。" }
+        // This window is the user's context/summary target, not a verified provider limit.
+        // The input UI explicitly allows Continue. Keep that contract for the first request
+        // and tool continuations instead of turning an estimated overage into an exception.
+        if (check.exceeds) {
+            AppLogger.w(TAG, "Configured context target exceeded; continuing request with the existing warning/summary policy")
+        }
         com.ai.assistance.operit.core.experience.RecallEvidence(context).selected(frame)
     }
 

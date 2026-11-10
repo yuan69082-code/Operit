@@ -1372,7 +1372,7 @@ object AIMessageManager {
         val lastSummary = messages.indexOfLast { it.sender == "summary" }
         val newTurns = messages.drop(lastSummary + 1).count { it.sender == "user" }
         // Recompressing one or two fresh turns cannot meaningfully reduce fixed system/tool
-        // overhead. Keep the hard context limit authoritative while avoiding summary churn.
+        // overhead. Revisit the configured target near capacity while avoiding summary churn.
         if (newTurns == 0) return false
         if (lastSummary >= 0 && newTurns < 3 && maxTokens > 0 && currentTokens < maxTokens * 0.95) return false
 

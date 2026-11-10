@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/yuan69082-code/Operit
-status: verified-on-repair-branch
+status: context-target-regression-in-progress
 ---
 
 # 聊天资料携带与请求失败修复
@@ -24,7 +24,7 @@ status: verified-on-repair-branch
 4. 补齐旧内置思考配置被重新格式化后未迁移的情况；自定义参数与规则顺序不改。
    HTTP 400 档位错误和 HTTP 402 余额错误显示可操作的说明，并保留服务原始错误。
 
-不改变已采用人格、关系、偏好的原文、候选采用规则、记忆内容、账户计费或上下文上限。
+不改变已采用人格、关系、偏好的原文、候选采用规则、记忆内容、账户计费或用户设定的上下文数值。
 
 ## 验证与交付
 
@@ -68,6 +68,26 @@ TokenTrackingAIService、EnhancedAIService、原生文本解析、并行读流�
 CI 新增 `ci/script/build_streamnative_host.sh`，将现有 11 个 streamnative C++ 源文件构建为
 Linux JVM 可加载的库，并在测试进程的 `LD_LIBRARY_PATH` 前追加产物目录；不改变 Android APK 的原生库打包。
 CI 继续上传 HTML 报告，并增加 XML 结果，便于读取完整失败证据。
+
+## 20:08 日志新增的上下文目标回归
+
+用户补充 `operit_log_20261110_200812.txt`，并确认此前超过配置长度时可在提醒后继续发送。
+新日志记录 `inputEstimate=70361 outputReserve=null window=65536`，在模型调用之前抛出
+`IllegalArgumentException`，随后进入全局崩溃处理。此前 400/402 回归将输入估算固定为 100，
+窗口设为 131072，未覆盖这个发送前检查，不能据此宣称这条超窗崩溃已解决。
+
+回溯确认提交 `8904226946ccfe09155f64d1e60dac8ccd49cb62` 于 2026-11-09 新增
+`checkSubjectRequestWindow` 及 `require(!check.exceeds)`。传入的窗口来自用户配置的
+`effectiveContextLength * 1024`，没有查询模型真实上限；原有两个输入界面仍提供“继续发送”，
+总结协调器也保持回合结束后总结。新的硬拒绝与这个既有行为冲突。
+
+本次最小修正把超过客户端上下文目标改为日志提醒并继续原请求，保留原有确认和总结逻辑。
+本地主体材料分词预算检查继续执行，服务端真正返回的错误仍由原有发送错误处理接收。
+不自动重试、重复执行工具或修改用户配置。
+
+新增真实 Delegate 用例复用日志的 70361/65536，分别覆盖首次发送和工具结果加入后的续答。
+既有 400/402 实际发送用例也改为先超过客户端目标，再验证服务端错误能正常收尾。
+本轮定向 CI 运行后补记实际结果，并撤除临时分支触发。
 
 ## 代码外的依据
 
