@@ -85,9 +85,11 @@ internal object ActivityNotes {
         // Keep the original paragraph and mark a provider rollback; never present it as final.
     }
 
-    suspend fun operation(context: Context, ref: Ref, id: String, tool: String, result: ToolResult?) {
+    suspend fun operation(context: Context, ref: Ref, id: String, tool: String, result: ToolResult?, request: com.ai.assistance.operit.data.model.AITool? = null) {
         val status = result?.executionStatus ?: if (result == null) "started" else if (result.success) "completed" else "failed"
         part(context, ref, "tool:$id:$status", "operation", JSONObject().put("tool", tool)
+            .put("actual_tool", request?.name ?: tool)
+            .put("private_section", request?.parameters?.firstOrNull { it.name == "section" }?.value ?: JSONObject.NULL)
             .put("status", status).put("action_id", result?.subjectActionId ?: JSONObject.NULL)
             .put("receipt", result?.result?.toString() ?: JSONObject.NULL)
             .put("error", result?.error ?: JSONObject.NULL))

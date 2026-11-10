@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import com.ai.assistance.operit.core.companion.ActivityNotes
+import com.ai.assistance.operit.core.companion.PrivateStateView
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +34,7 @@ internal fun ActivityNotesPanel(role: String, wakingOnly: Boolean = false) {
     LaunchedEffect(role, wakingOnly, offset, revision) {
         busy = true; error = null
         try {
-            val page = withContext(Dispatchers.IO) { ActivityNotes.page(context, role, if (wakingOnly) "waking_note" else "activity", null, offset) }
+            val page = withContext(Dispatchers.IO) { PrivateStateView.project(ActivityNotes.page(context, role, if (wakingOnly) "waking_note" else "activity", null, offset)) }
             rows = jsonRows(page.getJSONArray("items"))
             next = page.opt("next_offset").let { if (it is Number) it.toInt() else null }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -78,7 +79,7 @@ private fun ActivityNoteCard(role: String, head: JSONObject) {
         if (!expanded) return@LaunchedEffect
         busy = true
         try {
-            val page = withContext(Dispatchers.IO) { ActivityNotes.page(context, role, "activity_part", head.getString("id"), offset) }
+            val page = withContext(Dispatchers.IO) { PrivateStateView.project(ActivityNotes.page(context, role, "activity_part", head.getString("id"), offset)) }
             parts = jsonRows(page.getJSONArray("items")).asReversed()
             next = page.opt("next_offset").let { if (it is Number) it.toInt() else null }
             error = null
@@ -116,6 +117,7 @@ private fun ActivityNoteCard(role: String, head: JSONObject) {
                         when (row.getString("kind")) {
                             "note", "waking" -> SelectionContainer { Text(c.getString("text")) }
                             "private_choice" -> Text("这一次，他明确选择不公开随记。", style = MaterialTheme.typography.bodySmall)
+                            "report_failure" -> Text("本次内部状态回报未能采用，原状态保留；已保存的表达和操作不会重做。", style = MaterialTheme.typography.bodySmall)
                             "message" -> {
                                 Text("已保存的聊天表达 · ${privateTime(c.getLong("timestamp"))}", style = MaterialTheme.typography.labelMedium)
                                 SelectionContainer { Text(c.getString("text")) }

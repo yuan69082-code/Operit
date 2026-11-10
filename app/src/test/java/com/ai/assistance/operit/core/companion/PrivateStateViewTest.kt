@@ -6,6 +6,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrivateStateViewTest {
+    @Test fun activityReceiptsKeepTheSamePrivateAudience() {
+        val receipt = JSONObject().put("storage_kind", "activity_part").put("kind", "operation").put("content",
+            JSONObject().put("tool", "companion_internal_state").put("status", "completed").put("receipt", "旧梦原文"))
+        assertFalse(PrivateStateView.project(receipt).toString().contains("旧梦原文"))
+        receipt.getJSONObject("content").put("private_section", "inner").put("receipt", "完整可见的内在记录")
+        assertTrue(PrivateStateView.project(receipt).toString().contains("完整可见的内在记录"))
+        receipt.getJSONObject("content").put("private_section", "dream")
+        assertFalse(PrivateStateView.project(receipt).toString().contains("完整可见的内在记录"))
+        receipt.getJSONObject("content").put("tool", "some_tool").put("receipt",
+            JSONObject().put("type", "dream_not_reality").put("text", "旧私密梦全文").toString())
+        assertFalse(PrivateStateView.project(receipt).toString().contains("旧私密梦全文"))
+        assertTrue(receipt.toString().contains("旧私密梦全文"))
+    }
     @Test fun evidenceAndToolDetailDoNotReopenPrivateOriginals() {
         val source = JSONObject().put("type", "dream_not_reality").put("id", "dream-source").put("text", "旧私密梦全文")
         val adopted = JSONObject().put("id", "p").put("content", JSONObject().put("description", "后来采用的认识，条件和例外仍保留"))

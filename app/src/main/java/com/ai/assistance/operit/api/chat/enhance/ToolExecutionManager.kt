@@ -552,7 +552,7 @@ object ToolExecutionManager {
         suspend fun activityReceipt(index: Int, result: ToolResult?) {
             activity?.let { ref -> com.ai.assistance.operit.core.companion.ActivityNotes.operation(context, ref,
                 actionIds[index] ?: invocations[index].hostInvocationId,
-                resolveDisplayToolName(invocations[index].tool), result) }
+                resolveDisplayToolName(invocations[index].tool), result, invocations[index].tool) }
         }
         val eligible = mutableListOf<IndexedValue<ToolInvocation>>()
         for ((index, invocation) in invocations.withIndex()) {

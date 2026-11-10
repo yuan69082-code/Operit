@@ -30,9 +30,14 @@ internal object PrivateStateView {
                         val p = requireNotNull(parameters).getJSONObject(i)
                         p.optString("name") == "section" && p.optString("value") in privateKinds
                     })
+                // Activity receipts are another projection of the same real operation.
+                // Old records lack the section: keep the receipt private until a full
+                // action read can establish its audience. Never change stored evidence.
+                val activityPrivateRead = value.optString("actual_tool", value.optString("tool")) == "companion_internal_state" &&
+                    (value.isNull("private_section") || value.optString("private_section") in privateKinds)
                 JSONObject().also { out -> value.keys().forEach { key ->
                     val item = value.get(key)
-                    out.put(key, if (privateRead && key == "receipt" && item is JSONObject) hidden(item) else scrub(item, key))
+                    out.put(key, if ((privateRead || activityPrivateRead) && key == "receipt") hidden(if (item is JSONObject) item else JSONObject()) else scrub(item, key))
                 } }
             }
         }
@@ -40,11 +45,11 @@ internal object PrivateStateView {
             // Typed tool data may be stored as a JSON string. Decode only valid containers;
             // ordinary prose remains exact, except the explicitly private output tag.
             val trimmed = value.trimStart()
-            val nested = if (field !in setOf("text", "data", "inner_source", "detail")) null
+            val nested = if (field !in setOf("text", "data", "inner_source", "detail", "receipt")) null
                 else if (trimmed.startsWith("{")) runCatching { JSONObject(value) }.getOrNull()
                 else if (trimmed.startsWith("[")) runCatching { JSONArray(value) }.getOrNull() else null
             if (nested != null) scrub(nested).let { if (it.toString() == nested.toString()) value else it.toString() }
-            else if (field in setOf("text", "data", "inner_source", "detail")) value.replace(Regex("<companion_note(?:\\s[^>]*)?>[\\s\\S]*?(?:</companion_note>|$)"), "〔原私密随记未公开〕")
+            else if (field in setOf("text", "data", "inner_source", "detail", "receipt")) value.replace(Regex("<companion_note(?:\\s[^>]*)?>[\\s\\S]*?(?:</companion_note>|$)"), "〔原私密随记未公开〕")
             else value
         }
         else -> value
