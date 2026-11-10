@@ -39,6 +39,7 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.OkHttpClient
@@ -124,6 +125,9 @@ class EnhancedReportIsolationTest {
                 "getServiceForFunction", "getServiceForConfig" -> trackedProvider
                 "getModelConfigForFunction", "getModelConfigForConfig" -> model
                 "getModelParametersForFunction", "getModelParametersForConfig" -> emptyList<ModelParameter<*>>()
+                // Normal user turns query these suspend Boolean methods before preparing
+                // history. Mockito sees Object and returns null unless explicitly stubbed.
+                "hasImageRecognitionConfigured", "hasAudioRecognitionConfigured", "hasVideoRecognitionConfigured" -> false
                 else -> Mockito.RETURNS_DEFAULTS.answer(call)
             } }
             val realComposer = field("conversationService") as ConversationService
@@ -149,6 +153,14 @@ class EnhancedReportIsolationTest {
         }
         private fun field(name: String): Any = EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.get(service)
         private fun set(name: String, value: Any) { EnhancedAIService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value) }
+        fun failureDiagnostics(): String {
+            val loggedFailures = listOf("EnhancedAIService", "MessageProcessingDelegate", "AIMessageManager")
+                .flatMap { tag -> ShadowLog.getLogsForTag(tag).mapNotNull { item ->
+                    item.throwable?.let { "$tag: ${item.msg}\n${it.stackTraceToString()}" }
+                } }
+            return "providerCalls=$calls; uncaught=${uncaught.map { it.stackTraceToString() }}\n" +
+                loggedFailures.joinToString("\n")
+        }
         fun revisableOutput(index: Int, frame: InternalStateFrame): Stream<String> {
             val events = MutableSharedStream<TextStreamEvent>(replay = Int.MAX_VALUE)
             return stream<String> {
@@ -245,9 +257,9 @@ class EnhancedReportIsolationTest {
             try {
                 withTimeout(30_000) { delegate.withSummaryAfterTurn(chat) {} }
             } catch (timeout: TimeoutCancellationException) {
-                throw AssertionError("$phase: delegate did not finish; providerCalls=$calls, " +
+                throw AssertionError("$phase: delegate did not finish; " +
                     "loading=${delegate.isChatLoading(chat)}, state=${delegate.inputProcessingStateByChatId.value[chat]}, " +
-                    "uncaught=${uncaught.map { it.stackTraceToString() }}", timeout)
+                    failureDiagnostics(), timeout)
             }
         }
         companion object {
@@ -403,10 +415,11 @@ class EnhancedReportIsolationTest {
             f.sendThroughDelegate(delegate, scenario)
 
             val failedState = delegate.inputProcessingStateByChatId.value[f.chat]
-            assertTrue("$scenario: $failedState; errors=$errors; uncaught=${f.uncaught}", failedState is InputProcessingState.Error)
-            assertTrue("$scenario: $failedState", (failedState as InputProcessingState.Error).message.contains(status.toString()))
-            assertTrue("$scenario: error must reach the UI", errors.any { it.contains(status.toString()) })
-            assertEquals("$scenario: one HTTP request", 1, httpCalls.get())
+            val failureEvidence = "$scenario: $failedState; errors=$errors; HTTP calls=${httpCalls.get()}\n${f.failureDiagnostics()}"
+            assertTrue(failureEvidence, failedState is InputProcessingState.Error)
+            assertTrue(failureEvidence, (failedState as InputProcessingState.Error).message.contains(status.toString()))
+            assertTrue("Error must reach the UI: $failureEvidence", errors.any { it.contains(status.toString()) })
+            assertEquals("One HTTP request: $failureEvidence", 1, httpCalls.get())
             assertTrue("$scenario: must not be retried", f.warnings.isEmpty())
             assertEquals("$scenario: no successful callback", 0, completed.get())
             assertEquals("$scenario: no successful turn", 0L, delegate.getTurnCompleteCounter(f.chat))
