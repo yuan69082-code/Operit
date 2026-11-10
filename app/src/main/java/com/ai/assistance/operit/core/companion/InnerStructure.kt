@@ -329,22 +329,29 @@ internal object InnerStructure {
             .put("frame_id", frame.id).put("source_chat", frame.chatId))
     }
 
-    /** Whole records rotate before the shared Token selector. No all-history or all-belief read. */
+    /** Search all active adopted content before taking a bounded page for the shared budget. */
     fun material(data: JSONObject, input: String, cursor: Long): JSONObject {
         val records = InnerRows(data, false)
         val pending = InnerRows(data, true)
         val catalogue = records.rotating(cursor)
         val candidates = pending.rotating(cursor)
-        val others = records.rotating(cursor, "other").filter { it.getJSONObject("content").getString("status") == "active" }
-            .sortedByDescending { row ->
-                val c = row.getJSONObject("content")
-                listOf(c.getString("kind"), c.optString("object_ref"), c.optString("aspect"))
-                    .count { it.isNotBlank() && input.contains(it, true) }
-            }
+        // Paging before matching hid relevant beliefs beyond the rotating eight rows. Keep
+        // relevance first; rotation supplies additional exposure without enlarging the input.
+        val relatedIdentity = records.relevant(input, "identity")
+        val relatedOther = records.relevant(input, "other")
+        fun selected(parent: String, related: List<JSONObject>) = (related + records.rotating(cursor, parent))
+            .filter { it.getJSONObject("content").getString("status") == "active" }
+            .distinctBy { it.getString("id") }.take(8)
+        val identity = selected("identity", relatedIdentity)
+        val others = selected("other", relatedOther)
         return JSONObject().put("schema", SCHEMA)
-            .put("identity", JSONArray(records.rotating(cursor, "identity").filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
+            // Host-only handoff: the shared selector removes this before serializing. Without
+            // it, splitting long records into a fragment lane loses their relevance ordering.
+            .put("_relevance_first", JSONArray(listOfNotNull(relatedIdentity.firstOrNull(), relatedOther.firstOrNull())
+                .map { it.getString("id") }))
+            .put("identity", JSONArray(identity.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
             .put("selected", JSONArray(others.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }.map(::identityMaterial)))
-            .put("record_fragments", JSONArray((records.rotating(cursor, "identity") + others).distinctBy { it.getString("id") }
+            .put("record_fragments", JSONArray((identity + others).distinctBy { it.getString("id") }
                 .filter { SubjectMaterialBudget.estimate(it.toString()) > 384 }.map { InnerReadProgress.recordFragment(data, it) }))
             .put("pending", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) <= 384 }))
             .put("pending_fragments", JSONArray(candidates.filter { SubjectMaterialBudget.estimate(it.toString()) > 384 && !InnerReadProgress.complete(data, it) }
@@ -359,7 +366,7 @@ internal object InnerStructure {
                     .put("family", it.getJSONObject("content").getString("family"))
                     .put("status", it.getJSONObject("content").getString("status"))
             })).put("record_count", records.count()).put("pending_count", pending.count())
-            .put("selection", "完整条目按统一材料预算轮换；未选入仍有效，原文及全部候选可用 get 分页或按ID读取，实际读到后才能采用")
+            .put("selection", "从全部有效已采用条目的正文与情境按字词相关性检索，轮换补充，再按统一材料预算选入；未选入仍有效，原文及全部候选可用 get 分页或按ID读取，实际读到后才能采用")
     }
     private fun identityMaterial(row: JSONObject) = JSONObject().put("id", row.getString("id"))
         .put("content", copy(row.getJSONObject("content")))

@@ -36,7 +36,7 @@ import org.json.JSONObject
 private val Context.modelConfigDataStore: DataStore<Preferences> by
         versionedPreferencesDataStore(
                 name = "model_configs",
-                currentVersion = 6,
+                currentVersion = 7,
         ) { appContext ->
             preferenceSchemaMigration { version, preferences ->
                 when (version) {
@@ -46,6 +46,7 @@ private val Context.modelConfigDataStore: DataStore<Preferences> by
                     3 -> ModelConfigManager.migratePreferencesFromVersionThree(preferences)
                     4 -> ModelConfigManager.migratePreferencesFromVersionFour(preferences)
                     5 -> ModelConfigManager.migratePreferencesFromVersionFive(preferences)
+                    6 -> ModelConfigManager.migratePreferencesFromVersionSix(preferences)
                     else -> missingPreferencesSchemaMigration(version)
                 }
             }
@@ -470,6 +471,35 @@ class ModelConfigManager(
                 val mapping = ThinkingQualityMappingRegistry.resolve(provider, config.modelName, config.apiEndpoint, rules)
                 // The old first/default MINIMAL choice was invalid for these models. Preserve its
                 // minimum-thinking intent at configuration migration, never by retrying an API call.
+                val option = if (config.thinkingOptionId == "MINIMAL" && mapping.optionFor("MINIMAL") == null &&
+                        mapping.optionFor("LOW") != null) "LOW" else config.thinkingOptionId
+                preferences[key] = json.encodeToString(config.copy(thinkingConfigurations = rules, thinkingOptionId = option))
+            }
+        }
+
+        internal fun migratePreferencesFromVersionSix(preferences: MutablePreferences) {
+            val ids = preferences[CONFIG_LIST_KEY]?.let { json.decodeFromString<List<String>>(it) } ?: emptyList()
+            ids.forEach { id ->
+                val key = stringPreferencesKey("config_$id")
+                val stored = preferences[key] ?: return@forEach
+                val config = json.decodeFromString<ModelConfigData>(stored)
+                val provider = config.apiProviderTypeId
+                if (provider !in setOf("GOOGLE", "GEMINI_GENERIC", "VERTEX_AI")) return@forEach
+
+                // The editor pretty-prints JSON. Version 6 compared raw strings, so an unchanged
+                // shipped rule could miss the repair just because of whitespace or object-key order.
+                // Compare structure, keeping array order and every user-authored value significant.
+                val savedRules = try {
+                    json.parseToJsonElement(config.thinkingConfigurations)
+                } catch (error: kotlinx.serialization.SerializationException) {
+                    AppLogger.w("ModelConfigManager", "Skipping invalid thinking rules during schema migration")
+                    return@forEach
+                }
+                val legacyRules = json.parseToJsonElement(ModelThinkingConfigDefaults.legacyGeminiRulesForProvider(provider))
+                if (savedRules != legacyRules) return@forEach
+
+                val rules = thinkingRulesForProvider(provider)
+                val mapping = ThinkingQualityMappingRegistry.resolve(provider, config.modelName, config.apiEndpoint, rules)
                 val option = if (config.thinkingOptionId == "MINIMAL" && mapping.optionFor("MINIMAL") == null &&
                         mapping.optionFor("LOW") != null) "LOW" else config.thinkingOptionId
                 preferences[key] = json.encodeToString(config.copy(thinkingConfigurations = rules, thinkingOptionId = option))

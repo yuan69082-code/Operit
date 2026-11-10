@@ -3,6 +3,7 @@ package com.ai.assistance.operit.api.chat.enhance
 import android.content.Context
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.core.chat.CurrentRequestContext
+import com.ai.assistance.operit.core.chat.HistoricalToolResultContext
 import com.ai.assistance.operit.core.chat.RuntimeContextSections
 import com.ai.assistance.operit.core.chat.hooks.PromptHookContext
 import com.ai.assistance.operit.core.chat.hooks.PromptHookRegistry
@@ -37,6 +38,7 @@ import com.ai.assistance.operit.data.preferences.MemorySpaceProfileDocumentRepos
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.core.avatar.impl.factory.AvatarModelFactoryImpl
 import com.ai.assistance.operit.data.repository.AvatarRepository
+import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.core.tools.ToolProgressBus
@@ -744,6 +746,20 @@ class ConversationService(
                 } else {
                     // Add typed turns as is
                     preparedHistory.add(message)
+                }
+            }
+            // Completed results otherwise get retransmitted in full on every later user turn.
+            // Only project where the existing history tool can retrieve the exact saved source.
+            // Live follow-ups use normalizeConversationHistoryForModel and remain verbatim.
+            if (includeConversationIdentity && enableTools && chatId != null &&
+                effectiveRoleCardId != null && roleCardToolAccess.isBuiltinToolAllowed("group_chat") &&
+                HistoricalToolResultContext.hasCandidates(preparedHistory)) {
+                val chat = ChatHistoryManager.getInstance(context).getChatMetadata(chatId)
+                if (chat != null && chat.characterGroupId.isNullOrBlank() &&
+                    chat.characterCardId == effectiveRoleCardId) {
+                    val projected = HistoricalToolResultContext.compact(preparedHistory, chatId)
+                    preparedHistory.clear()
+                    preparedHistory.addAll(projected)
                 }
             }
         }

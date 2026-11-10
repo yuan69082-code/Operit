@@ -7326,6 +7326,8 @@
     <string name="gemini_error_request_cancelled">请求已被用户取消</string>
     <string name="gemini_error_no_error_details">无错误详情</string>
     <string name="gemini_error_api_request_failed">API请求失败: %1$d, %2$s</string>
+    <string name="gemini_error_prepaid_credits_exhausted">模型服务的预付余额已用完（HTTP 402）。请在 Google AI Studio 检查项目账单，或选择其他可用的模型配置。</string>
+    <string name="gemini_error_unsupported_thinking_level">模型 %1$s 不支持当前思考档位。请在该模型配置中选择它支持的档位；本次请求不会重复重试。</string>
     <string name="gemini_error_timeout_max_retries">AI响应获取失败，连接超时且已达最大重试次数: %1$s</string>
     <string name="gemini_error_cannot_connect">无法连接到服务器，请检查网络连接或API地址是否正确</string>
     <string name="gemini_error_max_retries">AI响应获取失败，已达最大重试次数: %1$s</string>

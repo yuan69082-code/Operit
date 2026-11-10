@@ -272,6 +272,49 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             (listOf(scope, kind) + listOfNotNull(parent)).toTypedArray()).use { c -> c.moveToFirst(); c.getLong(0) }
     }
 
+    /** Current adopted rows share a compact text index; the archive remains the authority.
+     * INSERT OR REPLACE gives an edited row a new rowid, including same-ID retirement. Other
+     * category kinds do not invalidate this index. No historical/evidence JSON is retained. */
+    fun relevantInnerRows(input: String, parent: String, limit: Int): List<JSONObject> {
+        require(parent in setOf("identity", "other") && limit in 1..8)
+        val query = InnerMaterialSelection.terms(input)
+        if (query.isEmpty() || !file.exists()) return emptyList()
+        val db = db()
+        val revision = db.rawQuery("SELECT COUNT(*),COALESCE(MAX(rowid),0) FROM category_current WHERE scope=? AND kind='inner_record'",
+            arrayOf(scope)).use { c -> c.moveToFirst(); c.getLong(0) to c.getLong(1) }
+        val key = file.absolutePath to scope
+        val cached = synchronized(innerSearchCache) { innerSearchCache[key]?.takeIf { it.revision == revision } }
+        val ids = if (cached != null) InnerMaterialSelection.ranked(cached.entries.asSequence(), query, parent, limit)
+        else {
+            val entries = mutableListOf<InnerMaterialSelection.Entry>()
+            var weight = 0L
+            var retain = true
+            val matches = db.rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind='inner_record' ORDER BY id",
+                arrayOf(scope)).use { cursor ->
+                val stream = sequence {
+                    while (cursor.moveToNext()) {
+                        val row = JSONObject(cursor.getString(0))
+                        if (row.optBoolean("closed")) continue
+                        val entry = InnerMaterialSelection.entry(row.getJSONObject("value")) ?: continue
+                        if (retain) {
+                            weight += entry.cacheWeight
+                            if (weight > INNER_INDEX_CACHE_WEIGHT) { entries.clear(); retain = false }
+                            else entries += entry
+                        }
+                        yield(entry)
+                    }
+                }
+                InnerMaterialSelection.ranked(stream, query, parent, limit)
+            }
+            synchronized(innerSearchCache) {
+                if (retain) innerSearchCache[key] = InnerSearchIndex(revision, entries.toList())
+                else innerSearchCache.remove(key)
+            }
+            matches
+        }
+        return ids.mapNotNull { id -> categoryRow("inner_record", id)?.getJSONObject("value") }
+    }
+
     fun page(kind: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> {
         require(offset >= 0 && limit in 1..21)
         if (!file.exists()) return emptyList()
@@ -306,6 +349,12 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     }
 
     companion object {
+        private const val INNER_INDEX_CACHE_WEIGHT = 1_048_576L
+        private data class InnerSearchIndex(val revision: Pair<Long, Long>, val entries: List<InnerMaterialSelection.Entry>)
+        private val innerSearchCache = object : LinkedHashMap<Pair<String, String>, InnerSearchIndex>(4, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, String>, InnerSearchIndex>?) = size > 4
+        }
+
         fun lookup(kind: String, row: JSONObject): String = when (kind) {
             "semantic_reports" -> row.getString("frame_id")
             "versions" -> "${row.getString("dimension")}:${row.getInt("version")}"

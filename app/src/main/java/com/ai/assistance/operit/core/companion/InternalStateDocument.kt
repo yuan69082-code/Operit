@@ -10,6 +10,7 @@ internal interface InternalStateHistoryAccess {
     fun categoryRow(kind: String, id: String): JSONObject? = null
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String? = null): List<JSONObject> = emptyList()
     fun categoryCount(kind: String, parent: String? = null): Long = 0L
+    fun relevantInnerRows(input: String, parent: String, limit: Int): List<JSONObject> = emptyList()
 }
 
 internal class InternalStateDocument(data: JSONObject, val history: InternalStateHistoryAccess) : JSONObject(data.toString()) {

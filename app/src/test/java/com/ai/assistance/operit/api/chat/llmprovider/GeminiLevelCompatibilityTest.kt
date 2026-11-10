@@ -8,6 +8,10 @@ import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -60,6 +64,56 @@ class GeminiLevelCompatibilityTest {
                     thinkingOptionId = expected), actual)
             }
         }
+    }
+
+    @Test fun reformattedPublishedRulesAreRepairedAfterVersionSixAlreadyRan() {
+        for (provider in listOf(ApiProviderType.GOOGLE, ApiProviderType.GEMINI_GENERIC, ApiProviderType.VERTEX_AI)) {
+            val legacy = ModelThinkingConfigDefaults.legacyGeminiRulesForProvider(provider.name)
+            val reordered = reverseObjectKeys(ModelConfigManager.json.parseToJsonElement(legacy)).toString()
+            for (saved in listOf(JSONArray(legacy).toString(2), reordered)) {
+                val original = ModelConfigData(id = "formatted", name = "formatted", modelName = "gemini-3.8-flash",
+                    apiProviderType = provider, apiProviderTypeId = provider.name,
+                    thinkingConfigurations = saved, thinkingOptionId = "MINIMAL")
+                val key = stringPreferencesKey("config_formatted")
+                val prefs = mutablePreferencesOf(ModelConfigManager.CONFIG_LIST_KEY to "[\"formatted\"]",
+                    key to ModelConfigManager.json.encodeToString(original))
+
+                ModelConfigManager.migratePreferencesFromVersionSix(prefs)
+                val repaired = prefs[key]!!
+                ModelConfigManager.migratePreferencesFromVersionSix(prefs)
+                assertEquals(repaired, prefs[key])
+                val actual = ModelConfigManager.json.decodeFromString<ModelConfigData>(repaired)
+                assertEquals(original.copy(thinkingConfigurations = ModelThinkingConfigDefaults.forProvider(provider.name),
+                    thinkingOptionId = "LOW"), actual)
+            }
+        }
+    }
+
+    @Test fun formattingRepairPreservesRulePriorityCustomValuesAndValidSelections() {
+        val legacy = ModelThinkingConfigDefaults.legacyGeminiRulesForProvider("GOOGLE")
+        val reversedRules = JsonArray(ModelConfigManager.json.parseToJsonElement(legacy).let { it as JsonArray }.reversed()).toString()
+        for ((saved, selected, expectedRules, expectedOption) in listOf(
+            listOf(JSONArray(legacy).toString(2), "HIGH", ModelThinkingConfigDefaults.forProvider("GOOGLE"), "HIGH"),
+            listOf(reversedRules, "MINIMAL", reversedRules, "MINIMAL"),
+            listOf(legacy.replace("\"value\":\"MINIMAL\"", "\"value\":\"LOW\""), "MINIMAL",
+                legacy.replace("\"value\":\"MINIMAL\"", "\"value\":\"LOW\""), "MINIMAL"),
+        )) {
+            val original = ModelConfigData(id = "custom", name = "custom", modelName = "gemini-3.8-flash",
+                apiProviderType = ApiProviderType.GOOGLE, apiProviderTypeId = "GOOGLE",
+                thinkingConfigurations = saved, thinkingOptionId = selected)
+            val key = stringPreferencesKey("config_custom")
+            val prefs = mutablePreferencesOf(ModelConfigManager.CONFIG_LIST_KEY to "[\"custom\"]",
+                key to ModelConfigManager.json.encodeToString(original))
+            ModelConfigManager.migratePreferencesFromVersionSix(prefs)
+            val actual = ModelConfigManager.json.decodeFromString<ModelConfigData>(prefs[key]!!)
+            assertEquals(original.copy(thinkingConfigurations = expectedRules, thinkingOptionId = expectedOption), actual)
+        }
+    }
+
+    private fun reverseObjectKeys(value: JsonElement): JsonElement = when (value) {
+        is JsonObject -> JsonObject(value.entries.reversed().associate { it.key to reverseObjectKeys(it.value) })
+        is JsonArray -> JsonArray(value.map(::reverseObjectKeys))
+        else -> value
     }
 
     private data class Case(val model: String, val input: String, val expected: String, val custom: Boolean = false)

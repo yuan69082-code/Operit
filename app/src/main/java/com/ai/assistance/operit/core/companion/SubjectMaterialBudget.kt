@@ -43,8 +43,11 @@ internal object SubjectMaterialBudget {
             lanes += Lane(path, empty, (0 until a.length()).map { a.get(it) })
         }
         val inner = result.getJSONObject("inner_structure")
-        // Identity gets the first opportunity; if it exceeds the budget it remains accessible
-        // by ID, explicitly omitted, never silently replaced with the initial role template.
+        val priority = inner.optJSONArray("_relevance_first")?.let { ids ->
+            (0 until minOf(ids.length(), 2)).map { ids.getString(it) }.distinct()
+        }.orEmpty()
+        inner.remove("_relevance_first")
+        // Short originals and long fragments retain the retrieval order across both lanes.
         lane(inner, "identity", "inner_structure.identity")
         lane(inner, "selected", "inner_structure.selected")
         lane(result.getJSONObject("category_events"), "episodes", "category_events.episodes")
@@ -56,7 +59,7 @@ internal object SubjectMaterialBudget {
             lane(result, key, key)
         for (key in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
         result.remove("selection")
-        inner.put("selection", "Whole records selected under shared token estimate; omitted identity remains authoritative. Retrieve by ID before assuming its content.")
+        inner.put("selection", "Relevant adopted records/fragments get first budget opportunities; other material rotates. Omitted records remain authoritative; retrieve by ID.")
         val omitted = JSONObject()
         val budget = JSONObject().put("limit_tokens", requested).put("estimated_tokens", requested)
             .put("method", "host_estimate_utf8_non_han_plus_25_percent")
@@ -94,9 +97,20 @@ internal object SubjectMaterialBudget {
                 omitted.put(lane.path, lane.rows.size - lane.target.length())
             }
         }
-        // A compact rotating directory remains discoverable even while large details compete.
-        // It carries no psychological ranking. Reserving these IDs prevents detail selection
-        // from permanently hiding the next page of existing records.
+        // Reserve an opportunity for the best matching identity and other adopted record before
+        // catalogue/filler overhead. Only two rows qualify; other domains still rotate normally.
+        val prioritized = mutableSetOf<Pair<String, Int>>()
+        for (id in priority) {
+            val match = lanes.asSequence().filter { it.path in setOf("inner_structure.identity",
+                "inner_structure.selected", "inner_structure.record_fragments") }.mapNotNull { lane ->
+                val index = lane.rows.indexOfFirst { row -> row is JSONObject && !row.optBoolean("private_material_omitted") &&
+                    (if (lane.path.endsWith("record_fragments")) row.optString("record_id") else row.optString("id")) == id }
+                if (index >= 0) lane to index else null
+            }.firstOrNull() ?: continue
+            if (prioritized.add(match.first.path to match.second)) include(match.first, match.first.rows[match.second])
+        }
+        // Remaining space exposes the compact rotating directory before other details. It
+        // carries no psychological ranking and continues to advance through existing records.
         val directory = lanes.firstOrNull { it.path == "inner_structure.catalogue" }
         directory?.rows?.forEach { include(directory, it) }
         // Rotate detail domains per request so emotion/identity cannot forever exclude
@@ -106,7 +120,7 @@ internal object SubjectMaterialBudget {
         val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
         val order = rest.drop(start) + rest.take(start)
         for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
-            order.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
+            order.forEach { if (index < it.rows.size && (it.path to index) !in prioritized) include(it, it.rows[index]) }
         budget.put("estimated_tokens", estimate(result.toString()) + ENVELOPE_RESERVE)
         check(estimate(result.toString()) + ENVELOPE_RESERVE <= requested)
         return result

@@ -236,6 +236,9 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Build host stream parser for JVM regression
+        run: bash ci/script/build_streamnative_host.sh "$RUNNER_TEMP/operit-native"
+
       - name: Run JVM regression before packaging
         shell: bash
         run: |
@@ -244,6 +247,7 @@ jobs:
           # Keep the full regression, but run it separately from native/APK assembly.
           # The combined invocation stalled after packageDebug in run 42626216230;
           # the same commit's standalone JVM job passed. Emit per-test progress for evidence.
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/operit-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./gradlew :app:testDebugUnitTest --init-script ci/script/android_test_progress.gradle --stacktrace --no-daemon
 
       - name: Run Gradle build

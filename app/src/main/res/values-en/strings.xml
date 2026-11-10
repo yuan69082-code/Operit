@@ -6810,6 +6810,8 @@
     <string name="gemini_error_request_cancelled">Request cancelled by user</string>
     <string name="gemini_error_no_error_details">No error details</string>
     <string name="gemini_error_api_request_failed">API request failed: %1$d, %2$s</string>
+    <string name="gemini_error_prepaid_credits_exhausted">The model service has no prepaid credits remaining (HTTP 402). Check the project billing in Google AI Studio or select another available model configuration.</string>
+    <string name="gemini_error_unsupported_thinking_level">Model %1$s does not support the selected thinking level. Choose a supported level in its model configuration. This request will not be retried.</string>
     <string name="gemini_error_timeout_max_retries">Failed to get AI response, connection timeout and max retries reached: %1$s</string>
     <string name="gemini_error_cannot_connect">Cannot connect to server, please check network connection and API address</string>
     <string name="gemini_error_max_retries">Failed to get AI response, max retries reached: %1$s</string>

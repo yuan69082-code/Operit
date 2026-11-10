@@ -17,6 +17,7 @@ on:
       - build.gradle.kts
       - ci/script/download_android_dependencies.sh
       - ci/script/prepare_android_dependencies.py
+      - ci/script/build_streamnative_host.sh
       - cmake/**
       - avator/**
       - examples/**
@@ -163,8 +164,13 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Build host stream parser for JVM tests
+        run: bash ci/script/build_streamnative_host.sh "$RUNNER_TEMP/operit-native"
+
       - name: Run JVM unit tests
-        run: ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
+        run: |
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/operit-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
 
       - name: Upload Android test reports
         if: always()
@@ -173,6 +179,7 @@ jobs:
           name: operit-android-test-reports-${{ github.run_number }}
           path: |
             app/build/reports/**
+            app/build/test-results/**
             build/reports/**
           if-no-files-found: warn
           retention-days: 14

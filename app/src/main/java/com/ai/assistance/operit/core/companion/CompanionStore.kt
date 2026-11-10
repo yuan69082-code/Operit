@@ -258,6 +258,9 @@ class CompanionStore(context: Context) {
         override fun categoryCount(kind: String, parent: String?) = synchronized(lock(scope)) {
             history(scope).use { it.categoryCount(kind, parent) }
         }
+        override fun relevantInnerRows(input: String, parent: String, limit: Int) = synchronized(lock(scope)) {
+            history(scope).use { it.relevantInnerRows(input, parent, limit) }
+        }
         private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256
         }
