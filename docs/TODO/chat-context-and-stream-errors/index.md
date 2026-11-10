@@ -100,6 +100,19 @@ CI 继续上传 HTML 报告，并增加 XML 结果，便于读取完整失败证
 正式安装包由本次授权的 Shared desktop preview 发布流程构建，最终交付以该流程和 Release 资产为准。
 尚未进行用户手机实机验证。
 
+## 正式发布验证
+
+[发布 PR #63](https://github.com/yuan69082-code/Operit/pull/63) 已按授权创建。
+[Shared #158](https://github.com/yuan69082-code/Operit/actions/runs/42825824180) 的 Windows
+25 项检查及打包通过；Android 打包前的完整回归共执行 2074 项，4 失败、6 跳过，因而未合并或发布。
+4 项失败均为新增真实 Delegate 用例初始化时缺少宿主库，报告明确为
+`UnsatisfiedLinkError: no streamnative in java.library.path`。
+同一合并候选的独立 Android JVM tests 工作已通过，包含完整 JVM 回归及 Android 测试源码编译。
+
+独立 Android Tests 已配置宿主库，但 Android Build 自己的打包前回归漏配了这一依赖。
+本次在 Android Build 中同样运行已有的宿主构建脚本，并只在 JVM 回归步骤前置其库路径。
+不跳过测试，不修改生产代码、测试断言或 APK 原生库打包；修订后继续同一 PR 的正常发布流程。
+
 ## 代码外的依据
 
 Google 官方文档列出 Argon、3.7/3.8 Flash 等型号不支持 `MINIMAL`，设置后会返回 400：
