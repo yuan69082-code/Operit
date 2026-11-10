@@ -1409,6 +1409,19 @@ class EnhancedAIService private constructor(private val context: Context) {
                     // CancellationException. Do not turn that into successful stream closure.
                     throw CancellationException("Message execution was cancelled").apply { initCause(e) }
                 }
+                if (e is InternalStateReportStream.ProtocolException) {
+                    val frame = execContext.internalStateFrame
+                    AppLogger.e(TAG, "STATE_REPORT_PARSE_REJECTED subject=${frame?.roleId} frame=${frame?.id} read=${frame?.stateVersion} code=${e.code}; prior state and execution receipts retained")
+                    execContext.activity?.let { ref ->
+                        try {
+                            ActivityNotes.part(context, ref, "report-failure:${frame?.id}:${execContext.activityRound}", "report_failure",
+                                JSONObject().put("status", "rejected").put("code", e.code.name)
+                                    .put("frame_id", frame?.id ?: JSONObject.NULL).put("read_version", frame?.stateVersion ?: JSONObject.NULL)
+                                    .put("state_adopted", false).put("retry_requested", false))
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (storage: Exception) { AppLogger.e(TAG, "STATE_REPORT_FAILURE_RECEIPT_NOT_SAVED type=${storage.javaClass.simpleName}") }
+                    }
+                }
                 invalidateExecutionContext(execContext, "sendMessage.failed")
                 AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
                 withContext(Dispatchers.Main) {

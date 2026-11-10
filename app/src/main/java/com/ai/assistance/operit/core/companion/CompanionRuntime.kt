@@ -547,7 +547,7 @@ object CompanionRuntime {
             ${if (phoneRole != null || softwareRole != null) "关注档位由你自己定：觉得现在要更紧或可以松一点，就用 phone_awareness action=gear 调（level/hours/reason）；不想改就不用调用。底线在的时候往下降要写理由。\n            " else ""}$openInstruction
             无论发不发消息，都另用 <companion_note>…</companion_note> 写给下次的自己：这次醒来注意到了什么、此刻什么心情、真正想继续、转向或放下什么，以及为什么这样决定。若本轮涉及联系她，再写想不想开口及真实原因；不要为了给软件一个理由而编造动机。它会藏在你们的聊天里，只有你能看到，她看不到；用你自己的话写，不写流水账。
             ${ActivityNotes.instructions}
-            学习过程写入实际资料，不把计划、工具日志和控制标记直接发送给用户。${if (internalEnabled) "内部状态通过本轮 operit_state_report 回报，在公开表达决定前给出完整报告；安静时也可以报告状态变化，不需要另调用工具写当前值。宿主记录真实回复、工具和探索结果，不自行编造宿主事件。" else ""}
+            学习过程写入实际资料，不把计划、工具日志和控制标记直接发送给用户。${if (internalEnabled) "内部状态通过最终模型子响应中独立的 operit_state_report 回报，可在公开表达或安静决定之前或之后，不嵌套在随记、消息或工具参数中；安静时也可以报告状态变化，不需要另调用工具写当前值。宿主记录真实回复、工具和探索结果，不自行编造宿主事件。" else ""}
         """.trimIndent()
         val result = CompletableDeferred<String>()
         if (explorationWork != null && (epoch != generation.get() ||

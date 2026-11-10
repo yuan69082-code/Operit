@@ -7,10 +7,10 @@ import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 
 class ResponseReaderIsolationTest {
-    @Test fun malformedAndLateReportsStayInsideOwningTurnAndCancelSiblingReaders(): Unit = runBlocking {
+    @Test fun malformedAndTruncatedReportsStayInsideOwningTurnAndCancelSiblingReaders(): Unit = runBlocking {
         for ((text, code) in listOf(
             "</operit_state_report>" to InternalStateReportStream.ErrorCode.MALFORMED_REPORT_TAG,
-            "正文<operit_state_report>" to InternalStateReportStream.ErrorCode.LATE_REPORT
+            "正文<operit_state_report>" to InternalStateReportStream.ErrorCode.TRUNCATED_REPORT
         )) {
             val uncaught = CopyOnWriteArrayList<Throwable>()
             val host = CoroutineScope(SupervisorJob() + Dispatchers.Default +

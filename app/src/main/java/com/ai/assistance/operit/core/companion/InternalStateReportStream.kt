@@ -5,11 +5,13 @@ import okio.Buffer
 import org.json.JSONObject
 
 /**
- * Removes a leading state report before text reaches reply history, UI, speech, or tool detection.
+ * Removes a state report before text reaches reply history, UI, speech, or tool detection.
  * This class only stages a report. The owner decides whether a successful business turn may commit it.
  *
  * Ordinary text, including provider thinking and Markdown code examples, is preserved unchanged.
- * A report is accepted only before public prose, outside those quoted regions.
+ * Final reports may precede or follow prose/control output. Adoption is still at turn end,
+ * with the same owner/source/version validation; output position is not adoption authority.
+ * Reports inside quoted/tool/companion payloads are not host framing.
  * Calls, including provider savepoint/rollback events, must be serialized by the stream's owner.
  */
 class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
@@ -97,10 +99,16 @@ class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
      * latched instead: no further private text is published, and [finish] throws outside that
      * retry boundary. Only a real provider [rollback] can restore an earlier valid parser state.
      */
-    fun appendDeferringFailure(chunk: String): String = try {
-        append(chunk)
-    } catch (_: ProtocolException) {
-        ""
+    fun appendDeferringFailure(chunk: String): String {
+        val output = StringBuilder()
+        try {
+            requireUsable()
+            chunk.forEach { consume(it, output) }
+        } catch (_: ProtocolException) {
+            // Preserve already unambiguously public text in this same chunk; suppress the
+            // failed report and all unparseable tail, without retrying the provider.
+        }
+        return output.toString()
     }
 
     /** Flushes non-report lookahead. An absent report is represented by [report] remaining null. */
@@ -164,7 +172,6 @@ class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
             when (token) {
                 OPEN_REPORT -> {
                     if (reportJson != null) fail(ErrorCode.DUPLICATE_REPORT)
-                    if (bodyStarted) fail(ErrorCode.LATE_REPORT)
                     textProbe.clear()
                     mode = Mode.REPORT
                     return
@@ -177,6 +184,13 @@ class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
                     mode = Mode.THINKING
                     return
                 }
+            }
+            PROTECTED_TAGS[token]?.let { end ->
+                thinkingEnd = end
+                emit(token, output)
+                textProbe.clear()
+                mode = Mode.THINKING
+                return
             }
             if (token.equals(OPEN_REPORT, ignoreCase = true) ||
                 token.equals(CLOSE_REPORT, ignoreCase = true)) {
@@ -397,6 +411,11 @@ class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
         const val CLOSE_THINK = "</think>"
         const val OPEN_THINKING = "<thinking>"
         const val CLOSE_THINKING = "</thinking>"
-        val TEXT_TOKENS = listOf(OPEN_REPORT, CLOSE_REPORT, OPEN_THINK, OPEN_THINKING)
+        val PROTECTED_TAGS = mapOf(
+            "<companion_note>" to "</companion_note>", "<companion_message>" to "</companion_message>",
+            "<activity_note>" to "</activity_note>", "<waking_note>" to "</waking_note>",
+            "<tool " to "</tool>", "<tool>" to "</tool>",
+            "<tool_result " to "</tool_result>", "<tool_result>" to "</tool_result>")
+        val TEXT_TOKENS = listOf(OPEN_REPORT, CLOSE_REPORT, OPEN_THINK, OPEN_THINKING) + PROTECTED_TAGS.keys
     }
 }
