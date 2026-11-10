@@ -110,6 +110,7 @@ EnhancedReportIsolationTest 使用实际 EnhancedAIService.sendMessage、共享�
 - CI 的失败曾真实阻止交付，未删断言、跳失败或停用功能。146 的活动测试确认为测试管理器跨测试持有旧 Context，已隔离两个管理器；偏好测试补齐本来必需的 context/exceptions。149 的新端到端测试还暴露了替身没有调用真实工具历史规范化、取消检查放错到子协程的问题；现已使用真实规范化，并按生产消息消费者在拥有本轮请求的协程检查完成原因。
 - 已验证代码 e1df565，[双端检查 150](https://github.com/yuan69082-code/Operit/actions/runs/42730540628)：Android 2041 项，2035 通过、6 项原有跳过、0 失败；Windows 25 项全部通过，类型检查与便携包完成。EnhancedReportIsolationTest 三条正常入口用例全部通过，另外断言合法报告确实采用、坏报告未采用、坏报告内的随记标记不能公开、工具已完成事实不丢失且下一条仍可回复。
 - 新测试覆盖正常候选超过 8/32/128、48 小时、备份恢复、全文修改与真实读取资格、活动、来源可见范围、Provider 工具续轮、摘要与报告失败边界。
+- 150/153 的打包环境还暴露出工具包初始化挂起：该环境生成内置 ToolPkg，JVM 不含 Android QuickJS JNI，LinkageError 逃过 Exception 捕获，初始化 Future 未完成，正常 EnhancedAIService 工具目录读取一直等待。153 的线程证据定位到 PackageManager.ensureInitialized:644；独立 JVM 任务没有同样生成资产，不能用它的通过替代打包回归。现按包记录运行库加载错误、保留其他工具可用，顶层初始化失败必须完成所有等待方并保持未就绪，取消/VM 致命错误不冒充成功；新增真实目录入口的并发失败测试。后续 CI 必须验证该修复及完整打包，不跳过原集成测试。
 - 浏览器实际生产页面 + 模拟 HTTP 交互 51 次、无 JavaScript 错误，无模型请求。截图与详细检查见 screenshots/ui-check.json。这是 Windows/WebChat 与手机宽度布局验证，不是 Android Compose 真机截图。
 - [桌面概览](screenshots/private-desktop-overview.png)、[完整候选](screenshots/private-desktop-fulltext.png)、[承接入口](screenshots/private-mobile-import.png)、[梦醒随记](screenshots/private-mobile-waking.png)、[读取失败](screenshots/private-mobile-read-error.png) 均使用标明的模拟内容，不能证明真实主体行为。
 - 真机、真实模型理解、实际 MCP、真实订阅账号、Android 原生触控截图、系统长期后台及这台手机的崩溃现场尚未验证。书房整书扫描随文件增长的原有限制保留。

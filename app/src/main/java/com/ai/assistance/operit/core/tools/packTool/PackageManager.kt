@@ -685,12 +685,17 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
                     refreshToolPkgRuntimeState(persistIfChanged = true)
                     logToolPkgInfo("initialization coroutine success, totalMs=${System.currentTimeMillis() - initStart}")
                     future.complete(Unit)
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Native/plugin linkage failures are Errors, not Exceptions. Every
+                    // waiter must receive a terminal result even when a runtime cannot load.
+                    // Complete before logging (which can itself fail) and never claim ready.
+                    synchronized(initLock) { isInitialized = false; runtimeCachesReady = false }
+                    future.completeExceptionally(e)
+                    if (e is kotlinx.coroutines.CancellationException || e is VirtualMachineError || e is ThreadDeath) throw e
                     logToolPkgError(
                         "initialization coroutine failed after ${System.currentTimeMillis() - initStart}ms, reason=${e.message ?: e.javaClass.simpleName}",
                         e
                     )
-                    future.completeExceptionally(e)
                 } finally {
                     synchronized(initLock) {
                         if (initializationFuture === future) {
@@ -1150,7 +1155,10 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
                         sourcePath = candidate.sourcePath
                     )
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException || e is VirtualMachineError || e is ThreadDeath) throw e
+            // An unavailable optional script runtime rejects this package, not the whole
+            // catalog. Preserve its source/error; built-in tools and other packages remain usable.
             AppLogger.e(TAG, "Unexpected error while loading $phase package: ${candidate.sourcePath}", e)
             logToolPkgError("loadAvailablePackages $phase parse failed, source=${candidate.sourcePath}", e)
             stagedPackageLoadErrors[candidate.fileName.substringBeforeLast('.')] =

@@ -44,21 +44,12 @@ class EnhancedReportIsolationTest {
     // indefinitely. This does not retry or waive any production-path assertion.
     @get:Rule val timeout = Timeout.builder().withTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
         .withLookingForStuckThread(true).build()
-    private var watchdog: java.util.Timer? = null
     @OptIn(ExperimentalCoroutinesApi::class)
     @Before fun mainDispatcher() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-        watchdog = java.util.Timer("report-isolation-diagnostics", true).apply {
-            schedule(object : java.util.TimerTask() { override fun run() {
-                System.err.println("Report isolation test still running after 60 seconds:")
-                Thread.getAllStackTraces().forEach { (thread, trace) ->
-                    System.err.println("${thread.name} ${thread.state}\n" + trace.joinToString("\n"))
-                }
-            } }, 60_000L)
-        }
     }
     @OptIn(ExperimentalCoroutinesApi::class)
-    @After fun restoreMainDispatcher() { watchdog?.cancel(); Dispatchers.resetMain() }
+    @After fun restoreMainDispatcher() { Dispatchers.resetMain() }
     private class Fixture(val app: Context) {
         lateinit var role: String
         lateinit var chat: String
