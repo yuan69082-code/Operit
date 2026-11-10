@@ -38,11 +38,12 @@ class SubscriptionProviderEntryPointsTest {
         val requests = mutableListOf<JSONObject>()
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()
-            assertEquals(if (channel == "kimi") "api.kimi.com" else "api.x.ai", request.url.host)
+            assertEquals(when (channel) { "kimi" -> "api.kimi.com"; "glm" -> "open.bigmodel.cn"; else -> "api.x.ai" }, request.url.host)
+            if (channel == "glm") assertEquals("/api/coding/paas/v4/chat/completions", request.url.encodedPath)
             assertEquals("Bearer subscription-test", request.header("Authorization"))
             val buffer = Buffer(); requireNotNull(request.body).writeTo(buffer)
             requests.add(JSONObject(buffer.readUtf8()))
-            val body = if (channel == "kimi") {
+            val body = if (channel != "grok") {
                 if (requests.size == 1) sse(
                     """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"server-call","type":"function","function":{"name":"sleep","arguments":"{}"}}]}}]}""",
                     """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""", "[DONE]")
@@ -59,7 +60,7 @@ class SubscriptionProviderEntryPointsTest {
                 .header("Content-Type", "text/event-stream").body(body.toResponseBody()).build()
         }.build()
         val accounts = SubscriptionAccounts(vault, client)
-        if (channel == "kimi") accounts.saveKimiKey("subscription-test") else vault.put("grok",
+        if (channel != "grok") accounts.savePlanKey(channel, "subscription-test") else vault.put("grok",
             JSONObject().put("session", "grok-test").put("access", "subscription-test").put("refresh", "refresh")
                 .put("expires_at", System.currentTimeMillis() + 3_600_000))
         val provider = SubscriptionProviderFactory.create(accounts,
@@ -80,7 +81,7 @@ class SubscriptionProviderEntryPointsTest {
         assertEquals(2, requests.size)
         assertTrue(requests[1].toString().contains("原助手的已采用身份材料"))
         assertTrue(requests[1].toString().contains("确切本地结果"))
-        if (channel == "kimi") {
+        if (channel != "grok") {
             val rows = requests[1].getJSONArray("messages")
             val messages = (0 until rows.length()).map { rows.getJSONObject(it) }
             val tool = messages.single { it.optString("role") == "tool" }
@@ -98,4 +99,58 @@ class SubscriptionProviderEntryPointsTest {
     }
     @Test fun kimiStreamsAndPairsToolContinuationWithoutChangingAssistantMaterial(): Unit = runBlocking { exercise("kimi") }
     @Test fun grokStreamsAndPairsToolContinuationWithoutChangingAssistantMaterial(): Unit = runBlocking { exercise("grok") }
+    @Test fun glmUsesPlanEndpointAndPairsToolContinuationWithoutChangingAssistantMaterial(): Unit = runBlocking { exercise("glm") }
+
+    @Test fun geminiCodeAssistPreservesNativePartsAndSignaturesThroughNormalFactory(): Unit = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val vault = Vault()
+        vault.put("gemini", JSONObject().put("session", "google-test").put("access", "google-access")
+            .put("refresh", "refresh").put("project", "service-managed-project").put("expires_at", System.currentTimeMillis() + 3_600_000))
+        val requests = mutableListOf<JSONObject>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            assertEquals("cloudcode-pa.googleapis.com", request.url.host)
+            assertEquals("/v1internal:streamGenerateContent", request.url.encodedPath)
+            assertEquals("sse", request.url.queryParameter("alt"))
+            assertNull(request.url.queryParameter("key"))
+            assertEquals("Bearer google-access", request.header("Authorization"))
+            val buffer = Buffer(); request.body!!.writeTo(buffer)
+            val input = JSONObject(buffer.readUtf8()); requests.add(input)
+            assertEquals("service-managed-project", input.getString("project"))
+            assertEquals(0, input.getJSONArray("enabled_credit_types").length())
+            assertTrue(input.getJSONObject("request").toString().contains("持续身份材料"))
+            val part = if (requests.size == 1)
+                """{"functionCall":{"id":"google-call","name":"sleep","args":{}},"thoughtSignature":"preserve-signature"}"""
+            else """{"text":"已看到准确回执。"}"""
+            val body = sse("""{"response":{"candidates":[{"content":{"role":"model","parts":[$part]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3}},"traceId":"trace"}""")
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("mocked")
+                .body(body.toResponseBody()).build()
+        }.build()
+        val accounts = SubscriptionAccounts(vault, client)
+        val provider = SubscriptionProviderFactory.create(accounts,
+            ModelConfigData("same-assistant-config", "Google", subscriptionChannel = "gemini", modelName = "gemini-2.5-pro", enableToolCall = true), client)
+        val history = listOf(PromptTurn(PromptTurnKind.SYSTEM, "持续身份材料"), PromptTurn(PromptTurnKind.USER, "请取得本地结果"))
+        suspend fun send(turns: List<PromptTurn>): String {
+            val text = StringBuilder()
+            provider.sendMessage(context, turns, availableTools = listOf(ToolPrompt("sleep", "Local receipt", parametersStructured = emptyList())),
+                enableRetry = false, recordTokenUsage = false).collect { text.append(it) }
+            return text.toString()
+        }
+        val call = send(history)
+        assertTrue(call, call.contains("sleep"))
+        val answer = send(history + PromptTurn(PromptTurnKind.ASSISTANT, call) +
+            PromptTurn(PromptTurnKind.TOOL_RESULT, "<tool_result name=\"sleep\" status=\"success\"><content>准确回执</content></tool_result>", "sleep"))
+        assertTrue(answer, answer.contains("已看到准确回执"))
+        val contents = requests[1].getJSONObject("request").getJSONArray("contents")
+        val parts = (0 until contents.length()).flatMap { i -> contents.getJSONObject(i).getJSONArray("parts").let { a ->
+            (0 until a.length()).map(a::getJSONObject)
+        } }
+        val function = parts.single { it.has("functionCall") }
+        assertEquals("preserve-signature", function.getString("thoughtSignature"))
+        assertEquals("sleep", parts.single { it.has("functionResponse") }.getJSONObject("functionResponse").getString("name"))
+        assertTrue(contents.toString().contains("准确回执"))
+        accounts.logout("gemini")
+        try { send(history); fail("old account must not send") } catch (_: Exception) {}
+        assertEquals(2, requests.size)
+    }
 }

@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.data.api.DeviceAuthorization
+import com.ai.assistance.operit.data.api.GeminiAuthorization
 import com.ai.assistance.operit.data.api.SubscriptionAccounts
 import com.ai.assistance.operit.data.api.SubscriptionChannels
 import com.ai.assistance.operit.data.model.ModelConfigData
@@ -33,6 +34,10 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
     var busy by remember { mutableStateOf(false) }
     var accepted by remember(selected) { mutableStateOf(false) }
     var auth by remember { mutableStateOf<DeviceAuthorization?>(null) }
+    var googleAuth by remember { mutableStateOf<GeminiAuthorization?>(null) }
+    var googleCode by remember { mutableStateOf("") }
+    var googleProject by remember { mutableStateOf("") }
+    var manualModel by remember(selected) { mutableStateOf("") }
     var operation by remember { mutableStateOf<Job?>(null) }
     var models by remember(selected) { mutableStateOf(emptyList<JSONObject>()) }
     var quota by remember(selected) { mutableStateOf<JSONObject?>(null) }
@@ -40,10 +45,19 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
     val channel = SubscriptionChannels.get(selected)
     LaunchedEffect(selected) {
         auth?.let { accounts.cancelLogin(it.attempt) }; operation?.cancel(); auth = null; busy = false
+        googleAuth?.let { accounts.cancelLogin(it.attempt) }; googleAuth = null; googleCode = ""; secret = ""
         connected = withContext(Dispatchers.IO) { accounts.connected(selected) }
         status = ""
     }
-    DisposableEffect(Unit) { onDispose { auth?.let { accounts.cancelLogin(it.attempt) }; operation?.cancel() } }
+    DisposableEffect(Unit) { onDispose {
+        auth?.let { accounts.cancelLogin(it.attempt) }; googleAuth?.let { accounts.cancelLogin(it.attempt) }; operation?.cancel()
+    } }
+    LaunchedEffect(googleAuth?.attempt) {
+        val pending = googleAuth ?: return@LaunchedEffect
+        delay((pending.expiresAt - System.currentTimeMillis()).coerceAtLeast(0))
+        accounts.cancelLogin(pending.attempt); operation?.cancel(); googleAuth = null; googleCode = ""
+        status = "Google 授权已超时，可重新登录"
+    }
     fun run(block: suspend () -> Unit) {
         operation = scope.launch {
             busy = true; status = ""
@@ -57,12 +71,15 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "订阅账号 ▴" else "订阅账号 ▾") }
             if (expanded) {
-                var choosing by remember { mutableStateOf(false) }
-                OutlinedButton(onClick = { choosing = true }, enabled = !busy) { Text(channel.title) }
-                if (choosing) AlertDialog(onDismissRequest = { choosing = false }, title = { Text("选择订阅") },
-                    text = { Column { SubscriptionChannels.entries.forEach { entry ->
-                        TextButton(onClick = { selected = entry.id; choosing = false }) { Text(entry.title) }
-                    } } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("关闭") } })
+                Text("选择订阅渠道", style = MaterialTheme.typography.labelLarge)
+                SubscriptionChannels.entries.chunked(2).forEach { pair ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { entry ->
+                            FilterChip(selected = selected == entry.id, onClick = { selected = entry.id },
+                                label = { Text(entry.title) }, enabled = !busy, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
                 Text(channel.limitation, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { uri.openUri(channel.documentation) }) { Text("官方说明") }
@@ -76,15 +93,38 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
                     Text(if (connected) "已保存凭据；实际权限以服务返回为准" else "未连接账号")
                     Row {
                         Checkbox(checked = accepted, onCheckedChange = { accepted = it })
-                        Text("我已了解套餐范围及可能的额外计费，当前账号的费用设置由服务方管理。",
+                        Text("我已了解上方服务限制、账号风险及计费范围，并选择连接此渠道。",
                             Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                     }
-                    if (selected == "kimi") {
-                        OutlinedTextField(secret, { secret = it }, label = { Text("Kimi Code 套餐 Key") },
+                    if (selected in setOf("kimi", "glm")) {
+                        OutlinedTextField(secret, { secret = it }, label = { Text("${channel.title} 套餐 Key") },
                             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                        Button(onClick = { run { withContext(Dispatchers.IO) { accounts.saveKimiKey(secret) }; secret = ""; status = "凭据已加密保存，请读取此账号的模型目录" } },
+                        Button(onClick = { run { withContext(Dispatchers.IO) { accounts.savePlanKey(selected, secret) }; secret = ""; status = "凭据已加密保存，请读取模型目录或填写账号支持的模型" } },
                             enabled = accepted && secret.isNotBlank() && !busy) { Text(if (connected) "更换凭据" else "连接套餐") }
-                    } else {
+                    } else if (selected == "gemini") {
+                        OutlinedTextField(googleProject, { googleProject = it }, label = { Text("Google Cloud 项目 ID（个人会员通常无需填写）") },
+                            modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                        Button(onClick = {
+                            googleAuth?.let { accounts.cancelLogin(it.attempt) }
+                            val pending = accounts.beginGemini(); googleAuth = pending; googleCode = ""
+                            uri.openUri(pending.url)
+                        }, enabled = accepted && !busy) { Text(if (connected) "重新授权 / 切换 Google 账号" else "在 Google 授权") }
+                        googleAuth?.let { pending ->
+                            Text("完成 Google 授权后，将网页显示的授权码填在这里。有效至 ${java.util.Date(pending.expiresAt)}。", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(googleCode, { googleCode = it }, label = { Text("本次 Google 授权码") },
+                                modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), enabled = !busy)
+                            Row {
+                                TextButton(onClick = { uri.openUri(pending.url) }, enabled = !busy) { Text("打开授权网页") }
+                                Button(onClick = { run {
+                                    accounts.completeGemini(pending, googleCode, googleProject)
+                                    googleAuth = null; googleCode = ""; status = "已授权并取得 Code Assist 项目，可读取模型或填写账号模型"
+                                } }, enabled = accepted && !busy && googleCode.isNotBlank()) { Text("完成连接") }
+                                TextButton(onClick = {
+                                    accounts.cancelLogin(pending.attempt); operation?.cancel(); googleAuth = null; googleCode = ""; status = "已取消"
+                                }) { Text("取消授权") }
+                            }
+                        }
+                    } else if (selected == "grok") {
                         Button(onClick = { run {
                             val pending = accounts.beginGrok(); auth = pending
                             uri.openUri(pending.url)
@@ -110,6 +150,15 @@ internal fun SubscriptionSettings(config: ModelConfigData, manager: ModelConfigM
                             } }, enabled = !busy) {
                                 Text(model.getString("id") + if (model.isNull("context_window")) " · 服务未提供窗口大小" else " · 窗口 ${model.get("context_window")}")
                             }
+                        }
+                        if (selected in setOf("gemini", "glm")) {
+                            Text("目录未提供模型时，可填写官方账号支持的模型；填写不代表服务端已授予使用权限。窗口大小沿原模型设置核对。", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(manualModel, { manualModel = it }, label = { Text("模型名称") },
+                                modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                            Button(onClick = { run {
+                                manager.updateSubscription(config.id, selected, manualModel.trim())
+                                status = "已绑定此订阅渠道，助手身份、内在状态和历史保持不变"
+                            } }, enabled = !busy && manualModel.isNotBlank()) { Text("使用此模型") }
                         }
                     }
                     if (config.subscriptionChannel.isNotEmpty()) {
