@@ -1,6 +1,6 @@
 # 私域连续性七项整合
 
-本轮从已发布 +140（c67f626）继续，保留已合并 #53—#60、前六批、书房/后台结果互通、Gemini 请求与共享流异常隔离。所有实现归于 [PR #61](https://github.com/yuan69082-code/Operit/pull/61)，最终发布必须完成同提交双端检查。本文当前记录实现和验证边界，尚不代表已发布；最终结果追加在文末。
+本轮从已发布 +140（c67f626）继续，保留已合并 #53—#60、前六批、书房/后台结果互通、Gemini 请求与共享流异常隔离。所有实现归于 [PR #61](https://github.com/yuan69082-code/Operit/pull/61)，最终发布必须完成同提交双端检查。本文记录实现和验证边界；最终合并、发布提交及下载核验记在该 PR 交付回执和实际 Release 中，不能把本文或草稿检查当作已发布。
 
 ## 权威、材料与时序
 
@@ -107,12 +107,13 @@ EnhancedReportIsolationTest 使用实际 EnhancedAIService.sendMessage、共享�
 
 ## 验证证据与仍未验证
 
-- CI 的失败曾真实阻止交付，未删断言、跳失败或停用功能。146 的活动测试确认为测试管理器跨测试持有旧 Context，已隔离两个管理器；偏好测试补齐本来必需的 context/exceptions。后续以最终运行结果为准。
+- CI 的失败曾真实阻止交付，未删断言、跳失败或停用功能。146 的活动测试确认为测试管理器跨测试持有旧 Context，已隔离两个管理器；偏好测试补齐本来必需的 context/exceptions。149 的新端到端测试还暴露了替身没有调用真实工具历史规范化、取消检查放错到子协程的问题；现已使用真实规范化，并按生产消息消费者在拥有本轮请求的协程检查完成原因。
+- 已验证代码 e1df565，[双端检查 150](https://github.com/yuan69082-code/Operit/actions/runs/42730540628)：Android 2041 项，2035 通过、6 项原有跳过、0 失败；Windows 25 项全部通过，类型检查与便携包完成。EnhancedReportIsolationTest 三条正常入口用例全部通过，另外断言合法报告确实采用、坏报告未采用、坏报告内的随记标记不能公开、工具已完成事实不丢失且下一条仍可回复。
 - 新测试覆盖正常候选超过 8/32/128、48 小时、备份恢复、全文修改与真实读取资格、活动、来源可见范围、Provider 工具续轮、摘要与报告失败边界。
 - 浏览器实际生产页面 + 模拟 HTTP 交互 51 次、无 JavaScript 错误，无模型请求。截图与详细检查见 screenshots/ui-check.json。这是 Windows/WebChat 与手机宽度布局验证，不是 Android Compose 真机截图。
 - [桌面概览](screenshots/private-desktop-overview.png)、[完整候选](screenshots/private-desktop-fulltext.png)、[承接入口](screenshots/private-mobile-import.png)、[梦醒随记](screenshots/private-mobile-waking.png)、[读取失败](screenshots/private-mobile-read-error.png) 均使用标明的模拟内容，不能证明真实主体行为。
 - 真机、真实模型理解、实际 MCP、真实订阅账号、Android 原生触控截图、系统长期后台及这台手机的崩溃现场尚未验证。书房整书扫描随文件增长的原有限制保留。
-- Claude/Gemini/GLM 订阅范围是外部限制；相应部分没有标为可用。Android/Windows 最终检查、签名、发布和 +136/+140 更新识别证据将在完成后追加。
+- Claude/Gemini/GLM 订阅范围是外部限制；相应部分没有标为可用。最终安装包、签名、发布和 +136/+140 更新识别证据由 PR #61 交付回执链接到对应运行与 Release；应用按非草稿 shared-v 发布的清单 version_code 判断更新，原包名与固定证书必须同时通过构建检查。
 
 ## 后续维护边界
 
