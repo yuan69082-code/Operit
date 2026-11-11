@@ -298,9 +298,14 @@ class EnhancedReportIsolationTest {
                 }
                 val request = launch {
                     if (functionCall) {
+                        // The simulated provider requires a real request frame. A preview
+                        // (persist=false) intentionally has none and fails before streaming.
                         val history = CurrentRequestContext.stage(
                             listOf(PromptTurn(PromptTurnKind.USER, "function cancellation")),
-                            InnerStructureContext.prepare(f.app, f.role, f.chat, false))
+                            InnerStructureContext.prepare(f.app, f.role, f.chat, persist = true,
+                                input = "function cancellation"))
+                        assertNotNull("Function cancellation fixture must reach the provider with a request frame",
+                            CurrentRequestContext.internalStateFrame(history))
                         f.service.callFunctionModel(FunctionType.SUMMARY, history)
                     } else {
                         f.send()
