@@ -24,6 +24,7 @@ import com.ai.assistance.operit.ui.permissions.PermissionLevel
 import com.ai.assistance.operit.util.stream.*
 import com.ai.assistance.operit.util.streamnative.NativeMarkdownSplitter
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.resetMain
@@ -538,6 +539,36 @@ class EnhancedReportIsolationTest {
             assertEquals(InputProcessingState.Completed, delegate.inputProcessingStateByChatId.value[f.chat])
             assertTrue("Next turn must not inherit cancellation: $errors", errors.isEmpty())
             assertTrue(f.failureDiagnostics(), f.uncaught.isEmpty())
+        } finally { f.close() }
+    }
+
+    @Test fun turnCompleteCounterPublishesAfterBusyIsReleasedAndNextTurnIsAccepted(): Unit = runBlocking {
+        NativeMarkdownSplitter.createBlockSession().destroy()
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        val errors = CopyOnWriteArrayList<String>()
+        val completed = AtomicInteger()
+        try {
+            val delegate = f.delegate(errors, completed)
+            repeat(2) { turn ->
+                val busyAtCompletion = CompletableDeferred<Boolean>()
+                // Group orchestration resumes directly from this counter. Observe inline
+                // when it is published, before joining the send could hide an early signal.
+                val observer = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                    delegate.turnCompleteCounterByChatId.first { (it[f.chat] ?: 0L) > turn.toLong() }
+                    busyAtCompletion.complete(delegate.isChatLoading(f.chat))
+                }
+                try {
+                    f.sendThroughDelegate(delegate, "completion publication turn ${turn + 1}")
+                    val busy = withTimeout(30_000) { busyAtCompletion.await() }
+                    val evidence = "turn=${turn + 1}; errors=$errors\n${f.failureDiagnostics()}"
+                    assertFalse("A completion waiter must be allowed to claim the next turn: $evidence", busy)
+                    assertEquals("The next send must reach the provider: $evidence", turn + 1, f.calls)
+                    assertEquals(evidence, turn + 1, completed.get())
+                    assertEquals(evidence, (turn + 1).toLong(), delegate.getTurnCompleteCounter(f.chat))
+                    assertTrue(evidence, errors.isEmpty())
+                    assertTrue(evidence, f.uncaught.isEmpty())
+                } finally { observer.cancelAndJoin() }
+            }
         } finally { f.close() }
     }
 

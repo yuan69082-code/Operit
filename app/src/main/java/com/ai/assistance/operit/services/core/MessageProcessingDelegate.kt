@@ -1908,6 +1908,11 @@ class MessageProcessingDelegate(
                     }
 
                     if (shouldNotifyTurnComplete) {
+                        // Group/automatic continuations wait for this signal and may send
+                        // immediately. Publish it only after the chat and activity are free.
+                        val updated = _turnCompleteCounterByChatId.value.toMutableMap()
+                        updated[chatId] = (updated[chatId] ?: 0L) + 1L
+                        _turnCompleteCounterByChatId.value = updated
                         companionCompletion.success(aiMessage.content)
                     }
 
@@ -2214,12 +2219,7 @@ class MessageProcessingDelegate(
     ) {
         onTurnTokensCaptured(activeChatId, service.captureCurrentTurnTokenSnapshot())
         onTurnComplete(activeChatId, service, null, turnOptions)
-        if (!chatId.isNullOrBlank()) {
-            val updated = _turnCompleteCounterByChatId.value.toMutableMap()
-            updated[chatId] = (updated[chatId] ?: 0L) + 1L
-            _turnCompleteCounterByChatId.value = updated
-        }
-        AppLogger.d(TAG, "回合完成: chatId=$activeChatId, service=${service.javaClass.simpleName}")
+        AppLogger.d(TAG, "回合统计已保存: chatId=$activeChatId, service=${service.javaClass.simpleName}")
         if (calculateNextWindowSize != null) {
             val runtime = runtimeFor(chatId)
             val finishingSend = coroutineContext[Job]
