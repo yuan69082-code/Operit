@@ -103,21 +103,33 @@ internal fun ExplorationPanel(initialRole: String) {
     val chat = status.optString("chat")
     Text("今天已启动 ${status.optInt("used_today")} / ${status.optInt("daily_limit", 4)} 轮")
     val at = status.optLong("at")
-    Text(when {
-        !status.optBoolean("enabled") -> "当前关闭，不会自动开始探索"
-        status.optBoolean("running") -> "正在探索"
-        status.optBoolean("paused", true) || at <= 0 -> "暂无下一次探索预约"
-        else -> "下次计划：" + DateFormat.getDateTimeInstance().format(Date(at))
+    val canResume = status.optBoolean("can_resume")
+    Text(when (status.optString("schedule_state")) {
+        "disabled" -> "当前关闭，不会自动开始探索"
+        "running" -> "正在探索，本轮尚未结束"
+        "scheduled" -> "下次计划：" + DateFormat.getDateTimeInstance().format(Date(at))
+        "paused" -> "已明确暂停后续探索预约"
+        "interrupted" -> if (canResume) "上次探索中断；原预约保留，等待恢复" else "上次探索未完成，暂无下一次预约"
+        else -> "本轮没有安排下一次探索"
     })
+    if (status.optBoolean("running") && status.optLong("next_at") > 0)
+        Text("已保存下次计划：" + DateFormat.getDateTimeInstance().format(Date(status.getLong("next_at"))))
+    if (status.optBoolean("running") && status.optBoolean("self_paused")) Text("本轮结束后暂停后续预约")
     if (status.optBoolean("enabled") && status.optString("purpose").isNotBlank()) Text(status.optString("purpose"))
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FilledTonalButton(enabled = loaded && !busy && status.optBoolean("enabled") && chat.isNotBlank(),
-            onClick = { perform { withContext(Dispatchers.IO) { store.schedule(role, chat, 15, "用户只提供一次自由判断机会；是否探索、探索什么、转向还是休息，由你自己决定。") } } }) {
-            Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text("15分钟后探索一次")
+            onClick = { perform { withContext(Dispatchers.IO) {
+                if (canResume) store.resume(role, chat)
+                else store.schedule(role, chat, 15, "用户只提供一次自由判断机会；是否探索、探索什么、转向还是休息，由你自己决定。")
+            } } }) {
+            Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(8.dp)); Text(if (canResume) "恢复中断的原预约" else "15分钟后探索一次")
         }
         OutlinedButton(enabled = loaded && !busy && status.optBoolean("enabled"),
             onClick = { perform { withContext(Dispatchers.IO) { store.pause(role) } } }) { Icon(Icons.Default.Pause, null); Spacer(Modifier.width(8.dp)); Text("暂停后续预约") }
     }
-    SpaceExplanation("探索如何安排", "首次开启会在15分钟后给一次自由判断机会。之后 AI 可以自己安排下一次或暂停；若一轮结束时两者都没做，软件默认3小时后再给一次自由判断机会，这不等于继续同一方向。需要后台服务运行，实际执行也取决于手机系统和当前对话是否空闲。达到每日上限后，预约等待下一天；关闭再开启不会重置当天次数。过程见“唤醒与记录”，收获见书房资料和私人打算。")
+    SpaceExplanation("探索如何安排", (if (status.optBoolean("continuous"))
+        "这位助手已开启内部状态：探索只执行明确安排，不会在开启时或结束后自动补排。正常结束没有新预约，和明确选择休息、执行中断分别记录；中断的原预约可由你明确恢复，不会自动重跑。"
+        else "首次开启会在15分钟后给一次自由判断机会。之后 AI 可以自己安排下一次或暂停；若一轮结束时两者都没做，软件默认3小时后再给一次自由判断机会，这不等于继续同一方向。") +
+        "需要后台服务运行，实际执行也取决于手机系统和当前对话是否空闲。达到每日上限后，预约等待下一天；关闭再开启不会重置当天次数。过程见“唤醒与记录”，收获见书房资料和私人打算。")
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }

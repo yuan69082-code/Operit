@@ -183,7 +183,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     private val workspaceTerminalSessions = mutableMapOf<String, String>()
     private var workspaceCommandExecutionJob: Job? = null
     private var workspaceOpenJob: Job? = null
-    private var inputProcessingStateListenerJob: Job? = null
 
     private lateinit var mainChatCore: ChatServiceCore
     private lateinit var attachmentDelegate: AttachmentDelegate
@@ -486,7 +485,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
         mainChatCore.setOnEnhancedAiServiceReady { service ->
             enhancedAiService = service
-            setupInputProcessingStateListener(service)
+            // Turn and summary owners already publish per-chat state. A global service's
+            // replay has no chat ownership and must not mark the selected window busy.
         }
 
         floatingWindowDelegate =
@@ -516,54 +516,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             // 检查历史记录加载后是否需要创建新聊天
             if (chatHistoryDelegate.checkIfShouldCreateNewChat() && isConfigured.value) {
                 chatHistoryDelegate.createNewChat()
-            }
-        }
-    }
-
-    /** 设置服务相关的流收集逻辑 */
-    /**
-     * 设置输入处理状态监听
-     * 当 EnhancedAIService 初始化或更新时调用
-     */
-    private fun setupInputProcessingStateListener(service: EnhancedAIService) {
-        AppLogger.d(TAG, "EnhancedAIService 已就绪，开始监听输入处理状态")
-        inputProcessingStateListenerJob?.cancel()
-        inputProcessingStateListenerJob = viewModelScope.launch {
-            try {
-                service.inputProcessingState.collect { state ->
-                    if (::messageProcessingDelegate.isInitialized && messageProcessingDelegate.isLoading.value) {
-                        return@collect
-                    }
-                    if (state is InputProcessingState.Completed && 
-                        ::messageCoordinationDelegate.isInitialized &&
-                        (messageCoordinationDelegate.isSummarizing.value ||
-                         messageCoordinationDelegate.isSendTriggeredSummarizing.value)
-                    ) {
-                        val targetChatId =
-                            if (messageCoordinationDelegate.isSummarizing.value) {
-                                messageCoordinationDelegate.summarizingChatId.value
-                            } else {
-                                messageCoordinationDelegate.sendTriggeredSummarizingChatId.value
-                            }
-
-                        if (targetChatId != null) {
-                            messageProcessingDelegate.setInputProcessingStateForChat(
-                                targetChatId,
-                                InputProcessingState.Summarizing(context.getString(R.string.chat_summarizing_memory))
-                            )
-                        }
-                    } else if (::messageProcessingDelegate.isInitialized) {
-                        val currentChatId = chatHistoryDelegate.currentChatId.value
-                        if (currentChatId != null) {
-                            messageProcessingDelegate.setInputProcessingStateForChat(currentChatId, state)
-                        }
-                    }
-                }
-            } catch (e: CancellationException) {
-                AppLogger.d(TAG, "输入处理状态监听已取消")
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "输入处理状态收集出错: ${e.message}", e)
-                uiStateDelegate.showErrorMessage(context.getString(R.string.chat_input_processing_collect_failed, e.message ?: ""))
             }
         }
     }
@@ -943,7 +895,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                     if (summaryMessage != null) {
                         // 插入总结消息
                         chatHistoryDelegate.addSummaryMessage(
-                            summaryMessage = summaryMessage,
+                            summaryMessage = slice.completedSummary(summaryMessage, System.currentTimeMillis()),
                             beforeTimestamp = slice.beforeTimestamp,
                             afterTimestamp = slice.afterTimestamp,
                             chatIdOverride = currentChatId,
@@ -2715,7 +2667,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        inputProcessingStateListenerJob?.cancel()
         voiceStateCollectionJob?.cancel()
         // 清理悬浮窗资源
         floatingWindowDelegate.cleanup()

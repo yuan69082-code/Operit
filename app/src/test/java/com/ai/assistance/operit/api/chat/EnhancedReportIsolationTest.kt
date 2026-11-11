@@ -70,6 +70,8 @@ class EnhancedReportIsolationTest {
         lateinit var handler: AIToolHandler
         var calls = 0
         var executions = 0
+        val providerCancellations = AtomicInteger()
+        var onProviderCancellation: () -> Unit = {}
         var wake = false
         @Volatile var inputEstimate = 100L
         val requestInputEstimates = CopyOnWriteArrayList<Long>()
@@ -101,6 +103,7 @@ class EnhancedReportIsolationTest {
             val provider = Mockito.mock(AIService::class.java) { call -> when (call.method.name) {
                 "getProviderModel" -> "OPENAI:simulated"
                 "calculateInputTokens" -> inputEstimate
+                "cancelStreaming" -> { providerCancellations.incrementAndGet(); onProviderCancellation(); null }
                 "sendMessage" -> {
                     @Suppress("UNCHECKED_CAST")
                     val history = call.arguments[1] as List<PromptTurn>
@@ -215,7 +218,11 @@ class EnhancedReportIsolationTest {
                 Thread.setDefaultUncaughtExceptionHandler(previousUncaughtHandler)
             }
         }
-        suspend fun delegate(errors: MutableList<String>, completed: AtomicInteger): MessageProcessingDelegate {
+        suspend fun delegate(
+            errors: MutableList<String>,
+            completed: AtomicInteger,
+            hasUserMessageOverride: (suspend (String) -> Boolean)? = null,
+        ): MessageProcessingDelegate {
             AIMessageManager.initialize(app)
             messageManagerJob = (AIMessageManager::class.java.getDeclaredField("scope")
                 .apply { isAccessible = true }.get(null) as CoroutineScope).coroutineContext[Job]
@@ -230,7 +237,7 @@ class EnhancedReportIsolationTest {
                 getEnhancedAiService = { service },
                 getFullChatHistory = { history.loadChatMessages(it) },
                 getRuntimeChatHistory = { history.loadChatMessages(it) },
-                hasUserMessage = { id -> history.loadChatMessages(id).any { it.sender == "user" } },
+                hasUserMessage = hasUserMessageOverride ?: { id -> history.loadChatMessages(id).any { it.sender == "user" } },
                 addMessageToChat = { id, message -> history.addMessage(id, message) },
                 saveCurrentChat = {},
                 showErrorMessage = { errors.add(it) },
@@ -242,7 +249,12 @@ class EnhancedReportIsolationTest {
                 speakMessageHandler = { _, _ -> fail("Speech is disabled, but its native reader must still run") },
             )
         }
-        suspend fun sendThroughDelegate(delegate: MessageProcessingDelegate, phase: String, maxTokens: Int = 131_072) {
+        suspend fun sendThroughDelegate(
+            delegate: MessageProcessingDelegate,
+            phase: String,
+            maxTokens: Int = 131_072,
+            turnOptions: ChatTurnOptions = ChatTurnOptions(notifyReply = false, disableWarning = true),
+        ) {
             delegate.sendUserMessage(
                 chatId = chat,
                 roleCardId = role,
@@ -253,7 +265,7 @@ class EnhancedReportIsolationTest {
                 tokenUsageThreshold = 0.9,
                 enableMemoryAutoUpdate = false,
                 enableSummary = false,
-                turnOptions = ChatTurnOptions(notifyReply = false, disableWarning = true),
+                turnOptions = turnOptions,
             )
             // This production gate joins the actual send job, including persistence and
             // runtime cleanup, instead of treating stream closure as a completed turn.
@@ -269,6 +281,55 @@ class EnhancedReportIsolationTest {
             fun report(f: InternalStateFrame) = "<operit_state_report>" + JSONObject().put("frame_id", f.id)
                 .put("updates", JSONArray()).put("create", JSONArray()) + "</operit_state_report>"
         }
+    }
+
+    @Test fun cancellationReachesChatAndFunctionProvidersBeforeReturning(): Unit = runBlocking {
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        try {
+            for (functionCall in listOf(false, true)) {
+                val started = CompletableDeferred<Unit>()
+                val cancelled = CompletableDeferred<Unit>()
+                f.onProviderCancellation = { cancelled.complete(Unit) }
+                f.output = { _, _ ->
+                    started.complete(Unit)
+                    cancelled.await()
+                    throw CancellationException("simulated provider cancellation")
+                }
+                val request = launch {
+                    if (functionCall) {
+                        val history = CurrentRequestContext.stage(
+                            listOf(PromptTurn(PromptTurnKind.USER, "function cancellation")),
+                            InnerStructureContext.prepare(f.app, f.role, f.chat, false))
+                        f.service.callFunctionModel(FunctionType.SUMMARY, history)
+                    } else {
+                        f.send()
+                    }
+                }
+                try {
+                    withTimeout(30_000) { started.await() }
+                    val before = f.providerCancellations.get()
+                    f.service.cancelConversation()
+                    assertEquals("Cancellation must not be queued behind a future turn", before + 1, f.providerCancellations.get())
+                    withTimeout(30_000) { request.join() }
+                } finally { request.cancelAndJoin() }
+            }
+            assertTrue(f.uncaught.isEmpty())
+        } finally { f.close() }
+    }
+
+    @Test fun subtaskFailureDoesNotReplaceForegroundInputState(): Unit = runBlocking {
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        try {
+            val foreground = InputProcessingState.Receiving("foreground response")
+            f.service.setInputProcessingState(foreground)
+            f.output = { _, _ -> throw java.io.IOException("simulated background transport failure") }
+
+            val (_, error) = f.send()
+
+            assertNotNull("The subtask must remain a failed turn", error)
+            assertEquals("A background failure has no foreground UI ownership", foreground, f.service.inputProcessingState.value)
+            assertTrue(f.uncaught.isEmpty())
+        } finally { f.close() }
     }
 
     @Test fun finalReportsAfterProseAndBackgroundControlsCommitWithoutAnotherModelCall(): Unit = runBlocking {
@@ -379,6 +440,105 @@ class EnhancedReportIsolationTest {
                 assertTrue("$scenario after cleanup: ${f.uncaught.map { it.stackTraceToString() }}", f.uncaught.isEmpty())
             }
         }
+    }
+
+    @Test fun preparationFailureReleasesBusyStateAndReportsItsActualCause(): Unit = runBlocking {
+        NativeMarkdownSplitter.createBlockSession().destroy()
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        val errors = CopyOnWriteArrayList<String>()
+        val failures = CopyOnWriteArrayList<Throwable>()
+        val completed = AtomicInteger()
+        val companionSuccesses = AtomicInteger()
+        val preparationFailure = IllegalStateException("simulated history lookup failure")
+        var rejectPreparation = true
+        try {
+            val delegate = f.delegate(errors, completed, hasUserMessageOverride = {
+                if (rejectPreparation) throw preparationFailure
+                true
+            })
+            f.sendThroughDelegate(delegate, "preparation failure", turnOptions = ChatTurnOptions(
+                notifyReply = false, disableWarning = true,
+                onCompanionFailure = { failures.add(it) },
+                onCompanionComplete = { companionSuccesses.incrementAndGet() },
+            ))
+
+            val evidence = "errors=$errors; failures=$failures\n${f.failureDiagnostics()}"
+            assertEquals(evidence, 0, f.calls)
+            assertEquals(evidence, listOf(preparationFailure), failures.toList())
+            assertEquals(evidence, 0, companionSuccesses.get())
+            assertEquals(evidence, 0, completed.get())
+            assertFalse(evidence, delegate.isChatLoading(f.chat))
+            assertFalse(evidence, delegate.isLoading.value)
+            assertFalse(evidence, f.chat in delegate.activeStreamingChatIds.value)
+            assertTrue(evidence, delegate.inputProcessingStateByChatId.value[f.chat] is InputProcessingState.Error)
+            assertTrue(evidence, f.uncaught.isEmpty())
+
+            rejectPreparation = false
+            errors.clear()
+            f.sendThroughDelegate(delegate, "normal send after preparation failure")
+            assertEquals(f.failureDiagnostics(), 1, f.calls)
+            assertEquals(f.failureDiagnostics(), 1, completed.get())
+            assertEquals(InputProcessingState.Completed, delegate.inputProcessingStateByChatId.value[f.chat])
+            assertFalse(delegate.isChatLoading(f.chat))
+            assertTrue("Next turn must not inherit the failure: $errors", errors.isEmpty())
+        } finally { f.close() }
+    }
+
+    @Test fun cancelledWakeSignalsFailureAndTheNextUserTurnCanRun(): Unit = runBlocking {
+        NativeMarkdownSplitter.createBlockSession().destroy()
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        val errors = CopyOnWriteArrayList<String>()
+        val failures = CopyOnWriteArrayList<Throwable>()
+        val completed = AtomicInteger()
+        val companionSuccesses = AtomicInteger()
+        try {
+            val delegate = f.delegate(errors, completed)
+            val started = CompletableDeferred<Unit>()
+            val cancelled = CompletableDeferred<Unit>()
+            f.wake = true
+            f.onProviderCancellation = { cancelled.complete(Unit) }
+            f.output = { _, _ ->
+                started.complete(Unit)
+                cancelled.await()
+                throw CancellationException("simulated waiting provider cancelled")
+            }
+            val wake = launch {
+                f.sendThroughDelegate(delegate, "cancelled wake", turnOptions = ChatTurnOptions(
+                    proactiveWake = true, hideUserMessage = true, notifyReply = false, disableWarning = true,
+                    onCompanionFailure = { failures.add(it) },
+                    onCompanionComplete = { companionSuccesses.incrementAndGet() },
+                ))
+            }
+            try {
+                withTimeout(30_000) { started.await() }
+                withTimeout(30_000) { delegate.cancelMessageAndWait(f.chat).join() }
+                withTimeout(30_000) { wake.join() }
+            } finally { wake.cancelAndJoin() }
+
+            val evidence = "errors=$errors; failures=$failures\n${f.failureDiagnostics()}"
+            assertEquals(evidence, 1, failures.size)
+            assertTrue(evidence, failures.single() is CancellationException)
+            assertEquals(evidence, 0, companionSuccesses.get())
+            assertEquals(evidence, 0, completed.get())
+            assertEquals(evidence, 0L, delegate.getTurnCompleteCounter(f.chat))
+            assertFalse(evidence, delegate.isChatLoading(f.chat))
+            assertFalse(evidence, delegate.isLoading.value)
+            assertNull(evidence, delegate.getResponseStream(f.chat))
+            assertEquals(evidence, InputProcessingState.Idle, delegate.inputProcessingStateByChatId.value[f.chat])
+            assertTrue(evidence, ChatHistoryManager.getInstance(f.app).loadChatMessages(f.chat)
+                .none { it.sender == "ai" && it.completedAt > 0L })
+
+            f.wake = false
+            f.onProviderCancellation = {}
+            f.output = { _, frame -> emit("取消后台等待后，正常回复。" + Fixture.report(frame)) }
+            errors.clear()
+            f.sendThroughDelegate(delegate, "normal send immediately after cancelled wake")
+            assertEquals(f.failureDiagnostics(), 2, f.calls)
+            assertEquals(f.failureDiagnostics(), 1, completed.get())
+            assertEquals(InputProcessingState.Completed, delegate.inputProcessingStateByChatId.value[f.chat])
+            assertTrue("Next turn must not inherit cancellation: $errors", errors.isEmpty())
+            assertTrue(f.failureDiagnostics(), f.uncaught.isEmpty())
+        } finally { f.close() }
     }
 
     @Test fun delegateHttp400ClearsFailedTurnAndAllowsNextSend(): Unit = runBlocking {

@@ -83,6 +83,15 @@ internal class SummaryReviewer private constructor(
     }
 
     companion object {
+        suspend fun draftCacheIdentity(context: Context): String {
+            val mapping = FunctionalConfigManager(context).getConfigMappingForFunction(FunctionType.SUMMARY)
+            val config = com.ai.assistance.operit.data.preferences.ModelConfigManager(context)
+                .getModelConfig(mapping.configId)
+            return ReviewedSummaryBatches.fingerprint(listOf(
+                SummaryFidelityPrompts.VERSION, mapping, ReviewedSummaryBatches.modelFingerprint(config)
+            ).joinToString("\u0000"))
+        }
+
         suspend fun capture(
             context: Context,
             roleCardId: String?,

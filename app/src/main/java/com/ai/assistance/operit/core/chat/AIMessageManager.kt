@@ -1165,11 +1165,14 @@ object AIMessageManager {
 
         return try {
             AppLogger.d(TAG, "开始使用AI生成对话总结：总结 ${messagesToSummarize.size} 条消息")
-            val reviewer = SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, isGroupChat)
+            val reviewer = if (summaryConfig.aiReviewEnabled) {
+                SummaryReviewer.capture(context, roleCardId, chatModelConfigIdOverride, chatModelIndexOverride, isGroupChat)
+            } else null
             // Former pinned memory belongs in the library, not every subsequent summary.
             val protectedMemory = ""
             val cacheKey = ReviewedSummaryBatches.fingerprint(listOf(
-                "reviewed-batches-v2-fidelity", chatId, reviewer.cacheIdentity(), summaryConfig.toString(),
+                "reviewed-batches-v2-fidelity", chatId,
+                reviewer?.cacheIdentity() ?: SummaryReviewer.draftCacheIdentity(context), summaryConfig.toString(),
                 LocaleUtils.usesChineseContent(context).toString(),
                 com.ai.assistance.operit.core.chat.hooks.SummaryHookRegistry.cacheRevision().toString(),
                 messagesToSummarize.joinToString("\u0000") { "${it.timestamp}:${it.roleName}:${it.content}" },
@@ -1177,7 +1180,9 @@ object AIMessageManager {
                     org.json.JSONArray(listOf(it.first, it.second))
                 }).toString(), isGroupChat.toString()
             ).joinToString("\u0000"))
-            val reviewedSummary = if (cachedOnly) ReviewedSummaryBatches.approved(cacheKey) ?: return null
+            val reviewedSummary = if (cachedOnly) {
+                ReviewedSummaryBatches.approved(cacheKey, summaryConfig.aiReviewEnabled) ?: return null
+            }
             else ReviewedSummaryBatches.resolve(cacheKey, draft = {
                 if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
                     com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
@@ -1186,11 +1191,11 @@ object AIMessageManager {
                     conversationToSummarize + listOfNotNull(protectedMemory.takeIf { it.isNotBlank() }?.let { "user" to it }),
                     previousSummary,
                     summaryConfig,
-                    awaitingReview = true,
+                    awaitingReview = summaryConfig.aiReviewEnabled,
                     reportProgress = false,
                     groupSummary = isGroupChat
                 )
-            AppLogger.d(TAG, "AI生成压缩草稿完成，等待审阅")
+            AppLogger.d(TAG, "AI生成压缩草稿完成，AI复核=${summaryConfig.aiReviewEnabled}")
 
             if (draft.isBlank()) {
                 AppLogger.e(TAG, "AI生成的总结内容为空，放弃本次总结")
@@ -1241,15 +1246,16 @@ object AIMessageManager {
                     "AI 正在审阅 $batchLabel"
                 )
                 // Review the actual complete draft, including generated dialogue excerpts.
-                reviewer.review(proposed, conversationToSummarize + segmentSources,
+                requireNotNull(reviewer).review(proposed, conversationToSummarize + segmentSources,
                     messages.getOrNull(lastSummaryIndex)?.content, protectedMemory)
             }, stage = { stage, hit, millis ->
                 AppLogger.d("SummaryTiming", "batch=$batchLabel stage=$stage cache=$hit elapsed_ms=$millis source_chars=${conversationToSummarize.sumOf { it.second.length }}")
-            })
+            }, reviewEnabled = summaryConfig.aiReviewEnabled)
                 if (summaryProgress) com.ai.assistance.operit.core.tools.ToolProgressBus.update(
                     com.ai.assistance.operit.core.tools.ToolProgressBus.SUMMARY_PROGRESS_TOOL_NAME,
                     0.98f,
-                    context.getString(R.string.conversation_summary_reviewed)
+                    context.getString(if (summaryConfig.aiReviewEnabled) R.string.conversation_summary_reviewed
+                        else R.string.conversation_summary_saving)
                 )
                 val finalSummary = reviewedSummary
                 
@@ -1364,45 +1370,13 @@ object AIMessageManager {
         enableSummaryByMessageCount: Boolean,
         summaryMessageCountThreshold: Int
     ): Boolean {
-        // 首先检查总结功能是否启用
-        if (!enableSummary) {
-            return false
-        }
-
-        val lastSummary = messages.indexOfLast { it.sender == "summary" }
-        val newTurns = messages.drop(lastSummary + 1).count { it.sender == "user" }
-        // Recompressing one or two fresh turns cannot meaningfully reduce fixed system/tool
-        // overhead. Revisit the configured target near capacity while avoiding summary churn.
-        if (newTurns == 0) return false
-        if (lastSummary >= 0 && newTurns < 3 && maxTokens > 0 && currentTokens < maxTokens * 0.95) return false
-
-        // 检查Token阈值
-        if (maxTokens > 0) {
-            val usageRatio = currentTokens.toDouble() / maxTokens.toDouble()
-            if (usageRatio >= tokenUsageThreshold) {
-                AppLogger.d(TAG, "Token usage ($usageRatio) exceeds threshold ($tokenUsageThreshold). Triggering summary.")
-                return true
-            }
-        }
-
-        // 检查消息条数阈值（如果启用）
-        if (enableSummaryByMessageCount) {
-            val lastSummaryIndex = messages.indexOfLast { it.sender == "summary" }
-            val relevantMessages = if (lastSummaryIndex != -1) {
-                messages.subList(lastSummaryIndex + 1, messages.size)
-            } else {
-                messages
-            }
-            val userAiMessagesSinceLastSummary = relevantMessages.count { it.sender == "user"}
-
-            if (userAiMessagesSinceLastSummary >= summaryMessageCountThreshold) {
-                AppLogger.d(TAG, "自上次总结后新消息数量达到阈值 ($userAiMessagesSinceLastSummary)，生成总结.")
-                return true
-            }
-        }
-
-        AppLogger.d(TAG, "未达到生成总结的条件. Token使用率: ${if (maxTokens > 0) currentTokens.toDouble() / maxTokens else 0.0}")
-        return false
+        val shouldGenerate = SummaryTriggerPolicy.shouldGenerateSummary(
+            messages, currentTokens, maxTokens, tokenUsageThreshold, enableSummary,
+            enableSummaryByMessageCount, summaryMessageCountThreshold
+        )
+        AppLogger.d(TAG, "自动总结检查: trigger=$shouldGenerate new_user_turns=${SummaryTriggerPolicy.newUserTurns(messages)} " +
+            "token_usage=${if (maxTokens > 0) currentTokens.toDouble() / maxTokens else 0.0}")
+        return shouldGenerate
     }
 
     /**

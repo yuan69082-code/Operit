@@ -12,7 +12,7 @@ import org.junit.Test
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SummaryContinuityTest {
     private fun minimumTail(messages: List<ChatMessage>) =
-        SummaryContextSlice.plan(messages, retainedCharBudget = 0)
+        SummaryContextSlice.plan(messages, maxRetainedTurns = 2)
 
     @Test fun shortRecentDiscussionSurvivesCompressionBeyondTwoTurns() {
         val history = (1..12).flatMap(::turn)
@@ -33,7 +33,18 @@ class SummaryContinuityTest {
         val latest = turn(8) + ChatMessage("ai", "tool result ".repeat(2000), timestamp = 820)
         val history = (1..7).flatMap(::turn) + latest
         val slice = requireNotNull(SummaryContextSlice.plan(history, retainedCharBudget = 100))
-        assertEquals(turn(7) + latest, slice.retained)
+        assertEquals(latest, slice.retained)
+        assertEquals(history, slice.source + slice.retained)
+    }
+
+    @Test fun oversizedPenultimateTurnIsSummarizedInsteadOfIgnoringTheTailBudget() {
+        val penultimate = turn(4) + ChatMessage("ai", "old tool result ".repeat(2000), timestamp = 420)
+        val latest = turn(5)
+        val history = (1..3).flatMap(::turn) + penultimate + latest
+        val slice = requireNotNull(SummaryContextSlice.plan(history, retainedCharBudget = 100))
+        assertEquals(latest, slice.retained)
+        assertTrue(slice.source.containsAll(penultimate))
+        assertEquals(history, slice.source + slice.retained)
     }
 
     private fun turn(index: Int) = listOf(

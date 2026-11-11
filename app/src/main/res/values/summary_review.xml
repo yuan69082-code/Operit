@@ -3,5 +3,8 @@
     <string name="conversation_summary_draft_ready">压缩草稿已生成，等待 AI 审阅</string>
     <string name="conversation_summary_reviewing">AI 正在对照原文审阅并修订摘要…</string>
     <string name="conversation_summary_reviewed">AI 已确认摘要，正在保存</string>
-    <string name="conversation_summary_source_changed">审阅期间原对话有变动，本次未压缩，请重新尝试。</string>
+    <string name="conversation_summary_saving">摘要已生成，正在保存</string>
+    <string name="conversation_summary_source_changed">压缩期间原对话有变动，本次未压缩，请重新尝试。</string>
+    <string name="settings_summary_ai_review">摘要 AI 复核</string>
+    <string name="settings_summary_ai_review_desc">生成摘要后，再调用聊天模型对照原文检查和修订。默认开启；关闭可减少一次模型请求，直接保存生成的摘要。手动与自动压缩均适用。</string>
 </resources>

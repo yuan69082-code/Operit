@@ -26,7 +26,8 @@ data class ChatTurnOptions(
     val onVoiceCallText: (suspend (String) -> Unit)? = null,
     val onVoiceCallComplete: ((String) -> Unit)? = null,
     val proactiveWake: Boolean = false,
-    val onCompanionComplete: ((String) -> Unit)? = null
+    val onCompanionComplete: ((String) -> Unit)? = null,
+    val onCompanionFailure: ((Throwable) -> Unit)? = null
 ) {
     val voiceCallEnded: Boolean get() = voiceCallOutcome != null
 }

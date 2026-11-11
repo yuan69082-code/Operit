@@ -13,14 +13,34 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.mockito.Mockito
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
 class ModelConfigSummariesFlowTest {
+
+    @Test
+    fun `summary AI review defaults on and persists independently of dialogue excerpts`() = runBlocking {
+        val json = Json { ignoreUnknownKeys = true }
+        val legacy = """{"id":"summary-review-test","name":"test","enableSummaryDialogueReview":false}"""
+        val config = json.decodeFromString<ModelConfigData>(legacy)
+        assertEquals(true, config.enableSummaryAiReview)
+        val dataStore = TestPreferencesDataStore(MutableStateFlow<Preferences>(mutablePreferencesOf(
+            stringPreferencesKey("config_${config.id}") to legacy)))
+        val context = Mockito.mock(Context::class.java)
+        ModelConfigManager(context, dataStore).updateSummaryAiReviewSettings(config.id, false)
+
+        val reloaded = ModelConfigManager(context, dataStore).getModelConfigFlow(config.id).first()
+        assertEquals(false, reloaded.enableSummaryAiReview)
+        assertEquals(false, reloaded.enableSummaryDialogueReview)
+        ModelConfigManager(context, dataStore).updateSummaryAiReviewSettings(config.id, true)
+        assertEquals(true, ModelConfigManager(context, dataStore).getModelConfigFlow(config.id).first().enableSummaryAiReview)
+    }
 
     @Test
     fun `active config summaries subscription receives created and updated models`() = runBlocking {

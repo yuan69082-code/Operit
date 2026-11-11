@@ -15,10 +15,14 @@ internal object ReviewedSummaryBatches {
     }
     private val locks = Array(32) { Mutex() }
 
-    suspend fun approved(key: String): String? =
-        locks[(key.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
-            synchronized(cache) { cache[key]?.approved }
+    private fun modeKey(key: String, reviewEnabled: Boolean) = "$reviewEnabled:$key"
+
+    suspend fun approved(key: String, reviewEnabled: Boolean = true): String? {
+        val cacheKey = modeKey(key, reviewEnabled)
+        return locks[(cacheKey.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
+            synchronized(cache) { cache[cacheKey]?.approved }
         }
+    }
 
     fun fingerprint(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -67,21 +71,26 @@ internal object ReviewedSummaryBatches {
         key: String,
         draft: suspend () -> String,
         review: suspend (String) -> String,
-        stage: (String, Boolean, Long) -> Unit
-    ): String = locks[(key.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
-            val old = synchronized(cache) { cache[key] }
+        stage: (String, Boolean, Long) -> Unit,
+        reviewEnabled: Boolean = true
+    ): String {
+        // A draft accepted with review disabled must never satisfy a later reviewed request.
+        val cacheKey = modeKey(key, reviewEnabled)
+        return locks[(cacheKey.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
+            val old = synchronized(cache) { cache[cacheKey] }
             old?.approved?.let { stage("approved", true, 0); return@withLock it }
             var start = System.nanoTime()
             val proposed = old?.draft ?: draft().also {
                 require(it.isNotBlank()) { "压缩草稿为空，原上下文已保留。" }
-                synchronized(cache) { cache[key] = CachedSummary(it) }
+                synchronized(cache) { cache[cacheKey] = CachedSummary(it) }
             }
             stage("draft", old != null, (System.nanoTime() - start) / 1_000_000)
             start = System.nanoTime()
-            val approved = review(proposed)
+            val approved = if (reviewEnabled) review(proposed) else proposed
             require(approved.isNotBlank()) { "审阅结果为空，原上下文已保留。" }
-            synchronized(cache) { cache[key] = CachedSummary(proposed, approved) }
-            stage("review", false, (System.nanoTime() - start) / 1_000_000)
+            synchronized(cache) { cache[cacheKey] = CachedSummary(proposed, approved) }
+            stage(if (reviewEnabled) "review" else "review_skipped", false, (System.nanoTime() - start) / 1_000_000)
             approved
+        }
     }
 }
