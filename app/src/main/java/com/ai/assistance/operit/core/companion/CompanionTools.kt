@@ -21,22 +21,19 @@ object CompanionTools {
                 param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
                 param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
-            description = "Operit 自有内部状态的查看和定义维护。action=get|create|revise|merge|deactivate|budget。budget 用 tokens 设置本主体材料预算2048至16384（默认2048，宿主估算，非完整模型窗口）。get 可用 section=inner|inner_pending|episode|focus|experience_link|union|category_versions|source|action|decision|feedback|activity|activity_part|waking_note；id 查具体记录，版本用 episode:ID、union:ID、decision:ID、feedback:ID 或 focus:类别ID；offset 真正分页。action 是实际工具请求与回执，decision/feedback 是私聊中已采用的决定/理解，技术完成不等于主观满足。省略 section 返回原状态与本页事件/重点。get 返回当前定义、宿主真实事件、版本和最近选材记录，offset翻页；inner 包含内在结构与候选（每页8项），inner_history 是增量历史，按各自 next_offset 继续。" +
-                "inner_family 用 id 指定 family 分页；长候选可用 inner_chunk +候选id+字符offset 分段读完整原文，长的已采用内容用 inner_record_chunk +记录id+字符offset；next_offset继续，未完整提供不赋予采用资格。当前主观值可通过主生成中的 operit_state_report 回报；updates更新已有状态，报告create可原子新建定义并写首次体验，报告revise可在同一次生成中改名、改简介、改类别或时间规则，未报告的维度保留。" +
-                "本工具的定义操作仍不接受value，不能伪造宿主事件。定义操作必须有id、expected_version（新建0）、reason、evidence（已提供的真实事件ID的JSON数组）。" +
-                "create/revise传完整definition JSON：id,name,description,kind（只能drive驱力/sentiment情感/emotion情绪/psychology心理）,baseline,min,max,scope=global|session,private,share（AI愿向本机公开）,participates,effects=[{action,weight,cue,target可选}],time_rules，可带object_ref绑定明确对象。" +
-                "新建必须明确kind和完整time_rules；旧定义缺kind时保留unclassified，新时间规则显示undefined，原规则继续到明确修订，不能替它预设类别、数值或速度。不同对象不要无声共用同一状态ID。" +
-                "time_rules={increase:{condition,reason,interval_minutes,amount},decrease:{condition,reason,interval_minutes,amount},floor}，condition只能always（任何）/not_contacted（未联系）/custom（自定义）；reason可自由填写具体原因。任一方向为not_contacted时另须contact_window_minutes，由实际用户消息时间判断，重试和唤醒不刷新联系。" +
-                "数字选项0至30或自定义；自定义仅限有限数字，不限于0至30且可为小数。interval_minutes<=0暂停该方向，amount=0不变化，负amount反向变化；contact_window_minutes<=0表示无等待窗口。floor由模型自行确定，30不是默认值，且须在状态总范围内；它只限时间下降，不限制有来源的主观反馈。" +
-                "custom由主生成报告updates.time_conditions={increase:true/false,decrease:true/false}确认成立或结束，只写自定义方向；允许只报条件与reason而不填写value。未确认条件不计时，已确认条件保留至明确变更。" +
-                "明确time_rules后日常事件值由模型回报，用户也可在本机状态详情手动修改并留下user_edit来源；旧maxDelta/halfLifeHours/triggers不再参与计算，新定义不需要这些旧字段。未迁移旧定义仍按原半衰期/时间漂移和客观事件规则计算，主观消息与唤醒不按旧关键词增减。" +
-                "effects action=contact|explore|todo|tool|reply|defer|drop|rest，weight为-10..10的相对基准倾向，cue说明影响，target可为待办/阅读来源ID或工具名；选中或高分都不强制执行。" +
-                "merge用target指定同作用域现有目标，宿主平均归一化值并停用来源，旧历史保留；revise不重置当前值。" +
-                "本工具的定义操作会改变语义版本，同轮旧frame状态报告会被拒绝；同轮改名、简介、分类、时间规则应使用最终报告revise:[{id,expected_version,changes:{要改的name/description/kind/time_rules},reason,evidence可选}]，可与updates原子保存。稳定ID不变，规则修改不重算过去。状态不授予工具、探索或联系权限。",
-            parametersStructured = listOf(param("action", "操作", true), param("id", "维度稳定ID"),
-                param("definition", "完整维度定义JSON；新建须有四类之一的kind及完整time_rules，不夹带value"), param("expected_version", "get读取的定义版本，新建0"),
-                param("reason", "演化经过与理由"), param("evidence", "真实事件ID的JSON数组"),
-                param("target", "merge目标维度ID"), param("tokens", "budget 本主体材料预算2048至16384"), param("offset", "历史分页起点"), param("section", "get 可选 episode/focus/experience_link/union/category_versions/source/action/decision/feedback/rest/dream/dream_understanding（私域记录仅本人私聊）"))),
+            description = "内部状态记录查询与定义维护。get 读取原始记录与版本；create/revise/merge/deactivate 维护定义；budget 设置材料预算。本工具不写主观value或伪造宿主事件；本轮体验值、时间条件及同轮定义修订由 operit_state_report 回报。调用参数以字段定义为准，不重复主体的长期行为规则。",
+            parametersStructured = listOf(
+                param("action", "get/create/revise/merge/deactivate/budget", true),
+                param("id", "定义稳定ID；get 读取记录或 inner_family 的family；历史/长内容用 offset/next_offset 分页"),
+                param("definition", "create/revise 完整定义JSON：id,name,description,kind=drive|sentiment|emotion|psychology,baseline,min,max,scope=global|session,private,share,participates,effects=[{action,weight,cue,target可选}],time_rules={increase:{condition,reason,interval_minutes,amount},decrease:{condition,reason,interval_minutes,amount},floor}；condition=always|not_contacted|custom，not_contacted还须contact_window_minutes；可选object_ref。不夹带value"),
+                param("expected_version", "定义版本；新建为0，修订取get返回值"),
+                param("reason", "本次定义变更的依据和理由"),
+                param("evidence", "已存在的真实事件ID组成的JSON数组，不得伪造"),
+                param("target", "merge 同作用域目标维度ID；来源停用，历史保留"),
+                param("tokens", "budget 时主体材料预算2048至16384，非模型上下文总额度"),
+                param("offset", "分页起点；按返回的next_offset继续直到完整"),
+                param("section", "get 可选 inner/inner_pending/inner_history/inner_family/inner_chunk/inner_record_chunk/episode/focus/experience_link/union/category_versions/source/action/decision/feedback/activity/activity_part/waking_note/rest/dream/dream_understanding；私域内容仅本人私聊")
+            )),
         ToolPrompt(name = "companion_explore",
             description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；启用连续性内部状态的助手没有自动续约，只有明确安排的事项才继续；其他助手保留既有三小时判断规则。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材、继续旧方向或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次探索距现在的分钟数"), param("purpose", "接下来想继续的事，最多500字"))),
