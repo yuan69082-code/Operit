@@ -1,6 +1,8 @@
 package com.ai.assistance.operit.api.chat.llmprovider
 
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
+import com.ai.assistance.operit.data.model.ApiProviderType
+import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.core.chat.hooks.PromptTurnKind
 import com.ai.assistance.operit.util.ChatMarkupRegex
 import java.io.IOException
@@ -13,6 +15,23 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ModelConfigConnectionTesterTest {
+    @Test
+    fun `Codex connection probes stream while other subscription protocols retain their modes`() {
+        val base = ModelConfigData(id = "probe", name = "probe", apiProviderType = ApiProviderType.OPENAI)
+        assertTrue(ModelConfigConnectionTester.requiresStreamingProbe(
+            base.copy(apiProviderType = ApiProviderType.OPENAI_CODEX)
+        ))
+        assertTrue(ModelConfigConnectionTester.requiresStreamingProbe(
+            base.copy(subscriptionChannel = "codex")
+        ))
+        assertEquals(false, ModelConfigConnectionTester.requiresStreamingProbe(base))
+        for (channel in listOf("gemini", "grok", "kimi", "glm")) {
+            assertEquals(channel, false, ModelConfigConnectionTester.requiresStreamingProbe(
+                base.copy(subscriptionChannel = channel)
+            ))
+        }
+    }
+
     @Test
     fun `probe obtains a real call and preserves the entire signed assistant turn`() = runBlocking {
         val assistantResponse =
