@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CompanionToolBudgetTest {
+    @Test fun internalStateToolPromptKeepsApiContractWithoutRepeatingTheSubjectManual() {
+        val prompt = CompanionTools.prompts().single { it.name == "companion_internal_state" }
+        assertTrue("Tool overview should stay concise", prompt.description.length < 300)
+        assertTrue(prompt.description.contains("operit_state_report"))
+        val parameters = prompt.parametersStructured.orEmpty().associateBy { it.name }
+        assertTrue(parameters["definition"]?.description?.contains("time_rules") == true)
+        assertTrue(parameters["definition"]?.description?.contains("not_contacted") == true)
+        assertTrue(parameters["section"]?.description?.contains("inner_record_chunk") == true)
+        assertTrue(parameters["evidence"]?.description?.contains("事件ID") == true)
+    }
+
     @Test fun exhaustedWakeReturnsDenialWithoutThrowingOrIncreasingCount() {
         val budget = CompanionToolBudget()
         repeat(12) { assertTrue(budget.admit("read_file", null)) }

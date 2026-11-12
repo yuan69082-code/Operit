@@ -5,6 +5,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupMemoryRulesTest {
+    @Test fun memoryIndexContainsOnlyReferencesNotStoredContent() {
+        val record = JSONObject().put("first", 10L).put("through", 20L)
+            .put("note", "secret private note").put("excerpt", "historical chat excerpt")
+        val index = GroupMemoryRules.index("group-chat-1", record)
+        assertTrue(index.contains("group-chat-1"))
+        assertTrue(index.contains("10..20"))
+        assertFalse(index.contains("secret private note"))
+        assertFalse(index.contains("historical chat excerpt"))
+        assertEquals("secret private note", GroupMemoryRules.recalled(record))
+    }
+
     private fun state() = JSONObject().also {
         GroupMemoryRules.observe(it, "a", listOf(10L to "old", 20L to "latest"))
         GroupMemoryRules.observe(it, "b", listOf(15L to "other"))

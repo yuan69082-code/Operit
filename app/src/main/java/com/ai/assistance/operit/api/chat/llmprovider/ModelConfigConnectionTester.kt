@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.api.chat.llmprovider
 
 import android.content.Context
+import com.ai.assistance.operit.data.model.ApiProviderType
 import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.data.model.ToolParameterSchema
 import com.ai.assistance.operit.data.model.ToolPrompt
@@ -56,6 +57,13 @@ data class ModelConnectionTestReport(
 }
 
 object ModelConfigConnectionTester {
+    // Codex OAuth Responses rejects non-streaming requests. Other providers keep their
+    // existing probe mode; normal chat behavior is unchanged by this test-only policy.
+    internal fun requiresStreamingProbe(config: ModelConfigData): Boolean =
+        config.apiProviderType == ApiProviderType.OPENAI_CODEX ||
+            config.apiProviderTypeId.equals(ApiProviderType.OPENAI_CODEX.name, ignoreCase = true) ||
+            config.subscriptionChannel == "codex"
+
     /**
      * Ask for a real call before returning its result. A fabricated assistant call has no provider
      * signature, and rebuilding the returned call would discard hidden protocol metadata.
@@ -158,7 +166,7 @@ object ModelConfigConnectionTester {
                     context,
                     history,
                     parameters,
-                    stream = false,
+                    stream = requiresStreamingProbe(configForTest),
                     availableTools = availableTools,
                     enableRetry = false,
                     recordTokenUsage = false,
