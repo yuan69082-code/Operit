@@ -8,6 +8,11 @@ import org.json.JSONObject
 
 /** User notes are separate from observed excerpts and retain the original participation range. */
 object GroupMemoryRules {
+    /** A stable, content-free pointer for every-round context; full text stays in memories/history. */
+    fun index(chatId: String, record: JSONObject): String =
+        "chat_id=$chatId，参与时间=${record.optLong("first")}..${record.optLong("through")}，" +
+            "有编辑记忆=${record.has("note")}"
+
     /** Apply deletion boundaries inside the same store transaction as observation. */
     fun observe(state: JSONObject, owner: String, entries: List<Pair<Long, String>>, prefix: String = "") {
         val boundary = state.optJSONObject("forgotten_through")?.optLong(owner, -1L) ?: -1L
