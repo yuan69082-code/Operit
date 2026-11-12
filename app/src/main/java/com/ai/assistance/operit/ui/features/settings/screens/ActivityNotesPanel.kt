@@ -123,7 +123,8 @@ private fun ActivityNoteCard(role: String, head: JSONObject) {
                                 SelectionContainer { Text(c.getString("text")) }
                             }
                             "schedule" -> {
-                                Text(if (c.optBoolean("paused")) "已暂停后续安排" else "已保存的安排 · ${privateTime(c.optLong("at"))}",
+                                val kind = if (c.optString("schedule_kind") == "exploration") "探索" else "主动联系"
+                                Text(if (c.optBoolean("paused")) "已暂停后续${kind}安排" else "已保存的${kind}安排 · ${privateTime(c.optLong("at"))}",
                                     style = MaterialTheme.typography.labelMedium)
                                 if (!c.optBoolean("paused")) Text(c.optString("purpose"), style = MaterialTheme.typography.bodyMedium)
                             }

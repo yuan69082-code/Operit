@@ -8,6 +8,7 @@ import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.api.chat.enhance.ConversationMarkupManager
 import com.ai.assistance.operit.api.chat.enhance.ConversationRoundManager
 import com.ai.assistance.operit.api.chat.enhance.ConversationService
+import com.ai.assistance.operit.api.chat.enhance.ExecutionInputState
 import com.ai.assistance.operit.api.chat.enhance.FileBindingService
 import com.ai.assistance.operit.api.chat.enhance.MultiServiceManager
 import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
@@ -77,7 +78,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -397,16 +397,15 @@ class EnhancedAIService private constructor(private val context: Context) {
     }
 
     // State flows for UI updates
-    private val _inputProcessingState =
-            MutableStateFlow<InputProcessingState>(InputProcessingState.Idle)
-    val inputProcessingState = _inputProcessingState.asStateFlow()
+    private val executionInputState = ExecutionInputState()
+    val inputProcessingState = executionInputState.state
 
     /**
      * 设置当前的输入处理状态
      * @param newState 新的状态
      */
     fun setInputProcessingState(newState: com.ai.assistance.operit.data.model.InputProcessingState) {
-        _inputProcessingState.value = newState
+        executionInputState.set(newState)
     }
 
     // Per-request token counts
@@ -440,6 +439,7 @@ class EnhancedAIService private constructor(private val context: Context) {
 
     private data class MessageExecutionContext(
         val executionId: Int,
+        val publishesInputState: Boolean,
         val streamBuffer: StringBuilder = StringBuilder(),
         val roundManager: ConversationRoundManager = ConversationRoundManager(),
         val isConversationActive: AtomicBoolean = AtomicBoolean(true),
@@ -455,20 +455,24 @@ class EnhancedAIService private constructor(private val context: Context) {
     )
 
     private val activeExecutionContexts = ConcurrentHashMap<Int, MessageExecutionContext>()
+    private val activeFunctionServices = ConcurrentHashMap<Int, AIService>()
     private val nextExecutionContextId = AtomicInteger(0)
 
     private fun registerExecutionContext(context: MessageExecutionContext) {
         activeExecutionContexts[context.executionId] = context
+        if (context.publishesInputState) executionInputState.begin(context.executionId)
     }
 
     private fun unregisterExecutionContext(context: MessageExecutionContext) {
         activeExecutionContexts.remove(context.executionId, context)
+        executionInputState.finish(context.executionId)
     }
 
     private fun invalidateExecutionContext(context: MessageExecutionContext, reason: String) {
         if (context.isConversationActive.compareAndSet(true, false)) {
             AppLogger.d(TAG, "执行上下文已失效: id=${context.executionId}, reason=$reason")
         }
+        executionInputState.finish(context.executionId)
     }
 
     private fun invalidateAllExecutionContexts(reason: String) {
@@ -729,21 +733,26 @@ class EnhancedAIService private constructor(private val context: Context) {
         val serviceForFunction = getAIServiceForFunction(functionType, chatModelConfigIdOverride, chatModelIndexOverride)
         val modelParameters = getModelParametersForFunction(functionType, chatModelConfigIdOverride, chatModelIndexOverride)
         val output = StringBuilder()
-
-        serviceForFunction
-            .sendMessage(
-                context = context,
-                chatHistory = turns,
-                modelParameters = modelParameters,
-                enableThinking = enableThinking,
-                stream = stream,
-                availableTools = emptyList(),
-                preserveThinkInHistory = true,
-                recordTokenUsage = recordTokenUsage
-            )
-            .collect { chunk ->
-                output.append(chunk)
-            }
+        val executionId = nextExecutionContextId.incrementAndGet()
+        activeFunctionServices[executionId] = serviceForFunction
+        try {
+            serviceForFunction
+                .sendMessage(
+                    context = context,
+                    chatHistory = turns,
+                    modelParameters = modelParameters,
+                    enableThinking = enableThinking,
+                    stream = stream,
+                    availableTools = emptyList(),
+                    preserveThinkInHistory = true,
+                    recordTokenUsage = recordTokenUsage
+                )
+                .collect { chunk ->
+                    output.append(chunk)
+                }
+        } finally {
+            activeFunctionServices.remove(executionId, serviceForFunction)
+        }
 
         return output.toString()
     }
@@ -1049,6 +1058,7 @@ class EnhancedAIService private constructor(private val context: Context) {
             val execContext =
                 MessageExecutionContext(
                     executionId = nextExecutionContextId.incrementAndGet(),
+                    publishesInputState = !isSubTask,
                     conversationHistory = chatHistory.toMutableList(),
                     activity = ActivityNotes.current(chatId)?.takeIf { it.role == roleCardId && it.id == options.activityId },
                     eventChannel = eventChannel
@@ -1064,8 +1074,11 @@ class EnhancedAIService private constructor(private val context: Context) {
 
                     // Update state to show we're processing
                     if (!isSubTask) {
-                    withContext(Dispatchers.Main) {
-                        _inputProcessingState.value = InputProcessingState.Processing(context.getString(R.string.enhanced_processing_message))
+                        withContext(Dispatchers.Main) {
+                            executionInputState.publish(
+                                execContext.executionId,
+                                InputProcessingState.Processing(context.getString(R.string.enhanced_processing_message))
+                            )
                         }
                     }
 
@@ -1108,8 +1121,11 @@ class EnhancedAIService private constructor(private val context: Context) {
 
                     // Update UI state to connecting
                     if (!isSubTask) {
-                    withContext(Dispatchers.Main) {
-                        _inputProcessingState.value = InputProcessingState.Connecting(context.getString(R.string.enhanced_connecting_service))
+                        withContext(Dispatchers.Main) {
+                            executionInputState.publish(
+                                execContext.executionId,
+                                InputProcessingState.Connecting(context.getString(R.string.enhanced_connecting_service))
+                            )
                         }
                     }
 
@@ -1286,9 +1302,11 @@ class EnhancedAIService private constructor(private val context: Context) {
                                 if (isFirstChunk) {
                                     recordInnerDelivery(execContext, requestHistory)
                                     if (!isSubTask) {
-                                    withContext(Dispatchers.Main) {
-                                        _inputProcessingState.value =
+                                        withContext(Dispatchers.Main) {
+                                            executionInputState.publish(
+                                                execContext.executionId,
                                                 InputProcessingState.Receiving(context.getString(R.string.enhanced_receiving_response))
+                                            )
                                         }
                                     }
                                     isFirstChunk = false
@@ -1428,12 +1446,14 @@ class EnhancedAIService private constructor(private val context: Context) {
                         catch (storage: Exception) { AppLogger.e(TAG, "STATE_REPORT_FAILURE_RECEIPT_NOT_SAVED type=${storage.javaClass.simpleName}") }
                     }
                 }
-                invalidateExecutionContext(execContext, "sendMessage.failed")
                 AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
                 withContext(Dispatchers.Main) {
-                    _inputProcessingState.value =
+                    executionInputState.publish(
+                        execContext.executionId,
                         InputProcessingState.Error(message = context.getString(R.string.enhanced_error_with_message, e.message ?: ""))
+                    )
                 }
+                invalidateExecutionContext(execContext, "sendMessage.failed")
                 if (!isSubTask) stopAiService()
                 throw e
             } finally {
@@ -2159,6 +2179,16 @@ class EnhancedAIService private constructor(private val context: Context) {
         // UI finalization is also used for invalid/empty responses; only successful
         // business turns (including explicit state-only quiet turns) may commit.
         currentCoroutineContext().ensureActive()
+        if (!isSubTask) {
+            withContext(Dispatchers.Main) {
+                // Model/tool output has ended, but its state report and visible message still
+                // need persistence. Keep the turn busy with an accurate completion phase.
+                executionInputState.publish(
+                    context.executionId,
+                    InputProcessingState.Processing(this@EnhancedAIService.context.getString(R.string.enhanced_saving_response))
+                )
+            }
+        }
         val report = context.pendingStateReport
         if (commitStateReport && report != null && !context.stateReportCommitted && context.isConversationActive.get()) {
             val frame = context.internalStateFrame
@@ -2196,7 +2226,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         // Ensure input processing state is updated to completed
         if (!isSubTask) {
             withContext(Dispatchers.Main) {
-                _inputProcessingState.value = InputProcessingState.Completed
+                executionInputState.publish(context.executionId, InputProcessingState.Completed)
             }
         }
 
@@ -2269,7 +2299,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         if (!isSubTask && toolInvocations.isNotEmpty()) {
             withContext(Dispatchers.Main) {
                 val toolNames = toolInvocations.joinToString(", ") { resolveToolDisplayName(it.tool) }
-                _inputProcessingState.value = InputProcessingState.ExecutingTool(toolNames)
+                executionInputState.publish(context.executionId, InputProcessingState.ExecutingTool(toolNames))
             }
         }
 
@@ -2406,8 +2436,8 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         // Add transition state
         if (!isSubTask) {
-        withContext(Dispatchers.Main) {
-            _inputProcessingState.value = InputProcessingState.ProcessingToolResult(displayToolNames)
+            withContext(Dispatchers.Main) {
+                executionInputState.publish(context.executionId, InputProcessingState.ProcessingToolResult(displayToolNames))
             }
         }
 
@@ -2445,13 +2475,10 @@ class EnhancedAIService private constructor(private val context: Context) {
 
         // Clearly show we're preparing to send tool result to AI
         if (!isSubTask) {
-        withContext(Dispatchers.Main) {
-            _inputProcessingState.value = InputProcessingState.ProcessingToolResult(displayToolNames)
+            withContext(Dispatchers.Main) {
+                executionInputState.publish(context.executionId, InputProcessingState.ProcessingToolResult(displayToolNames))
             }
         }
-
-        // Add short delay to make state change more visible
-        delay(300)
 
         // Get all model parameters from preferences (with enabled state)
         val modelSnapshot = getModelExecutionSnapshot(
@@ -2524,9 +2551,11 @@ class EnhancedAIService private constructor(private val context: Context) {
 
                 // 更新状态为接收中
                 if (!isSubTask) {
-                withContext(Dispatchers.Main) {
-                    _inputProcessingState.value =
+                    withContext(Dispatchers.Main) {
+                        executionInputState.publish(
+                            context.executionId,
                             InputProcessingState.Receiving(this@EnhancedAIService.context.getString(R.string.enhanced_receiving_tool_result))
+                        )
                     }
                 }
 
@@ -3040,16 +3069,19 @@ class EnhancedAIService private constructor(private val context: Context) {
 
     /** Cancel the current conversation */
     fun cancelConversation() {
+        // Capture and cancel now: a separately launched manager-wide cancellation can run
+        // after the old send job joins and abort the next turn using the same provider.
+        val servicesToCancel = buildSet {
+            activeExecutionContexts.values.forEach { execution ->
+                execution.modelExecutionSnapshot?.service?.let { add(it) }
+            }
+            addAll(activeFunctionServices.values)
+        }
         invalidateAllExecutionContexts("cancelConversation")
-
-        // Set conversation inactive
-        // isConversationActive.set(false) // This is now per-context, can't set a global one
-
-        // Cancel all underlying AIService streaming instances
-        initScope.launch {
-            runCatching {
-                multiServiceManager.cancelAllStreaming()
-            }.onFailure { e ->
+        servicesToCancel.forEach { service ->
+            try {
+                service.cancelStreaming()
+            } catch (e: Exception) {
                 AppLogger.e(TAG, "取消AIService流式输出失败", e)
             }
         }
@@ -3062,7 +3094,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         AppLogger.d(TAG, "Conversation canceled")
 
         // Reset input processing state
-        _inputProcessingState.value = InputProcessingState.Idle
+        executionInputState.set(InputProcessingState.Idle)
 
         // Reset per-request token counts
         _perRequestTokenCounts.value = null

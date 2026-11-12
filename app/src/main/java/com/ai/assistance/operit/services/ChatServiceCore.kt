@@ -183,8 +183,15 @@ class ChatServiceCore(
             getChatTitle = { chatId ->
                 chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == chatId }?.title
             },
-            onTurnComplete = { chatId, service, nextWindowSize, turnOptions ->
-                tokenStatisticsDelegate.updateCumulativeStatistics(chatId, service)
+            onTurnTokensCaptured = { chatId, snapshot ->
+                tokenStatisticsDelegate.accumulateTurnTokens(chatId, snapshot)
+            },
+            onContextWindowEstimated = { chatId, windowSize ->
+                // The delegate checks turn ownership immediately before this synchronous
+                // update. Do not launch a stale persistence write or another completion here.
+                tokenStatisticsDelegate.updateContextWindow(chatId, windowSize)
+            },
+            onTurnComplete = { chatId, _, nextWindowSize, turnOptions ->
                 val (inputTokens, outputTokens) = tokenStatisticsDelegate.getCumulativeTokenCounts(chatId)
                 val windowSize = nextWindowSize ?: tokenStatisticsDelegate.getLastCurrentWindowSize(chatId)
                 tokenStatisticsDelegate.setTokenCounts(chatId, inputTokens, outputTokens, windowSize)

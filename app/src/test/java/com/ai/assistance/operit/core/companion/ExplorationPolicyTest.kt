@@ -6,6 +6,77 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ExplorationPolicyTest {
+    @Test fun interruptedExplicitPlanWaitsForUserToResumeWithOriginalTimeAndPurpose() {
+        val data = JSONObject()
+        ExplorationPolicy.configure(data, true, setOf("reading"), 4, now, continuous = true)
+        ExplorationPolicy.schedule(data, 15, "把原来那一页读完", now)
+        val at = data.getLong("at")
+        assertTrue(ExplorationPolicy.claim(data, at, day, "old", "chat"))
+        assertEquals("running", ExplorationPolicy.state(data))
+        ExplorationPolicy.finish(data, "old", "interrupted", at + 1, continuous = true)
+        assertEquals("interrupted", ExplorationPolicy.state(data))
+        assertTrue(ExplorationPolicy.canResume(data))
+        assertFalse(data.has("at"))
+        assertEquals(at, data.getJSONObject("interrupted_plan").getLong("at"))
+        assertFalse(ExplorationPolicy.due(data, at + 1_000_000, day))
+
+        ExplorationPolicy.resume(data)
+        assertEquals(at, data.getLong("at"))
+        assertEquals("把原来那一页读完", data.getString("purpose"))
+        assertEquals(1, ExplorationPolicy.used(data, day))
+        assertTrue(data.getBoolean("resume_requested"))
+        assertTrue(ExplorationPolicy.due(data, at + 1_000_000, day))
+        assertTrue(ExplorationPolicy.claim(data, at + 1_000_000, day, "resumed", "chat"))
+        assertEquals(2, ExplorationPolicy.used(data, day))
+        ExplorationPolicy.finish(data, "resumed", "completed", at + 1_000_001, continuous = true)
+        assertEquals("not_scheduled", ExplorationPolicy.state(data))
+        assertFalse(ExplorationPolicy.canResume(data))
+        assertFalse(data.has("interrupted_plan"))
+    }
+
+    @Test fun recoveredWorkCannotResumePastTheDailyBudget() {
+        val data = enabled(limit = 1)
+        ExplorationPolicy.schedule(data, 15, "明确的原计划", now)
+        val at = data.getLong("at")
+        ExplorationPolicy.claim(data, at, day, "old", "chat")
+        assertTrue(ExplorationPolicy.recover(data, continuous = true))
+        assertTrue(ExplorationPolicy.canResume(data))
+        ExplorationPolicy.resume(data)
+        assertFalse(ExplorationPolicy.due(data, at + 1, day))
+        assertTrue(ExplorationPolicy.due(data, at + 1, "next-day"))
+    }
+
+    @Test fun pauseAndNewScheduleCannotBeOverwrittenByAnInterruptedOldTurn() {
+        for (pause in listOf(true, false)) {
+            val data = enabled()
+            ExplorationPolicy.schedule(data, 15, "旧预约", now)
+            val at = data.getLong("at")
+            ExplorationPolicy.claim(data, at, day, "old", "chat")
+            if (pause) ExplorationPolicy.selfPause(data)
+            else ExplorationPolicy.schedule(data, 60, "新的安排", at)
+            ExplorationPolicy.finish(data, "old", "interrupted", at + 1, continuous = true)
+            assertFalse(ExplorationPolicy.canResume(data))
+            assertFalse(data.has("interrupted_plan"))
+            assertThrows(IllegalStateException::class.java) { ExplorationPolicy.resume(data) }
+            if (pause) assertEquals("paused", ExplorationPolicy.state(data))
+            else {
+                assertEquals("scheduled", ExplorationPolicy.state(data))
+                assertEquals("新的安排", data.getString("purpose"))
+                assertEquals(at + 3_600_000, data.getLong("at"))
+            }
+        }
+    }
+
+    @Test fun initialAutomaticOpportunityIsNotAnExplicitPlanToResume() {
+        val data = enabled()
+        val at = data.getLong("at")
+        ExplorationPolicy.claim(data, at, day, "old", "chat")
+        ExplorationPolicy.finish(data, "old", "interrupted", at + 1, continuous = true)
+        assertEquals("interrupted", ExplorationPolicy.state(data))
+        assertFalse(ExplorationPolicy.canResume(data))
+        assertFalse(data.has("interrupted_plan"))
+    }
+
     @Test fun continuousSubjectHasNoInitialOrAutomaticIdleWakeButKeepsOwnArrangement() {
         val data = JSONObject()
         ExplorationPolicy.configure(data, true, setOf("reading"), 4, 100, continuous = true)

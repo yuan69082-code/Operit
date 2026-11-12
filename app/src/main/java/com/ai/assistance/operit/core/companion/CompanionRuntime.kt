@@ -58,9 +58,13 @@ object CompanionRuntime {
         lastInteraction = SystemClock.elapsedRealtime()
         generation.incrementAndGet()
         // Cancel our own request before the user's next request starts, never in a late finally.
-        owned.getAndSet(null)?.let { cancellationBarrier = it.core.cancelMessageAndWait(it.chatId) }
-        decision?.cancel()
-        cancellationBarrier?.takeIf { it.isActive }
+        val sendCancellation = owned.getAndSet(null)?.let { it.core.cancelMessageAndWait(it.chatId) }
+        val previousDecision = decision
+        previousDecision?.cancel()
+        // Joining just the provider/send job leaves evaluate's activity lease occupied.
+        // A cancelled Job is inactive while its finally is still running.
+        cancellationBarrier = completionBarrier(cancellationBarrier, sendCancellation, previousDecision)
+        cancellationBarrier
     }
 
     fun beforeTool(context: Context, chatId: String?, tool: String, action: String? = null): String? {
@@ -351,9 +355,15 @@ object CompanionRuntime {
                             store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
                         } finally {
                             releaseTurn(epoch)
-                            store.update(scheduleKey) { CompanionSchedule.finish(it, ticket, completed, System.currentTimeMillis(), continuous) }
-                            if (store.read(scheduleKey).optBoolean("paused"))
-                                store.log(target, "暂停", "本次未安排下一次；可在聊天中让 AI 安排，或点击一分钟后唤醒")
+                            val saved = store.update(scheduleKey) { CompanionSchedule.finish(it, ticket, completed, System.currentTimeMillis(), continuous) }
+                            val outcome = when (CompanionSchedule.state(saved)) {
+                                "scheduled" -> "下一次预约已保存"
+                                "paused" -> "已明确暂停后续唤醒"
+                                "interrupted" -> "本轮中断，原预约已保留待恢复"
+                                "not_scheduled" -> "本轮已结束，没有设置下一次预约"
+                                else -> "预约状态仍在处理中"
+                            }
+                            store.log(target, "安排结果", outcome)
                         }
                     }
                     decision?.join()
@@ -520,13 +530,16 @@ object CompanionRuntime {
         }
         val scheduleInstruction = when {
             studyEvent -> "书房事件无需更改主动联系设置。记录实际阅读进度；有明确后续章节时可用 companion_study schedule，或结束。"
-            internalEnabled -> "本轮源于实际事件或已有具体安排。只有自己确实安排了要继续的事情时，才使用原有 schedule/submit 工具记录目的与时间；也可以不安排。连续性主体没有默认闲置判断或自动三小时续约。休息与梦可通过本轮私域状态报告承接，不因设备锁屏或恢复服务而推断休息、做梦或醒来。"
+            explorationWork != null && internalEnabled ->
+                "需要继续时用 companion_explore action=schedule 记录下一次的时间和目的；决定休息可用 action=pause。没有新安排也可以正常结束，软件不会自动三小时续约；只有工具返回保存成功才算已预约。不能借其他调度工具绕过探索开关、间隔或每日上限。"
             explorationWork != null ->
                 "可用 companion_explore schedule 安排15分钟至7天后的下一次自由判断机会，或 pause 明说要歇；如果两者都不做，软件会在默认3小时后再给一次自由判断机会，这不代表你仍想继续同一方向。不能借其他调度工具绕过探索开关、间隔或每日上限；探索、继续和联系她是分开的决定，不要求每次有产出或消息。"
             phoneRole != null || softwareRole != null ->
                 "事件触发无需安排下一次唤醒，不要为了处理感知事件更改既有主动联系计划。"
             taskEvent ->
                 "本次由待办提交触发，无需修改主动联系设置；可以更新事项、批注、完成或暂缓。以后确需继续可用 companion_todo submit 安排至少1分钟后的处理；不能把计划当作结果。"
+            internalEnabled ->
+                "有下一次具体判断计划时用 companion_schedule action=set 记录时间和目的，明确停止后续可用 action=cancel；没有新安排也可以正常结束。只有工具返回保存成功才算已预约。连续性主体没有默认闲置判断或自动续约，未安排不代表设置失败。休息与梦通过本轮私域状态报告承接，不因设备锁屏或恢复服务而推断休息、做梦或醒来。"
             else ->
                 "结束前用 companion_schedule 安排下次主动联系判断的时间和想留意的事，或主动 cancel 暂停。"
         }
@@ -606,10 +619,16 @@ object CompanionRuntime {
                     activityOutcome = "interrupted"
                     core.sendUserMessage(roleCardIdOverride = roleId, chatIdOverride = chatId, messageTextOverride = instruction,
                         turnOptions = ChatTurnOptions(proactiveWake = true, persistTurn = false, hideUserMessage = true,
-                            notifyReply = false, onCompanionComplete = { result.complete(it) }))
+                            notifyReply = false, onCompanionComplete = { result.complete(it) },
+                            onCompanionFailure = { result.completeExceptionally(it) }))
                 }
             }
-            withTimeout(30_000) { started.await() }
+            withTimeout(30_000) {
+                kotlinx.coroutines.selects.select<Unit> {
+                    started.onAwait { }
+                    result.onAwait { }
+                }
+            }
             ActivityNotes.started(context, requireNotNull(activity))
             val failure = async(start = CoroutineStart.UNDISPATCHED) {
                 core.inputProcessingStateByChatId.first { it[chatId] is InputProcessingState.Error }[chatId] as InputProcessingState.Error

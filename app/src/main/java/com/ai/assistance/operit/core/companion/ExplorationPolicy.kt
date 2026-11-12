@@ -27,6 +27,9 @@ object ExplorationPolicy {
         data.put("enabled", enable).put("activities", JSONArray(choices.toList()))
             .put("limit", limit).put("revision", revision(data) + 1)
         data.remove("running")
+        data.remove("claimed_plan")
+        data.remove("interrupted_plan")
+        data.remove("resume_requested")
         if (!enable || interrupted) {
             data.put("paused", true)
             data.remove("at")
@@ -45,11 +48,17 @@ object ExplorationPolicy {
         data.put("arrangement_origin", "subject")
         data.remove("self_paused")
         data.remove("auto_continued")
+        data.remove("claimed_plan")
+        data.remove("interrupted_plan")
+        data.remove("resume_requested")
     }
     /** 助手自己明说要歇：本轮结束后不自动续约。 */
     fun selfPause(data: JSONObject) {
         pause(data)
         data.put("self_paused", true)
+        data.remove("claimed_plan")
+        data.remove("interrupted_plan")
+        data.remove("resume_requested")
     }
     const val AUTO_CONTINUE_MINUTES = 180
 
@@ -66,6 +75,13 @@ object ExplorationPolicy {
     fun claim(data: JSONObject, now: Long, day: String, ticket: String, chat: String): Boolean {
         require(chat.isNotBlank()) { "执行探索需要助手的活跃私聊" }
         if (!due(data, now, day)) return false
+        // The due time is consumed while running. Retain only a real explicit plan so that
+        // an interruption can be shown and deliberately resumed without inventing a new time.
+        if (data.optString("arrangement_origin") == "subject" && !data.optBoolean("auto_continued")) {
+            data.put("claimed_plan", JSONObject().put("at", data.getLong("at"))
+                .put("purpose", data.optString("purpose")).put("arrangement_origin", "subject"))
+        } else data.remove("claimed_plan")
+        data.remove("interrupted_plan")
         data.put("chat", chat).put("used", used(data, day) + 1).put("day", day).put("running", ticket)
             .put("started", now).put("paused", true)
         data.remove("at")
@@ -79,10 +95,18 @@ object ExplorationPolicy {
 
     fun finish(data: JSONObject, ticket: String, outcome: String, now: Long = System.currentTimeMillis(), continuous: Boolean = false) {
         if (data.optString("running") != ticket) return
+        val claimed = data.optJSONObject("claimed_plan")
         data.remove("running")
+        data.remove("claimed_plan")
+        data.remove("resume_requested")
         data.put("last_outcome", outcome)
         // 本轮里已自己约了下一次，或明说要歇：尊重它
-        if (data.has("at") || data.optBoolean("self_paused")) return
+        if (data.has("at") || data.optBoolean("self_paused")) {
+            data.remove("interrupted_plan")
+            return
+        }
+        if (outcome != "completed" && claimed != null) data.put("interrupted_plan", claimed)
+        else data.remove("interrupted_plan")
         if (continuous) { pause(data); return }
         if (!enabled(data)) { pause(data); return }
         // 没有自行安排时，只给下一次重新判断的机会；不替助手认定兴趣仍然持续。失败的多歇一会儿。
@@ -90,6 +114,7 @@ object ExplorationPolicy {
         val last = data.optString("purpose").take(400)
         data.put("at", now + minutes * 60_000L).put("paused", false).put("auto_continued", true)
             .put("purpose", "软件提供一次新的自由判断机会；这不代表你仍想继续上次方向。上一轮没有自行安排下一次。上次的打算仅供参考：$last".take(500))
+        data.remove("interrupted_plan")
     }
 
     fun recover(data: JSONObject, continuous: Boolean = false): Boolean {
@@ -97,6 +122,29 @@ object ExplorationPolicy {
         if (ticket.isBlank()) return false
         finish(data, ticket, "interrupted", continuous = continuous)
         return true
+    }
+
+    fun state(data: JSONObject): String = when {
+        !enabled(data) -> "disabled"
+        data.has("running") -> "running"
+        !data.optBoolean("paused", true) && data.has("at") -> "scheduled"
+        data.optBoolean("self_paused") -> "paused"
+        data.optString("last_outcome") in setOf("failed", "interrupted") -> "interrupted"
+        else -> "not_scheduled"
+    }
+
+    fun canResume(data: JSONObject): Boolean = state(data) == "interrupted" &&
+        data.optJSONObject("interrupted_plan")?.let {
+            it.optString("arrangement_origin") == "subject" && it.optLong("at") > 0
+        } == true
+
+    fun resume(data: JSONObject) {
+        check(canResume(data)) { "没有可恢复的明确探索预约" }
+        val plan = data.getJSONObject("interrupted_plan")
+        data.put("at", plan.getLong("at")).put("purpose", plan.getString("purpose"))
+            .put("arrangement_origin", "subject").put("paused", false).put("resume_requested", true)
+        data.remove("interrupted_plan")
+        data.remove("auto_continued")
     }
 
     /** Preserve old arrangements as evidence, but never consume an automatic idle opportunity

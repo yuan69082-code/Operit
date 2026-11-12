@@ -328,6 +328,22 @@ fun ContextSummarySettingsScreen(onBackPressed: () -> Unit) {
                     contextError = contextError,
                     enableSummary = enableSummary,
                     onEnableSummaryChange = { enableSummary = it },
+                    aiReviewEnabled = currentConfig?.enableSummaryAiReview ?: true,
+                    onAiReviewEnabledChange = { enabled ->
+                        currentConfig?.let { config ->
+                            scope.launch {
+                                try {
+                                    modelConfigManager.updateSummaryAiReviewSettings(config.id, enabled)
+                                    summaryError = null
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (e: Exception) {
+                                    AppLogger.w("ContextSummarySettings", "保存摘要 AI 复核设置失败", e)
+                                    summaryError = e.message ?: errorSaveFailed
+                                }
+                            }
+                        }
+                    },
                     summaryTokenThresholdInput = summaryTokenThresholdInput,
                     onSummaryTokenThresholdInputChange = {
                         summaryTokenThresholdInput = it
@@ -691,6 +707,8 @@ private fun RenderContextSummaryConfigSections(
     contextError: String?,
     enableSummary: Boolean,
     onEnableSummaryChange: (Boolean) -> Unit,
+    aiReviewEnabled: Boolean,
+    onAiReviewEnabledChange: (Boolean) -> Unit,
     summaryTokenThresholdInput: String,
     onSummaryTokenThresholdInputChange: (String) -> Unit,
     enableSummaryByMessageCount: Boolean,
@@ -757,6 +775,13 @@ private fun RenderContextSummaryConfigSections(
         subtitle = stringResource(id = R.string.settings_enable_summary_desc),
         checked = enableSummary,
         onCheckedChange = onEnableSummaryChange,
+        backgroundColor = componentBackgroundColor
+    )
+    SettingsSwitchRow(
+        title = stringResource(id = R.string.settings_summary_ai_review),
+        subtitle = stringResource(id = R.string.settings_summary_ai_review_desc),
+        checked = aiReviewEnabled,
+        onCheckedChange = onAiReviewEnabledChange,
         backgroundColor = componentBackgroundColor
     )
     SettingsInputField(

@@ -211,6 +211,28 @@ class TokenStatisticsDelegate(
         }
     }
 
+    /** Record a completed turn before its independently calculated window is ready. */
+    fun accumulateTurnTokens(chatId: String?, snapshot: EnhancedAIService.TurnTokenSnapshot) {
+        val key = chatKey(chatId)
+        // Completion holds this immutable snapshot before the next request resets the
+        // service counters; window estimation must never read those mutable counters later.
+        val input = cumulativeInputTokensByChatKey.compute(key) { _, previous ->
+            (previous ?: 0L) + snapshot.inputTokens.coerceAtLeast(0L)
+        }!!
+        val output = cumulativeOutputTokensByChatKey.compute(key) { _, previous ->
+            (previous ?: 0L) + snapshot.outputTokens.coerceAtLeast(0L)
+        }!!
+        if (isActiveKey(key)) {
+            _cumulativeInputTokens.value = input
+            _cumulativeOutputTokens.value = output
+        }
+    }
+
+    /** Apply a current turn's preview without counting its usage a second time. */
+    fun updateContextWindow(chatId: String?, windowSize: Long) {
+        handleRequestWindowEstimate(chatKey(chatId), windowSize)
+    }
+
     /** 设置累计token计数 */
     fun setTokenCounts(chatId: String?, inputTokens: Long, outputTokens: Long, windowSize: Long) {
         val key = chatKey(chatId)

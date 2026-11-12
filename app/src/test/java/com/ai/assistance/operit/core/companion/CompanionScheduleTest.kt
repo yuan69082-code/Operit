@@ -5,6 +5,61 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CompanionScheduleTest {
+    @Test fun runningCompletionAndExplicitPauseHaveDifferentVisibleStates() {
+        val data = JSONObject().put("purpose", "留意进度").put("owner", "ai").put("at", 100)
+        CompanionSchedule.claim(data, "one", 100)
+        assertEquals("running", CompanionSchedule.status(data).getString("schedule_state"))
+        assertTrue(CompanionSchedule.status(data).isNull("next_at"))
+        CompanionSchedule.finish(data, "one", true, 200, continuous = true)
+        assertEquals("not_scheduled", CompanionSchedule.state(data))
+        assertFalse(CompanionSchedule.canResume(data))
+        CompanionSchedule.cancel(data)
+        assertEquals("paused", CompanionSchedule.state(data))
+        assertFalse(CompanionSchedule.canResume(data))
+    }
+
+    @Test fun explicitResumeUsesTheOriginalPlanWithoutAutomaticRetry() {
+        val data = JSONObject().put("purpose", "原来想留意的事").put("owner", "ai").put("at", 100)
+        CompanionSchedule.claim(data, "old", 100)
+        CompanionSchedule.finish(data, "old", false, 200, continuous = true)
+        assertEquals("interrupted", CompanionSchedule.state(data))
+        assertTrue(CompanionSchedule.canResume(data))
+        assertTrue(data.getBoolean("paused"))
+        assertFalse(CompanionSchedule.eligible(data, true))
+
+        CompanionSchedule.resume(data)
+        assertEquals(100L, data.getLong("at"))
+        assertEquals("原来想留意的事", data.getString("purpose"))
+        assertEquals("scheduled", CompanionSchedule.state(data))
+        assertEquals(100L, CompanionSchedule.status(data).getLong("next_at"))
+        assertTrue(CompanionSchedule.eligible(data, true))
+        assertTrue(data.getBoolean("interrupted")) // The resumed turn must check actual prior results.
+        assertFalse(CompanionSchedule.canResume(data))
+
+        CompanionSchedule.claim(data, "resumed", 300)
+        CompanionSchedule.finish(data, "resumed", false, 400, continuous = true)
+        assertTrue(data.getBoolean("paused"))
+        assertFalse(CompanionSchedule.eligible(data, true))
+        assertEquals(100L, data.getLong("at"))
+    }
+
+    @Test fun cancellationAndFreshSchedulesRevokeTheInterruptedPlan() {
+        val data = JSONObject().put("owner", "user").put("at", 100)
+        CompanionSchedule.claim(data, "old", 100)
+        CompanionSchedule.finish(data, "old", false, 200, continuous = true)
+        CompanionSchedule.cancel(data)
+        assertFalse(CompanionSchedule.canResume(data))
+        assertThrows(IllegalStateException::class.java) { CompanionSchedule.resume(data) }
+        CompanionSchedule.supersede(data)
+        data.put("at", 900).put("paused", false)
+        assertEquals("scheduled", CompanionSchedule.state(data))
+        assertFalse(data.optBoolean("self_paused"))
+        assertFalse(CompanionSchedule.canResume(data))
+        val saved = data.toString()
+        CompanionSchedule.finish(data, "old", false, 1000, continuous = true)
+        assertEquals(saved, data.toString())
+    }
+
     @Test fun continuousRecoveryRetainsUnknownWithoutCreatingJudgment() {
         val data = JSONObject().put("purpose", "继续已安排的事").put("owner", "ai").put("at", 100)
         CompanionSchedule.claim(data, "old", 100)

@@ -1074,6 +1074,10 @@ class ModelConfigManager(
         }
     }
 
+    suspend fun updateSummaryAiReviewSettings(configId: String, enabled: Boolean): ModelConfigData {
+        return updateConfigInternal(configId) { it.copy(enableSummaryAiReview = enabled) }
+    }
+
     suspend fun updateSummaryDialogueReviewSettings(
             configId: String,
             enabled: Boolean,

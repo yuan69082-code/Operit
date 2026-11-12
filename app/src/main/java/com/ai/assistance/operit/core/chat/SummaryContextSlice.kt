@@ -10,6 +10,14 @@ internal data class SummaryContextSlice(
 ) {
     val beforeTimestamp: Long get() = source.last().timestamp
     val afterTimestamp: Long get() = retained.first().timestamp
+    val snapshotTimestamp: Long get() = (source + retained).maxOf { it.timestamp }
+
+    fun completedSummary(summary: ChatMessage, completedAt: Long): ChatMessage {
+        require(summary.sender == "summary")
+        // For summary markers only, sentAt records the immutable snapshot boundary, including
+        // retained turns. Completion time would incorrectly swallow concurrently appended turns.
+        return summary.copy(sentAt = snapshotTimestamp, completedAt = completedAt)
+    }
 
     companion object {
         fun activeHistory(messages: List<ChatMessage>): List<ChatMessage> =
@@ -42,10 +50,10 @@ internal data class SummaryContextSlice(
             }
             // Never cut between a user's message and its assistant/tool response chain.
             if (turnStarts.size < 2) return null
-            // Two whole turns remain the minimum. Spend available room on earlier turns
-            // so a short correction or reference is not lost merely because it is third-last.
-            // Never split a tool chain; an oversized minimum tail is kept verbatim.
-            var retainedTurns = minOf(2, turnStarts.size - 1)
+            // Keep the latest whole turn even when it alone exceeds the budget. Older turns
+            // must fit: an unconditional two-turn minimum kept huge tool chains after compression.
+            // Spend remaining room on earlier turns so short recent references still survive.
+            var retainedTurns = 1
             var retainedChars = active.drop(turnStarts[turnStarts.size - retainedTurns])
                 .sumOf { it.content.length.toLong() }
             while (retainedTurns < minOf(maxRetainedTurns, turnStarts.size - 1)) {

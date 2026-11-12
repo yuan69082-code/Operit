@@ -87,6 +87,7 @@ object CompanionTools {
                     val store = CompanionStore(context)
                     val scope = store.scope(chatId, roleId)
                     val action = value(tool, "action")
+                    val scheduleActivity = if (name in setOf("companion_schedule", "companion_explore")) ActivityNotes.current(chatId) else null
                     var privateStateRead = false
                     val result = when (name) {
                         "companion_software" -> kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO +
@@ -125,13 +126,14 @@ object CompanionTools {
                             val exploration = ExplorationStore(context)
                             val actor = requireNotNull(roleId) { "请先选择独立助手" }
                             exploration.authorize(actor, chatId)
-                            when (action) {
-                                "status" -> Unit
+                            val saved = when (action) {
+                                "status" -> exploration.read(actor)
                                 "schedule" -> exploration.schedule(actor, chatId, required(tool, "minutes").toInt(), required(tool, "purpose"))
                                 "pause" -> exploration.pause(actor)
                                 else -> error("action 须为 status、schedule 或 pause；AI不能开启开关")
                             }
-                            exploration.status(actor)
+                            if (action != "status") recordSavedSchedule(context, scheduleActivity, saved, "exploration")
+                            exploration.status(actor, saved)
                         }
                         "software_awareness" -> if (value(tool, "action") == "gear") {
                             val level = value(tool, "level")
@@ -199,29 +201,30 @@ object CompanionTools {
                                 check(target != null && target.characterGroupId.isNullOrBlank() && target.characterCardId == roleId) { "主动联系计划只允许该助手在自己的私聊管理。" }
                             }
                             val scheduleKey = store.scheduleKey(requireNotNull(roleId))
-                            when (action) {
-                                "get" -> Unit
+                            val saved = when (action) {
+                                "get" -> store.read(scheduleKey)
                                 "set" -> {
                                     val minutes = required(tool, "minutes").toIntOrNull() ?: error("minutes 须为整数")
                                     val purpose = required(tool, "purpose")
                                     require(purpose.length <= 500) { "目的最多500字。" }
                                     store.update(scheduleKey) { CompanionSchedule.supersede(it); it.put("at", CompanionPolicy.wakeAt(System.currentTimeMillis(), minutes))
-                                        .put("purpose", purpose).put("owner", "ai").put("paused", false) }
-                                    store.log(chatId, "安排", "${minutes}分钟后：$purpose")
+                                        .put("purpose", purpose).put("owner", "ai").put("paused", false) }.also {
+                                        logSavedSchedule(store, chatId, "${minutes}分钟后：$purpose")
+                                    }
                                 }
                                 "cancel" -> {
-                                    store.update(scheduleKey) { CompanionSchedule.supersede(it); it.put("paused", true) }
-                                    store.log(chatId, "安排", "AI 暂停了下一次唤醒")
+                                    store.update(scheduleKey) { CompanionSchedule.cancel(it) }.also {
+                                        logSavedSchedule(store, chatId, "AI 暂停了下一次唤醒")
+                                    }
                                 }
                                 else -> error("未知唤醒操作")
                             }
-                            store.read(scheduleKey).also { saved ->
-                                if (action != "get") ActivityNotes.current(chatId)?.let { ref ->
-                                    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                                        ActivityNotes.schedule(context, ref, saved)
-                                    }
+                            if (action != "get") {
+                                kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                    recordSavedSchedule(context, scheduleActivity, saved, "contact")
                                 }
                             }
+                            CompanionSchedule.status(saved)
                         }
                         "companion_capabilities" -> {
                             kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
@@ -247,6 +250,23 @@ object CompanionTools {
                 }
             })
         }
+    }
+
+    private suspend fun recordSavedSchedule(context: Context, ref: ActivityNotes.Ref?, saved: JSONObject, kind: String) {
+        if (ref == null) return
+        try {
+            ActivityNotes.schedule(context, ref, JSONObject(saved.toString()).put("schedule_kind", kind))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            // Scheduling has already committed. A failed activity index is not a failed
+            // schedule and must not encourage the model to repeat the successful write.
+            AppLogger.e("CompanionTools", "预约已保存，活动展示索引未写入：$kind", failure)
+        }
+    }
+
+    private fun logSavedSchedule(store: CompanionStore, chat: String, detail: String) {
+        try { store.log(chat, "安排", detail) }
+        catch (failure: Exception) { AppLogger.e("CompanionTools", "预约已保存，安排日志未写入", failure) }
     }
 
     private fun library(context: Context, role: String?, store: CompanionStore, scope: String, tool: AITool, action: String): JSONObject = when (action) {

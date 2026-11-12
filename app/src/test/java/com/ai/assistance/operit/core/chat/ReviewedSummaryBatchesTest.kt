@@ -47,6 +47,42 @@ class ReviewedSummaryBatchesTest {
         assertEquals(1, drafts); assertEquals(1, reviews)
     }
 
+    @Test fun disabledAiReviewSavesDraftWithoutCallingReviewerAndCachesIt() = runTest {
+        val key = UUID.randomUUID().toString()
+        var drafts = 0
+        repeat(2) {
+            assertEquals("draft", ReviewedSummaryBatches.resolve(key,
+                draft = { drafts++; "draft" },
+                review = { error("Disabled AI review must not send a request") },
+                stage = { _, _, _ -> }, reviewEnabled = false))
+        }
+        assertEquals(1, drafts)
+        assertEquals("draft", ReviewedSummaryBatches.approved(key, reviewEnabled = false))
+        assertNull(ReviewedSummaryBatches.approved(key))
+    }
+
+    @Test fun enablingReviewNeverReusesAnUnreviewedCachedResult() = runTest {
+        val key = UUID.randomUUID().toString()
+        ReviewedSummaryBatches.resolve(key, { "unreviewed" }, { error("disabled") },
+            { _, _, _ -> }, reviewEnabled = false)
+        var reviews = 0
+        val result = ReviewedSummaryBatches.resolve(key, { "draft for review" },
+            { reviews++; "corrected" }, { _, _, _ -> })
+        assertEquals("corrected", result)
+        assertEquals(1, reviews)
+        assertEquals("unreviewed", ReviewedSummaryBatches.approved(key, reviewEnabled = false))
+    }
+
+    @Test fun disabledReviewStillRejectsAnEmptyDraft() = runTest {
+        val key = UUID.randomUUID().toString()
+        try {
+            ReviewedSummaryBatches.resolve(key, { "   " }, { error("disabled") },
+                { _, _, _ -> }, reviewEnabled = false)
+            fail("Empty draft must not replace the source")
+        } catch (_: IllegalArgumentException) { }
+        assertNull(ReviewedSummaryBatches.approved(key, reviewEnabled = false))
+    }
+
     @Test fun cacheProbeWaitsForAnOngoingReviewButNeverTreatsDraftAsApproved() = runTest {
         val key = UUID.randomUUID().toString()
         assertNull(ReviewedSummaryBatches.approved(key))

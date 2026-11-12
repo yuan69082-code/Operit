@@ -731,10 +731,12 @@ class MessageCoordinationDelegate(
             if (!isShouldGenerateSummary && chatContextSettings.enableSummary &&
                 summaryPreparationJob?.isActive != true &&
                 android.os.SystemClock.elapsedRealtime() >= (preparationRetryAfter[chatId] ?: 0L) &&
+                (currentMessages.none { it.sender == "summary" } ||
+                    com.ai.assistance.operit.core.chat.SummaryTriggerPolicy.newUserTurns(currentMessages) >= 3) &&
                 (maxTokensForSend > 0 && currentTokens >= maxTokensForSend * tokenUsageThresholdForSend * 0.7 ||
                     chatContextSettings.enableSummaryByMessageCount &&
-                    currentMessages.drop(currentMessages.indexOfLast { it.sender == "summary" } + 1)
-                        .count { it.sender == "user" } >= chatContextSettings.summaryMessageCountThreshold * 0.7)) {
+                    com.ai.assistance.operit.core.chat.SummaryTriggerPolicy.newUserTurns(currentMessages) >=
+                        chatContextSettings.summaryMessageCountThreshold * 0.7)) {
                 val prefix = com.ai.assistance.operit.core.chat.ReviewedSummaryBatches.preparationPrefix(currentMessages)
                 if (prefix.isNotEmpty()) {
                     summaryPreparationChatId = chatId
@@ -1852,7 +1854,7 @@ class MessageCoordinationDelegate(
 
             if (summaryMessage != null) {
                 chatHistoryDelegate.addSummaryMessage(
-                    summaryMessage = summaryMessage,
+                    summaryMessage = slice.completedSummary(summaryMessage, System.currentTimeMillis()),
                     beforeTimestamp = beforeTimestamp,
                     afterTimestamp = afterTimestamp,
                     chatIdOverride = currentChatId,
@@ -1908,7 +1910,8 @@ class MessageCoordinationDelegate(
                     globalRules = config.summaryCustomRules.takeIf { it.isNotBlank() },
                     sectionOverrides = config.summarySectionOverrides,
                     dialogueReviewEnabled = config.enableSummaryDialogueReview,
-                    dialogueReviewTitle = config.summaryDialogueReviewTitle
+                    dialogueReviewTitle = config.summaryDialogueReviewTitle,
+                    aiReviewEnabled = config.enableSummaryAiReview
                 )
             } else {
                 ConversationSummaryConfig()

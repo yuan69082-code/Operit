@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.companion
 import android.content.Context
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
+import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONObject
 import java.util.UUID
 
@@ -46,11 +47,17 @@ class ExplorationStore(private val context: Context) {
         return store.update(scope(role)) {
             if (work != null) check(work.role == role && ExplorationPolicy.valid(it, work.chat, work.revision, work.ticket)) { "旧探索已撤销，不能再安排预约" }
             ExplorationPolicy.schedule(it, minutes, purpose, System.currentTimeMillis())
-        }.also { store.log(chat, "探索安排", "${minutes}分钟后：$purpose") }
+        }.also { logSaved(chat, "探索安排", "${minutes}分钟后：$purpose") }
     }
 
     fun pause(role: String): JSONObject = store.update(scope(role)) { ExplorationPolicy.selfPause(it) }.also {
-        if (it.optString("chat").isNotBlank()) store.log(it.getString("chat"), "探索安排", "后续探索预约已暂停")
+        if (it.optString("chat").isNotBlank()) logSaved(it.getString("chat"), "探索安排", "后续探索预约已暂停")
+    }
+
+    suspend fun resume(role: String, chat: String): JSONObject {
+        authorize(role, chat)
+        return store.update(scope(role)) { ExplorationPolicy.resume(it) }
+            .also { logSaved(chat, "探索安排", "用户恢复了中断前的原预约；时间和目的未改写") }
     }
 
     fun disableRemovedRole(role: String) {
@@ -90,7 +97,9 @@ class ExplorationStore(private val context: Context) {
                 if (AssistantWindowRouter.chat(context, role) != chat || ExplorationPolicy.revision(data) != ExplorationPolicy.revision(candidate)) return@update
                 val ticket = UUID.randomUUID().toString()
                 if (ExplorationPolicy.claim(data, now, day, ticket, chat)) {
-                    work = Work(role, chat, ExplorationPolicy.revision(data), ticket, data.optString("purpose"))
+                    val purpose = data.optString("purpose") + if (data.optBoolean("resume_requested"))
+                        "\n这是用户恢复的原预约。上次探索曾中断，先核对实际进度和工具结果，不重做已完成操作，再决定是否继续。" else ""
+                    work = Work(role, chat, ExplorationPolicy.revision(data), ticket, purpose)
                 }
             }
             if (work != null) return work
@@ -101,12 +110,12 @@ class ExplorationStore(private val context: Context) {
     fun valid(work: Work) = AssistantWindowRouter.chat(context, work.role) == work.chat && ExplorationPolicy.valid(read(work.role), work.chat, work.revision, work.ticket)
     fun finish(work: Work, outcome: String) {
         val continuous = InternalStateStore(context).enabled(work.role)
-        store.update(scope(work.role)) { ExplorationPolicy.finish(it, work.ticket, outcome, continuous = continuous) }
-        store.log(work.chat, "探索结束", if (continuous) "本轮结果：$outcome；仅保留明确安排，不自动补排判断。" else when (outcome) {
-            "completed" -> "本轮结束；阅读、整理的实际结果见资料库和私人待办；未自行安排时，软件会按默认间隔再给一次自由判断机会"
-            "interrupted" -> "探索已中断；未自行安排时，软件会按默认间隔再给一次自由判断机会"
-            else -> "探索未完成；未自行安排时，软件会加倍间隔后再给一次自由判断机会"
-        })
+        var finished = false
+        val data = store.update(scope(work.role)) {
+            finished = it.optString("running") == work.ticket
+            ExplorationPolicy.finish(it, work.ticket, outcome, continuous = continuous)
+        }
+        if (finished) logSaved(work.chat, "探索结束", "本轮结果：$outcome；${arrangementDescription(data)}")
     }
     fun recover() {
         for (role in roles()) {
@@ -114,18 +123,39 @@ class ExplorationStore(private val context: Context) {
             var interrupted = false
             val continuous = InternalStateStore(context).enabled(role)
             val data = store.update(scope(role)) { interrupted = ExplorationPolicy.recover(it, continuous) }
-            if (interrupted) store.log(data.optString("chat"), "探索中断", if (continuous) "上次运行未结束，保留结果未知；不会自动重跑。" else "上次运行未结束；未自行安排时已按默认间隔保留下一次自由判断机会")
+            if (interrupted) logSaved(data.optString("chat"), "探索中断", "上次运行未结束，实际操作需核对；${arrangementDescription(data)}")
         }
     }
 
-    fun status(role: String): JSONObject {
-        val data = read(role)
+    fun status(role: String, data: JSONObject = read(role)): JSONObject {
         return JSONObject().put("enabled", ExplorationPolicy.enabled(data)).put("assistant_id", role)
             .put("chat", AssistantWindowRouter.chat(context, role)).put("activities", org.json.JSONArray(ExplorationPolicy.choices(data).toList()))
             .put("daily_limit", data.optInt("limit", 4)).put("used_today", ExplorationPolicy.used(data, ExplorationPolicy.day(System.currentTimeMillis())))
             .put("paused", data.optBoolean("paused", true)).put("at", data.optLong("at"))
             .put("purpose", data.optString("purpose")).put("running", data.has("running"))
             .put("auto_continued", data.optBoolean("auto_continued")).put("last_outcome", data.optString("last_outcome"))
+            .put("schedule_state", ExplorationPolicy.state(data)).put("self_paused", data.optBoolean("self_paused"))
+            .put("can_resume", ExplorationPolicy.canResume(data))
+            .put("next_at", if (data.has("at") && !data.optBoolean("paused", true)) data.getLong("at") else JSONObject.NULL)
+            .put("interrupted_plan", data.optJSONObject("interrupted_plan"))
+            .put("continuous", InternalStateStore(context).enabled(role))
+    }
+
+    private fun arrangementDescription(data: JSONObject): String = when (ExplorationPolicy.state(data)) {
+        "scheduled" -> "下次预约已保存：${java.time.Instant.ofEpochMilli(data.getLong("at")).atZone(java.time.ZoneId.systemDefault())}"
+        "paused" -> "已明确暂停后续预约"
+        "interrupted" -> if (ExplorationPolicy.canResume(data)) "原预约保留，等待明确恢复，不自动重跑" else "本轮未完成，暂无下一次预约"
+        "disabled" -> "自主探索已关闭"
+        else -> "本轮没有安排下一次；不等于设置失败"
+    }
+
+    private fun logSaved(chat: String, kind: String, detail: String) {
+        try { store.log(chat, kind, detail) }
+        catch (failure: Exception) {
+            // The atomic schedule write has already succeeded. An observational log failure
+            // must not make the caller retry the completed scheduling operation.
+            AppLogger.e("ExplorationStore", "探索安排已保存，展示日志未写入", failure)
+        }
     }
 
     companion object { private val settingsLock = Any() }

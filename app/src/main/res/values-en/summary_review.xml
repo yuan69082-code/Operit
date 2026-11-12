@@ -3,5 +3,8 @@
     <string name="conversation_summary_draft_ready">Draft ready, awaiting AI review</string>
     <string name="conversation_summary_reviewing">AI is checking the source and revising the summary…</string>
     <string name="conversation_summary_reviewed">AI approved the summary. Saving…</string>
-    <string name="conversation_summary_source_changed">The source changed during review. Nothing was compressed; please try again.</string>
+    <string name="conversation_summary_saving">Summary generated. Saving…</string>
+    <string name="conversation_summary_source_changed">The source changed during compression. Nothing was compressed; please try again.</string>
+    <string name="settings_summary_ai_review">AI summary review</string>
+    <string name="settings_summary_ai_review_desc">After generating a summary, ask the chat model to check and revise it against the source. On by default; turn off to save the generated summary without this extra request. Applies to manual and automatic compression.</string>
 </resources>

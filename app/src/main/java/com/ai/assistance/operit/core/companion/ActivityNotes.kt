@@ -3,6 +3,8 @@ package com.ai.assistance.operit.core.companion
 import android.content.Context
 import com.ai.assistance.operit.data.model.ToolResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -14,19 +16,37 @@ internal object ActivityNotes {
     data class Ref(val role: String, val chat: String, val id: String)
     private val active = ConcurrentHashMap<String, Ref>()
     fun current(chat: String?): Ref? = chat?.let { active[it] }
-    fun release(ref: Ref) { active.remove(ref.chat, ref) }
+    fun release(ref: Ref) {
+        // A retried trigger can have the same data as its predecessor. Only the actual
+        // owner may release the lease, including from a cancelled turn's late finally.
+        active.computeIfPresent(ref.chat) { _, current -> if (current === ref) null else current }
+    }
 
-    suspend fun begin(context: Context, role: String, chat: String, trigger: String, source: String): Ref =
-        withContext(Dispatchers.IO) {
-            check(!InternalStateStore(context).recipientScope(role, chat)) { "活动随记仅在本助手私域保存" }
-            val ref = Ref(role, chat, "activity-" + InnerStructure.hash("$role:$trigger"))
-            CompanionStore(context).activityWrite(role, "activity", ref.id, "private") { old ->
-                old ?: base(ref, "activity", ref.id, "private").put("trigger", trigger).put("source", source)
-                    .put("status", "received").put("message_count", 0)
-            }
-            check(active.putIfAbsent(chat, ref) == null) { "此窗口已有活动" }
-            ref
+    internal suspend fun acquire(ref: Ref, persist: suspend () -> Unit): Ref {
+        currentCoroutineContext().ensureActive()
+        check(active.putIfAbsent(ref.chat, ref) == null) { "此窗口已有活动" }
+        try {
+            persist()
+            currentCoroutineContext().ensureActive()
+            return ref
+        } catch (failure: Throwable) {
+            release(ref)
+            throw failure
         }
+    }
+
+    suspend fun begin(context: Context, role: String, chat: String, trigger: String, source: String): Ref {
+        val ref = Ref(role, chat, "activity-" + InnerStructure.hash("$role:$trigger"))
+        return acquire(ref) {
+            withContext(Dispatchers.IO) {
+                check(!InternalStateStore(context).recipientScope(role, chat)) { "活动随记仅在本助手私域保存" }
+                CompanionStore(context).activityWrite(role, "activity", ref.id, "private") { old ->
+                    old ?: base(ref, "activity", ref.id, "private").put("trigger", trigger).put("source", source)
+                        .put("status", "received").put("message_count", 0)
+                }
+            }
+        }
+    }
 
     private fun base(ref: Ref, kind: String, id: String, parent: String) = JSONObject()
         .put("id", id).put("parent", parent).put("storage_kind", kind).put("owner", ref.role)
