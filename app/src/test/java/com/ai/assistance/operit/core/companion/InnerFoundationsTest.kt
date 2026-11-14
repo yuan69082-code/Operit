@@ -48,8 +48,8 @@ class InnerFoundationsTest {
         InnerFoundations.install(data, 0)
         assertFalse(data.getJSONObject("foundation_state").getJSONObject("survival").getBoolean("formed"))
         assertEquals(0, data.optJSONArray("experiences")?.length() ?: 0)
-        assertTrue(InnerFoundations.page(data, "emotion", 0, 0).getJSONArray("items").getJSONObject(0)
-            .getString("state") == "not_formed")
+        assertEquals("not_formed", InnerFoundations.kinds.first { it.id == "foundation:emotion:joy" }
+            .asJson().getString("state"))
     }
 
     @Test fun legacyMigrationIsIdempotentAndPreservesUnmappedSources() {
