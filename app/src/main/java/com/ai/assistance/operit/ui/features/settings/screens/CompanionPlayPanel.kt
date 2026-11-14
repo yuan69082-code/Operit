@@ -24,6 +24,8 @@ fun CompanionPlayPanel(role: String, section: String) {
     val play = remember(role) { CompanionPlayStore(context) }
     val coroutine = rememberCoroutineScope()
     var revision by remember(role) { mutableIntStateOf(0) }
+    var page by remember(role, section) { mutableIntStateOf(0) }
+    var nextPage by remember(role, section) { mutableIntStateOf(-1) }
     var rows by remember(role, section) { mutableStateOf(JSONArray()) }
     var extra by remember(role, section) { mutableStateOf(JSONArray()) }
     var prefs by remember(role) { mutableStateOf(JSONObject()) }
@@ -34,30 +36,32 @@ fun CompanionPlayPanel(role: String, section: String) {
     var uses by remember(role) { mutableIntStateOf(1) }
     var editor by remember(role) { mutableStateOf(false) }
 
-    LaunchedEffect(role, section, revision) {
+    LaunchedEffect(role, section, revision, page) {
         try {
             val result = withContext(Dispatchers.IO) {
                 play.observeInstalledVersion(role)
                 when (section) {
-                    "情侣游戏屋" -> Triple(play.coupons(role), JSONArray(), JSONObject())
-                    "储物柜" -> Triple(play.items(role), play.coupons(role, human = false).getJSONArray("rows"), JSONObject())
-                    else -> Triple(play.notices(role), JSONArray(), play.preferences(role))
+                    "情侣游戏屋" -> Triple(play.coupons(role, page), play.gifts(role).getJSONArray("rows"), JSONObject())
+                    "储物柜" -> Triple(play.items(role, page), play.coupons(role, human = false).getJSONArray("rows"), JSONObject())
+                    else -> Triple(play.notices(role, page), JSONArray(), play.preferences(role))
                 }
             }
             rows = result.first.getJSONArray("rows")
+            nextPage = result.first.optInt("next_offset", -1)
             extra = result.second
             prefs = result.third
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { error = failure.message.orEmpty() }
     }
 
-    fun apply(action: suspend () -> Unit) {
+    fun apply(action: suspend () -> Unit, onSuccess: () -> Unit = {}) {
         if (busy) return
         busy = true
         coroutine.launch {
             try {
                 error = ""
                 withContext(Dispatchers.IO) { action() }
+                onSuccess()
                 revision++
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message.orEmpty() }
@@ -93,10 +97,8 @@ fun CompanionPlayPanel(role: String, section: String) {
                             }
                         }
                         Button(enabled = !busy && title.trim().isNotBlank() && details.trim().isNotBlank(),
-                            onClick = { apply {
-                                play.createCoupon(role, title, details, uses)
-                                title = ""; details = ""; editor = false
-                            } }) { Text("创建并暂存（同时通知他）") }
+                            onClick = { apply({ play.createCoupon(role, title, details, uses) },
+                                { title = ""; details = ""; editor = false; page = 0 }) }) { Text("创建并暂存（同时通知他）") }
                     }
                 }
                 Text("我的券包与赠送记录", style = MaterialTheme.typography.titleMedium)
@@ -122,6 +124,11 @@ fun CompanionPlayPanel(role: String, section: String) {
                         }
                     }
                 }
+                Text("他赠送给你的物品", style = MaterialTheme.typography.titleMedium)
+                if (extra.length() == 0) Text("还没有他送出的物品。")
+                for (index in 0 until extra.length()) {
+                    KeepsakeDisplay(play, role, extra.getJSONObject(index))
+                }
                 Text("更多玩法以后可以加入这个游戏屋；现在不会额外创建积分、等级或重复记忆系统。",
                     style = MaterialTheme.typography.bodySmall)
             }
@@ -133,12 +140,7 @@ fun CompanionPlayPanel(role: String, section: String) {
                 if (rows.length() == 0) Text("他还没有公开展示的收藏品。")
                 for (index in 0 until rows.length()) {
                     val item = rows.getJSONObject(index)
-                    OutlinedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(item.getString("title"), style = MaterialTheme.typography.titleMedium)
-                            Text("AI 自己保存的物品 · 已公开", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                    KeepsakeDisplay(play, role, item)
                 }
                 Text("他的券夹", style = MaterialTheme.typography.titleMedium)
                 if (extra.length() == 0) Text("尚未收到兑换券。")
@@ -185,6 +187,39 @@ fun CompanionPlayPanel(role: String, section: String) {
                         }
                     }
                 }
+            }
+        }
+        if (page > 0 || nextPage >= 0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(enabled = page > 0, onClick = { page = (page - 20).coerceAtLeast(0) }) {
+                    Text("上一页")
+                }
+                if (nextPage >= 0) OutlinedButton(onClick = { page = nextPage }) { Text("下一页") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeepsakeDisplay(play: CompanionPlayStore, role: String, entry: JSONObject) {
+    val itemId = entry.getString("id")
+    var opened by remember(role, itemId) { mutableStateOf(false) }
+    var body by remember(role, itemId) { mutableStateOf("") }
+    var error by remember(role, itemId) { mutableStateOf("") }
+    LaunchedEffect(role, itemId, opened) {
+        if (opened) {
+            try { body = withContext(Dispatchers.IO) { play.item(role, itemId, false).getString("body") } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { error = failure.message.orEmpty() }
+        }
+    }
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(entry.getString("title"), style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = { opened = !opened }) { Text(if (opened) "收起" else "打开物品") }
+            if (opened) {
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+                else Text(body)
             }
         }
     }
