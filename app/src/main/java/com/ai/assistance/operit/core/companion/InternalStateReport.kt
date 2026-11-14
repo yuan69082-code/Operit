@@ -219,6 +219,11 @@ object InternalStateReports {
         val innerChanged = InternalStateReportDiagnostics.stage("inner") {
             InnerStructure.apply(next, frame, if (report.has("inner")) report.getJSONArray("inner") else JSONArray(), now)
         }
+        // Existing adopted survival needs remain a valid provenance route; after adoption
+        // the same foundation record becomes current, rather than a parallel strength.
+        val survivalSynced = if (innerChanged) InternalStateReportDiagnostics.stage("inner.survival") {
+            InnerFoundations.syncAdoptedSurvival(next, frame, now)
+        } else false
         val episodesChanged = InternalStateReportDiagnostics.stage("episodes") {
             CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
         }
@@ -232,13 +237,13 @@ object InternalStateReports {
         val restDreamChanged = InternalStateReportDiagnostics.stage("rest_dream") {
             SubjectRestDreams.apply(next, frame, report, now)
         }
-        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged) revision else revision + 1
+        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !survivalSynced && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)
         val receipt = JSONObject().put("frame_id", frame.id).put("revision", nextRevision)
             .put("updated", JSONArray(updates.map { it.getString("id") }))
             .put("created", JSONArray(creates.map { it.getJSONObject("definition").getString("id") }))
             .put("revised", JSONArray(revisions.map { it.getString("id") }))
-            .put("foundation_changed", foundationChanged)
+            .put("foundation_changed", foundationChanged || survivalSynced)
             .put("episodes_adopted", episodesChanged)
             .put("unions_adopted", unionsChanged)
             .put("action_understanding_adopted", actionChanged)
