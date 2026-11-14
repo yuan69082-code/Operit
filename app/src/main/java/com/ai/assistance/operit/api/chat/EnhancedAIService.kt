@@ -2222,7 +2222,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} code=${issue.code} stage=${issue.stage} path=${issue.path} type=${failure.javaClass.simpleName}")
                     onNonFatalError(this@EnhancedAIService.context.getString(
                         R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes),
-                        "${issue.code} @ ${issue.path}"))
+                        "${issue.code} @ ${issue.path} (${issue.stage})"))
                 }
             }
         }
