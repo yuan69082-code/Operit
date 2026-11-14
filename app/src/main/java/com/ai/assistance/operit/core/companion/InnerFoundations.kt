@@ -150,6 +150,27 @@ internal object InnerFoundations {
     }
     private fun Int?.orZero(): Int = this ?: 0
 
+    /** Read-only member for unions, with one stable identity per installed category. */
+    fun member(data: JSONObject, id: String, now: Long): JSONObject {
+        val kind = requireNotNull(find(id)) { "基础类别不存在" }
+        val row = kind.asJson().put("version", 1).put("available", true)
+        val state = data.optJSONObject("foundation_state")
+        if (state != null && kind.family == "drive") {
+            val drive = requireNotNull(state.optJSONObject("drives")?.optJSONObject(id))
+            val duration = requireNotNull(kind.hours)
+            val hours = ((now - drive.optLong("at")).coerceAtLeast(0)) / 3_600_000.0
+            val projected = 1.0 - (1.0 - drive.getDouble("value")) * exp(-hours / duration)
+            row.put("version", drive.getInt("version")).put("current_value", projected.coerceIn(0.0, 1.0))
+                .put("state", "base_drive_running")
+        }
+        if (state != null && id == "foundation:need:survival") {
+            val survival = state.getJSONObject("survival")
+            row.put("version", survival.optInt("version")).put("formed", survival.optBoolean("formed"))
+            if (survival.optBoolean("formed")) row.put("current_value", survival.getDouble("value"))
+        }
+        return row
+    }
+
     /** Immutable vocabulary, one transactional adoption of legacy facts and one active numeric reducer. */
     fun install(data: JSONObject, now: Long) {
         if (data.optJSONObject("foundation_state")?.optInt("schema") == SCHEMA) return
