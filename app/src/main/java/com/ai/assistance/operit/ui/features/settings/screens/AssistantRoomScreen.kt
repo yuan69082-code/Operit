@@ -67,11 +67,11 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().imePadding().padding(horizontal = if (tab == "书房") 0.dp else 16.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    SpaceHeader(if (tab == "书房") "$name · 书房" else "$name · 房间",
+                    SpaceHeader("$name · $tab",
                         { if (tab == "书房") tab = "房间" else onDismiss() }, onDismiss, enabled = !busy)
                 }
                 if (tab != "书房") Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("房间", "书房", "布置").forEach { label ->
+                    listOf("房间", "书房", "情侣游戏屋", "储物柜", "通知中心", "布置").forEach { label ->
                         FilterChip(modifier = Modifier.inspectRender("room_tabs", if (label == tab) com.ai.assistance.operit.ui.theme.StudioComponents.color("room_tabs", MaterialTheme.colorScheme.secondaryContainer) else androidx.compose.ui.graphics.Color.Transparent, details = label), shape = com.ai.assistance.operit.ui.theme.StudioComponents.shape("room_tabs", RoundedCornerShape(8.dp)), colors = FilterChipDefaults.filterChipColors(selectedContainerColor = com.ai.assistance.operit.ui.theme.StudioComponents.color("room_tabs", MaterialTheme.colorScheme.secondaryContainer)), selected = label == tab, onClick = { tab = label; error = "" }, label = { Text(label) }, leadingIcon = { Icon(when (label) { "房间" -> Icons.Default.Home; "日记" -> Icons.Default.EditNote; "书房" -> Icons.Default.MenuBook; else -> Icons.Default.Tune }, null, Modifier.size(18.dp)) })
                     }
                 }
@@ -91,6 +91,7 @@ fun AssistantRoomDialog(role: String, chat: String, initialTab: String = "房间
                                 }
                             }, { work(it) })
                             "书房" -> ReadingPanel(role, chat, name, revision, bookSection, { work(it) })
+                            "情侣游戏屋", "储物柜", "通知中心" -> CompanionPlayPanel(role, tab)
                             "布置" -> {
                                 RoleRulesEntry(role)
                                 PersonaWizardEntry()
