@@ -470,8 +470,11 @@ class InternalStateStore(private val context: Context) {
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "foundation") {
-            val family = requireNotNull(id) { "基础目录查询需要 family" }
-            return InnerFoundations.page(data, family, offset, System.currentTimeMillis())
+            val familyOrId = requireNotNull(id) { "基础目录查询需要 family 或类别ID" }
+            val now = System.currentTimeMillis()
+            return if (familyOrId.startsWith("foundation:")) JSONObject()
+                .put("item", InnerFoundations.member(data, familyOrId, now))
+            else InnerFoundations.page(data, familyOrId, offset, now)
         }
         if (kind == "legacy_handoff") return InnerFoundations.legacyPage(data, offset)
         if (kind == "foundation_history") return CategoryEvents.page(data, "foundation_change", offset, id)
@@ -637,6 +640,17 @@ class InternalStateStore(private val context: Context) {
                         val row = rows.getJSONObject(i)
                         members["inner:" + row.getJSONObject("content").getString("id")] = row.getInt("version")
                     }
+                }
+                // Only foundations actually included in this request qualify as union members.
+                val availableFoundations = payload.getJSONObject("foundation").getJSONArray("available")
+                for (i in 0 until availableFoundations.length()) {
+                    val id = availableFoundations.getJSONObject(i).getString("id")
+                    members["foundation:$id"] = InnerFoundations.member(data, id, now).getInt("version")
+                }
+                val projectedDrives = payload.getJSONObject("foundation").getJSONArray("drive_values")
+                for (i in 0 until projectedDrives.length()) {
+                    val item = projectedDrives.getJSONObject(i)
+                    members["foundation:" + item.getString("id")] = item.getInt("version")
                 }
                 val episodes = payload.getJSONObject("category_events").getJSONArray("episodes")
                 for (i in 0 until episodes.length()) {
