@@ -65,9 +65,21 @@ internal object CategoryEvents {
             val parent: String
             if (op == "appraise") {
                 fields(a, setOf("op", "id", "expected_version", "category_ref", "objects", "goals", "intensity", "importance",
-                    "long_term_impact", "attention", "status", "understanding", "basis", "evidence", "reason", "related"))
+                    "long_term_impact", "attention", "status", "understanding", "basis", "evidence", "reason", "related",
+                    "phase", "supporting", "opposing"))
                 parent = text(a, "category_ref", 64)
-                category(data, parent)
+                val category = category(data, parent)
+                if (a.has("phase")) {
+                    require(category.getString("family") == "desire") { "发展阶段仅适用于具体愿望" }
+                    require(a.get("phase") is String &&
+                        a.getString("phase") in setOf("arising", "strengthening", "weakening",
+                            "sustaining", "suppressed", "suppression_failed", "disappeared",
+                            "reappeared", "conflicted", "transformed", "acted", "abandoned")) {
+                        "具体愿望阶段必须使用已约定的十二种状态之一"
+                    }
+                }
+                for (name in listOf("supporting", "opposing"))
+                    if (a.has(name)) strings(a.getJSONArray(name), 8)
                 if (old != null) require(old.getString("parent") == parent) { "既有事件不能无声改类" }
                 strings(a.getJSONArray("objects"), 8); strings(a.getJSONArray("goals"), 8)
                 val intensity = a.get("intensity")
@@ -165,6 +177,7 @@ internal object CategoryEvents {
         related 可省略。回忆/重新理解引用原事实；不创建第二次现实发生。不同类别可引用同一个事实。关联修正保留版本和原始来源；不会删除原事件。
         {op:"focus",id:"类别ID",expected_version:0或当前重点版本,capacity:3到6,events:["按你决定的次序排列的事件ID"],reason:"本次安排或替换理由"}。可以不足3件或为空，不凑数。重点外的事件完整保留。
         强度、重要性、注意力、解决状态相互独立。放到背景不是原谅或解决；重新关注不自动回升强度。执念/不甘心不意味着必须行动或不能放下。
+        愿望事件可另带 phase:"arising|strengthening|weakening|sustaining|suppressed|suppression_failed|disappeared|reappeared|conflicted|transformed|acted|abandoned" 以及 supporting/opposing 字符串数组。阶段由主体对实际经历判断，不要求按顺序走完；其他类别不得伪称愿望阶段。
         inner.record 可带 experience_refs:["已有心理事件ID"]，每次最多6个新增关联；只在通过原采用规则后关联，之前的关联另存并保留，可查询。它们不替代人格采用所需的原文依据。
         广义生用 need level:broad semantic_rule:"life"；求生欲用 need level:specific parent_ref 指向该广义需要，semantic_rule:"survival",strength:自主给出的非负有限数,objects:[...],goals:[...]。不强制创建，不从旧值推测，不允许 legacy_ref 产生第二强度权威。
         只有求生欲候选 propose/adopt 的 reason 可以省略或为空。仍须真实 evidence、版本和采用；求生欲不受时间/溢出/联合自动改值，归零不触发停止或删除。其事件强度也不自动改写该需要强度。
