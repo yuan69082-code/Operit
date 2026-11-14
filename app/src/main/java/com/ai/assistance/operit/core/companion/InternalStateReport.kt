@@ -24,7 +24,8 @@ data class InternalStateFrame(
     val interactionMembers: Map<String, Int> = emptyMap(),
     val materialSources: Map<String, String> = emptyMap(),
     val materialTokenLimit: Int = 2048,
-    val materialText: String = ""
+    val materialText: String = "",
+    val foundationVersions: Map<String, Int> = emptyMap()
 )
 
 /** Applies one subjective report atomically. This does not replay the source event or choose actions. */
@@ -37,7 +38,7 @@ object InternalStateReports {
         require(frame.id.isNotBlank() && frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         require(frame.revision >= 0 && frame.at >= 0 && now >= frame.at) { "状态报告时间早于本轮快照" }
         requireStateReport(frame.eventSequence >= 0 && frame.eventSequence <= data.optLong("sequence"), InternalStateReportFailure.SOURCE)
-        require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise", "inner", "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding") }) { "状态报告包含未知字段" }
+        require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise", "inner", "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "foundation") }) { "状态报告包含未知字段" }
         requireStateReport(string(report, "frame_id", 160) == frame.id, InternalStateReportFailure.FRAME)
         val reportDigest = digest(report)
         val frameIdentity = JSONObject().put("id", frame.id).put("role", frame.roleId).put("chat", frame.chatId)
@@ -47,6 +48,7 @@ object InternalStateReports {
             .put("inner_pending", JSONObject(frame.innerPending))
             .put("inner_sources", JSONObject(frame.innerSources.mapValues { InnerStructure.hash(it.value) }))
             .put("inner_objects", JSONArray(frame.innerObjects.sorted()))
+        if (frame.foundationVersions.isNotEmpty()) frameIdentity.put("foundation_versions", JSONObject(frame.foundationVersions))
         if (frame.interactionMembers.isNotEmpty()) frameIdentity.put("interaction_members", JSONObject(frame.interactionMembers))
         if (frame.materialSources.isNotEmpty()) frameIdentity.put("material_sources",
             JSONObject(frame.materialSources.mapValues { InnerStructure.hash(it.value) }))
@@ -80,6 +82,13 @@ object InternalStateReports {
         val creates = objects(report, "create")
         val revisions = if (report.has("revise")) objects(report, "revise") else emptyList()
         val definitions = InternalStateEngine.definitions(next).associateBy { it.getString("id") }
+        if (next.optJSONObject("foundation_state")?.optInt("schema") == InnerFoundations.SCHEMA) {
+            // The former numeric reducer is historical after the atomic handoff. Its report
+            // operations must never create a second live authority beside the new foundations.
+            require(updates.isEmpty() && creates.isEmpty() && revisions.isEmpty()) {
+                "旧数值状态已转档；当下驱力使用 foundation，具体情绪/愿望用 episodes 与 inner"
+            }
+        }
         val revisedDefinitions = linkedMapOf<String, JSONObject>()
         revisions.forEach { revision ->
             require(revision.keys().asSequence().all { it in setOf("id", "expected_version", "changes", "reason", "evidence") }) {
@@ -202,18 +211,21 @@ object InternalStateReports {
         }
         // A no-change acknowledgement consumes its frame without invalidating another
         // in-flight report: no semantic state has changed merely because the model stayed quiet.
+        val foundationChanged = InnerFoundations.apply(next, frame,
+            if (report.has("foundation")) report.getJSONArray("foundation") else JSONArray(), now)
         val innerChanged = InnerStructure.apply(next, frame, if (report.has("inner")) report.getJSONArray("inner") else JSONArray(), now)
         val episodesChanged = CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
         val unionsChanged = InnerInteractions.apply(data, next, frame,
             if (report.has("unions")) report.getJSONArray("unions") else JSONArray(), now)
         val actionChanged = ActionUnderstanding.apply(next, frame, report, now)
         val restDreamChanged = SubjectRestDreams.apply(next, frame, report, now)
-        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged) revision else revision + 1
+        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)
         val receipt = JSONObject().put("frame_id", frame.id).put("revision", nextRevision)
             .put("updated", JSONArray(updates.map { it.getString("id") }))
             .put("created", JSONArray(creates.map { it.getJSONObject("definition").getString("id") }))
             .put("revised", JSONArray(revisions.map { it.getString("id") }))
+            .put("foundation_changed", foundationChanged)
             .put("episodes_adopted", episodesChanged)
             .put("unions_adopted", unionsChanged)
             .put("action_understanding_adopted", actionChanged)
