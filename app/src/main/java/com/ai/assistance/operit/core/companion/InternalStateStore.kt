@@ -193,7 +193,9 @@ class InternalStateStore(private val context: Context) {
             update(role, "user_configuration") { data ->
                 val now = System.currentTimeMillis()
                 if (enable) InnerFoundations.install(data, now)
-                InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+                if (!enable && data.optJSONObject("foundation_state") == null) {
+                    InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+                }
                 // A frame prepared before disabling/re-enabling cannot later become current.
                 data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1L))
             }
