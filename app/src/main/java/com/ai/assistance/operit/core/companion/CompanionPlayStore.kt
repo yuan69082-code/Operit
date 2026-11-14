@@ -197,6 +197,62 @@ class CompanionPlayStore(context: Context) {
         rows
     }
 
+    data class Wake(val role: String, val chat: String, val ids: List<Long>) {
+        val triggerId: String get() = "playroom:" + ids.joinToString(":")
+        val prompt: String get() = "AI 通知中心有${ids.size}条新的允许唤醒的通知。请阅读本次真实通知，再决定要不要回应；不必强制联系用户，也不要编造未发生的事情。"
+    }
+
+    /** Lease at most three wake notices, only for the user-enabled proactive assistant. */
+    fun claimWake(): Wake? = synchronized(lock) {
+        val options = CompanionStore(app)
+        if (!options.proactiveEnabled) return@synchronized null
+        val role = options.proactiveRole ?: return@synchronized null
+        val chat = AssistantWindowRouter.chat(app, role) ?: return@synchronized null
+        val db = helper.writableDatabase
+        val ids = mutableListOf<Long>()
+        db.beginTransaction()
+        try {
+            val last = meta(db, role, "wake_last")?.toLongOrNull() ?: 0L
+            if (now() - last < 30_000) {
+                db.setTransactionSuccessful()
+                return@synchronized null
+            }
+            // Explicit AI preference wins. Only a gifted coupon defaults to wake.
+            db.rawQuery(
+                "SELECT n.id FROM notices n LEFT JOIN preferences p ON p.role=n.role AND p.category=n.category " +
+                    "WHERE n.role=? AND n.status='new' AND n.wake_state='pending' " +
+                    "AND COALESCE(p.mode,CASE WHEN n.category='coupon_gift' THEN 'wake' ELSE 'next' END)='wake' " +
+                    "ORDER BY n.id LIMIT 3",
+                arrayOf(role)
+            ).use { c -> while (c.moveToNext()) ids.add(c.getLong(0)) }
+            if (ids.isNotEmpty()) {
+                ids.forEach { key -> db.execSQL("UPDATE notices SET wake_state='running' WHERE id=?", arrayOf(key)) }
+                db.execSQL("INSERT OR REPLACE INTO meta (role,key,value) VALUES (?,?,?)",
+                    arrayOf(role, "wake_last", now().toString()))
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        if (ids.isEmpty()) null else Wake(role, chat, ids)
+    }
+
+    fun finishWake(work: Wake, outcome: String) = synchronized(lock) {
+        require(outcome in setOf("handled", "interrupted", "failed"))
+        val db = helper.writableDatabase
+        db.beginTransaction()
+        try {
+            work.ids.forEach { key ->
+                db.execSQL("UPDATE notices SET wake_state=? WHERE role=? AND id=? AND wake_state='running'",
+                    arrayOf(outcome, work.role, key))
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun recoverWake() = synchronized(lock) {
+        // Never replay an interrupted model turn automatically; the inbox is still inspectable.
+        helper.writableDatabase.execSQL("UPDATE notices SET wake_state='interrupted' WHERE wake_state='running'")
+    }
+
     /** Called only with an actual installed app version, never a repository commit. */
     fun observeInstalledVersion(role: String) = synchronized(lock) {
         val key = "installed_version"
@@ -230,7 +286,7 @@ class CompanionPlayStore(context: Context) {
         // Reuse the existing serialized wake pipeline. A user-disabled proactive channel stays off.
         val options = CompanionStore(app)
         if (mode(role, category) == "wake" && options.proactiveEnabled && options.proactiveRole == role)
-            CompanionRuntime.publishEvent(app, "情侣游戏屋", description.take(160))
+            CompanionRuntime.signalPlayroomEvent()
     }
 
     private fun notice(db: SQLiteDatabase, role: String, category: String, reference: String, body: String) {
@@ -280,7 +336,7 @@ class CompanionPlayStore(context: Context) {
             db.execSQL("CREATE INDEX coupon_role_date ON coupons(role,created DESC)")
             db.execSQL("CREATE TABLE items (id TEXT PRIMARY KEY, role TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, visibility TEXT NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL)")
             db.execSQL("CREATE INDEX item_role_date ON items(role,created DESC)")
-            db.execSQL("CREATE TABLE notices (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, category TEXT NOT NULL, reference TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE notices (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, category TEXT NOT NULL, reference TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, wake_state TEXT NOT NULL DEFAULT 'pending', created INTEGER NOT NULL)")
             db.execSQL("CREATE INDEX notice_role_new ON notices(role,status,id)")
             db.execSQL("CREATE TABLE preferences (role TEXT NOT NULL, category TEXT NOT NULL, mode TEXT NOT NULL, PRIMARY KEY(role,category))")
             db.execSQL("CREATE TABLE meta (role TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(role,key))")
