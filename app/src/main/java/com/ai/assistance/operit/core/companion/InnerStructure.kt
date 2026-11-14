@@ -68,6 +68,7 @@ internal object InnerStructure {
         val pending = InnerRows(data, true, frame)
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
+            try {
             val action = actions.getJSONObject(i)
             val id = text(action, "id", 64)
             require(touched.add(id)) { "同轮不能重复处理同一候选" }
@@ -161,6 +162,10 @@ internal object InnerStructure {
                     pending.remove(id)
                 }
                 else -> error("未知内在候选操作")
+            }
+            } catch (failure: Exception) {
+                if (failure is InternalStateReportRejected) throw failure
+                throw InternalStateReportDiagnostics.issue(failure, "inner[$i]")
             }
         }
         return true
