@@ -47,6 +47,7 @@ object CompanionRuntime {
 
     fun signalPhoneEvent() { events.trySend("phone_event") }
     fun signalSoftwareEvent() { events.trySend("software_event") }
+    fun signalPlayroomEvent() { events.trySend("playroom_event") }
 
     fun noteConversation(context: Context, chatId: String, roleId: String?) {
         val store = CompanionStore(context)
@@ -128,10 +129,11 @@ object CompanionRuntime {
             AssistantWindowRouter.initialize(app)
             store.preferences.registerOnSharedPreferenceChangeListener(listener)
             com.ai.assistance.operit.core.tasks.TaskEvents.recoverPrivate(app)
+            CompanionPlayStore(app).recoverWake()
             ExplorationStore(app).recover()
             dispatch@ while (isActive) {
                 val event = withTimeoutOrNull(2_000) { events.receive() }
-                if (event != null && event !in setOf("phone_event", "software_event", "exploration_event")) pendingEvent = event
+                if (event != null && event !in setOf("phone_event", "software_event", "exploration_event", "playroom_event")) pendingEvent = event
                 revokePhoneBefore.getAndSet(0).takeIf { it > 0 }?.let { PhoneAwarenessStore(app).discardPending(it) }
                 revokeSoftwareBefore.getAndSet(0).takeIf { it > 0 }?.let {
                     com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(app).revokePending(it)
@@ -142,7 +144,7 @@ object CompanionRuntime {
                 val groupBusy = com.ai.assistance.operit.core.group.GroupStore(app).let { gs ->
                     gs.ids().any { taskHolder.getCore(ChatRuntimeSlot.MAIN).getMessageCoordinationDelegate().isGroupRunning(it) }
                 }
-                for (source in (0 until 6).map { (nextSource + it) % 6 }) {
+                for (source in (0 until 7).map { (nextSource + it) % 7 }) {
                     if (source == 0 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
                         VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
                         val softwareStore = com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(app)
@@ -173,7 +175,7 @@ object CompanionRuntime {
                             decision?.join()
                             decision = null
                             softwareDecision = false
-                            nextSource = (source + 1) % 6
+                            nextSource = (source + 1) % 7
                             continue@dispatch
                         }
                     }
@@ -301,6 +303,47 @@ object CompanionRuntime {
                                 }
                             }
                             decision?.join(); decision = null
+                            nextSource = 0
+                            continue@dispatch
+                        }
+                    }
+                    // Leased notification wake: reuse the one active-turn owner, never start a
+                    // parallel AI request against a foreground conversation or another wake.
+                    if (source == 6 && taskHolder.activeConversationCount.value == 0 && !groupBusy &&
+                        VoiceCallRuntime.controller == null && VoiceCallIncoming.pending == null &&
+                        SystemClock.elapsedRealtime() - lastInteraction >= 10_000) {
+                        val play = CompanionPlayStore(app)
+                        val work = try { play.claimWake() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) {
+                            com.ai.assistance.operit.util.AppLogger.e("CompanionRuntime", "通知中心读取失败", failure)
+                            continue
+                        }
+                        if (work != null) {
+                            val epoch = generation.get()
+                            decision = launch {
+                                var outcome = "failed"
+                                try {
+                                    withTimeout(180_000) {
+                                        evaluate(app, work.chat, work.prompt, epoch, taskEvent = true, triggerId = work.triggerId)
+                                    }
+                                    outcome = if (epoch == generation.get()) "handled" else "interrupted"
+                                } catch (timeout: TimeoutCancellationException) {
+                                    currentCoroutineContext().ensureActive()
+                                    store.log(work.chat, "通知唤醒超时", "本轮超过3分钟，未自动重试")
+                                } catch (cancelled: CancellationException) {
+                                    outcome = "interrupted"
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    store.log(work.chat, "通知唤醒失败", failure.message.orEmpty().take(300))
+                                } finally {
+                                    play.finishWake(work, outcome)
+                                    releaseTurn(epoch)
+                                    AIForegroundService.refreshBackgroundKeepAlive(app)
+                                }
+                            }
+                            decision?.join()
+                            decision = null
                             nextSource = 0
                             continue@dispatch
                         }
