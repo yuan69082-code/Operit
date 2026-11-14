@@ -27,6 +27,7 @@ import com.ai.assistance.operit.core.companion.ActivityNotes
 import com.ai.assistance.operit.core.companion.ActivityNoteStream
 import com.ai.assistance.operit.core.companion.InternalStateReportStream
 import com.ai.assistance.operit.core.companion.InternalStateReportFailure
+import com.ai.assistance.operit.core.companion.InternalStateReportDiagnostics
 import com.ai.assistance.operit.core.companion.InternalStateStore
 import com.ai.assistance.operit.core.chat.SegmentedSummary
 import com.ai.assistance.operit.core.chat.hooks.appendUserTurnIfMissing
@@ -2208,9 +2209,20 @@ class EnhancedAIService private constructor(private val context: Context) {
                 } catch (failure: Exception) {
                     // Report text, source text and arbitrary JSON exception messages are private.
                     val reason = InternalStateReportFailure.classify(failure)
-                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} code=${reason.code} type=${failure.javaClass.simpleName}")
+                    // Never emit raw JSONException/IllegalArgumentException messages: they may
+                    // contain complete private state or user-authored text.
+                    val issue = try {
+                        withContext(Dispatchers.IO) {
+                            InternalStateStore(this@EnhancedAIService.context).noteReportFailure(frame, failure)
+                        }
+                    } catch (metadataError: Exception) {
+                        AppLogger.e(TAG, "ISR_DIAGNOSTIC_SAVE_FAILED type=${metadataError.javaClass.simpleName}")
+                        com.ai.assistance.operit.core.companion.InternalStateReportDiagnostics.issue(failure, "report_commit")
+                    }
+                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} code=${issue.code} stage=${issue.stage} path=${issue.path} type=${failure.javaClass.simpleName}")
                     onNonFatalError(this@EnhancedAIService.context.getString(
-                        R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes), reason.code))
+                        R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes),
+                        "${issue.code} @ ${issue.path}"))
                 }
             }
         }
