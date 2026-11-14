@@ -79,6 +79,7 @@ internal object CategoryEvents {
         require(actions.length() <= 8)
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
+            try {
             val a = actions.getJSONObject(i)
             val op = text(a, "op", 24)
             val id = text(a, "id", 64)
@@ -151,6 +152,10 @@ internal object CategoryEvents {
                 .put("version", Math.addExact(old?.getInt("version") ?: 0, 1)).put("content", content)
                 .put("owner", frame.roleId).put("frame_id", frame.id).put("at", now).put("source_chat", frame.chatId)
                 .put("previous_version", old?.getInt("version") ?: 0).put("source", "subject_report_adoption"))
+            } catch (failure: Exception) {
+                if (failure is InternalStateReportRejected) throw failure
+                throw InternalStateReportDiagnostics.issue(failure, "episodes[$i]")
+            }
         }
         return actions.length() > 0
     }
