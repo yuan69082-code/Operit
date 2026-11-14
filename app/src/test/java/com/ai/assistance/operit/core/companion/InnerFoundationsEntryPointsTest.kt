@@ -110,6 +110,37 @@ class InnerFoundationsEntryPointsTest {
             .getJSONObject("foundation:drive:expression").getInt("version"))
     }
 
+    @Test fun realFoundationMembersCanFormAConflictWithoutAutomaticAction(): Unit = runBlocking {
+        val first = frame(chat, "亲近和休息都值得考虑，先理解真实情况")
+        val intimacy = "foundation:drive:intimacy"
+        val rest = "foundation:drive:rest"
+        assertEquals(0, first.interactionMembers["foundation:$intimacy"])
+        assertEquals(0, first.interactionMembers["foundation:$rest"])
+        val members = JSONArray(listOf(intimacy, rest).map { id ->
+            JSONObject().put("kind", "foundation").put("id", id).put("version", 0)
+        })
+        val union = JSONObject().put("id", "tradeoff-1").put("expected_version", 0)
+            .put("members", members).put("objects", JSONArray().put("self"))
+            .put("evidence", JSONArray().put(first.eventIds.first()))
+            .put("interpretation", "我同时想亲近，也想休息，暂时没有强制答案")
+            .put("decision", "允许我先整理一下，再决定如何表达")
+            .put("status", "active")
+            .put("effects", JSONArray().put(JSONObject()
+                .put("from", "foundation:$intimacy").put("to", "foundation:$rest")
+                .put("meaning", "两者存在拉扯，但并不决定最后选择")))
+        val r = report(first).put("unions", JSONArray().put(union))
+        val output = InnerStructureContext.submit(context, first, r)
+        assertTrue(output.getBoolean("unions_adopted"))
+        val adopted = states.inspectCategory(role, chat, "union", "tradeoff-1", 0).getJSONObject("item")
+        assertEquals("active", adopted.getJSONObject("content").getString("status"))
+        assertEquals(0, states.read(role).getJSONObject("foundation_state").getJSONObject("drives")
+            .getJSONObject(intimacy).getInt("version"))
+        // Persisted interpretation is present for the next real selector; no tool is executed.
+        val second = InnerStructureContext.prepare(context, role, secondChat, true,
+            input = "现在继续考虑上次的拉扯")
+        assertTrue(second.state.contains("foundation"))
+    }
+
     @Test fun unformedSurvivalDoesNotMaterializeAsAnInventedExperience(): Unit = runBlocking {
         frame(chat, "今天聊聊真实经历，但并没有报告求生欲")
         val survival = states.inspectCategory(role, chat, "foundation", "foundation:need:survival", 0).getJSONObject("item")
