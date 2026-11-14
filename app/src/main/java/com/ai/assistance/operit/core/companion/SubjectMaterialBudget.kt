@@ -48,6 +48,9 @@ internal object SubjectMaterialBudget {
         }.orEmpty()
         inner.remove("_relevance_first")
         // Short originals and long fragments retain the retrieval order across both lanes.
+        lane(result.getJSONObject("foundation"), "available", "foundation.available")
+        lane(result.getJSONObject("foundation"), "drive_values", "foundation.drive_values")
+        lane(result.getJSONObject("foundation"), "legacy_pending", "foundation.legacy_pending")
         lane(inner, "identity", "inner_structure.identity")
         lane(inner, "selected", "inner_structure.selected")
         lane(result.getJSONObject("category_events"), "episodes", "category_events.episodes")
