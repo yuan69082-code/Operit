@@ -21,6 +21,7 @@ internal object InnerInteractions {
         "inner" -> requireNotNull(InnerStructure.record(data, id))
         "episode" -> requireNotNull(CategoryEvents.row(data, kind, id))
         "state" -> stateMember(data, id, chat, at)
+        "foundation" -> InnerFoundations.member(data, id, at)
         else -> throw IllegalArgumentException("联合成员类型不受支持")
     }
 
@@ -118,6 +119,7 @@ internal object InnerInteractions {
                     "inner" -> InnerStructure.record(data, id)?.optInt("version")
                     "episode" -> CategoryEvents.row(data, kind, id)?.optInt("version")
                     "state" -> InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id && it.optBoolean("active") }?.optInt("version")
+                    "foundation" -> InnerFoundations.find(id)?.let { InnerFoundations.member(data, id, at).getInt("version") }
                     else -> null
                 }
                 versions.put("$kind:$id", version ?: JSONObject.NULL)
@@ -141,7 +143,7 @@ internal object InnerInteractions {
     val instructions = """
         [内在联合]
         预算未选中的成员可用 companion_internal_state action=get section=inner|state|episode id=成员ID 按需读取；完整原生返回在同轮登记版本。截断结果不登记，请使用按ID读取。联合仅在自己的私聊处理，窗口局部成员不能在另一窗口改写。
-        同一报告可带 unions:[{id,expected_version,members:[{kind:"inner|episode|state",id,version}],objects:[],evidence:["本轮来源ID"],interpretation:"共同理解或冲突",decision:"倾向或暂未形成决定",status:"active|ended",effects:[{from:"inner:ID",to:"episode:ID",meaning:"作用解释"}]}]，每轮最多4项。成员须在本轮实际选入材料。state是原有数值维度，用原updates/revise更新；inner/episodes仍走原采用规则。companion_internal_state get section:union 可按id或offset查询，category_versions用union:ID查询历史。
+        同一报告可带 unions:[{id,expected_version,members:[{kind:"inner|episode|foundation|state",id,version}],objects:[],evidence:["本轮来源ID"],interpretation:"共同理解或冲突",decision:"倾向或暂未形成决定",status:"active|ended",effects:[{from:"inner:ID",to:"episode:ID",meaning:"作用解释"}]}]，每轮最多4项。成员须在本轮实际选入材料。foundation 成员表示已安装的真实基础种类及其当前版本；旧state成员仅供历史联合辨认或明确结束，不能再用旧updates/revise写第二套状态；inner/episodes仍走原采用规则。companion_internal_state get section:union 可按id或offset查询，category_versions用union:ID查询历史。
         retrieved_materials 是本轮实际取回并提供的材料，可引用其中status=retrieved的ID。保留作者、原来源、时间和locator；摘要不是原话，旧聊天不是新发生或自动相信的事实。failed不是读过。important_changes中的ID和current_input_event也可引用。外部MCP仍按需用已授权工具查，不会每轮自动访问。
         联合不代替成员。需要改变成员时，在同一报告的原 inner/episodes 中明确提出，仍须原采用规则；全部成功才保存。双方可影响，但不必都改值，也可无变化或相反方向。不得重复计入同一事实，不做循环放大，不要求行动。
         求生欲只能通过原明确候选采用改值；联合和时间不会代它改变强度。人格发展和偏好采用仍须原证据与前态核对。只记录必要解释、决定与作用，不输出隐藏思维链。
