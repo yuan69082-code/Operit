@@ -108,6 +108,8 @@ internal object InternalStateReportDiagnostics {
     /** Never surface JSONException.message or a user-provided unknown key as a path. */
     fun issue(failure: Exception, stage: String): InternalStateReportIssue = when (failure) {
         is InternalStateReportIssue -> failure
+        is InternalStateReportRejected ->
+            InternalStateReportIssue("contract", failure.reason.name.lowercase(), failure.reason.name)
         is JSONException -> InternalStateReportIssue(stage, stage, "JSON_SHAPE")
         is IllegalArgumentException -> InternalStateReportIssue(stage, stage, "SEMANTIC_RULE")
         else -> InternalStateReportIssue(stage, stage, "INTERNAL")
