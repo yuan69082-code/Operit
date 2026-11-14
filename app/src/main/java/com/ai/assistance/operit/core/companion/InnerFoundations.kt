@@ -393,13 +393,16 @@ internal object InnerFoundations {
             }
             val reason = row.optString("reason")
             require(reason.length <= 800 && (reason.isNotBlank() || id == "foundation:need:survival"))
+            // Snapshot the old authority BEFORE editing references. Otherwise a survival
+            // change records its newly supplied people/goals as if they were already present,
+            // making recovery and history audit inaccurate.
+            val before = JSONObject(current.toString())
             if (id == "foundation:need:survival") {
                 if (row.has("objects")) CategoryEvents.strings(row.getJSONArray("objects"), 8)
                 if (row.has("goals")) CategoryEvents.strings(row.getJSONArray("goals"), 8)
                 for (field in listOf("objects", "goals")) if (row.has(field)) current.put(field, JSONArray(row.getJSONArray(field).toString()))
                 current.put("formed", true)
             } else require(!row.has("objects") && !row.has("goals"))
-            val before = JSONObject(current.toString())
             current.put("value", raw.toDouble()).put("at", now).put("version", current.optInt("version") + 1)
                 .put("reason", reason).put("evidence", JSONArray(evidence.toString()))
                 .put("origin", "subject_report")
