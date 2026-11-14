@@ -15,6 +15,31 @@ import java.util.UUID
 class InternalStateStore(private val context: Context) {
     private val store = CompanionStore(context)
     private fun key(role: String) = SubjectStateBoundary.scope(role, "internal-state")
+    private fun failureKey(role: String) = "isr-failure:$role"
+
+    /** Stores only safe failure metadata. Neither report bodies nor personal memories enter logs. */
+    fun noteReportFailure(frame: InternalStateFrame, failure: Exception): InternalStateReportIssue {
+        val issue = InternalStateReportDiagnostics.issue(failure, "report_commit")
+        store.update(failureKey(frame.roleId)) { state ->
+            state.put("status", "unresolved").put("code", issue.code).put("stage", issue.stage)
+                .put("path", issue.path).put("rule", issue.rule)
+                .put("frame_id", frame.id).put("frame_revision", frame.revision)
+                .put("state_version", frame.stateVersion).put("at", System.currentTimeMillis())
+        }
+        return issue
+    }
+
+    private fun failureNotice(role: String): JSONObject? {
+        val saved = store.read(failureKey(role))
+        if (saved.optString("status") != "unresolved") return null
+        return JSONObject().put("code", saved.optString("code").take(36))
+            .put("stage", saved.optString("stage").take(40))
+            .put("path", saved.optString("path").take(75))
+            .put("frame_revision", saved.optLong("frame_revision"))
+            .put("at", saved.optLong("at"))
+            .put("state", "previous_report_not_adopted")
+    }
+
     private fun update(role: String, source: String, change: (JSONObject) -> Unit) =
         store.updateSubject(role, "internal-state", source, change)
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
@@ -365,6 +390,11 @@ class InternalStateStore(private val context: Context) {
             restoreEvidence(data, frame.roleId, CategoryEvents.evidence(if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray()))
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
         }
+        // A successful report resolves prior failure metadata without replaying old actions.
+        try { store.update(failureKey(frame.roleId)) { it.put("status", "resolved").put("resolved_at", System.currentTimeMillis()) } }
+        catch (failure: Exception) {
+            AppLogger.e("InternalState", "报告已提交，但诊断状态未更新", failure)
+        }
         AppLogger.d("InternalState", "Accepted subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} saved=${SubjectStateBoundary.revision(saved)} semantic=${InternalStateEngine.semanticRevision(saved)}")
         return receipt
     }
@@ -566,6 +596,9 @@ class InternalStateStore(private val context: Context) {
                     innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
             var payload = selected.payload
+            // Only a short machine-readable failure notice from a prior turn can reappear.
+            // It contains no rejected report text, no identity statements, and no retry command.
+            failureNotice(actor)?.let { payload.put("last_report_failure", it) }
             payload.put("material_selection_cursor", innerCursor)
             payload.put("foundation", InnerFoundations.material(data, currentInput, innerCursor, now))
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
