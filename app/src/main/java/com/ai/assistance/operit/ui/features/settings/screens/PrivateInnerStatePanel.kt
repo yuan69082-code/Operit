@@ -42,8 +42,12 @@ internal fun InternalStatePanel(role: String) {
     key(role, section) {
         when (section) {
             "当前" -> {
-                InternalStateValuesPanel(role)
+                Text("基础机制已安装，但不等于每种感受已经发生。真实强度、具体事情和待承接旧资料分别显示；不再并列运行旧数值曲线。")
                 InnerFamilyPanel(role, listOf("drive", "need", "desire", "emotion", "sentiment", "feeling"))
+                PrivateFold("旧数值历史 · 尚待语义承接的部分") {
+                    Text("原始数值、原规则、原时间与来源仍可追溯，但不再作为第二套当前自动涨落。")
+                    PrivateRows(role, "legacy_handoff")
+                }
             }
             "人格与自我" -> {
                 Text("已采用的内容作为持续依据。初始设置仍保留；新的理解先成为候选，后续实际读取后才可采用。")
@@ -97,6 +101,9 @@ private fun InnerFamilyPanel(role: String, families: List<String>) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         families.forEach { item -> FilterChip(item == family, { family = item }, label = { Text(innerFamilyNames.getValue(item)) }) }
     }
+    Text("已安装的基础类别（不预填主观经历）", style = MaterialTheme.typography.titleMedium)
+    PrivateRows(role, "foundation", family)
+    Text("此助手已经采用的个人内容", style = MaterialTheme.typography.titleMedium)
     PrivateRows(role, "inner_family", family)
 }
 
@@ -163,6 +170,20 @@ private fun PrivateRecordCard(role: String, kind: String, row: JSONObject, histo
                 content.optString(it).takeIf(String::isNotBlank)
             }.orEmpty()
             if (preview.isNotBlank()) Text(preview, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            if (kind == "foundation") {
+                val meaning = when (row.optString("state")) {
+                    "base_drive_running" -> "基础驱力正在按独立时间曲线运行；并不强迫行动"
+                    "explicitly_formed" -> "由主体明确形成的强度"
+                    "has_real_appraisals" -> "已有实际心理事件；点击查看不同事情"
+                    else -> "已安装能力，尚无已形成的主观经历"
+                }
+                Text(meaning, style = MaterialTheme.typography.labelMedium)
+                if (row.has("current_value")) Text("当前投影值：" + row.optDouble("current_value"))
+            }
+            if (kind == "legacy_handoff") Text(
+                if (row.optString("status") == "linked_by_exact_engine_id") "通过稳定ID关联，旧数值仍保存在原记录" else
+                    "尚待语义承接；没有凭名称自动认作一种新心理状态",
+                style = MaterialTheme.typography.labelMedium)
             Text(privateOrigin(row) + row.optLong("adopted_at", row.optLong("created_at", row.optLong("at"))).takeIf { it > 0 }?.let { " · ${privateTime(it)}" }.orEmpty(),
                 style = MaterialTheme.typography.labelSmall)
             TextButton(onClick = { open = true }) { Text("查看全文与来源") }
@@ -221,6 +242,14 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
                         PrivateFold("变化历史 · 按需读取") {
                             PrivateRows(role, if (kind == "action") "action_versions" else "category_versions",
                                 if (kind == "action") target else "$rowKind:$target", history = true)
+                        }
+                        if (kind == "foundation") {
+                            PrivateFold("这个类别中已真实形成的不同事情") {
+                                PrivateRows(role, "episode_category", target)
+                            }
+                            PrivateFold("本类别主动升降的完整历史") {
+                                PrivateRows(role, "foundation_history", target, history = true)
+                            }
                         }
                         if (kind in setOf("inner", "inner_family")) {
                             PrivateFold("关联经历") { PrivateRows(role, "experience_link", target) }
