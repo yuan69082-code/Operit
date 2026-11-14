@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.core.companion.CompanionPlayStore
+import com.ai.assistance.operit.core.companion.CompanionStore
+import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -35,6 +37,22 @@ fun CompanionPlayPanel(role: String, section: String) {
     var details by remember(role) { mutableStateOf("") }
     var uses by remember(role) { mutableIntStateOf(1) }
     var editor by remember(role) { mutableStateOf(false) }
+
+    LaunchedEffect(role) {
+        // A deliberate first visit enables this assistant's new tool once, without overwriting
+        // a later manual disable. Other assistants keep their independent permissions.
+        try {
+            withContext(Dispatchers.IO) {
+                val preferences = CompanionStore(context).preferences
+                val key = "playroom_tool_enrolled:$role"
+                if (!preferences.getBoolean(key, false)) {
+                    CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", "companion_play", true)
+                    preferences.edit().putBoolean(key, true).apply()
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { error = failure.message.orEmpty() }
+    }
 
     LaunchedEffect(role, section, revision, page) {
         try {
