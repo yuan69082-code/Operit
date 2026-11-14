@@ -235,7 +235,11 @@ internal object InnerFoundations {
             .put("available", JSONArray(selected.map { JSONObject().put("id", it.id).put("name", it.name)
                 .put("family", it.family).put("policy", it.policy) }))
             .put("drive_values", driveValues)
-            .put("survival", if (survival.optBoolean("formed")) JSONObject(survival.toString()) else JSONObject().put("formed", false))
+            .put("survival", if (survival.optBoolean("formed")) JSONObject().put("formed", true)
+                .put("value", survival.getDouble("value")).put("version", survival.getInt("version"))
+                .put("objects_count", survival.optJSONArray("objects")?.length() ?: 0)
+                .put("goals_count", survival.optJSONArray("goals")?.length() ?: 0)
+                else JSONObject().put("formed", false))
             .put("legacy_pending", legacyRows)
             .put("notice", "目录不代表体验已形成；每轮最多六个目录名与少量待承接索引。其他按ID或family查询。价值人格与关系已采用原文另由既有材料选择读取。")
     }
