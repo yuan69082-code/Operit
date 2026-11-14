@@ -72,7 +72,7 @@ fun CompanionPlayPanel(role: String, section: String) {
         catch (failure: Exception) { error = failure.message.orEmpty() }
     }
 
-    fun apply(action: suspend () -> Unit, onSuccess: () -> Unit = {}) {
+    fun apply(onSuccess: () -> Unit = {}, action: suspend () -> Unit) {
         if (busy) return
         busy = true
         coroutine.launch {
@@ -115,8 +115,9 @@ fun CompanionPlayPanel(role: String, section: String) {
                             }
                         }
                         Button(enabled = !busy && title.trim().isNotBlank() && details.trim().isNotBlank(),
-                            onClick = { apply({ play.createCoupon(role, title, details, uses) },
-                                { title = ""; details = ""; editor = false; page = 0 }) }) { Text("创建并暂存（同时通知他）") }
+                            onClick = { apply(onSuccess = { title = ""; details = ""; editor = false; page = 0 }) {
+                                play.createCoupon(role, title, details, uses)
+                            } }) { Text("创建并暂存（同时通知他）") }
                     }
                 }
                 Text("我的券包与赠送记录", style = MaterialTheme.typography.titleMedium)
