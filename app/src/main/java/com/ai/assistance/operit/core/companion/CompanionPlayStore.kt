@@ -192,23 +192,25 @@ class CompanionPlayStore(context: Context) {
      */
     fun takeForContext(role: String): JSONArray = synchronized(lock) {
         val db = helper.writableDatabase
-        val rows = JSONArray()
+        val batch = mutableListOf<JSONObject>()
+        db.rawQuery("SELECT id,category,body,reference FROM notices WHERE role=? AND status='new' AND category NOT IN " +
+            "(SELECT category FROM preferences WHERE role=? AND mode='archive') ORDER BY id DESC LIMIT 3",
+            arrayOf(roleId(role), role)).use { c ->
+            while (c.moveToNext()) {
+                batch.add(JSONObject().put("id", c.getLong(0)).put("category", c.getString(1))
+                    .put("body", c.getString(2).take(180)).put("reference", c.getString(3)))
+            }
+        }
+        if (batch.isEmpty()) return@synchronized JSONArray()
         db.beginTransaction()
         try {
-            db.rawQuery("SELECT id,category,body,reference FROM notices WHERE role=? AND status='new' AND category NOT IN " +
-                "(SELECT category FROM preferences WHERE role=? AND mode='archive') ORDER BY id LIMIT 3",
-                arrayOf(roleId(role), role)).use { c ->
-                while (c.moveToNext()) {
-                    val key = c.getLong(0)
-                    rows.put(JSONObject().put("id", key).put("category", c.getString(1))
-                        .put("body", c.getString(2).take(180)).put("reference", c.getString(3)))
-                    db.execSQL("UPDATE notices SET status='surfaced' WHERE id=? AND role=?",
-                        arrayOf(key, role))
-                }
+            batch.forEach { row ->
+                db.execSQL("UPDATE notices SET status='surfaced' WHERE id=? AND role=? AND status='new'",
+                    arrayOf(row.getLong("id"), role))
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
-        rows
+        JSONArray(batch)
     }
 
     data class Wake(val role: String, val chat: String, val ids: List<Long>) {
@@ -216,37 +218,33 @@ class CompanionPlayStore(context: Context) {
         val prompt: String get() = "AI 通知中心有${ids.size}条新的允许唤醒的通知。请阅读本次真实通知，再决定要不要回应；不必强制联系用户，也不要编造未发生的事情。"
     }
 
-    /** Lease at most three wake notices, only for the user-enabled proactive assistant. */
+    /** Idle polling uses reads only; writes a lease only if a wake is really needed. */
     fun claimWake(): Wake? = synchronized(lock) {
         val options = CompanionStore(app)
         if (!options.proactiveEnabled) return@synchronized null
         val role = options.proactiveRole ?: return@synchronized null
         val chat = AssistantWindowRouter.chat(app, role) ?: return@synchronized null
         val db = helper.writableDatabase
+        if (now() - (meta(db, role, "wake_last")?.toLongOrNull() ?: 0L) < 30_000)
+            return@synchronized null
         val ids = mutableListOf<Long>()
+        db.rawQuery(
+            "SELECT n.id FROM notices n LEFT JOIN preferences p ON p.role=n.role AND p.category=n.category " +
+                "WHERE n.role=? AND n.status='new' AND n.wake_state='pending' " +
+                "AND COALESCE(p.mode,CASE WHEN n.category='coupon_gift' THEN 'wake' ELSE 'next' END)='wake' " +
+                "ORDER BY n.id DESC LIMIT 3",
+            arrayOf(role)
+        ).use { c -> while (c.moveToNext()) ids.add(c.getLong(0)) }
+        if (ids.isEmpty()) return@synchronized null
         db.beginTransaction()
         try {
-            val last = meta(db, role, "wake_last")?.toLongOrNull() ?: 0L
-            if (now() - last < 30_000) {
-                db.setTransactionSuccessful()
-                return@synchronized null
-            }
-            // Explicit AI preference wins. Only a gifted coupon defaults to wake.
-            db.rawQuery(
-                "SELECT n.id FROM notices n LEFT JOIN preferences p ON p.role=n.role AND p.category=n.category " +
-                    "WHERE n.role=? AND n.status='new' AND n.wake_state='pending' " +
-                    "AND COALESCE(p.mode,CASE WHEN n.category='coupon_gift' THEN 'wake' ELSE 'next' END)='wake' " +
-                    "ORDER BY n.id LIMIT 3",
-                arrayOf(role)
-            ).use { c -> while (c.moveToNext()) ids.add(c.getLong(0)) }
-            if (ids.isNotEmpty()) {
-                ids.forEach { key -> db.execSQL("UPDATE notices SET wake_state='running' WHERE id=?", arrayOf(key)) }
-                db.execSQL("INSERT OR REPLACE INTO meta (role,key,value) VALUES (?,?,?)",
-                    arrayOf(role, "wake_last", now().toString()))
-            }
+            ids.forEach { key -> db.execSQL("UPDATE notices SET wake_state='running' WHERE id=? AND wake_state='pending'",
+                arrayOf(key)) }
+            db.execSQL("INSERT OR REPLACE INTO meta (role,key,value) VALUES (?,?,?)",
+                arrayOf(role, "wake_last", now().toString()))
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
-        if (ids.isEmpty()) null else Wake(role, chat, ids)
+        Wake(role, chat, ids)
     }
 
     fun finishWake(work: Wake, outcome: String) = synchronized(lock) {
@@ -269,6 +267,7 @@ class CompanionPlayStore(context: Context) {
 
     /** Called only with an actual installed app version, never a repository commit. */
     fun observeInstalledVersion(role: String) = synchronized(lock) {
+        if (observedVersions[role] == BuildConfig.VERSION_NAME) return@synchronized
         val key = "installed_version"
         val db = helper.writableDatabase
         db.beginTransaction()
@@ -288,6 +287,7 @@ class CompanionPlayStore(context: Context) {
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        observedVersions[role] = BuildConfig.VERSION_NAME
     }
 
     private fun mode(role: String, category: String): String =
@@ -363,6 +363,7 @@ class CompanionPlayStore(context: Context) {
     companion object {
         private val lock = Any()
         private var database: PlayDatabase? = null
+        private val observedVersions = mutableMapOf<String, String>()
         val categories = setOf("coupon_draft", "coupon_gift", "coupon_result", "games", "updates", "gifts", "study")
     }
 }
