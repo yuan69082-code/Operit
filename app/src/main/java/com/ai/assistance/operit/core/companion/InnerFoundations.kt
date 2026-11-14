@@ -314,6 +314,7 @@ internal object InnerFoundations {
         advance(data, now)
         val targets = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
+            try {
             val row = actions.getJSONObject(i)
             require(row.keys().asSequence().all { it in setOf("id", "expected_version", "value", "evidence", "reason", "objects", "goals") })
             val id = row.getString("id")
@@ -349,6 +350,10 @@ internal object InnerFoundations {
                 .put("content", JSONObject().put("before", before).put("after", JSONObject(current.toString())))
                 .put("source", "subject_report").put("frame_id", frame.id).put("at", now)
                 .put("owner", frame.roleId))
+            } catch (failure: Exception) {
+                if (failure is InternalStateReportRejected) throw failure
+                throw InternalStateReportDiagnostics.issue(failure, "foundation[$i]")
+            }
         }
         return true
     }
