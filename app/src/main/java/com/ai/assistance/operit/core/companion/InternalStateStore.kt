@@ -218,6 +218,17 @@ class InternalStateStore(private val context: Context) {
             update(role, "user_configuration") { data ->
                 val now = System.currentTimeMillis()
                 if (enable) InnerFoundations.install(data, now)
+                data.optJSONObject("foundation_state")?.let { foundation ->
+                    if (!enable) {
+                        InnerFoundations.advance(data, now)
+                        foundation.put("paused_at", now)
+                    } else if (foundation.has("paused_at")) {
+                        val values = foundation.getJSONObject("drives")
+                        for (kind in InnerFoundations.drives)
+                            values.getJSONObject(kind.id).put("at", now)
+                        foundation.remove("paused_at")
+                    }
+                }
                 if (!enable && data.optJSONObject("foundation_state") == null) {
                     InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
                 }
