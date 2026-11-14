@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.companion
 
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.exp
 
 /** Psychological episodes are interpretations of facts, never extra factual input events.
  * The host adopts validated candidates in the existing report transaction at round end.
@@ -21,9 +22,34 @@ internal object CategoryEvents {
     }
     fun page(data: JSONObject, kind: String, offset: Int, parent: String? = null): JSONObject {
         val rows = access(data).categoryPage(kind, offset, 9, parent)
-        return JSONObject().put("items", JSONArray(rows.take(8)))
+        // A view-only emotional time projection: old intensity and unresolved status are
+        // immutable. Reading never reapplies a change or mistakes calming for forgiveness.
+        val view = rows.take(8).map { record ->
+            if (kind != "episode") record else emotionTimeView(record, System.currentTimeMillis())
+        }
+        return JSONObject().put("items", JSONArray(view))
             .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
     }
+    private fun emotionTimeView(source: JSONObject, now: Long): JSONObject {
+        val content = source.optJSONObject("content") ?: return source
+        val type = InnerFoundations.find(content.optString("category_ref")) ?: return source
+        if (type.family != "emotion") return source
+        val seconds = when (type.key) {
+            "anger" -> 12 * 3600.0
+            "surprise" -> 30.0
+            else -> 7200.0
+        }
+        val elapsed = ((now - source.optLong("at")).coerceAtLeast(0)).toDouble() / 1000.0
+        val original = content.optDouble("intensity")
+        if (!original.isFinite()) return source
+        val value = original * exp(-elapsed / seconds)
+        return JSONObject(source.toString()).put("time_projection", JSONObject()
+            .put("intensity", value).put("at", now)
+            .put("basis", "engine_emotion_natural_v1:baseline_without_relationship_closeness")
+            .put("duration_parameter_seconds", seconds)
+            .put("not_a_new_episode", true).put("not_resolved_by_time", true))
+    }
+
     fun evidence(actions: JSONArray): List<String> {
         require(actions.length() <= 8)
         return (0 until actions.length()).map { actions.getJSONObject(it) }
@@ -177,6 +203,7 @@ internal object CategoryEvents {
         related 可省略。回忆/重新理解引用原事实；不创建第二次现实发生。不同类别可引用同一个事实。关联修正保留版本和原始来源；不会删除原事件。
         {op:"focus",id:"类别ID",expected_version:0或当前重点版本,capacity:3到6,events:["按你决定的次序排列的事件ID"],reason:"本次安排或替换理由"}。可以不足3件或为空，不凑数。重点外的事件完整保留。
         强度、重要性、注意力、解决状态相互独立。放到背景不是原谅或解决；重新关注不自动回升强度。执念/不甘心不意味着必须行动或不能放下。
+        基础九情绪在读取时附 time_projection：愤怒的默认参数12小时，惊讶30秒，其余默认2小时。当前关系亲近分量未核实则不虚构关系修正；该投影不是新经历，也不写回强度或把未解决改为解决，主体仍可明确重新评价。
         愿望事件可另带 phase:"arising|strengthening|weakening|sustaining|suppressed|suppression_failed|disappeared|reappeared|conflicted|transformed|acted|abandoned" 以及 supporting/opposing 字符串数组。阶段由主体对实际经历判断，不要求按顺序走完；其他类别不得伪称愿望阶段。
         inner.record 可带 experience_refs:["已有心理事件ID"]，每次最多6个新增关联；只在通过原采用规则后关联，之前的关联另存并保留，可查询。它们不替代人格采用所需的原文依据。
         广义生用 need level:broad semantic_rule:"life"；求生欲用 need level:specific parent_ref 指向该广义需要，semantic_rule:"survival",strength:自主给出的非负有限数,objects:[...],goals:[...]。不强制创建，不从旧值推测，不允许 legacy_ref 产生第二强度权威。
