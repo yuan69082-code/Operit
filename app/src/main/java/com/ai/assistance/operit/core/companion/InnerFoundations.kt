@@ -171,6 +171,63 @@ internal object InnerFoundations {
         return row
     }
 
+    /** A previously adopted survival need is actual prior subject content, not a seed to invent.
+     * Locate it by its authoritative semantic_rule index, never by a display name. */
+    private fun adoptedSurvival(data: JSONObject): JSONObject? {
+        if (!data.has("inner_structure")) return null
+        val id = if (data is InternalStateDocument) {
+            val index = CategoryEvents.row(data, "inner_index", InnerStructure.hash("rule:survival"))
+            if (index?.optBoolean("closed") == true) null else index?.optJSONObject("value")?.optString("target")
+        } else null
+        val record = if (!id.isNullOrBlank()) InnerStructure.record(data, id)
+            else if (data is InternalStateDocument) null
+            else InnerStructure.records(data).firstOrNull {
+                it.getJSONObject("content").optString("semantic_rule") == "survival"
+            }
+        val content = record?.optJSONObject("content") ?: return null
+        if (content.optString("status") != "active" || content.optString("family") != "need" ||
+            content.optString("semantic_rule") != "survival" || !content.has("strength")) return null
+        val strength = content.opt("strength")
+        if (strength !is Number || !strength.toDouble().isFinite() || strength.toDouble() < 0) return null
+        return record
+    }
+
+    private fun survivalFromAdopted(record: JSONObject, at: Long): JSONObject {
+        val content = record.getJSONObject("content")
+        return JSONObject().put("formed", true).put("version", record.getInt("version"))
+            .put("value", content.getDouble("strength"))
+            .put("objects", JSONArray(content.getJSONArray("objects").toString()))
+            .put("goals", JSONArray(content.getJSONArray("goals").toString()))
+            .put("at", at).put("origin", "adopted_inner_legacy")
+            .put("source_ref", record.getString("id"))
+            .put("source_version", record.getInt("version"))
+            .put("adopted_at", record.optLong("adopted_at", at))
+    }
+
+    /** A newer adopted legacy survival version participates in the same atomic report.
+     * A prior explicit foundation decision may not be silently overwritten by a stale candidate. */
+    fun syncAdoptedSurvival(data: JSONObject, frame: InternalStateFrame, now: Long): Boolean {
+        val record = adoptedSurvival(data) ?: return false
+        val state = data.getJSONObject("foundation_state").getJSONObject("survival")
+        val current = state.optInt("source_version")
+        val version = record.getInt("version")
+        if (version <= current) return false
+        require(!state.optBoolean("formed") || state.optString("origin") == "adopted_inner_legacy") {
+            "求生欲已有更近的主体直接调整；旧候选不能覆盖当前强度"
+        }
+        val before = JSONObject(state.toString())
+        val after = survivalFromAdopted(record, now)
+        state.keys().asSequence().toList().forEach(state::remove)
+        after.keys().forEach { state.put(it, after.get(it)) }
+        CategoryEvents.append(data, frame, JSONObject().put("storage_kind", "foundation_change")
+            .put("id", "foundation:need:survival").put("parent", "need")
+            .put("version", state.getInt("version"))
+            .put("content", JSONObject().put("before", before).put("after", JSONObject(state.toString())))
+            .put("at", now).put("owner", frame.roleId).put("frame_id", frame.id)
+            .put("source", "adopted_existing_need"))
+        return true
+    }
+
     /** Immutable vocabulary, one transactional adoption of legacy facts and one active numeric reducer. */
     fun install(data: JSONObject, now: Long) {
         if (data.optJSONObject("foundation_state")?.optInt("schema") == SCHEMA) return
@@ -212,8 +269,9 @@ internal object InnerFoundations {
                 .put("source", "host_migration").put("reason", "旧时间规则停止参与；原始定义、实例和历史保留")
                 .put("before", old).put("after", JSONObject(definition.toString())))
         }
+        val inheritedSurvival = adoptedSurvival(data)?.let { survivalFromAdopted(it, now) }
         data.put("foundation_state", JSONObject().put("schema", SCHEMA).put("drives", driveStates)
-            .put("survival", JSONObject().put("formed", false).put("version", 0))
+            .put("survival", inheritedSurvival ?: JSONObject().put("formed", false).put("version", 0))
             .put("legacy", legacy).put("installed_at", now)
             .put("catalogue_version", "engine-0567ba4-user-additions-v1"))
         data.put("semantic_revision", InternalStateEngine.semanticRevision(data) + 1L)
