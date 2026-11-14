@@ -116,6 +116,33 @@ class InnerFoundationsTest {
             .getJSONObject("foundation:drive:intimacy").getDouble("value"), 0.000001)
     }
 
+
+    @Test fun survivalReferenceHistoryPreservesPriorObjectsBeforeAnExplicitRevision() {
+        val data = JSONObject()
+        InnerFoundations.install(data, 0)
+        val first = input(data, "first-survival", HOUR)
+        val create = JSONObject().put("id", "foundation:need:survival")
+            .put("expected_version", 0).put("value", 0.7)
+            .put("evidence", JSONArray().put("first-survival"))
+            .put("objects", JSONArray().put("person:A")).put("goals", JSONArray().put("keep_living"))
+        InternalStateReports.apply(data, first, report(first, JSONArray().put(create)), HOUR)
+        val second = input(data, "second-survival", 2 * HOUR)
+        val revised = JSONObject().put("id", "foundation:need:survival")
+            .put("expected_version", 1).put("value", 0.5)
+            .put("evidence", JSONArray().put("second-survival"))
+            .put("objects", JSONArray().put("person:B")).put("goals", JSONArray().put("new_goal"))
+        InternalStateReports.apply(data, second, report(second, JSONArray().put(revised)), 2 * HOUR)
+        val rows = data.getJSONObject("category_commit").getJSONArray("rows")
+        val change = (0 until rows.length()).map { rows.getJSONObject(it) }
+            .last { it.optString("storage_kind") == "foundation_change" &&
+                it.optString("id") == "foundation:need:survival" }
+            .getJSONObject("content")
+        assertEquals("person:A", change.getJSONObject("before").getJSONArray("objects").getString(0))
+        assertEquals("person:B", change.getJSONObject("after").getJSONArray("objects").getString(0))
+        assertEquals("keep_living", change.getJSONObject("before").getJSONArray("goals").getString(0))
+        assertEquals("new_goal", change.getJSONObject("after").getJSONArray("goals").getString(0))
+    }
+
     @Test fun survivalCanReachZeroWithoutTimeOrForcedAction() {
         val data = JSONObject()
         InnerFoundations.install(data, 0)
