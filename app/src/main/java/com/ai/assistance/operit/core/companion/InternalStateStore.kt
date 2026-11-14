@@ -601,7 +601,7 @@ class InternalStateStore(private val context: Context) {
             var payload = selected.payload
             // Only a short machine-readable failure notice from a prior turn can reappear.
             // It contains no rejected report text, no identity statements, and no retry command.
-            failureNotice(actor)?.let { payload.put("last_report_failure", it) }
+            if (!groupInput) failureNotice(actor)?.let { payload.put("last_report_failure", it) }
             payload.put("material_selection_cursor", innerCursor)
             payload.put("foundation", InnerFoundations.material(data, currentInput, innerCursor, now))
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
