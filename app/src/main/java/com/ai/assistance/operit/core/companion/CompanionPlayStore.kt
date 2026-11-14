@@ -39,7 +39,7 @@ class CompanionPlayStore(context: Context) {
                 db.setTransactionSuccessful()
             } finally { db.endTransaction() }
         }
-        wake(role, "coupon_draft", "新建未赠送的情侣券")
+        wake(role, "coupon_draft")
         coupon(role, key, true)
     }
 
@@ -54,7 +54,7 @@ class CompanionPlayStore(context: Context) {
             notice(db, role, "coupon_gift", couponId, "园园赠送给你一张「${old.getString("title")}」，已放入你的券夹。")
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
-        wake(role, "coupon_gift", "收到情侣券")
+        wake(role, "coupon_gift")
         coupon(role, couponId, true)
     }
 
@@ -135,8 +135,22 @@ class CompanionPlayStore(context: Context) {
         item(role, itemId, true)
     }
 
+    /** The AI can give its own creation to the user without cloning its content. */
+    fun giftItem(role: String, itemId: String): JSONObject = synchronized(lock) {
+        val old = item(role, itemId, true)
+        check(old.getString("visibility") != "gifted") { "这件礼物已经送出" }
+        helper.writableDatabase.execSQL("UPDATE items SET visibility='gifted',updated=? WHERE role=? AND id=?",
+            arrayOf(now(), role, itemId))
+        item(role, itemId, true)
+    }
+
+    fun gifts(role: String, offset: Int = 0): JSONObject = synchronized(lock) {
+        queryPage("SELECT id,role,title,created,updated FROM items WHERE role=? AND visibility='gifted' ORDER BY updated DESC LIMIT 20 OFFSET ?",
+            arrayOf(roleId(role), validateOffset(offset).toString()), offset)
+    }
+
     fun item(role: String, itemId: String, ai: Boolean): JSONObject = synchronized(lock) {
-        val where = if (ai) "" else " AND visibility='shared'"
+        val where = if (ai) "" else " AND visibility IN ('shared','gifted')"
         one("SELECT * FROM items WHERE role=? AND id=?$where", arrayOf(roleId(role), itemId), "物品不存在或不可查看")
     }
 
@@ -282,7 +296,7 @@ class CompanionPlayStore(context: Context) {
             if (c.moveToFirst()) c.getString(0) else if (category == "coupon_gift") "wake" else "next"
         }
 
-    private fun wake(role: String, category: String, description: String) {
+    private fun wake(role: String, category: String) {
         // Reuse the existing serialized wake pipeline. A user-disabled proactive channel stays off.
         val options = CompanionStore(app)
         if (mode(role, category) == "wake" && options.proactiveEnabled && options.proactiveRole == role)
