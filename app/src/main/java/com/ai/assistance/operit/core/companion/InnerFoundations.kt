@@ -217,7 +217,7 @@ internal object InnerFoundations {
         }
         val before = JSONObject(state.toString())
         val after = survivalFromAdopted(record, now)
-        state.keys().asSequence().toList().forEach(state::remove)
+        state.keys().asSequence().toList().forEach { key -> state.remove(key) }
         after.keys().forEach { state.put(it, after.get(it)) }
         CategoryEvents.append(data, frame, JSONObject().put("storage_kind", "foundation_change")
             .put("id", "foundation:need:survival").put("parent", "need")
