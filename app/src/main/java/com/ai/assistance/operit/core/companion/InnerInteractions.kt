@@ -29,6 +29,7 @@ internal object InnerInteractions {
         require(actions.length() <= 4)
         val ids = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
+            try {
             val a = actions.getJSONObject(i)
             require(a.keys().asSequence().all { it in setOf("id", "expected_version", "members", "objects", "evidence", "interpretation", "decision", "status", "effects") })
             val id = text(a, "id", 64)
@@ -92,6 +93,10 @@ internal object InnerInteractions {
                 .put("content", content).put("owner", frame.roleId).put("frame_id", frame.id)
                 .put("source_chat", frame.chatId).put("local_chat", if (local) frame.chatId else old?.optString("local_chat").orEmpty())
                 .put("at", now).put("source", "subject_report_adoption"))
+            } catch (failure: Exception) {
+                if (failure is InternalStateReportRejected) throw failure
+                throw InternalStateReportDiagnostics.issue(failure, "unions[$i]")
+            }
         }
         return actions.length() > 0
     }
