@@ -29,8 +29,16 @@ internal object CategoryEvents {
         return (0 until actions.length()).map { actions.getJSONObject(it) }
             .filter { it.optString("op") == "appraise" }.flatMap { strings(it.getJSONArray("evidence"), 6) }.distinct()
     }
-    private fun category(data: JSONObject, id: String): JSONObject = requireNotNull(InnerStructure.record(data, id)) { "类别须先通过内在候选采用" }.getJSONObject("content").also {
-        require(it.getString("family") in families && it.getString("status") == "active") { "此记录不是活动的心理类别" }
+    private fun category(data: JSONObject, id: String): JSONObject {
+        // Structural vocabulary is installed by the host. It is not an adopted subjective
+        // feeling and must not require the model to first invent a candidate about itself.
+        val content = InnerStructure.record(data, id)?.getJSONObject("content")
+            ?: InnerFoundations.definition(id)
+            ?: error("心理类别不存在；可先查询已安装基础目录")
+        require(content.getString("family") in families && content.getString("status") == "active") {
+            "此记录不是可承接心理事件的类别"
+        }
+        return content
     }
     internal fun append(data: JSONObject, frame: InternalStateFrame, row: JSONObject) {
         var journal = data.optJSONObject("category_commit")
@@ -150,7 +158,7 @@ internal object CategoryEvents {
 
     val instructions = """
         [类别内部事件 v1]
-        类别使用已采用 inner 记录的 ID。不同事情用独立稳定事件 ID；不能按同名对象/关键词合并，也不必每条消息建事件。
+        类别使用已采用 inner 记录的 ID，或宿主已安装的 foundation:family:key 目录 ID。不同事情用独立稳定事件 ID；不能按同名对象/关键词合并，也不必每条消息建事件。
         同一报告可选 episodes:[...]，最多8项；宿主轮末校验采用，无需额外模型调用。
         companion_internal_state action:get section:source id:事实ID 可按ID取得原事件，含已归档来源。section:episode|focus 用 id 精确读取；experience_link 用 id:内在记录ID 查累计经历关联；category_versions 用 id:"episode:事件ID" 或 "focus:类别ID" 查变化过程，offset 分页。
         {op:"appraise",id:"稳定事件ID",expected_version:0或当前版本,category_ref:"类别ID",objects:["对象"],goals:["目标"],intensity:非负强度,importance:"重要性",long_term_impact:"长期意义",attention:"foreground|background|aside",status:"unresolved|processing|resolved",understanding:"当前理解",basis:"input|result|recollection|reinterpretation",evidence:["已读事实ID"],reason:"变化说明",related:[{id:"已有事件ID",relation:"same_matter|split_from|merged_from|corrects"}]}。
