@@ -48,6 +48,13 @@ internal object SubjectMaterialBudget {
         }.orEmpty()
         inner.remove("_relevance_first")
         // Short originals and long fragments retain the retrieval order across both lanes.
+        result.optJSONObject("foundation")?.let { foundation ->
+            // Older unit-test and pre-handoff material envelopes remain readable; a real
+            // migrated role always supplies this field in InternalStateStore.prepare.
+            lane(foundation, "available", "foundation.available")
+            lane(foundation, "drive_values", "foundation.drive_values")
+            lane(foundation, "legacy_pending", "foundation.legacy_pending")
+        }
         lane(inner, "identity", "inner_structure.identity")
         lane(inner, "selected", "inner_structure.selected")
         lane(result.getJSONObject("category_events"), "episodes", "category_events.episodes")

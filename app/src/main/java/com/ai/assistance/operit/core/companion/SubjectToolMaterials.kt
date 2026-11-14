@@ -115,7 +115,7 @@ internal object SubjectToolMaterials {
                     rows("episode", body.optJSONObject("psychological_events")?.optJSONArray("items"))
                     rows("state", body.optJSONArray("states"))
                 }
-                "inner", "inner_family", "state", "episode", "decision", "feedback" -> {
+                "inner", "inner_family", "state", "episode", "decision", "feedback", "foundation" -> {
                     val one = body.optJSONObject("item")
                     rows(if (receipt.section == "inner_family") "inner" else receipt.section, if (one != null) JSONArray().put(one)
                         else body.optJSONArray(if (receipt.section in setOf("inner", "inner_family")) "records" else "items"))
