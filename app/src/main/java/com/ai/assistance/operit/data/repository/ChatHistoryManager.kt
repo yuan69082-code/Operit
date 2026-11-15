@@ -2532,17 +2532,18 @@ class ChatHistoryManager private constructor(private val context: Context) {
                             )
                         else -> messageDao.getLatestSummaryTimestamp(chatId)
                     }
+                // Read the summary marker and every row at its timestamp in one query.
+                // Previously the exclusive lower bound skipped same-millisecond rows,
+                // while the commit check correctly saw them (31 expected vs 32 actual).
+                // Do not fetch the marker separately by timestamp: timestamps aren't unique.
                 val messageEntities =
                     chatContentDao.getMessagesForChatInRangeAsc(
                         chatId = chatId,
-                        afterTimestampExclusive = latestSummaryTimestamp,
+                        afterTimestampExclusive = latestSummaryTimestamp?.let { Math.subtractExact(it, 1L) },
                         beforeTimestampExclusive = beforeTimestampExclusive,
                         upToTimestampInclusive = upToTimestampInclusive,
                     )
-                val previousSummary = latestSummaryTimestamp?.let {
-                    chatContentDao.getMessageByTimestamp(chatId, it)
-                }
-                hydrateMessages(chatId, listOfNotNull(previousSummary) + messageEntities)
+                hydrateMessages(chatId, messageEntities)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "按总结窗口加载聊天消息失败", e)
                 emptyList()
