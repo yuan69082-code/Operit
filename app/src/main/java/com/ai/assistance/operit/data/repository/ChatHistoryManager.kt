@@ -892,10 +892,24 @@ class ChatHistoryManager private constructor(private val context: Context) {
                 // never move the marker past content that was not actually summarized.
                 if (expectedSource != null) {
                     val boundary = requireNotNull(beforeTimestamp)
-                    val currentSource = loadRuntimeChatMessagesUpTo(chatId, boundary)
-                    check(com.ai.assistance.operit.core.chat.SummaryReview.canCommit(
+                    // Verify the exact reviewed timestamp window, not a potentially
+                    // different "latest summary" window selected by a second query.
+                    val first = expectedSource.minOfOrNull { it.timestamp }
+                        ?: error(context.getString(R.string.conversation_summary_source_changed))
+                    val currentSource = hydrateMessages(
+                        chatId, chatContentDao.getMessagesForChatWindowAsc(chatId, first, boundary)
+                    )
+                    val mismatch = com.ai.assistance.operit.core.chat.SummaryReview.commitMismatchReason(
                         expectedSource, currentSource, boundary, afterTimestamp
-                    )) { context.getString(R.string.conversation_summary_source_changed) }
+                    )
+                    if (mismatch != null) {
+                        AppLogger.w(TAG,
+                            "Summary source verification rejected: chatId=$chatId, reason=$mismatch, " +
+                            "expected=${expectedSource.size}, actual=${currentSource.size}, " +
+                            "before=$boundary, after=$afterTimestamp"
+                        )
+                        error(context.getString(R.string.conversation_summary_source_changed))
+                    }
                 }
                 val beforeMessage =
                     when {
