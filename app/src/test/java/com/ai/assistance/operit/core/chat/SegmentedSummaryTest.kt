@@ -86,6 +86,19 @@ class SegmentedSummaryTest {
         assertEquals(6000L, SegmentedSummary.index(fresh.single())!!.to)
     }
 
+    @Test fun modelContinuationAfterTitleResolvesTheCorrectOpenEvent() {
+        val open = listOf(
+            "§ 悬着｜甲\n索引：chat_id=c from=1000 to=2000\n内容：甲还没完",
+            "§ 悬着｜乙\n索引：chat_id=c from=3000 to=4000\n内容：乙还没完"
+        )
+        val generated = "§ 起#0 止#2｜悬着｜乙的进展 续接=3000\n内容：按约完成一次检查"
+        val result = SegmentedSummary.segments(generated, "c", msgs.drop(4), open).single()
+        assertEquals(3000L, SegmentedSummary.index(result)!!.from)
+        assertEquals(6000L, SegmentedSummary.index(result)!!.to)
+        assertTrue(result.contains("乙的进展"))
+        assertFalse(result.contains("续接=3000"))
+    }
+
     @Test fun recallResultsAreNeverCompactedAsIfTheyWereTheCurrentSummary() {
         val original = SegmentedSummary.render(emptyList(), listOf("§ 已结束｜工具里的摘要\n内容：完整原文"))
         val turn = com.ai.assistance.operit.core.chat.hooks.PromptTurn(
