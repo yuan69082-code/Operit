@@ -23,6 +23,9 @@ internal object SegmentedSummary {
     private const val KEEP_FULL = 12
     private val fmt = DateTimeFormatter.ofPattern("MM-dd HH:mm")
     private val rangeHeader = Regex("""^§\s*起#(\d+)\s*止#(\d+)(?:\s+续接=(\d+))?\s*[｜|]\s*(.*)$""")
+    // Some models append the continuation index after the event title instead of
+    // between the message numbers and the separator.
+    private val trailingContinuation = Regex("""\s+续接=(\d+)\s*$""")
     private val indexLine = Regex("""^索引：chat_id=(\S+)\s+from=(\d+)\s+to=(\d+)""")
 
     data class Parsed(val closed: List<String>, val open: List<String>)
@@ -137,8 +140,11 @@ internal object SegmentedSummary {
             if (match != null) {
                 current?.let { blocks += it.toString().trim() }
                 val (a, b, continuation, rest) = match.destructured
+                val trailing = trailingContinuation.find(rest)
+                val continuationIndex = continuation.ifBlank { trailing?.groupValues?.get(1).orEmpty() }
+                val cleanTitle = if (trailing != null) rest.removeRange(trailing.range).trim() else rest
                 val previous = if (a == "0") {
-                    val selected = if (continuation.isNotBlank()) open.singleOrNull { index(it)?.from == continuation.toLong() }
+                    val selected = if (continuationIndex.isNotBlank()) open.singleOrNull { index(it)?.from == continuationIndex.toLong() }
                         else open.singleOrNull()
                     requireNotNull(selected?.let(::index)) { "续接必须指向一个明确的悬着事件" }
                 } else null
@@ -146,7 +152,7 @@ internal object SegmentedSummary {
                 val to = if (b == "0") requireNotNull(previous?.to) { "事件终点缺失" }
                     else requireNotNull(messages.getOrNull(b.toInt() - 1)?.timestamp) { "事件终点编号越界" }
                 require(to >= from) { "事件终点早于起点" }
-                current = StringBuilder().appendLine("§ $rest").appendLine("索引：chat_id=$chatId from=$from to=$to")
+                current = StringBuilder().appendLine("§ $cleanTitle").appendLine("索引：chat_id=$chatId from=$from to=$to")
             } else if (current != null && line.isNotBlank() && !line.startsWith("索引：") && !line.startsWith("我的感受")) {
                 current!!.appendLine(line)
             }
