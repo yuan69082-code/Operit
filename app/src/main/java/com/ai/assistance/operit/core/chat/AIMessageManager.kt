@@ -1267,7 +1267,7 @@ object AIMessageManager {
                 // Some OpenAI-compatible gateways return a successful stream containing a
                 // refusal marker after partially generating text. Never commit that fragment.
                 check(!finalSummary.contains("<claude-gateway-notice>", ignoreCase = true) &&
-                    !finalSummary.contains("content_refused", ignoreCase = true)) {
+                    !finalSummary.contains("Content refused by upstream safety classifier", ignoreCase = true)) {
                     "摘要上游拒绝了本次请求，结果不完整；原聊天已保留。"
                 }
 
