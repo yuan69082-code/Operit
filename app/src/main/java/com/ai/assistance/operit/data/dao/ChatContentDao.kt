@@ -107,12 +107,12 @@ abstract class ChatContentDao {
     @Transaction
     open suspend fun activityMessage(id: Long): MessageEntity? = queryActivityMessage(id)?.let { materializeMessage(it) }
 
-    @Query(MESSAGE_CONTENT_ROW_QUERY + " WHERE chatId = :chatId ORDER BY timestamp ASC")
+    @Query(MESSAGE_CONTENT_ROW_QUERY + " WHERE chatId = :chatId ORDER BY timestamp ASC, messageId ASC")
     protected abstract suspend fun queryMessagesForChat(chatId: String): List<MessageContentRow>
 
     @Query(
         MESSAGE_CONTENT_ROW_QUERY +
-            " WHERE chatId = :chatId AND timestamp >= :startTimestampInclusive ORDER BY timestamp ASC"
+            " WHERE chatId = :chatId AND timestamp >= :startTimestampInclusive ORDER BY timestamp ASC, messageId ASC"
     )
     protected abstract suspend fun queryMessagesForChatFromTimestampAsc(
         chatId: String,
@@ -122,7 +122,7 @@ abstract class ChatContentDao {
     @Query(
         MESSAGE_CONTENT_ROW_QUERY +
             " WHERE chatId = :chatId AND timestamp >= :startTimestampInclusive" +
-            " AND timestamp <= :endTimestampInclusive ORDER BY timestamp ASC"
+            " AND timestamp <= :endTimestampInclusive ORDER BY timestamp ASC, messageId ASC"
     )
     protected abstract suspend fun queryMessagesForChatWindowAsc(
         chatId: String,
@@ -179,7 +179,7 @@ abstract class ChatContentDao {
             " AND (:afterTimestampExclusive IS NULL OR timestamp > :afterTimestampExclusive)" +
             " AND (:beforeTimestampExclusive IS NULL OR timestamp < :beforeTimestampExclusive)" +
             " AND (:upToTimestampInclusive IS NULL OR timestamp <= :upToTimestampInclusive)" +
-            " ORDER BY timestamp ASC"
+            " ORDER BY timestamp ASC, messageId ASC"
     )
     protected abstract suspend fun queryMessagesForChatInRangeAsc(
         chatId: String,
