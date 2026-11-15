@@ -97,6 +97,19 @@ class SummaryReviewTest {
         assertFalse(SummaryReview.sourceUnchanged(reviewed, listOf(first, second.copy(content = "内容变了"), trailing)))
     }
 
+    @Test fun previousSummaryTimestampCollisionDoesNotFalseRejectOrHideNewMessages() {
+        val older = ChatMessage("user", "已经包含在上一份摘要中", timestamp = 100)
+        val marker = ChatMessage("summary", "上一份摘要", timestamp = 100)
+        val newUser = ChatMessage("user", "本轮消息", timestamp = 110)
+        val expected = SummaryContextSlice.activeHistory(listOf(older, marker, newUser))
+        assertEquals(listOf(marker, newUser), expected)
+        assertTrue(SummaryReview.canCommit(expected,
+            SummaryContextSlice.activeHistory(listOf(older, marker, newUser)), 110, 120))
+        val inserted = ChatMessage("ai", "压缩期间补写的消息", timestamp = 105)
+        assertFalse(SummaryReview.canCommit(expected,
+            SummaryContextSlice.activeHistory(listOf(older, marker, inserted, newUser)), 110, 120))
+    }
+
     @Test fun sourceCheckAllowsNewTurnsButRejectsChangesInsideReviewedHistory() {
         val source = listOf(
             ChatMessage("user", "明天见", timestamp = 10),
