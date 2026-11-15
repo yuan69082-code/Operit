@@ -1159,7 +1159,13 @@ object AIMessageManager {
                         }
                     conversationReviewEntries.add(speakerLabel to displayContent)
                 }
-                Pair(role, "#${index + 1}: $cleanedContent")
+                // A summary is data, not a replay of the assistant's tool calls. Sending
+                // historic assistant XML as an assistant turn makes Gemini interpret it as
+                // a new functionCall without the original thought_signature (HTTP 400).
+                // Keep the speaker and ordering in the text, but send it as inert user data.
+                val speaker = if (message.sender == "user") "user"
+                    else message.roleName?.takeIf { it.isNotBlank() } ?: "AI"
+                Pair("user", "#${index + 1} [$speaker]: $cleanedContent")
             }
         }
 
@@ -1258,7 +1264,13 @@ object AIMessageManager {
                         else R.string.conversation_summary_saving)
                 )
                 val finalSummary = reviewedSummary
-                
+                // Some OpenAI-compatible gateways return a successful stream containing a
+                // refusal marker after partially generating text. Never commit that fragment.
+                check(!finalSummary.contains("<claude-gateway-notice>", ignoreCase = true) &&
+                    !finalSummary.contains("content_refused", ignoreCase = true)) {
+                    "摘要上游拒绝了本次请求，结果不完整；原聊天已保留。"
+                }
+
                 ChatMessage(
                     sender = "summary",
                     content = finalSummary,
