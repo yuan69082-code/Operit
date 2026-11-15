@@ -896,9 +896,14 @@ class ChatHistoryManager private constructor(private val context: Context) {
                     // different "latest summary" window selected by a second query.
                     val first = expectedSource.minOfOrNull { it.timestamp }
                         ?: error(context.getString(R.string.conversation_summary_source_changed))
-                    val currentSource = hydrateMessages(
+                    val rowsInWindow = hydrateMessages(
                         chatId, chatContentDao.getMessagesForChatWindowAsc(chatId, first, boundary)
                     )
+                    // The last summary marker starts the active window. Rows with the
+                    // same timestamp but ordered before that marker were already
+                    // compressed, so the validator must use the same logical window
+                    // as summary planning. Newly added rows *after* it still fail.
+                    val currentSource = com.ai.assistance.operit.core.chat.SummaryContextSlice.activeHistory(rowsInWindow)
                     val mismatch = com.ai.assistance.operit.core.chat.SummaryReview.commitMismatchReason(
                         expectedSource, currentSource, boundary, afterTimestamp
                     )
