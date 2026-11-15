@@ -84,6 +84,19 @@ class SummaryReviewTest {
         assertTrue(result.await().exceptionOrNull()?.message.orEmpty().contains("审阅超时"))
     }
 
+    @Test fun equalTimestampRowsMayChangeQueryOrderWithoutChangingHistory() {
+        val first = ChatMessage("user", "同一毫秒 A", timestamp = 42)
+        val second = ChatMessage("ai", "同一毫秒 B", timestamp = 42, roleName = "角色")
+        val trailing = ChatMessage("ai", "第三条", timestamp = 48, roleName = "角色")
+        val reviewed = listOf(first, second, trailing)
+        val reloaded = listOf(second, first, trailing)
+        assertTrue(SummaryReview.sourceUnchanged(reviewed, reloaded))
+        assertTrue(SummaryReview.canCommit(reviewed, reloaded, 48, 49))
+        assertFalse(SummaryReview.canCommit(reviewed, reloaded, 48, 48))
+        assertFalse(SummaryReview.canCommit(reviewed, reloaded + ChatMessage("summary", "其他压缩", timestamp = 45), 48, 49))
+        assertFalse(SummaryReview.sourceUnchanged(reviewed, listOf(first, second.copy(content = "内容变了"), trailing)))
+    }
+
     @Test fun sourceCheckAllowsNewTurnsButRejectsChangesInsideReviewedHistory() {
         val source = listOf(
             ChatMessage("user", "明天见", timestamp = 10),
