@@ -79,6 +79,12 @@ internal class ParticipatoryDreams(private val context: Context) {
                         "你只生成梦境环境当前一小段场景或对刚才选择的后果，不扮演主体作决定，不预写后面剧情或结局。允许愉快、恐惧、复杂混合、荒诞、嵌套或日常；不按心理分数固定安排结局。不发消息、不调用现实工具。只输出当前场景；需要自然结束时可用<dream_end/>。"
                     else "你是${card.name}，正在梦中经历刚呈现的场景。带着已提供的自身状态，自由回应、感觉或选择，不要求积极结论。只写当下可留存的经历与选择，不输出隐藏推理，不生成未来场景或现实工具命令。这里的行为完全是梦中模拟；不是新的现实证据。可用<dream_end/>选择结束。"
                     val input = JSONObject().put("plan", plan).put("previous_fragment", last)
+                    // Keep the last scene/choice from this same participant as well as the
+                    // other side's reply. Otherwise "I go through the door" loses which
+                    // scene supplied the door when the environment produces consequences.
+                    // Two bounded step reads, never the complete dream history.
+                    if (cursor >= 2) input.put("previous_own_fragment",
+                        requireNotNull(store.activityRead(role, "dream_step", "${work.id}:${cursor - 2}")).getString("text"))
                     if (!environment || cursor == 0) {
                         val available = budget - SubjectMaterialBudget.estimate(input.toString()).toInt() - 128
                         require(available > 0) { "上一段梦境与安排已占满材料预算，保留片段等待续接" }

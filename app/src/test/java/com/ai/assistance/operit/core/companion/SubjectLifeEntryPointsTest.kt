@@ -7,6 +7,9 @@ import com.ai.assistance.operit.data.model.ChatHistory
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Dispatchers
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -25,6 +28,10 @@ class SubjectLifeEntryPointsTest {
     private lateinit var chat: String
     @Before fun setup() = runBlocking {
         context = RuntimeEnvironment.getApplication()
+        // Robolectric creates a new Application per method. Do not let a singleton
+        // inspect the previous Application's enabled-state preferences during migration.
+        CharacterCardManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
+        ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "生活测试", characterSetting = "初始参考"))
         InternalStateStore(context).configure(role, true)
         val c = ChatHistory(title = "私聊", messages = emptyList(), characterCardId = role)
@@ -40,7 +47,8 @@ class SubjectLifeEntryPointsTest {
             enabled = true, allowedBuiltinTools = listOf("companion_internal_state", "sleep"))))
         InternalStateStore(context).configure(other, true)
         cards.ensureIndependentSettings(other)
-        assertTrue("companion_life" in cards.getCharacterCard(other).toolAccessConfig.allowedBuiltinTools)
+        assertTrue(cards.getCharacterCard(other).toolAccessConfig.toString(),
+            "companion_life" in cards.getCharacterCard(other).toolAccessConfig.allowedBuiltinTools)
         assertTrue("sleep" in cards.getCharacterCard(other).toolAccessConfig.allowedBuiltinTools)
         cards.setToolSelected(other, "builtin", "companion_life", false)
         cards.ensureIndependentSettings(other)
@@ -78,6 +86,18 @@ class SubjectLifeEntryPointsTest {
         assertEquals(12L, CompanionStore(context).activityCount(role, "life_event", "pending"))
         assertEquals("resting", life.rest(role)!!.getJSONObject("content").getString("state"))
     }
+    @Test fun anExistingEngineWindowDoesNotStartASecondLocalLifeRunner() = runBlocking {
+        adopt(rest(JSONObject().put("steps", 2)))
+        val life = SubjectLife(context)
+        val end = life.rest(role)!!.getJSONObject("content").getLong("until")
+        com.ai.assistance.operit.core.engine.EngineWindow(context).bind(role, "existing-subject", false, emptySet())
+        assertNull(life.next(role, chat, end + 1))
+        assertFalse(life.defer(role, chat, "external-input", "user_message", "原入口继续处理"))
+        assertEquals(0L, CompanionStore(context).activityCount(role, "life_run", "technical"))
+        // Preserve the dormant arrangement; do not rewrite the existing subject state.
+        assertEquals("sleep", CategoryEvents.row(InternalStateStore(context).read(role), "rest", "current")!!
+            .getJSONObject("content").getString("mode"))
+    }
     @Test fun acceptedMessagesSurviveReopenAndClaimIsIdempotent() {
         val inbox = SubjectMessageInbox(context)
         val accepted = inbox.accept(role, chat, "input-one", "自己的原始消息", emptyList())
@@ -87,6 +107,20 @@ class SubjectLifeEntryPointsTest {
         SubjectLife(context).recover(role)
         assertEquals("unknown", inbox.read(role, "input-one").getString("status"))
         assertFalse(inbox.claim(role, "input-one"))
+    }
+    @Test fun concurrentDeliveryOfOneInputKeepsOneReceiptAndOneClaim() = runBlocking {
+        val receipts = (0 until 12).map {
+            async(Dispatchers.IO) { SubjectMessageInbox(context).accept(role, chat, "concurrent-input", "同一条输入", emptyList()) }
+        }.awaitAll()
+        assertEquals(1, receipts.map { it.getLong("timestamp") }.distinct().size)
+        val claims = (0 until 12).map {
+            async(Dispatchers.IO) { SubjectMessageInbox(context).claim(role, "concurrent-input") }
+        }.awaitAll()
+        assertEquals(1, claims.count { it })
+        assertEquals(1L, CompanionStore(context).activityCount(role, "message_inbox", "pending"))
+        SubjectLife(context).recover(role)
+        assertEquals("unknown", SubjectMessageInbox(context).read(role, "concurrent-input").getString("status"))
+        assertNull(SubjectMessageInbox(context).next(role))
     }
     @Test fun dreamAlternatesEnvironmentAndSubjectWithoutRealToolsAndReachesLaterRequest() = runBlocking {
         adopt(rest(JSONObject().put("steps", 2).put("tone", "复杂恐惧").put("form", "跳跃")))
@@ -102,6 +136,9 @@ class SubjectLifeEntryPointsTest {
             text
         })
         assertEquals(4, requests.size)
+        assertEquals("眼前是一道没见过的门，里面传来不确定的声音。", requests[2].second.getString("previous_own_fragment"))
+        assertEquals("我先走近看看，同时仍有些犹豫。", requests[2].second.getString("previous_fragment"))
+        assertEquals("我先走近看看，同时仍有些犹豫。", requests[3].second.getString("previous_own_fragment"))
         assertFalse(requests[0].second.has("subject_material"))
         assertTrue(requests[1].second.has("subject_material"))
         assertEquals("我先走近看看，同时仍有些犹豫。", requests[2].second.getString("previous_fragment"))

@@ -357,6 +357,7 @@ class MessageCoordinationDelegate(
             val target = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == targetChat }
             val targetRole = target?.characterCardId
             if (targetRole != null && target.characterGroupId.isNullOrBlank() &&
+                !com.ai.assistance.operit.core.engine.EngineWindow.associated(context, targetRole) &&
                 com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(targetRole)) {
                 val captured = messageTextOverride ?: messageProcessingDelegate.userMessage.value.text
                 val capturedAttachments = attachmentDelegate.attachments.value.toList()

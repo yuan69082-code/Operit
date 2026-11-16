@@ -239,7 +239,9 @@ class EnhancedReportIsolationTest {
                 getFullChatHistory = { history.loadChatMessages(it) },
                 getRuntimeChatHistory = { history.loadChatMessages(it) },
                 hasUserMessage = hasUserMessageOverride ?: { id -> history.loadChatMessages(id).any { it.sender == "user" } },
-                addMessageToChat = { id, message -> history.addMessage(id, message) },
+                // Match ChatHistoryDelegate's persisted upsert contract: the consumer
+                // sends later revisions of the same user/stream message, not new rows.
+                addMessageToChat = { id, message -> history.updateMessage(id, message) },
                 saveCurrentChat = {},
                 showErrorMessage = { errors.add(it) },
                 updateChatTitle = { _, _ -> fail("Existing conversations must not generate a title") },

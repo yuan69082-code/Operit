@@ -10,7 +10,8 @@ import java.util.concurrent.ConcurrentHashMap
 internal class SubjectLife(private val context: Context) {
     class Deferred : Exception("触发已可靠暂存，尚未执行主体判断")
     private val store = CompanionStore(context)
-    fun rest(role: String): JSONObject? = if (!InternalStateStore(context).enabled(role)) null else
+    fun rest(role: String): JSONObject? = if (!InternalStateStore(context).enabled(role) ||
+        com.ai.assistance.operit.core.engine.EngineWindow.associated(context, role)) null else
         CategoryEvents.row(InternalStateStore(context).read(role), "rest", "current")
 
     fun buffer(role: String, chat: String, id: String, source: String, text: String): JSONObject {
@@ -111,6 +112,9 @@ internal class SubjectLife(private val context: Context) {
         val input: JSONObject? = null)
 
     fun next(role: String, chat: String, now: Long): Work? {
+        // Preserve the existing external-engine window's ownership. Dormant local
+        // arrangements must not create a second model runner after that binding.
+        if (com.ai.assistance.operit.core.engine.EngineWindow.associated(context, role)) return null
         val r = rest(role)
         val c = r?.getJSONObject("content")
         if (c?.optString("state") == "resting") {

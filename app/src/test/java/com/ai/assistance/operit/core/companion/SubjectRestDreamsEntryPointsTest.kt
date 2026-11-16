@@ -213,7 +213,6 @@ class SubjectRestDreamsEntryPointsTest {
                     .put("evidence", JSONArray().put(frame.eventIds.first())))))
             }
             appraiseFoundation(0.6)
-            val foundationBefore = InternalStateStore(context).read(role).getJSONObject("foundation_state").toString()
             val original = item("dream", id).toString()
             SubjectLife(context).defer(role, chat, "restore-study", "study", "休息期间的一条批注")
             val input = SubjectMessageInbox(context).accept(role, chat, "restore-input", "重启后仍要保留的消息", emptyList())
@@ -230,6 +229,9 @@ class SubjectRestDreamsEntryPointsTest {
             assertEquals("Room must belong to this test application's storage", databasePath.canonicalPath, java.io.File(actualPath).canonicalPath)
             assertTrue("actual Room file must be present: $actualPath", databasePath.isFile)
             assertEquals("snapshot must include the actual Room directory", java.io.File(context.dataDir, "databases").canonicalFile, databasePath.parentFile!!.canonicalFile)
+            // Normal dream preparation can advance valid time rules. Compare restore
+            // against the exact export point, not an earlier pre-dream observation.
+            val foundationBefore = InternalStateStore(context).read(role).getJSONObject("foundation_state").toString()
             val zip = RawSnapshotBackupManager.exportToBackupDir(context)
             assertTrue(zip.length() > 0)
             val window = InternalStateStore(context).openEstablishedWindow(role)
