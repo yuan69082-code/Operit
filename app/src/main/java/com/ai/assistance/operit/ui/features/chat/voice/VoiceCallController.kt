@@ -505,8 +505,12 @@ class VoiceCallController(
                                 // Cancellation may arrive during synthesis or an STT network request.
                                 // Join cleanup before allowing the next turn to acquire the microphone.
                                 withContext(NonCancellable) {
-                                    recognizer?.cancelRecognition()
-                                    speaker.stop()
+                                    val cleanupErrors = VoiceCallCleanup.release({ recognizer?.cancelRecognition(); Unit }, { speaker.stop(); Unit })
+                                    cleanupErrors.forEach { AppLogger.e("VoiceCall", "Call turn resource release failed", it) }
+                                    if (cleanupErrors.isNotEmpty()) {
+                                        errorMessage = "通话资源释放失败，请重试或挂断；已保存内容保留。"
+                                        phase = Phase.ERROR
+                                    }
                                     // Keep analysis recordings: their paths are part of the persisted turn.
                                     if (!audioAnalysis) audioFile?.delete()
                                     if (visual !== latestVisual) visual?.file?.delete()
@@ -529,8 +533,8 @@ class VoiceCallController(
             } finally {
                 withContext(NonCancellable) {
                     try {
-                        speech?.cancelRecognition()
-                        voice?.stop()
+                        VoiceCallCleanup.release({ speech?.cancelRecognition(); Unit }, { voice?.stop(); Unit })
+                            .forEach { AppLogger.e("VoiceCall", "Call resource release failed", it) }
                     } finally {
                         continuousJob?.cancelAndJoin()
                         silenceJob?.cancelAndJoin()
@@ -542,11 +546,10 @@ class VoiceCallController(
                         heardTurnReady = false
                         speechTurnActive.set(false)
                         while (heardReady.tryReceive().isSuccess) { }
-                        speech?.shutdown()
-                        voice?.shutdown()
+                        VoiceCallCleanup.release({ speech?.shutdown(); Unit }, { voice?.shutdown(); Unit }, { disableCamera() })
+                            .forEach { AppLogger.e("VoiceCall", "Call device shutdown failed", it) }
                         speech = null
                         voice = null
-                        disableCamera()
                         voiceReference?.delete()
                         voiceReference = null
                         pendingTyped.clear()
@@ -554,11 +557,11 @@ class VoiceCallController(
                         while (typedReady.tryReceive().isSuccess) { /* No text survives a finished call. */ }
                         viewModel.setVoiceCallActive(false)
                         try {
-                            AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, false)
+                            VoiceCallCleanup.release({ AIForegroundService.setWakeListeningSuspendedForVoiceCall(context, false) })
+                                .forEach { AppLogger.e("VoiceCall", "Wake listener resume failed", it) }
                         } finally {
                             isRunning = false
-                            recordEndEvent()?.join()
-                            onStopped()
+                            try { recordEndEvent()?.join() } finally { onStopped() }
                         }
                     }
                 }
@@ -782,12 +785,14 @@ class VoiceCallController(
             result.await()
         } finally {
             manualTimer?.cancel()
-            withContext(NonCancellable) { recognizer.cancelRecognition() }
-            levels.cancel()
-            microphoneLevel = 0f
-            results.cancel()
-            errors.cancel()
-            states.cancel()
+            try { withContext(NonCancellable) { recognizer.cancelRecognition() } }
+            finally {
+                levels.cancel()
+                microphoneLevel = 0f
+                results.cancel()
+                errors.cancel()
+                states.cancel()
+            }
         }
     }
 

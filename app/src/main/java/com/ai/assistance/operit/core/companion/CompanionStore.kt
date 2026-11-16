@@ -200,7 +200,7 @@ class CompanionStore(context: Context) {
         return synchronized(lock(scope)) { history(scope).use { it.activityWrite(kind, id, parent, change) } }
     }
 
-    internal fun activityPage(role: String, kind: String, parent: String, offset: Int): List<JSONObject> {
+    internal fun activityPage(role: String, kind: String, parent: String?, offset: Int): List<JSONObject> {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val scope = SubjectStateBoundary.scope(role, "internal-state")
         return synchronized(lock(scope)) { history(scope).use { it.categoryPage(kind, offset, 9, parent) } }
@@ -210,6 +210,12 @@ class CompanionStore(context: Context) {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val scope = SubjectStateBoundary.scope(role, "internal-state")
         return synchronized(lock(scope)) { history(scope).use { it.categoryRow(kind, id) } }
+    }
+
+    internal fun activityQueuePage(role: String, kind: String, parents: List<String>, offset: Int = 0): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.activityQueuePage(kind, parents, offset) } }
     }
 
     internal fun activityCount(role: String, kind: String, parent: String): Long {

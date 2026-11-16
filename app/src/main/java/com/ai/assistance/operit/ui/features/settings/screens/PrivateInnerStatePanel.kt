@@ -52,6 +52,7 @@ internal fun InternalStatePanel(role: String) {
             "人格与自我" -> {
                 Text("已采用的内容作为持续依据。初始设置仍保留；新的理解先成为候选，后续实际读取后才可采用。")
                 InitialIdentityReference(role)
+                PrivateFold("对话回顾称呼") { SummaryAddressPanel(role) }
                 InnerFamilyPanel(role, listOf("personality", "self_knowledge", "value", "stance"))
             }
             "偏好" -> {
@@ -71,11 +72,12 @@ internal fun InternalStatePanel(role: String) {
             }
             "打算与行动" -> {
                 Text("想做、决定、实际执行和后来怎样理解分别保留。成功回执不等于愿望已满足。能力的构建、运行和调整可在操作详情中查看。")
-                InnerCollectionTabs(role, listOf("decision" to "打算与选择", "action" to "实际操作与能力", "feedback" to "结果后的理解"))
+                InnerCollectionTabs(role, listOf("decision" to "打算与选择", "direction" to "目的、目标与投入", "experience" to "经验与方法", "action" to "实际操作与能力", "feedback" to "结果后的理解"))
             }
             "休息" -> {
                 Text("休息由主体自己的选择承接。锁屏、断网和程序恢复不自动算作入睡或醒来。")
                 PrivateRows(role, "rest")
+                SubjectLifePanel(role)
                 Text("梦醒随记", style = MaterialTheme.typography.titleLarge)
                 Text("只呈现明确留给园园看的醒后记录；旧的私密梦境全文不会在这里自动公开。")
                 ActivityNotesPanel(role, wakingOnly = true)

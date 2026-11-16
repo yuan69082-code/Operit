@@ -39,7 +39,7 @@ object InternalStateReports {
         require(frame.id.isNotBlank() && frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         require(frame.revision >= 0 && frame.at >= 0 && now >= frame.at) { "状态报告时间早于本轮快照" }
         requireStateReport(frame.eventSequence >= 0 && frame.eventSequence <= data.optLong("sequence"), InternalStateReportFailure.SOURCE)
-        require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise", "inner", "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "foundation") }) { "状态报告包含未知字段" }
+        require(report.keys().asSequence().all { it in setOf("frame_id", "updates", "create", "revise", "inner", "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "foundation", "life") }) { "状态报告包含未知字段" }
         requireStateReport(string(report, "frame_id", 160) == frame.id, InternalStateReportFailure.FRAME)
         val reportDigest = digest(report)
         val frameIdentity = JSONObject().put("id", frame.id).put("role", frame.roleId).put("chat", frame.chatId)
@@ -235,6 +235,9 @@ object InternalStateReports {
         val episodesChanged = InternalStateReportDiagnostics.stage("episodes") {
             CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
         }
+        val lifeChanged = InternalStateReportDiagnostics.stage("life") {
+            LifeUnderstandings.apply(next, frame, report.optJSONArray("life") ?: JSONArray(), now)
+        }
         val unionsChanged = InternalStateReportDiagnostics.stage("unions") {
             InnerInteractions.apply(data, next, frame,
                 if (report.has("unions")) report.getJSONArray("unions") else JSONArray(), now)
@@ -245,7 +248,7 @@ object InternalStateReports {
         val restDreamChanged = InternalStateReportDiagnostics.stage("rest_dream") {
             SubjectRestDreams.apply(next, frame, report, now)
         }
-        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !survivalSynced && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged) revision else revision + 1
+        val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !survivalSynced && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged && !lifeChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)
         val receipt = JSONObject().put("frame_id", frame.id).put("revision", nextRevision)
             .put("updated", JSONArray(updates.map { it.getString("id") }))
@@ -256,6 +259,7 @@ object InternalStateReports {
             .put("unions_adopted", unionsChanged)
             .put("action_understanding_adopted", actionChanged)
             .put("rest_dream_adopted", restDreamChanged)
+            .put("life_adopted", lifeChanged)
         if (report.has("inner")) receipt.put("inner_operations", JSONArray((0 until report.getJSONArray("inner").length()).map {
             report.getJSONArray("inner").getJSONObject(it).let { action -> JSONObject().put("op", action.getString("op")).put("id", action.getString("id")) }
         }))

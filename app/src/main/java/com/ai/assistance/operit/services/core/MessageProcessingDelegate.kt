@@ -247,6 +247,10 @@ class MessageProcessingDelegate(
     private val summaryTurnGate = com.ai.assistance.operit.core.chat.SummaryTurnGate()
 
     suspend fun awaitSummaryForChat(chatId: String) = summaryTurnGate.awaitAvailable(chatId)
+    suspend fun awaitIdleForChat(chatId: String) {
+        runtimeFor(chatId).isLoading.first { !it }
+        awaitSummaryForChat(chatId)
+    }
 
     private fun claimTurn(chatId: String): Boolean = summaryTurnGate.startTurnIfAllowed(chatId) {
         val runtime = runtimeFor(chatId)
@@ -708,7 +712,7 @@ class MessageProcessingDelegate(
         userMessageDraftsByChatId[chatId] = value
     }
 
-    private fun clearUserMessageDraft(chatId: String) {
+    fun clearUserMessageDraft(chatId: String) {
         userMessageDraftsByChatId.remove(chatId)
         if (activeDraftChatId == chatId) {
             _userMessage.value = TextFieldValue("")
@@ -852,6 +856,13 @@ class MessageProcessingDelegate(
         val companionCompletion = CompanionTurnCompletion(
             turnOptions.onCompanionComplete, turnOptions.onCompanionFailure
         )
+        fun rejectAcceptedInput(failure: Exception) {
+            turnOptions.subjectInboxId?.let { id ->
+                try { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).finish(roleCardId, id, "failed") }
+                catch (storageFailure: Exception) { AppLogger.e(TAG, "Rejected input receipt could not be saved", storageFailure) }
+            }
+            companionCompletion.failure(failure)
+        }
         check(!com.ai.assistance.operit.core.engine.EngineWindow.associated(context, roleCardId)) {
             "此入口已关联引擎，不能调用软件模型代答"
         }
@@ -862,7 +873,7 @@ class MessageProcessingDelegate(
                 TAG,
                 "sendUserMessage忽略: 空消息且无附件, chatId=$chatId, autoContinuation=$isAutoContinuation"
             )
-            companionCompletion.failure(IllegalArgumentException("消息为空"))
+            rejectAcceptedInput(IllegalArgumentException("消息为空"))
             return
         }
         val humanInput = !isAutoContinuation && !isGroupOrchestrationTurn &&
@@ -874,11 +885,13 @@ class MessageProcessingDelegate(
                 access.submit(rawMessageText, access.enabled(roleCardId))
             } else rawMessageText
         } catch (failure: IllegalArgumentException) {
+            rejectAcceptedInput(failure)
             reportNonFatalError(failure.message.orEmpty())
             turnOptions.onUserMessageRejected?.invoke(failure.message.orEmpty())
             return
         }
         if (humanInput && submittedText.isBlank() && attachments.isEmpty()) {
+            rejectAcceptedInput(IllegalArgumentException("请填写正文回复"))
             reportNonFatalError("请填写正文回复")
             return
         }
@@ -893,6 +906,22 @@ class MessageProcessingDelegate(
             return
         }
         val turnId = chatRuntime.turnSequence.incrementAndGet()
+        turnOptions.subjectInboxId?.let { inboxId ->
+            val claimed = try { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).claim(roleCardId, inboxId) }
+            catch (failure: Exception) {
+                chatRuntime.isLoading.value = false
+                updateGlobalLoadingState()
+                AppLogger.e(TAG, "Input dispatch receipt unavailable; no model call started", failure)
+                companionCompletion.failure(failure)
+                reportNonFatalError("消息发送记录未能确认，原输入保留。请检查后重试。")
+                return
+            }
+            if (!claimed) {
+                chatRuntime.isLoading.value = false
+                updateGlobalLoadingState()
+                return
+            }
+        }
         chatRuntime.activeTurnId = turnId
 
         val originalMessageText = submittedText.trim()
@@ -940,6 +969,7 @@ class MessageProcessingDelegate(
             var calculateNextWindowSize: (suspend () -> Long?)? = null
             var cancellationToPropagate: kotlinx.coroutines.CancellationException? = null
             var ownedActivity: com.ai.assistance.operit.core.companion.ActivityNotes.Ref? = null
+            var toolWasRequested = false
             try {
                 // 检查这是否是聊天中的第一条用户消息（忽略AI的开场白）
                 val isFirstMessage = !hasUserMessage(chatId)
@@ -1050,7 +1080,7 @@ class MessageProcessingDelegate(
                 userMessage = ChatMessage(
                     sender = "user",
                     content = finalMessageContent,
-                    timestamp = turnOptions.voiceMessageTimestamp ?: com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(),
+                    timestamp = turnOptions.subjectInputTimestamp ?: turnOptions.voiceMessageTimestamp ?: com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(),
                     roleName = context.getString(R.string.message_role_user), // 用户消息的角色名固定为"用户"
                     displayMode =
                         if (effectiveHideUserMessage) {
@@ -1097,6 +1127,7 @@ class MessageProcessingDelegate(
                     val addUserMessageStartTime = messageTimingNow()
                     addMessageToChat(chatId, userMessage)
                     userMessageAdded = true
+                    turnOptions.subjectInboxId?.let { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).finish(roleCardId, it, "saved") }
                     turnOptions.onUserMessagePersisted?.invoke()
                     if (!turnOptions.voiceCallEnded && !turnOptions.proactiveWake && !isAutoContinuation &&
                         !turnOptions.voiceCallEvent && !turnOptions.voiceCallDecision && !turnOptions.voiceCallSilence &&
@@ -1373,6 +1404,7 @@ class MessageProcessingDelegate(
                     groupParticipantNamesText = groupParticipantNamesText,
                     proxySenderName = proxySenderNameOverride,
                     onToolInvocation = {
+                        toolWasRequested = true
                         incrementCurrentTurnToolInvocationCount(chatId)
                     },
                     notifyReplyOverride = if (isGroupOrchestrationTurn) false else turnOptions.notifyReply,
@@ -1872,6 +1904,18 @@ class MessageProcessingDelegate(
                                     if (cancellationToPropagate != null) "cancelled" else if (shouldFinalizeInterruptedMessage) "failed" else "finished")
                             } catch (failure: Exception) { AppLogger.e(TAG, "活动结束状态未保存；不重跑已完成消息", failure) }
                             finally { com.ai.assistance.operit.core.companion.ActivityNotes.release(ref) }
+                        }
+                    }
+                    turnOptions.subjectInboxId?.let { id ->
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            try { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).finish(roleCardId, id,
+                                if (cancellationToPropagate != null) "unknown"
+                                else if (shouldFinalizeInterruptedMessage || finalInputStateAfterSend is EnhancedInputProcessingState.Error) {
+                                    // A failed final answer does not establish that earlier tools or
+                                    // saved expressions had no effect. Never expose blind whole-turn retry.
+                                    if (toolWasRequested || aiMessage.content.isNotBlank()) "unknown" else "failed"
+                                } else "completed") }
+                            catch (failure: Exception) { AppLogger.e(TAG, "Input receipt finalization failed; do not replay", failure) }
                         }
                     }
                     logMessageTiming(

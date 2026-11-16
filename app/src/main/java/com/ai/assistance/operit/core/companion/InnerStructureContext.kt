@@ -38,7 +38,8 @@ internal object InnerStructureContext {
                 hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
                     if (group) emptyList() else SubjectMaterials.read(context, role, input) +
                         ActionUnderstanding.materials(store.read(role)) + SubjectRestDreams.materials(store.read(role)) +
-                        ActivityNotes.materials(context, role))
+                        ActivityNotes.materials(context, role) + LifeUnderstandings.materials(store.read(role)) +
+                        SubjectLife(context).materials(role) + ParticipatoryDreams.materials(context, role))
         }
 
     suspend fun submit(context: Context, frame: InternalStateFrame, report: JSONObject): JSONObject =

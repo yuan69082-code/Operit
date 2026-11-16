@@ -349,8 +349,52 @@ class MessageCoordinationDelegate(
         turnOptions: ChatTurnOptions = ChatTurnOptions(),
         preferActiveRoleCard: Boolean = false,
     ) {
+        // Capture before waiting for a background turn: the composer and selected window can
+        // change while cancellation completes. Durable receipt is independent of model availability.
+        val targetChat = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
+        if (turnOptions.subjectInboxId == null && targetChat != null && !turnOptions.proactiveWake &&
+            !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.hideUserMessage && proxySenderNameOverride == null) {
+            val target = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == targetChat }
+            val targetRole = target?.characterCardId
+            if (targetRole != null && target.characterGroupId.isNullOrBlank() &&
+                !com.ai.assistance.operit.core.engine.EngineWindow.associated(context, targetRole) &&
+                com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(targetRole)) {
+                val captured = messageTextOverride ?: messageProcessingDelegate.userMessage.value.text
+                val capturedAttachments = attachmentDelegate.attachments.value.toList()
+                val capturedReply = uiBridge.getReplyToMessage()?.copy()
+                if (captured.isBlank() && capturedAttachments.isEmpty()) return
+                val inputId = java.util.UUID.randomUUID().toString()
+                coroutineScope.launch {
+                    try {
+                        val inbox = com.ai.assistance.operit.core.companion.SubjectMessageInbox(context)
+                        val row = withContext(Dispatchers.IO) { inbox.accept(targetRole, targetChat, inputId, captured, capturedAttachments, capturedReply) }
+                        val accepted = turnOptions.copy(subjectInboxId = inputId, subjectDispatch = true, subjectInputTimestamp = row.getLong("timestamp"),
+                            acceptedAttachments = capturedAttachments, acceptedReplyTo = capturedReply)
+                        if (messageTextOverride == null && messageProcessingDelegate.userMessage.value.text == captured) {
+                            messageProcessingDelegate.clearUserMessageDraft(targetChat)
+                            attachmentDelegate.clearAttachments()
+                            uiBridge.clearReplyToMessage()
+                        }
+                        if (withContext(Dispatchers.IO) { com.ai.assistance.operit.core.companion.SubjectLife(context)
+                                .defer(targetRole, targetChat, "input:$inputId", "user_message", captured) }) {
+                            uiStateDelegate.showToast("消息已保存，等待按休息安排处理。可在首页查看。")
+                            return@launch
+                        }
+                        com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()?.join()
+                        messageProcessingDelegate.awaitIdleForChat(targetChat)
+                        sendUserMessage(promptFunctionType, targetRole, targetChat, captured, proxySenderNameOverride,
+                            chatModelConfigIdOverride, chatModelIndexOverride, accepted, preferActiveRoleCard)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        AppLogger.e(TAG, "Accepted input dispatch failed", failure)
+                        uiStateDelegate.showErrorMessage("消息接收或发送失败，已保存的输入可在首页重试。${failure.javaClass.simpleName}")
+                    }
+                }
+                return
+            }
+        }
         // 仅在没有指定 chatId 的情况下，才需要确保有当前对话
-        val wakeCancellation = if (!turnOptions.proactiveWake)
+        val wakeCancellation = if (!turnOptions.proactiveWake && !turnOptions.subjectDispatch)
             com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction() else null
         if (wakeCancellation != null) {
             // Cancellation is asynchronous. Wait for our owned background turn to release the
@@ -579,7 +623,7 @@ class MessageCoordinationDelegate(
         val isBackgroundSend =
             !chatIdOverride.isNullOrBlank() && chatIdOverride != chatHistoryDelegate.currentChatId.value
         // 自动续聊由总结消息中的续接指令驱动，不能消费用户尚未提交的编辑器状态。
-        val shouldReadComposerState = turnOptions.voiceMessageTimestamp == null && !isGroupOrchestrationTurn && !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
+        val shouldReadComposerState = turnOptions.subjectInboxId == null && turnOptions.voiceMessageTimestamp == null && !isGroupOrchestrationTurn && !isBackgroundSend && !isAutoContinuation && !turnOptions.voiceCall && !turnOptions.voiceCallEnded && !turnOptions.proactiveWake
         val effectiveMessageTextOverride = if (isAutoContinuation) "" else messageTextOverride
         // 获取当前聊天ID和工作区路径
         val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
@@ -626,7 +670,7 @@ class MessageCoordinationDelegate(
 
         // 获取当前附件列表
         val currentAttachments =
-            if (shouldReadComposerState) attachmentDelegate.attachments.value else emptyList()
+            turnOptions.acceptedAttachments ?: if (shouldReadComposerState) attachmentDelegate.attachments.value else emptyList()
         // Every request, including background wakes, is scoped to the persisted owner.
         val roleCardId = try { runBlocking {
             resolveRoleCardId(
@@ -647,7 +691,7 @@ class MessageCoordinationDelegate(
             messageProcessingDelegate.sendEngineMessage(
                 chatId, roleCardId, effectiveMessageTextOverride, currentAttachments,
                 isGroupOrchestrationTurn, suppressUserMessageInHistory, turnOptions,
-                if (shouldReadComposerState) uiBridge.getReplyToMessage() else null
+                turnOptions.acceptedReplyTo ?: if (shouldReadComposerState) uiBridge.getReplyToMessage() else null
             )
             return
         }
@@ -795,7 +839,7 @@ class MessageCoordinationDelegate(
             enableMemoryAutoUpdate = shouldEnableMemoryAutoUpdate,
             maxTokens = maxTokensForSend,
             tokenUsageThreshold = tokenUsageThresholdForSend,
-            replyToMessage = if (shouldReadComposerState) uiBridge.getReplyToMessage() else null,
+            replyToMessage = turnOptions.acceptedReplyTo ?: if (shouldReadComposerState) uiBridge.getReplyToMessage() else null,
             isAutoContinuation = isAutoContinuation,
             enableSummary = !forceDisableSummary && (!isBackgroundSend || turnOptions.voiceCall) && chatContextSettings.enableSummary,
             chatModelConfigIdOverride = resolvedChatModelConfigIdOverride,

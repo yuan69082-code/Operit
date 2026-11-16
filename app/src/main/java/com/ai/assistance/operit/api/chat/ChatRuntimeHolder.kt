@@ -255,6 +255,10 @@ class ChatRuntimeHolder private constructor(context: Context) {
         @Volatile
         private var instance: ChatRuntimeHolder? = null
 
+        /** Status observation must not instantiate a chat service or start work. */
+        internal fun activeChatsIfCreated(): Set<String> = instance?.cores?.values
+            ?.flatMap { it.activeStreamingChatIds.value }?.toSet().orEmpty()
+
         fun getInstance(context: Context): ChatRuntimeHolder {
             return instance ?: synchronized(this) {
                 instance ?: ChatRuntimeHolder(context.applicationContext).also {

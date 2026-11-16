@@ -129,7 +129,7 @@ object ExplorationPolicy {
         data.has("running") -> "running"
         !data.optBoolean("paused", true) && data.has("at") -> "scheduled"
         data.optBoolean("self_paused") -> "paused"
-        data.optString("last_outcome") in setOf("failed", "interrupted") -> "interrupted"
+        data.optString("last_outcome") in setOf("failed", "interrupted", "deferred") -> "interrupted"
         else -> "not_scheduled"
     }
 

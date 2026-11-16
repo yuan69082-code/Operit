@@ -53,7 +53,7 @@ class SubjectActionEntryPointsTest {
         // Fault tests replace only the already-authorized local sleep/read_file executor.
         registerAllTools(handler, context)
         handler.getToolPermissionSystem().saveMasterSwitch(PermissionLevel.ALLOW)
-        for (name in listOf("sleep", "read_file", "companion_software", "companion_internal_state")) {
+        for (name in listOf("sleep", "read_file", "companion_software", "companion_internal_state", "companion_life")) {
             CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", name, true)
             handler.getToolPermissionSystem().saveToolPermission(name, PermissionLevel.ALLOW)
         }
@@ -165,6 +165,61 @@ class SubjectActionEntryPointsTest {
             mapOf("action" to "get", "section" to "decision", "id" to "own-direction"))), 1).results.single()
         assertTrue(readDecision.error, readDecision.success)
         assertEquals("considering", JSONObject(readDecision.result.toString()).getJSONObject("item").getJSONObject("content").getString("status"))
+    }
+
+    @Test fun experienceFromRealReceiptSupportsNextToolAndRevisedDirection(): Unit = runBlocking {
+        InternalStateStore(context).materialBudget(role, chat, 16384)
+        val first = sections()
+        val receipt = execute(first.internalStateFrame!!, listOf(invocation("sleep", mapOf("duration_ms" to "0")))).results.single()
+        assertTrue(receipt.error, receipt.success)
+        val afterTool = delivered(first, listOf(receipt))
+        val source = afterTool.materialSources.entries.first { JSONObject(it.value).optString("type") == "actual_operation" }.key
+        fun life(kind: String, id: String, version: Int, evidence: String, text: String) = JSONObject()
+            .put("kind", kind).put("id", id).put("expected_version", version).put("text", text)
+            .put("scope", "自己的这次整理尝试").put("uncertainty", "本用例只验证接线，不预言主体会作何选择")
+            .put("status", "considering").put("evidence", JSONArray().put(evidence))
+        submit(afterTool, JSONObject().put("life", JSONArray()
+            .put(life("experience", "bounded-step", 0, source, "操作实际返回了；只说明这一步完成，不能证明整个方向满足。"))
+            .put(life("direction", "own-work", 0, source, "保留这个方向，再看看不同做法。"))))
+        val next = sections(second)
+        val frame = next.internalStateFrame!!
+        val source2 = frame.materialSources.entries.first { JSONObject(it.value).optString("type") == "subject_experience" }.key
+        val declaration = JSONObject().put("decision", "在已知结果基础上选择一个有界操作")
+            .put("evidence", JSONArray().put(source2)).put("intention_refs", JSONArray()
+                .put(JSONObject().put("kind", "experience").put("id", "bounded-step").put("version", 1))
+                .put(JSONObject().put("kind", "direction").put("id", "own-work").put("version", 1)))
+        val result = execute(frame, listOf(invocation("sleep", mapOf("duration_ms" to "0",
+            SubjectActions.DECLARATION to declaration.toString())))).results.single()
+        assertTrue(result.error, result.success)
+        val actual = CompanionStore(context).actionRead(role, result.subjectActionId!!)!!
+        assertEquals(declaration.toString(), actual.getJSONObject("declaration").toString())
+        val continuation = delivered(next, listOf(result))
+        val receiptSource = continuation.materialSources.entries.first {
+            JSONObject(it.value).optJSONObject("locator")?.optString("action_id") == result.subjectActionId
+        }.key
+        submit(continuation, JSONObject().put("life", JSONArray().put(life("direction", "own-work", 1, receiptSource,
+            "这一段先暂停；原来的目的仍保留，之后是否继续需要再判断。").put("status", "paused"))))
+        val later = sections()
+        assertTrue(later.state.contains("原来的目的仍保留"))
+        assertEquals(2, InternalStateStore(context).inspectCategory(role, chat, "direction", "own-work", 0)
+            .getJSONObject("item").getInt("version"))
+        assertFalse(CompanionStore(context).read("schedule:$chat").has("at"))
+    }
+
+    @Test fun lifeEventAcknowledgementRequiresItsActualDeliveredMaterial(): Unit = runBlocking {
+        val prior = sections()
+        SubjectLife(context).buffer(role, chat, "private-event", "study", "这条批注仍需查看")
+        val ack = invocation("companion_life", mapOf("action" to "ack", "details" to "{\"ids\":[\"private-event\"]}"))
+        val rejected = execute(prior.internalStateFrame!!, listOf(ack)).results.single()
+        assertFalse(rejected.success)
+        assertEquals("pending", CompanionStore(context).activityRead(role, "life_event", "private-event")!!.getString("status"))
+        val read = execute(prior.internalStateFrame!!, listOf(invocation("companion_life", mapOf("action" to "events", "id" to "private-event"))), 1).results.single()
+        assertTrue(read.error, read.success)
+        assertEquals("private-event", JSONObject(read.result.toString()).getJSONObject("item").getString("id"))
+        val provided = delivered(prior, listOf(read))
+        val accepted = execute(provided, listOf(ack), 2).results.single()
+        assertTrue(accepted.error, accepted.success)
+        assertEquals("handled", CompanionStore(context).activityRead(role, "life_event", "private-event")!!.getString("status"))
     }
 
     @Test fun permissionDenialIsPersistedWithoutExecution(): Unit = runBlocking {

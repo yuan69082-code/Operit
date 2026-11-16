@@ -1,6 +1,11 @@
 package com.ai.assistance.operit.data.model
 
 data class ChatTurnOptions(
+    val subjectInboxId: String? = null,
+    val subjectDispatch: Boolean = false,
+    val subjectInputTimestamp: Long? = null,
+    val acceptedAttachments: List<AttachmentInfo>? = null,
+    val acceptedReplyTo: ChatMessage? = null,
     val persistTurn: Boolean = true,
     val voiceMessageTimestamp: Long? = null,
     val onUserMessagePersisted: (() -> Unit)? = null,

@@ -43,6 +43,7 @@ internal fun CompanionActivityPanel(store: CompanionStore, role: String) {
         "running" -> "正在进行本次唤醒判断"
         "scheduled" -> "下次唤醒：" + DateFormat.getDateTimeInstance().format(Date(at))
         "paused" -> "后续主动联系已暂停"
+        "deferred" -> "休息期间暂缓了原预约；时间和目的保留，醒后重新安排"
         "interrupted" -> if (canResume) "上次唤醒中断；原预约保留，等待恢复" else "上次唤醒未完成，暂无下一次安排"
         else -> "本轮没有安排下一次唤醒"
     })

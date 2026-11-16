@@ -19,7 +19,7 @@ internal object InnerInteractions {
 
     private fun member(data: JSONObject, kind: String, id: String, chat: String, at: Long): JSONObject = when (kind) {
         "inner" -> requireNotNull(InnerStructure.record(data, id))
-        "episode" -> requireNotNull(CategoryEvents.row(data, kind, id))
+        "episode", "experience", "direction" -> requireNotNull(CategoryEvents.row(data, kind, id))
         "state" -> stateMember(data, id, chat, at)
         "foundation" -> InnerFoundations.member(data, id, at)
         else -> throw IllegalArgumentException("联合成员类型不受支持")
@@ -67,7 +67,11 @@ internal object InnerInteractions {
                         }) { "停用成员只可随已有联合明确结束，不能形成新作用" }
                 }
                 if (kind == "state" && prior.optString("instance_scope") != "global") local = true
-                require(frame.interactionMembers["$kind:$target"] == prior.getInt("version")) { "成员未在本轮实际材料中提供，或版本已变化" }
+                val providedLife = kind in LifeUnderstandings.kinds && frame.materialSources.values.any {
+                    JSONObject(it).optJSONObject("locator")?.let { locator -> locator.optString("kind") == kind &&
+                        locator.optString("id") == target && locator.optInt("version") == prior.getInt("version") } == true
+                }
+                require(providedLife || frame.interactionMembers["$kind:$target"] == prior.getInt("version")) { "成员未在本轮实际材料中提供，或版本已变化" }
                 val version = ref.get("version")
                 require(version is Number && version.toDouble() == prior.getInt("version").toDouble())
                 val current = member(after, kind, target, frame.chatId, now)
@@ -127,7 +131,7 @@ internal object InnerInteractions {
                 val id = ref.getString("id")
                 val version = when (kind) {
                     "inner" -> InnerStructure.record(data, id)?.optInt("version")
-                    "episode" -> CategoryEvents.row(data, kind, id)?.optInt("version")
+                    "episode", "experience", "direction" -> CategoryEvents.row(data, kind, id)?.optInt("version")
                     "state" -> InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id && it.optBoolean("active") }?.optInt("version")
                     "foundation" -> InnerFoundations.find(id)?.let { InnerFoundations.member(data, id, at).getInt("version") }
                     else -> null
@@ -151,6 +155,7 @@ internal object InnerInteractions {
     }
 
     val instructions = """
+        experience/direction也可作为已读联合成员（kind同名），通过实际提供材料的locator版本绑定。它们是经验理解和长期方向，不能通过time_rule自动改写；变化仍走life报告。新建记录须先在后续正常请求读到，才能作为联合成员。
         [内在联合]
         预算未选中的成员可用 companion_internal_state action=get section=inner|state|episode id=成员ID 按需读取；完整原生返回在同轮登记版本。截断结果不登记，请使用按ID读取。联合仅在自己的私聊处理，窗口局部成员不能在另一窗口改写。
         同一报告可带 unions:[{id,expected_version,members:[{kind:"inner|episode|foundation|state",id,version}],objects:[],evidence:["本轮来源ID"],interpretation:"共同理解或冲突",decision:"倾向或暂未形成决定",status:"active|ended",effects:[{from:"inner:ID",to:"episode:ID",meaning:"作用解释"}]}]。不设联合提交总条数门槛，仍遵守本次报告大小和实际材料边界。成员须在本轮实际选入材料。foundation 成员表示已安装的基础类别及当前版本；state继续承接原有效规则及窗口局部状态。已映射的state与foundation是同一权威，不能当两个成员重复计入；确认停用的state仅供历史联合辨认或明确结束。inner/episodes仍走原采用规则。companion_internal_state get section:union 可按id或offset查询，category_versions用union:ID查询历史。

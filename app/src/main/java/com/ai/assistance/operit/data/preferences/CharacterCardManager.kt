@@ -583,7 +583,21 @@ class CharacterCardManager private constructor(private val context: Context) {
     private val independentSettingsMutex = Mutex()
 
     suspend fun ensureIndependentSettings(id: String) = independentSettingsMutex.withLock {
-        val card = getAllCharacterCards().firstOrNull { it.id == id } ?: error("助手不存在")
+        var card = getAllCharacterCards().firstOrNull { it.id == id } ?: error("助手不存在")
+        val lifeTools = booleanPreferencesKey("character_card_${id}_life_tools_v1")
+        if (com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(id) && dataStore.data.first()[lifeTools] != true) {
+            dataStore.edit { preferences ->
+                val access = parseToolAccessConfig(preferences[toolAccessConfigKey(id)])
+                // Extend the already-enabled internal-state capability once. Device/tool
+                // permission checks still apply; a later explicit deselection stays respected.
+                if (access.enabled && "companion_internal_state" in access.allowedBuiltinTools) {
+                    writeToolAccessConfig(preferences, id, access.copy(
+                        allowedBuiltinTools = (access.allowedBuiltinTools + "companion_life").distinct()))
+                }
+                preferences[lifeTools] = true
+            }
+            card = getCharacterCard(id)
+        }
         val migrated = booleanPreferencesKey("character_card_${id}_independent_v2")
         if (dataStore.data.first()[migrated] == true) return@withLock
         if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FOLLOW_GLOBAL ||

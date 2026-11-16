@@ -107,4 +107,36 @@ class PrivateInnerStateNativeTest {
         output.outputStream().use { org.junit.Assert.assertTrue(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         org.junit.Assert.assertTrue(output.length() > 1000)
     }
+
+    @Test(timeout = 120_000) fun chosenSleepIsReadByTheHomeStatusViewWithoutModelCalls() {
+        val context = RuntimeEnvironment.getApplication()
+        val role = runBlocking { CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "睡眠页面测试")) }
+        val chat = ChatHistory(title = "睡眠原生页面", messages = emptyList(), characterCardId = role)
+        runBlocking { ChatHistoryManager.getInstance(context).saveChatHistory(chat) }
+        AssistantWindowRouter.selected(context, chat)
+        val store = InternalStateStore(context)
+        runBlocking {
+            store.configure(role, true)
+            val request = com.ai.assistance.operit.core.companion.InnerStructureContext.prepare(context, role, chat.id, true, input = "准备休息")
+            val frame = request.internalStateFrame!!
+            val report = org.json.JSONObject().put("frame_id", frame.id).put("updates", org.json.JSONArray()).put("create", org.json.JSONArray())
+                .put("rest", org.json.JSONObject().put("expected_version", 0).put("state", "resting").put("mode", "sleep")
+                    .put("until", System.currentTimeMillis() + 3_600_000).put("meaning", "休息之后接着读书").put("evidence", org.json.JSONArray()))
+            val parser = com.ai.assistance.operit.core.companion.InternalStateReportStream()
+            parser.append("<operit_state_report>$report</operit_state_report>")
+            parser.finish()
+            com.ai.assistance.operit.core.companion.InnerStructureContext.submit(context, frame, parser.report!!)
+        }
+        val revision = store.read(role).getLong("semantic_revision")
+        compose.setContent {
+            MaterialTheme { Surface(Modifier.fillMaxSize()) {
+                Column(Modifier.padding(16.dp)) { SubjectLifePanel(role) }
+            } }
+        }
+        compose.waitUntil(30_000) { compose.onAllNodesWithText("睡眠中").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("查看安排与待发送消息").performClick()
+        compose.onNodeWithText("休息之后接着读书").assertIsDisplayed()
+        screenshot("native-life-sleep-arrangement")
+        org.junit.Assert.assertEquals(revision, store.read(role).getLong("semantic_revision"))
+    }
 }

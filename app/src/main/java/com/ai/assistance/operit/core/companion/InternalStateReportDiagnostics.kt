@@ -16,9 +16,9 @@ internal class InternalStateReportIssue(
 
 internal object InternalStateReportDiagnostics {
     private val sections = setOf("frame_id", "updates", "create", "revise", "foundation", "inner",
-        "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding")
+        "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "life")
     private val arrays = setOf("updates", "create", "revise", "foundation", "inner", "episodes", "unions", "decisions",
-        "action_feedback", "dream_understanding")
+        "action_feedback", "dream_understanding", "life")
     private val objects = setOf("rest", "dream")
 
     /** Validate only the shared structural protocol. Domain-specific rules remain authoritative. */
