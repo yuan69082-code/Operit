@@ -3,6 +3,9 @@ package com.ai.assistance.operit.ui.features.settings.screens
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,9 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -88,7 +89,19 @@ class PrivateInnerStateNativeTest {
     }
 
     private fun screenshot(name: String) {
-        val image = compose.onRoot().captureToImage().asAndroidBitmap()
+        // This Compose version waits for a hardware frame-commit callback which Robolectric
+        // does not produce. PixelCopy's native-graphics shadow captures the actual View tree
+        // synchronously instead (AndroidX fix bcef06da), without changing production Compose.
+        val image = compose.runOnIdle {
+            val window = compose.activity.window
+            val view = window.decorView
+            org.junit.Assert.assertTrue(view.width > 0 && view.height > 0)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            var result = -1
+            PixelCopy.request(window, bitmap, { result = it }, Handler(Looper.getMainLooper()))
+            org.junit.Assert.assertEquals(PixelCopy.SUCCESS, result)
+            bitmap
+        }
         val output = File("build/reports/native-private-state/$name.png")
         output.parentFile.mkdirs()
         output.outputStream().use { org.junit.Assert.assertTrue(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }

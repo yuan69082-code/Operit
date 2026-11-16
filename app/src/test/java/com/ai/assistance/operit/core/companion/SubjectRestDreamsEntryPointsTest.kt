@@ -256,7 +256,16 @@ class SubjectRestDreamsEntryPointsTest {
             assertEquals(1, foundationHistory.getJSONArray("items").length())
             assertEquals(original, item("dream", id).toString())
             assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
-            assertTrue(requireNotNull(request(second).internalStateFrame).materialSources.values.any { it.contains("海上的书房") })
+            // The extra foundation appraisals are real competing material in the same 2048
+            // token budget. Recovery must not force every saved item into the first request.
+            // Verify the normal next-turn tool/continuation path really delivers this exact
+            // restored dream, not merely that an archive inspection can find its database row.
+            val resumed = readMaterial(second, "dream", id)
+            assertTrue(resumed.materialSources.values.any {
+                val source = JSONObject(it)
+                source.optString("type") == "dream_not_reality" &&
+                    source.optJSONObject("locator")?.optString("id") == id && it.contains("海上的书房")
+            })
         } finally { Dispatchers.resetMain() }
     }
 
