@@ -47,7 +47,8 @@ internal object SubjectMaterialBudget {
             (0 until minOf(ids.length(), 2)).map { ids.getString(it) }.distinct()
         }.orEmpty()
         inner.remove("_relevance_first")
-        // Short originals and long fragments retain the retrieval order across both lanes.
+        // Preserve the established rotation order. Installing vocabulary must not shift
+        // which real adopted content, activity or event the next ordinary request receives.
         lane(inner, "identity", "inner_structure.identity")
         lane(inner, "selected", "inner_structure.selected")
         lane(result.getJSONObject("category_events"), "episodes", "category_events.episodes")
@@ -58,8 +59,13 @@ internal object SubjectMaterialBudget {
         for (key in listOf("states", "important_changes", "experiences", "thoughts", "candidates", "state_catalog"))
             lane(result, key, key)
         for (key in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
+        result.optJSONObject("foundation")?.let { foundation ->
+            lane(foundation, "drive_values", "foundation.drive_values")
+            lane(foundation, "available", "foundation.available")
+            lane(foundation, "legacy_pending", "foundation.legacy_pending")
+        }
         result.remove("selection")
-        inner.put("selection", "Relevant adopted records/fragments get first budget opportunities; other material rotates. Omitted records remain authoritative; retrieve by ID.")
+        inner.put("selection", "Relevant records first; other material rotates. Omission preserves authority; retrieve by ID.")
         val omitted = JSONObject()
         val budget = JSONObject().put("limit_tokens", requested).put("estimated_tokens", requested)
             .put("method", "host_estimate_utf8_non_han_plus_25_percent")
@@ -67,12 +73,18 @@ internal object SubjectMaterialBudget {
             .put("omitted_counts", omitted).put("omission_is_not_deletion", true)
             .put("retrieve", "companion_internal_state get section=inner/state/episode/focus/union/source id or offset; material locator tools")
         result.put("material_budget", budget)
-        lanes.forEach { omitted.put(it.path, it.rows.size) }
+        fun count(lane: Lane) {
+            val missing = lane.rows.size - lane.target.length()
+            // Zero-count entries are metadata, not subject material. Avoid spending the
+            // same budget on a long empty directory while omitting a real saved episode.
+            if (missing == 0) omitted.remove(lane.path) else omitted.put(lane.path, missing)
+        }
+        lanes.forEach(::count)
         // This envelope is small and bounded, regardless of the history volume.
         require(estimate(result.toString()) + ENVELOPE_RESERVE <= requested) { "主体材料预算不足以容纳来源与版本信息" }
         fun include(lane: Lane, row: Any) {
             lane.target.put(row)
-            omitted.put(lane.path, lane.rows.size - lane.target.length())
+            count(lane)
             if (estimate(result.toString()) + ENVELOPE_RESERVE > requested) {
                 // A fragment is an explicit range of immutable text, not a shortened record.
                 // Adapt its range to the shared remaining budget, including provenance metadata.
@@ -94,12 +106,23 @@ internal object SubjectMaterialBudget {
                     if (best != null) { lane.target.put(lane.target.length() - 1, best); return }
                 }
                 lane.target.remove(lane.target.length() - 1)
-                omitted.put(lane.path, lane.rows.size - lane.target.length())
+                count(lane)
             }
         }
         // Reserve an opportunity for the best matching identity and other adopted record before
         // catalogue/filler overhead. Only two rows qualify; other domains still rotate normally.
         val prioritized = mutableSetOf<Pair<String, Int>>()
+        // Keep one real current base drive in the normal request even when historical
+        // catalogues fill the envelope. Rotate this bounded opportunity, not the subject's
+        // importance or stored values. A vocabulary-only row never qualifies as a read.
+        val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
+        lanes.firstOrNull { it.path == "foundation.drive_values" }?.let { drives ->
+            if (drives.rows.isNotEmpty()) {
+                val index = (cursor % drives.rows.size).toInt()
+                include(drives, drives.rows[index])
+                prioritized += drives.path to index
+            }
+        }
         for (id in priority) {
             val match = lanes.asSequence().filter { it.path in setOf("inner_structure.identity",
                 "inner_structure.selected", "inner_structure.record_fragments") }.mapNotNull { lane ->
@@ -115,12 +138,16 @@ internal object SubjectMaterialBudget {
         directory?.rows?.forEach { include(directory, it) }
         // Rotate detail domains per request so emotion/identity cannot forever exclude
         // contrary material. This is technical exposure, never a change in subjective focus.
-        val rest = lanes.filter { it != directory }
-        val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
+        val rest = lanes.filter { it != directory && !it.path.startsWith("foundation.") }
         val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
         val order = rest.drop(start) + rest.take(start)
         for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
             order.forEach { if (index < it.rows.size && (it.path to index) !in prioritized) include(it, it.rows[index]) }
+        // Empty catalogue concepts must not displace actual relevant experience. Omitted
+        // foundation values grant no read/adoption permission and remain retrievable by ID.
+        val foundationLanes = lanes.filter { it.path.startsWith("foundation.") }
+        for (index in 0 until (foundationLanes.maxOfOrNull { it.rows.size } ?: 0))
+            foundationLanes.forEach { if (index < it.rows.size && (it.path to index) !in prioritized) include(it, it.rows[index]) }
         budget.put("estimated_tokens", estimate(result.toString()) + ENVELOPE_RESERVE)
         check(estimate(result.toString()) + ENVELOPE_RESERVE <= requested)
         return result

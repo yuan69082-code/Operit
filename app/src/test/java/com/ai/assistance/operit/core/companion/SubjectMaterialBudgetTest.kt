@@ -57,6 +57,26 @@ class SubjectMaterialBudgetTest {
         assertEquals(1, source.getJSONObject("inner_structure").getJSONArray("identity").length())
     }
 
+    @Test fun currentFoundationValuesRemainReachableWithoutDisplacingWholeDomains() {
+        val source = payload().put("foundation", JSONObject().put("drive_values", JSONArray((0..6).map {
+            JSONObject().put("id", "drive-$it").put("value", 0.2).put("version", 1)
+        })).put("available", JSONArray()).put("legacy_pending", JSONArray()))
+        source.getJSONObject("inner_structure").getJSONArray("selected")
+            .put(JSONObject().put("id", "actual-preference").put("text", "喜欢直说，特殊场合会温和表达"))
+        repeat(100) { source.getJSONArray("state_catalog").put(JSONObject().put("description", "旧类别的完整说明".repeat(50))) }
+        val original = source.toString()
+        for (cursor in 0..6) {
+            val selected = SubjectMaterialBudget.select(JSONObject(original).put("material_selection_cursor", cursor))
+            val values = selected.getJSONObject("foundation").getJSONArray("drive_values")
+            val ids = (0 until values.length()).map { values.getJSONObject(it).getString("id") }
+            assertTrue(ids.contains("drive-$cursor"))
+            assertEquals(ids.size, ids.distinct().size)
+            assertTrue(selected.getJSONObject("inner_structure").getJSONArray("selected").length() > 0)
+            assertTrue(SubjectMaterialBudget.estimate(selected.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 2048)
+        }
+        assertEquals(original, source.toString())
+    }
+
     @Test fun estimatorDistinguishesScriptsAndDoesNotCallLengthTokens() {
         assertTrue(SubjectMaterialBudget.estimate("中文".repeat(100)) > SubjectMaterialBudget.estimate("ab".repeat(100)))
         assertTrue(SubjectMaterialBudget.estimate("🙂".repeat(100)) > 100)

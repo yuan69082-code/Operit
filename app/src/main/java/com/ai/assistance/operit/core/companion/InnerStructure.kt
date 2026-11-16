@@ -68,6 +68,7 @@ internal object InnerStructure {
         val pending = InnerRows(data, true, frame)
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
+            try {
             val action = actions.getJSONObject(i)
             val id = text(action, "id", 64)
             require(touched.add(id)) { "同轮不能重复处理同一候选" }
@@ -162,6 +163,10 @@ internal object InnerStructure {
                 }
                 else -> error("未知内在候选操作")
             }
+            } catch (failure: Exception) {
+                if (failure is InternalStateReportRejected) throw failure
+                throw InternalStateReportDiagnostics.issue(failure, "inner[$i]")
+            }
         }
         return true
     }
@@ -232,16 +237,20 @@ internal object InnerStructure {
             val id = text(row, "legacy_ref", 64)
             require(InternalStateEngine.definitions(data).any { it.getString("id") == id }) { "引用的旧状态不存在" }
         }
+        fun parentContent(id: String): JSONObject? = records.optJSONObject(id)?.getJSONObject("content")
+            ?: if (data.has("foundation_state")) InnerFoundations.definition(id) else null
         fun parent(allowed: Set<String>) {
             val id = text(row, "parent_ref", 64)
             require(id != row.getString("id"))
-            val p = requireNotNull(records.optJSONObject(id)) { "上层需要须先采用" }.getJSONObject("content")
+            // Installed categories are structure, not fabricated personal experiences.
+            // A real specific need must not first invent/adopt a second copy of that category.
+            val p = requireNotNull(parentContent(id)) { "上层类别须已安装或采用" }
             require(p.getString("family") in allowed && p.getString("status") == "active")
             var cursor: String? = id
             val visited = mutableSetOf(row.getString("id"))
             while (cursor != null) {
                 require(visited.add(cursor)) { "需要层级不能成环" }
-                cursor = records.optJSONObject(cursor)?.getJSONObject("content")?.optString("parent_ref")?.takeIf { it.isNotBlank() }
+                cursor = parentContent(cursor)?.optString("parent_ref")?.takeIf { it.isNotBlank() }
             }
         }
         when (family) {
@@ -254,7 +263,7 @@ internal object InnerStructure {
                     if (row.getString("semantic_rule") == "life") require(row.getString("level") == "broad")
                     else {
                         require(row.getString("level") == "specific" && !row.has("legacy_ref"))
-                        val p = records.getJSONObject(row.getString("parent_ref")).getJSONObject("content")
+                        val p = requireNotNull(parentContent(row.getString("parent_ref")))
                         require(p.getString("family") == "need" && p.getString("level") == "broad" && p.optString("semantic_rule") == "life")
                         val strength = row.get("strength")
                         require(strength is Number && strength.toDouble().isFinite() && strength.toDouble() >= 0)
@@ -395,9 +404,9 @@ internal object InnerStructure {
         提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["已读本主体事件ID或本轮来源ID"],reason:"简短依据"}。历史原文可经 get 分页读取后引用；不能引用本帧开始之后发生的事，也不能猜测未读经历。
         未采用候选可修订：用新id和replaces:"旧候选ID"提出完整新版，须先读取旧版；旧版保留且撤出待处理，新版不继承已读资格。已采用记录不得直接修改；仍须以当前版本为before提出新候选。完整description/context/exceptions等原文保存，标题或预览不是替代；精简只能另提建议，不能在采用时换成自己的摘要。
         采用先前候选：{op:"adopt",id:"候选ID",reason:"明确采用理由"}；放下候选用 op:"discard"。不能同轮提出并采用；用户说“你喜欢”只是候选来源，不能当作已采用偏好。
-        record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，其数值/时间仍由旧维度负责）。
+        record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，迁移后只作历史来源索引；当前数值与时间不再由旧维度计算）。
         family 可为 drive,need,desire,emotion,sentiment,feeling,personality,self_knowledge,value,stance,relation,preference；kind 自由命名细分类别，不靠复制同名记录表达不同对象。
-        drive 另填 direction；need 另填 level:"broad|specific"，specific 必须 parent_ref 指向已采用 drive/need；desire 必须 parent_ref 和 object_ref。
+        drive 另填 direction；need 另填 level:"broad|specific"，specific 必须 parent_ref 指向已安装的基础 drive/need 或已采用的个人 drive/need（例如 foundation:need:thought）；desire 必须 parent_ref 和 object_ref。基础目录不是主观经历，无需先复制一条候选来充当上层类别；具体个人内容仍按原候选采用。
         emotion/sentiment/feeling 分别表示当前反应、持续情感、体验解释，另填 unresolved 布尔值和 current_state；强度变弱不等于事情解决。
         relation 必须 object_ref 为本轮已知对象ID、label、understanding、feeling，方向始终是自己看待该对象，称谓与理解分开。
         preference 必须 aspect（自由类别，如语言方式/思维方式/爱好）、orientation:"like|dislike|neutral|uncertain"、horizon:"long_term|short_term|contextual"、ownership:"self|accommodation"、context、exceptions；后两项可为空，配合行为不是自身喜好。

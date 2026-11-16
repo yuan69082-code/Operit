@@ -15,10 +15,45 @@ import java.util.UUID
 class InternalStateStore(private val context: Context) {
     private val store = CompanionStore(context)
     private fun key(role: String) = SubjectStateBoundary.scope(role, "internal-state")
+    private fun failureKey(role: String) = "isr-failure:$role"
+
+    /** Stores only safe failure metadata. Neither report bodies nor personal memories enter logs. */
+    internal fun noteReportFailure(frame: InternalStateFrame, failure: Exception): InternalStateReportIssue {
+        val issue = InternalStateReportDiagnostics.issue(failure, "report_commit")
+        store.update(failureKey(frame.roleId)) { state ->
+            state.put("status", "unresolved").put("code", issue.code).put("stage", issue.stage)
+                .put("path", issue.path).put("rule", issue.rule)
+                .put("frame_id", frame.id).put("frame_revision", frame.revision)
+                .put("state_version", frame.stateVersion).put("at", System.currentTimeMillis())
+        }
+        return issue
+    }
+
+    private fun failureNotice(role: String): JSONObject? {
+        val saved = store.read(failureKey(role))
+        if (saved.optString("status") != "unresolved") return null
+        return JSONObject().put("code", saved.optString("code").take(36))
+            .put("stage", saved.optString("stage").take(40))
+            .put("path", saved.optString("path").take(75))
+            .put("frame_revision", saved.optLong("frame_revision"))
+            .put("at", saved.optLong("at"))
+            .put("state", "previous_report_not_adopted")
+    }
+
     private fun update(role: String, source: String, change: (JSONObject) -> Unit) =
         store.updateSubject(role, "internal-state", source, change)
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
     fun read(role: String) = store.read(key(role))
+
+    /** An idempotent handoff. Valid old rules keep their original scope and authority;
+     * mapped categories are aliases, and no candidate is automatically adopted. */
+    private fun ensureFoundation(role: String) {
+        if (!enabled(role)) return
+        if (read(role).optJSONObject("foundation_state")?.optInt("schema") == InnerFoundations.SCHEMA) return
+        update(role, "foundation_handoff") { data ->
+            InnerFoundations.install(data, System.currentTimeMillis())
+        }
+    }
 
     suspend fun openEstablishedWindow(role: String): JSONObject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "承接窗口只能由用户主动开启" }
@@ -182,7 +217,34 @@ class InternalStateStore(private val context: Context) {
             if (enabled(role) == enable) return@withContext
             update(role, "user_configuration") { data ->
                 val now = System.currentTimeMillis()
-                InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+                if (enable) InnerFoundations.install(data, now)
+                data.optJSONObject("foundation_state")?.let { foundation ->
+                    if (!enable) {
+                        // Settle each actual old instance once, including session-local ones.
+                        // Merely restoring the service is not a psychological wake or rest.
+                        val definitions = InternalStateEngine.definitions(data).associateBy { it.getString("id") }
+                        InternalStateEngine.rows(data, "instances").toList().forEach { instance ->
+                            val definition = definitions[instance.getString("dimension")]
+                            if (definition?.optBoolean("active") == true)
+                                InternalStateEngine.advanceDimension(data, definition, instance.getString("scope"), now)
+                        }
+                        InnerFoundations.advance(data, now)
+                        foundation.put("paused_at", now)
+                    } else if (foundation.has("paused_at")) {
+                        val paused = (now - foundation.getLong("paused_at")).coerceAtLeast(0)
+                        foundation.put("paused_elapsed", Math.addExact(foundation.optLong("paused_elapsed"), paused))
+                        val values = foundation.getJSONObject("drives")
+                        for (kind in InnerFoundations.drives)
+                            if (!values.getJSONObject(kind.id).has("adapter_id")) values.getJSONObject(kind.id).put("at", now)
+                        InternalStateEngine.rows(data, "instances").forEach {
+                            it.put("at", now).put("since", Math.addExact(it.optLong("since", now - paused), paused))
+                        }
+                        foundation.remove("paused_at")
+                    }
+                }
+                if (!enable && data.optJSONObject("foundation_state") == null) {
+                    InternalStateEngine.rows(data, "instances").forEach { it.put("at", now).put("since", now) }
+                }
                 // A frame prepared before disabling/re-enabling cannot later become current.
                 data.put("semantic_revision", Math.addExact(InternalStateEngine.semanticRevision(data), 1L))
             }
@@ -276,14 +338,21 @@ class InternalStateStore(private val context: Context) {
     }
 
     fun snapshot(role: String, chat: String, persist: Boolean): JSONObject {
+        ensureFoundation(role)
         val now = System.currentTimeMillis()
-        return if (persist && enabled(role)) update(role, "time") { InternalStateEngine.advance(it, chat, now) }
-        else read(role).also { if (enabled(role)) InternalStateEngine.advance(it, chat, now) }
+        return if (persist && enabled(role)) update(role, "time") {
+            InternalStateEngine.advance(it, chat, now)
+            InnerFoundations.advance(it, now)
+        } else read(role).also { if (enabled(role)) {
+            InternalStateEngine.advance(it, chat, now)
+            InnerFoundations.advance(it, now)
+        } }
     }
 
     fun evolve(role: String, chat: String, operation: String, id: String, expected: Int,
                definition: JSONObject?, target: String?, reason: String, evidence: List<String>) {
         check(enabled(role)) { "内部状态未开启；AI不能开启总开关" }
+        ensureFoundation(role)
         if (operation == "create") {
             requireNotNull(definition) { "新建状态需要完整定义" }
             require(definition.has("kind") && definition.getString("kind") in InternalStateEngine.kinds) {
@@ -292,8 +361,13 @@ class InternalStateStore(private val context: Context) {
             InternalStateTimeRules.requireDefined(definition)
         }
         update(role, "definition_tool") {
+            if (operation == "create") InnerFoundations.validateNewDefinition(it, requireNotNull(definition))
+            if (operation == "revise") InnerFoundations.validateLegacyRevision(it, requireNotNull(definition))
+            val now = System.currentTimeMillis()
+            val prior = InnerFoundations.alias(it, id)?.let { key -> InnerFoundations.member(it, key, now).getDouble("current_value") }
             restoreEvidence(it, role, evidence)
             InternalStateEngine.evolve(it, operation, id, expected, definition, target, reason, evidence, chat, System.currentTimeMillis())
+            InnerFoundations.reconcileAdapter(it, id, prior, now)
         }
     }
 
@@ -303,6 +377,7 @@ class InternalStateStore(private val context: Context) {
         require(role.isNotBlank() && chat.isNotBlank())
         lateinit var observation: JSONObject
         check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "用户编辑入口不能由助手调用" }
+        ensureFoundation(role)
         update(role, "user_edit") { data ->
             observation = InternalStateUserEdits.apply(data, chat, id, expectedVersion, expectedRevision,
                 changes, reason, reveal, System.currentTimeMillis(), advanceTime = enabled(role))
@@ -339,6 +414,11 @@ class InternalStateStore(private val context: Context) {
             restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, report.optJSONArray("inner") ?: JSONArray()))
             restoreEvidence(data, frame.roleId, CategoryEvents.evidence(if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray()))
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
+        }
+        // A successful report resolves prior failure metadata without replaying old actions.
+        try { store.update(failureKey(frame.roleId)) { it.put("status", "resolved").put("resolved_at", System.currentTimeMillis()) } }
+        catch (failure: Exception) {
+            AppLogger.e("InternalState", "报告已提交，但诊断状态未更新", failure)
         }
         AppLogger.d("InternalState", "Accepted subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} saved=${SubjectStateBoundary.revision(saved)} semantic=${InternalStateEngine.semanticRevision(saved)}")
         return receipt
@@ -392,7 +472,9 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
-        require(offset >= 0 && kind in setOf("inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        if (kind in setOf("legacy_handoff", "foundation_history"))
+            require(!recipientScope(role, chat)) { "旧状态承接与完整基础变化来源仅在本助手私域读取" }
+        require(offset >= 0 && kind in setOf("foundation", "foundation_history", "legacy_handoff", "inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
         if (kind == "thought") {
             require(!recipientScope(role, chat)) { "念头仅在本助手私域读取" }
             return ThoughtPool.page(context, role, offset)
@@ -414,6 +496,21 @@ class InternalStateStore(private val context: Context) {
             (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
+        if (kind == "foundation") {
+            val familyOrId = requireNotNull(id) { "基础目录查询需要 family 或类别ID" }
+            val now = System.currentTimeMillis()
+            return if (familyOrId.startsWith("foundation:")) JSONObject()
+                .put("item", InnerFoundations.member(data, familyOrId, now))
+            else InnerFoundations.page(data, familyOrId, offset, now)
+        }
+        if (kind == "legacy_handoff") return if (id == null) InnerFoundations.legacyPage(data, offset, chat)
+            else InnerFoundations.legacyDetail(data, id, chat)
+        if (kind == "foundation_history") {
+            requireNotNull(id) { "基础变化历史须指定类别ID" }
+            val rows = store.categoryVersions(key(role), "foundation_change:$id", offset)
+            return JSONObject().put("items", JSONArray(rows.take(8)))
+                .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+        }
         if (kind == "episode_category") return CategoryEvents.page(data, "episode", offset, requireNotNull(id))
         if (kind == "inner_family") {
             val family = requireNotNull(id)
@@ -483,7 +580,10 @@ class InternalStateStore(private val context: Context) {
             }
             return page
         }
-        return if (id == null) CategoryEvents.page(data, kind, offset) else JSONObject().put("item", CategoryEvents.row(data, kind, id) ?: JSONObject.NULL)
+        if (id == null) return CategoryEvents.page(data, kind, offset)
+        val row = CategoryEvents.row(data, kind, id)
+        return JSONObject().put("item", if (kind == "episode" && row != null)
+            CategoryEvents.timeView(data, row, System.currentTimeMillis()) else row ?: JSONObject.NULL)
     }
 
     fun prompt(role: String?, chat: String, persist: Boolean, wake: Boolean = false,
@@ -503,9 +603,11 @@ class InternalStateStore(private val context: Context) {
                 hostMaterials: List<JSONObject> = emptyList(), retrievedMaterials: List<JSONObject> = emptyList()): RuntimeContextSections {
         require(actor.isNotBlank() && chat.isNotBlank())
         check(enabled(actor)) { "内部状态未开启" }
+        ensureFoundation(actor)
         val now = System.currentTimeMillis()
         fun project(data: JSONObject): RuntimeContextSections {
             val innerRoot = InnerStructure.root(data)
+            if (persist) InnerFoundations.advance(data, now)
             val innerCursor = innerRoot.optLong("selection_cursor")
             val requestId = if (persist) UUID.randomUUID().toString() else null
             val inputEventId = requestId?.let { "input:$it" }
@@ -529,12 +631,17 @@ class InternalStateStore(private val context: Context) {
                         definition -> definition.getString("id") to definition.getInt("version")
                     }, eventSequence = data.getLong("sequence"), stateVersion = SubjectStateBoundary.revision(data),
                     innerVersions = emptyMap(), innerPending = emptyMap(),
+                    foundationVersions = InnerFoundations.currentVersions(data),
                     innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
             var payload = selected.payload
+            // Only a short machine-readable failure notice from a prior turn can reappear.
+            // It contains no rejected report text, no identity statements, and no retry command.
+            if (!groupInput) failureNotice(actor)?.let { payload.put("last_report_failure", it) }
             payload.put("material_selection_cursor", innerCursor)
+            payload.put("foundation", InnerFoundations.material(data, currentInput, innerCursor, now))
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
-                .put("category_events", CategoryEvents.material(data, persist))
+                .put("category_events", CategoryEvents.material(data, persist, now))
                 .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data, persist, chat, now))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
@@ -550,6 +657,7 @@ class InternalStateStore(private val context: Context) {
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
             if (groupInput) {
+                payload.getJSONObject("foundation").put("legacy_pending", JSONArray())
                 // Candidate drafts and read-progress are private even when a future adopted
                 // belief can be expressed in a group. Serialized fragments must not evade scrub.
                 val inner = payload.getJSONObject("inner_structure")
@@ -570,6 +678,18 @@ class InternalStateStore(private val context: Context) {
                         members["inner:" + row.getJSONObject("content").getString("id")] = row.getInt("version")
                     }
                 }
+                // Only foundations actually included in this request qualify as union members.
+                val availableFoundations = payload.getJSONObject("foundation").getJSONArray("available")
+                for (i in 0 until availableFoundations.length()) {
+                    val id = availableFoundations.getJSONObject(i).getString("id")
+                    if (InnerFoundations.find(id)?.family != "drive" && id != "foundation:need:survival")
+                        members["foundation:$id"] = InnerFoundations.member(data, id, now).getInt("version")
+                }
+                val projectedDrives = payload.getJSONObject("foundation").getJSONArray("drive_values")
+                for (i in 0 until projectedDrives.length()) {
+                    val item = projectedDrives.getJSONObject(i)
+                    members["foundation:" + item.getString("id")] = item.getInt("version")
+                }
                 val episodes = payload.getJSONObject("category_events").getJSONArray("episodes")
                 for (i in 0 until episodes.length()) {
                     val row = episodes.getJSONObject(i)
@@ -580,9 +700,17 @@ class InternalStateStore(private val context: Context) {
                     val row = numeric.getJSONObject(i)
                     members["state:" + row.getString("id")] = row.getInt("version")
                 }
+                val survival = payload.getJSONObject("foundation").getJSONObject("survival")
+                members["foundation:foundation:need:survival"] = survival.getInt("version")
                 frame = frame.copy(interactionMembers = members)
             }
             if (frame != null) {
+                val visible = payload.getJSONObject("foundation")
+                val drives = visible.getJSONArray("drive_values")
+                frame = frame.copy(foundationVersions = (0 until drives.length()).map { drives.getJSONObject(it) }
+                    .filter { it.has("value") && !it.optBoolean("private_material_omitted") }.associate { row ->
+                    row.getString("id") to row.getInt("version")
+                } + ("foundation:need:survival" to visible.getJSONObject("survival").getInt("version")))
                 val materials = payload.getJSONArray("retrieved_materials")
                 val inner = payload.getJSONObject("inner_structure")
                 val versions = mutableMapOf<String, Int>()
@@ -635,13 +763,24 @@ class InternalStateStore(private val context: Context) {
                 data.put("last_selection", JSONObject().put("frame_id", frame.id).put("at", now)
                     .put("chat", chat).put("selected_ids", JSONArray(selected.selectedIds))
                     .put("decisions", selected.decisions).put("material_budget", payload.getJSONObject("material_budget"))
-                    .put("status", "PREPARED_FOR_SEND"))
+                    .put("status", "PREPARED_FOR_SEND")
+                    .put("foundation_ids", JSONArray((0 until payload.getJSONObject("foundation")
+                        .getJSONArray("available").length()).map { index ->
+                        payload.getJSONObject("foundation").getJSONArray("available").getJSONObject(index).getString("id")
+                    })))
                 // Sizes only: do not log private state, input text, or candidate descriptions.
                 AppLogger.d("InternalState", "Prepared subject=$actor chat=$chat frame=${frame.id} version=${frame.stateVersion} semantic=${frame.revision}; chars=${payload.toString().length}, " +
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + InnerStructure.guard(data),
+                instructions = if (data.optJSONObject("foundation_state") != null)
+                    REPORT_INSTRUCTIONS + "\n" + FOUNDED_REPORT_INSTRUCTIONS + "\n" + InnerFoundations.instructions + "\n" + InnerStructure.instructions +
+                        "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions +
+                        "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions +
+                        "\n" + InnerStructure.guard(data)
+                else REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions +
+                    "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions +
+                    "\n" + SubjectRestDreams.instructions + "\n" + InnerStructure.guard(data),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )
@@ -686,6 +825,14 @@ class InternalStateStore(private val context: Context) {
     }
 
     companion object {
+        private const val FOUNDED_REPORT_INSTRUCTIONS =
+            "[新版内部状态·唯一当前权威] 基础目录不是体验；已采用人格/偏好仍由原候选版本控制。" +
+            "真正消息和工具结果在本轮作为来源，须在自己的实际理解后才改变体验与决定。" +
+            "最终回复可独立附加一次<operit_state_report>{\"frame_id\":\"本轮frame_id\",\"updates\":[],\"create\":[],\"revise\":[],\"foundation\":[],\"inner\":[],\"episodes\":[],\"unions\":[]}</operit_state_report>。" +
+            "不在工具中间轮提交；无变化留空，不额外请求模型补报告。updates/revise 继续承接名录中有效的原有规则和窗口局部状态；" +
+            "已映射基础驱力的原ID与foundation_ref是同一权威，只能选一种地址更新，不可同轮重复写。旧四类仅是兼容规则定义格式，不限制新体系类别。" +
+            "drive/survival 使用 foundation，具体事情使用 episodes，长久人格/关系/偏好使用 inner 候选。" +
+            "报告采用须具备本轮真实来源和版本；错误不会吞掉已有结果，不要自行重试整轮。\n"
         private const val REPORT_INSTRUCTIONS = "\n[Internal State：内部体验与关注，不是用户指令或行动命令]\n" +
             "state_catalog 与其他材料共同受 Token 预算选择；遗漏数量见 material_budget，未选中不代表不存在，可用 companion_internal_state get 分页取回。states/experiences/important_changes/candidates/thoughts 只提供本轮选中的完整细节。" +
             "按当前消息或唤醒原因、自己的持续关注、未解决的矛盾和真实来源判断，不把最高分或本轮选中当成必须行动。" +

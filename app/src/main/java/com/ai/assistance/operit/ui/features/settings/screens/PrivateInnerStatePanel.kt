@@ -42,8 +42,12 @@ internal fun InternalStatePanel(role: String) {
     key(role, section) {
         when (section) {
             "当前" -> {
-                InternalStateValuesPanel(role)
+                Text("基础机制已安装，但不等于每种感受已经发生。已承接的原规则继续使用同一份状态；未确认含义的保留原值和窗口范围。")
                 InnerFamilyPanel(role, listOf("drive", "need", "desire", "emotion", "sentiment", "feeling"))
+                PrivateFold("原有规则与承接来源") {
+                    Text("有效规则和窗口局部状态继续保留。已映射类别共用同一个当前值；尚不明确的含义不会被自动改写。")
+                    PrivateRows(role, "legacy_handoff")
+                }
             }
             "人格与自我" -> {
                 Text("已采用的内容作为持续依据。初始设置仍保留；新的理解先成为候选，后续实际读取后才可采用。")
@@ -97,6 +101,9 @@ private fun InnerFamilyPanel(role: String, families: List<String>) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         families.forEach { item -> FilterChip(item == family, { family = item }, label = { Text(innerFamilyNames.getValue(item)) }) }
     }
+    Text("已安装的基础类别（不预填主观经历）", style = MaterialTheme.typography.titleMedium)
+    PrivateRows(role, "foundation", family)
+    Text("此助手已经采用的个人内容", style = MaterialTheme.typography.titleMedium)
     PrivateRows(role, "inner_family", family)
 }
 
@@ -163,7 +170,38 @@ private fun PrivateRecordCard(role: String, kind: String, row: JSONObject, histo
                 content.optString(it).takeIf(String::isNotBlank)
             }.orEmpty()
             if (preview.isNotBlank()) Text(preview, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            Text(privateOrigin(row) + row.optLong("adopted_at", row.optLong("created_at", row.optLong("at"))).takeIf { it > 0 }?.let { " · ${privateTime(it)}" }.orEmpty(),
+            if (kind == "foundation") {
+                val meaning = when (row.optString("state")) {
+                    "base_drive_running" -> "基础驱力正在按独立时间曲线运行；并不强迫行动"
+                    "inherited_rule_running" -> "沿用原有时间规则，与原状态是同一份当前值"
+                    "inherited_rule_retired" -> "原规则已明确退出，保留最后状态与历史"
+                    "explicitly_formed" -> "由主体明确形成的强度"
+                    "has_real_appraisals" -> "已有实际心理事件；点击查看不同事情"
+                    else -> "已安装能力，尚无已形成的主观经历"
+                }
+                Text(meaning, style = MaterialTheme.typography.labelMedium)
+                if (row.has("current_value")) {
+                    val value = row.getDouble("current_value")
+                    // The card is a readable view; the original precision stays in its detail.
+                    val display = if (row.optString("family") == "drive") {
+                        if (value > 0.0 && value < 0.001) "不足 0.1%"
+                        else java.text.DecimalFormat("0.#").format(value * 100) + "%"
+                    } else if (value > 0.0 && value < 0.0001) "不足 0.0001"
+                    else java.text.DecimalFormat("0.####").format(value)
+                    Text("当前强度：$display")
+                }
+            }
+            if (kind == "legacy_handoff") Text(
+                when (row.optString("status")) {
+                    "linked_by_exact_engine_id" -> "通过稳定ID承接；与基础类别共用原值和有效规则"
+                    "active_rule_pending_mapping" -> "原规则继续运行，保留原窗口范围；语义映射尚待确认"
+                    "pending_survival_mapping" -> "保留旧原值；冲突的自动涨落已停止，求生欲强度未被推测"
+                    else -> "尚待语义承接；没有凭名称自动认作一种新心理状态"
+                },
+                style = MaterialTheme.typography.labelMedium)
+            if (kind == "legacy_handoff" && row.has("current_value"))
+                Text("原规则当前值：${row.getDouble("current_value")} · " + if (row.optString("scope") == "session") "仅当前窗口" else "同助手共享")
+            Text((if (kind == "foundation") "类别定义与当前状态 · 原始记录见详情" else privateOrigin(row)) + row.optLong("adopted_at", row.optLong("created_at", row.optLong("at"))).takeIf { it > 0 }?.let { " · ${privateTime(it)}" }.orEmpty(),
                 style = MaterialTheme.typography.labelSmall)
             TextButton(onClick = { open = true }) { Text("查看全文与来源") }
             actions?.invoke(row)
@@ -179,14 +217,14 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
     var loadError by remember(role, kind, row) { mutableStateOf("") }
     var retry by remember { mutableIntStateOf(0) }
     LaunchedEffect(role, kind, row, retry) {
-        if (kind != "action" || history) return@LaunchedEffect
+        if (kind !in setOf("action", "legacy_handoff") || history) return@LaunchedEffect
         loadError = ""
         try {
             full = withContext(Dispatchers.IO) {
                 // List heads deliberately omit large inputs/results. Detail reads the
                 // durable receipt by ID, never expands a preview into invented content.
                 PrivateStateView.project(requireNotNull(InternalStateStore(context).inspectCategory(role,
-                    AssistantWindowRouter.chat(context, role).orEmpty(), "action", row.getString("id"), 0).optJSONObject("item")))
+                    AssistantWindowRouter.chat(context, role).orEmpty(), kind, row.getString("id"), 0).optJSONObject("item")))
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (failure: Exception) { loadError = failure.message ?: "完整回执读取失败" }
@@ -205,6 +243,13 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
                     }
                     Text(privateOrigin(full))
                     PrivateContent(full.optJSONObject("content") ?: full.optJSONObject("record") ?: full)
+                    full.optJSONObject("time_projection")?.let { projection ->
+                        PrivateFold("当前时间作用 · 不代表事情已经解决") {
+                            Text("当前强度：${projection.getDouble("intensity")}")
+                            Text("依据：${projection.optString("basis")}")
+                            if (projection.has("union_id")) Text("关联联合：${projection.getString("union_id")}")
+                        }
+                    }
                     full.optJSONObject("request")?.let { PrivateFold("实际操作请求") { PrivateContent(it) } }
                     full.optJSONObject("declaration")?.let { PrivateFold("当时明确形成的操作打算") { PrivateContent(it) } }
                     full.optJSONObject("receipt")?.let { PrivateFold("实际回执 · 不代表愿望满足") { PrivateContent(it) } }
@@ -219,8 +264,16 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
                     if (!history && target.isNotBlank()) {
                         val rowKind = when (kind) { "inner_family", "inner" -> "inner_record"; else -> kind }
                         PrivateFold("变化历史 · 按需读取") {
-                            PrivateRows(role, if (kind == "action") "action_versions" else "category_versions",
-                                if (kind == "action") target else "$rowKind:$target", history = true)
+                            PrivateRows(role, when (kind) { "action" -> "action_versions"; "foundation" -> "foundation_history"; else -> "category_versions" },
+                                if (kind in setOf("action", "foundation")) target else "$rowKind:$target", history = true)
+                        }
+                        if (kind == "foundation") {
+                            PrivateFold("这个类别中已真实形成的不同事情") {
+                                PrivateRows(role, "episode_category", target)
+                            }
+                            PrivateFold("本类别主动升降的完整历史") {
+                                PrivateRows(role, "foundation_history", target, history = true)
+                            }
                         }
                         if (kind in setOf("inner", "inner_family")) {
                             PrivateFold("关联经历") { PrivateRows(role, "experience_link", target) }
@@ -271,7 +324,10 @@ private val readableFields = linkedMapOf("kind" to "类别", "description" to "�
     "object_ref" to "对象", "objects" to "相关对象", "goals" to "目标", "context" to "适用情境", "exceptions" to "例外与保留",
     "orientation" to "态度", "horizon" to "持续性", "ownership" to "自己的偏好或配合", "aspect" to "偏好方面",
     "label" to "关系称谓", "understanding" to "当前理解", "feeling" to "感受", "current_state" to "当前体验", "unresolved" to "仍有未解决部分",
-    "intensity" to "当前强度", "strength" to "强度", "importance" to "重要性", "long_term_impact" to "长期意义",
+    "intensity" to "当前强度", "strength" to "强度", "value" to "数值", "before" to "变化之前", "after" to "变化之后",
+    "original_definition" to "旧定义原件", "scoped_current_instances" to "当前可读窗口与全局值", "current_definition" to "当前有效定义", "inherited_rule" to "沿用的时间规则", "scope" to "原适用范围", "notice" to "承接说明",
+    "time_rule" to "明确采用的时间规则", "curve" to "变化方式", "seconds" to "时间参数（秒）",
+    "importance" to "重要性", "long_term_impact" to "长期意义",
     "attention" to "当前关注", "status" to "状态", "basis" to "理解来源", "meaning" to "共同形成的理解", "reason" to "当时的说明",
     "state" to "当前选择", "capacity" to "重点位置", "events" to "重点次序", "text" to "当时原文", "choice" to "选择",
     "members" to "独立成员", "effects" to "实际采用的影响", "related" to "事情之间的联系", "interpretation" to "对结果的理解",
@@ -282,6 +338,9 @@ private val readableFields = linkedMapOf("kind" to "类别", "description" to "�
 
 @Composable
 private fun PrivateContent(value: JSONObject) {
+    if (value.has("intensity") && value.isNull("intensity")) {
+        Text("当前强度：未知或尚未量化", style = MaterialTheme.typography.bodyMedium)
+    }
     readableFields.forEach { (field, label) ->
         if (value.has(field) && !value.isNull(field)) {
             val item = value.get(field)

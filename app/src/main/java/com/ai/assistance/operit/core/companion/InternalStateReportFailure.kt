@@ -23,6 +23,7 @@ enum class InternalStateReportFailure(val messageRes: Int) {
     companion object {
         fun classify(failure: Exception): InternalStateReportFailure = when (failure) {
             is InternalStateReportRejected -> failure.reason
+            is InternalStateReportIssue -> FORMAT
             is IOException -> STORAGE
             is JSONException, is IllegalArgumentException -> FORMAT
             else -> INTERNAL

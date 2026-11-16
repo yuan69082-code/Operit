@@ -99,6 +99,23 @@ class InnerStructureEntryPointsTest {
     private fun innerHash() = InnerStructure.hash(JSONObject(states.read(role).getJSONObject("inner_structure").toString())
         .apply { remove("selection_cursor") })
 
+    @Test fun specificNeedsAndDesiresCanUseInstalledParentsWithoutInventingAnotherCategory(): Unit = runBlocking {
+        val need = content("understand-issue", "need").put("level", "specific")
+            .put("parent_ref", "foundation:need:thought").put("object_ref", "matter:question")
+        val desire = content("explore-method", "desire").put("parent_ref", "foundation:drive:exploration")
+            .put("object_ref", "self")
+        adoptRecord(need)
+        adoptRecord(desire)
+        val restored = InternalStateStore(context)
+        assertEquals("foundation:need:thought", restored.inspectCategory(role, two, "inner", "understand-issue", 0)
+            .getJSONObject("item").getJSONObject("content").getString("parent_ref"))
+        assertEquals(2, InnerStructure.records(restored.read(role)).size)
+        assertTrue(restored.inspectCategory(role, two, "inner", "foundation:need:thought", 0).isNull("item"))
+        val next = sections(two, "understand-issue explore-method")
+        assertTrue(next.state.contains("foundation:need:thought"))
+        assertTrue(next.state.contains("foundation:drive:exploration"))
+    }
+
     @Test fun normalRequestCompositionReadsAdoptedIdentityAcrossWindowsAndRestart(): Unit = runBlocking {
         val first = sections()
         assertTrue(first.instructions.contains("尚未采用持续人格"))

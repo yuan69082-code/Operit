@@ -125,6 +125,12 @@ object InternalStateEngine {
     private fun advanceInstance(data: JSONObject, definition: JSONObject, state: JSONObject, chat: String, now: Long, changes: JSONArray) {
         val from = state.getLong("at")
         if (now <= from) return
+        InnerFoundations.inheritedTimeProjection(data, definition.getString("id"), now)?.let { normalized ->
+            val value = definition.getDouble("min") + normalized * (definition.getDouble("max") - definition.getDouble("min"))
+            change(definition, state, value, now)?.let { changes.put(it.put("interval_start", from)
+                .put("interval_end", now).put("time_basis", "subject_adopted_union_rule")) }
+            return
+        }
         if (InternalStateTimeRules.isDefined(definition)) {
             InternalStateTimeRules.stepSequence(data, definition, state, chat, now).forEach { step ->
                 change(definition, state, step.value, step.at)?.let { change ->
@@ -265,6 +271,7 @@ object InternalStateEngine {
                 val semantic = JSONObject(state.toString())
                 subjectiveFields.filter { semantic.has(it) }.forEach { snapshot.put(it, semantic.get(it)) }
                 snapshot.put("disclosure", stateDisclosure(data, snapshot))
+                InnerFoundations.projectInherited(data, snapshot, now)
             }
     }
 

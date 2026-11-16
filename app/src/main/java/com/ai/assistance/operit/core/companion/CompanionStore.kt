@@ -258,6 +258,9 @@ class CompanionStore(context: Context) {
         override fun categoryCount(kind: String, parent: String?) = synchronized(lock(scope)) {
             history(scope).use { it.categoryCount(kind, parent) }
         }
+        override fun latestCategoryRow(kind: String, parent: String) = synchronized(lock(scope)) {
+            history(scope).use { it.latestCategoryRow(kind, parent) }
+        }
         override fun relevantInnerRows(input: String, parent: String, limit: Int) = synchronized(lock(scope)) {
             history(scope).use { it.relevantInnerRows(input, parent, limit) }
         }
@@ -273,6 +276,8 @@ class CompanionStore(context: Context) {
             synchronized(definitions) { definitions[key] = found }
             return found?.let { JSONObject(it.toString()) }
         }
+        override fun definitionChange(id: String, version: Int): JSONObject? =
+            archivedStateRow(scope, "versions", "$id:$version")
         override fun latestContact(chat: String?, at: Long): Long? = synchronized(lock(scope)) {
             history(scope).use { it.latestContact(chat, at) }
         }

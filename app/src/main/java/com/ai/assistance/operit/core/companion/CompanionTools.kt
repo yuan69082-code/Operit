@@ -21,9 +21,9 @@ object CompanionTools {
                 param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
                 param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
-            description = "内部状态记录查询与定义维护。get 读取原始记录与版本；create/revise/merge/deactivate 维护定义；budget 设置材料预算。本工具不写主观value或伪造宿主事件；本轮体验值、时间条件及同轮定义修订由 operit_state_report 回报。调用参数以字段定义为准，不重复主体的长期行为规则。",
+            description = "持续内部状态工具。get 按需查看已安装基础目录、同类独立事件、旧状态待承接、已采用认识、原文/版本/来源；budget 调整共享材料预算。原先 create/revise/merge/deactivate 的旧数值定义已完成历史转档，禁止再建立第二套数值权威；本轮真实主观驱力变化用 operit_state_report 的 foundation，具体感受/事件用 episodes，稳定人格与立场仍走 inner 候选/跨轮版本。查询不改写或重复计分。",
             parametersStructured = listOf(
-                param("action", "get/create/revise/merge/deactivate/budget", true),
+                param("action", "get/budget；旧数值定义操作已停用", true),
                 param("id", "定义稳定ID；get 读取记录或 inner_family 的family；历史/长内容用 offset/next_offset 分页"),
                 param("definition", "create/revise 完整定义JSON：id,name,description,kind=drive|sentiment|emotion|psychology,baseline,min,max,scope=global|session,private,share,participates,effects=[{action,weight,cue,target可选}],time_rules={increase:{condition,reason,interval_minutes,amount},decrease:{condition,reason,interval_minutes,amount},floor}；condition=always|not_contacted|custom，not_contacted还须contact_window_minutes；可选object_ref。不夹带value"),
                 param("expected_version", "定义版本；新建为0，修订取get返回值"),
@@ -32,7 +32,7 @@ object CompanionTools {
                 param("target", "merge 同作用域目标维度ID；来源停用，历史保留"),
                 param("tokens", "budget 时主体材料预算2048至16384，非模型上下文总额度"),
                 param("offset", "分页起点；按返回的next_offset继续直到完整"),
-                param("section", "get 可选 inner/inner_pending/inner_history/inner_family/inner_chunk/inner_record_chunk/episode/focus/experience_link/union/category_versions/source/action/decision/feedback/activity/activity_part/waking_note/rest/dream/dream_understanding；私域内容仅本人私聊")
+                param("section", "get 可选 foundation（id=drive/need/desire/emotion/sentiment/feeling/personality/self_knowledge/value/stance/relation/preference）、legacy_handoff、foundation_history（id=基础类别ID）、inner/inner_pending/inner_family/inner_chunk/inner_record_chunk/episode/episode_category/focus/union/source/action/decision/feedback/activity/waking_note/rest/dream/dream_understanding等；每次按offset分页，私域内容仅本人私聊")
             )),
         ToolPrompt(name = "companion_explore",
             description = "查询或安排你自己的自主探索。默认关闭，只有用户能在设置里开启。action=status|schedule|pause；schedule 用 minutes（15–10080）和 purpose 安排一次继续，可在自己的私聊中使用，执行时跟随最近活跃私聊；pause 明说要歇、暂停后续预约；启用连续性内部状态的助手没有自动续约，只有明确安排的事项才继续；其他助手保留既有三小时判断规则。独立于主动联系、感知事件和已提交待办。开启不代表每次必须取材、继续旧方向或联系用户，不得通过其他调度工具绕过关闭状态或上限。资料与随记用 companion_library 分别保存，私人念头用 companion_todo 记录。",
