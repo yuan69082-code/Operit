@@ -65,7 +65,7 @@ internal object SubjectMaterialBudget {
             lane(foundation, "legacy_pending", "foundation.legacy_pending")
         }
         result.remove("selection")
-        inner.put("selection", "Relevant adopted records/fragments get first budget opportunities; other material rotates. Omitted records remain authoritative; retrieve by ID.")
+        inner.put("selection", "Relevant records first; other material rotates. Omission preserves authority; retrieve by ID.")
         val omitted = JSONObject()
         val budget = JSONObject().put("limit_tokens", requested).put("estimated_tokens", requested)
             .put("method", "host_estimate_utf8_non_han_plus_25_percent")
@@ -73,12 +73,18 @@ internal object SubjectMaterialBudget {
             .put("omitted_counts", omitted).put("omission_is_not_deletion", true)
             .put("retrieve", "companion_internal_state get section=inner/state/episode/focus/union/source id or offset; material locator tools")
         result.put("material_budget", budget)
-        lanes.forEach { omitted.put(it.path, it.rows.size) }
+        fun count(lane: Lane) {
+            val missing = lane.rows.size - lane.target.length()
+            // Zero-count entries are metadata, not subject material. Avoid spending the
+            // same budget on a long empty directory while omitting a real saved episode.
+            if (missing == 0) omitted.remove(lane.path) else omitted.put(lane.path, missing)
+        }
+        lanes.forEach(::count)
         // This envelope is small and bounded, regardless of the history volume.
         require(estimate(result.toString()) + ENVELOPE_RESERVE <= requested) { "主体材料预算不足以容纳来源与版本信息" }
         fun include(lane: Lane, row: Any) {
             lane.target.put(row)
-            omitted.put(lane.path, lane.rows.size - lane.target.length())
+            count(lane)
             if (estimate(result.toString()) + ENVELOPE_RESERVE > requested) {
                 // A fragment is an explicit range of immutable text, not a shortened record.
                 // Adapt its range to the shared remaining budget, including provenance metadata.
@@ -100,7 +106,7 @@ internal object SubjectMaterialBudget {
                     if (best != null) { lane.target.put(lane.target.length() - 1, best); return }
                 }
                 lane.target.remove(lane.target.length() - 1)
-                omitted.put(lane.path, lane.rows.size - lane.target.length())
+                count(lane)
             }
         }
         // Reserve an opportunity for the best matching identity and other adopted record before

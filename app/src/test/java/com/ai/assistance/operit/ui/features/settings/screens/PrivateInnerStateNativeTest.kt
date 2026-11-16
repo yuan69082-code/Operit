@@ -21,8 +21,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.core.companion.InternalStateStore
+import com.ai.assistance.operit.core.companion.AssistantWindowRouter
 import com.ai.assistance.operit.core.companion.OperitStorageTestRunner
 import com.ai.assistance.operit.data.model.CharacterCard
 import com.ai.assistance.operit.data.model.ChatHistory
@@ -52,6 +54,7 @@ class PrivateInnerStateNativeTest {
         val role = runBlocking { CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "原生页面验证助手")) }
         val chat = ChatHistory(title = "原生页面验证", messages = emptyList(), characterCardId = role)
         runBlocking { ChatHistoryManager.getInstance(context).saveChatHistory(chat) }
+        AssistantWindowRouter.selected(context, chat)
         context.getSharedPreferences("companion_options", Context.MODE_PRIVATE).edit()
             .putBoolean("internal_state:$role", true).commit()
         val states = InternalStateStore(context)
@@ -64,7 +67,13 @@ class PrivateInnerStateNativeTest {
                 }
             }
         }
-        compose.waitUntil(30_000) { compose.onAllNodesWithText("亲近").fetchSemanticsNodes().isNotEmpty() }
+        try {
+            compose.waitUntil(30_000) { compose.onAllNodesWithText("亲近").fetchSemanticsNodes().isNotEmpty() }
+        } catch (failure: Throwable) {
+            println(compose.onRoot().printToString())
+            runCatching { screenshot("native-current-load-failure") }.exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        }
         compose.onNodeWithText("亲近").assertExists()
         screenshot("native-current-installed")
         compose.onNodeWithText("需要").performScrollTo().performClick()

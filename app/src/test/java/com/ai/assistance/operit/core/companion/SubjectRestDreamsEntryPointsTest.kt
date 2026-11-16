@@ -204,6 +204,16 @@ class SubjectRestDreamsEntryPointsTest {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         try {
             val id = createDream()
+            val foundationId = "foundation:drive:rest"
+            suspend fun appraiseFoundation(value: Double) {
+                val frame = readMaterial(second, "foundation", foundationId)
+                submit(frame, JSONObject().put("foundation", JSONArray().put(JSONObject()
+                    .put("id", foundationId).put("expected_version", frame.foundationVersions.getValue(foundationId))
+                    .put("value", value).put("reason", "受控备份前后的明确重评")
+                    .put("evidence", JSONArray().put(frame.eventIds.first())))))
+            }
+            appraiseFoundation(0.6)
+            val foundationBefore = InternalStateStore(context).read(role).getJSONObject("foundation_state").toString()
             val original = item("dream", id).toString()
             assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             val databasePath = context.getDatabasePath("app_database")
@@ -230,6 +240,7 @@ class SubjectRestDreamsEntryPointsTest {
             }
             val f = readMaterial(second, "rest", "current")
             submit(f, JSONObject().put("rest", rest("awake", 1)))
+            appraiseFoundation(0.2)
             RawSnapshotBackupManager.restoreFromBackupUri(context, Uri.fromFile(zip))
             // The existing restore UI requires an application restart. Simulate only that
             // singleton lifetime boundary; do not edit any persisted subject or chat data.
@@ -240,6 +251,9 @@ class SubjectRestDreamsEntryPointsTest {
             val restoredWindow = InternalStateStore(context).openEstablishedWindow(role)
             assertEquals(window.getLong("opened_at"), restoredWindow.getLong("opened_at"))
             assertEquals(window.getLong("closes_at"), restoredWindow.getLong("closes_at"))
+            assertEquals(foundationBefore, InternalStateStore(context).read(role).getJSONObject("foundation_state").toString())
+            val foundationHistory = InternalStateStore(context).inspectCategory(role, second, "foundation_history", foundationId, 0)
+            assertEquals(1, foundationHistory.getJSONArray("items").length())
             assertEquals(original, item("dream", id).toString())
             assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
             assertTrue(requireNotNull(request(second).internalStateFrame).materialSources.values.any { it.contains("海上的书房") })

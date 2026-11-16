@@ -224,6 +224,25 @@ class InnerFoundationsEntryPointsTest {
         assertFalse(restored.read(secondRole).has("foundation_state"))
     }
 
+    @Test fun moreThanFourDifferentUnionsPersistWithoutReapplyingTheirMembers(): Unit = runBlocking {
+        var f = frame(chat, "这些理解可以有不同含义，不代表经历发生了多次")
+        val ids = listOf("foundation:drive:intimacy", "foundation:drive:rest")
+        ids.forEach { f = nativeInnerRead(context, f, "foundation", it) }
+        val versions = f.foundationVersions
+        val unions = JSONArray((1..9).map { index -> JSONObject()
+            .put("id", "meaning-$index").put("expected_version", 0).put("status", "active")
+            .put("members", JSONArray(ids.map { JSONObject().put("kind", "foundation").put("id", it).put("version", versions.getValue(it)) }))
+            .put("objects", JSONArray()).put("evidence", JSONArray().put(f.eventIds.first()))
+            .put("interpretation", "受控不同理解 $index").put("decision", "尚未决定行动")
+            .put("effects", JSONArray()) })
+        val output = report(f).put("unions", unions)
+        assertTrue(InnerStructureContext.submit(context, f, output).getBoolean("unions_adopted"))
+        InnerStructureContext.submit(context, f, output) // Technical replay returns the prior receipt.
+        for (i in 1..9) assertEquals(1, states.inspectCategory(role, secondChat, "union", "meaning-$i", 0)
+            .getJSONObject("item").getInt("version"))
+        ids.forEach { assertEquals(versions.getValue(it), InnerFoundations.currentVersions(states.read(role)).getValue(it)) }
+    }
+
     @Test fun adoptedUnionTimeRuleAffectsLaterReadsWithoutOverwritingNewMemberAppraisals(): Unit = runBlocking {
         val first = frame(chat, "两件事情带来了不同体验")
         InnerStructureContext.submit(context, first, report(first, listOf(episode(first, "A"), episode(first, "B"))))
