@@ -31,6 +31,7 @@ object InternalStateUserEdits {
         // Validate and settle on a copy: a rejected edit must not leave half a rule revision,
         // advance a clock, or discard a concurrent model update.
         val next = InternalStateDocument.copy(data)
+        val priorAlias = InnerFoundations.alias(next, id)?.let { InnerFoundations.member(next, it, now).getDouble("current_value") }
         val old = requireNotNull(InternalStateEngine.definitions(next).firstOrNull { it.getString("id") == id }) {
             "状态不存在"
         }
@@ -120,6 +121,7 @@ object InternalStateUserEdits {
         InternalStateEngine.record(next, eventId, "user_edit", chat, "用户修改内部状态：$reason", JSONArray().put(change), now)
         InternalStateEngine.rows(next, "events").last().put("edited_fields", JSONArray(editedFields.toString()))
         next.put("semantic_revision", revision + 1)
+        InnerFoundations.reconcileAdapter(next, id, priorAlias, now)
 
         // Observation may instantiate untouched states for display; keep that read projection
         // separate from the transaction's durable, target-only changes.

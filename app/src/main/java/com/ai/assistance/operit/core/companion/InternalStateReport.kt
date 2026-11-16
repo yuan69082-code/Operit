@@ -83,12 +83,11 @@ object InternalStateReports {
         val creates = objects(report, "create")
         val revisions = if (report.has("revise")) objects(report, "revise") else emptyList()
         val definitions = InternalStateEngine.definitions(next).associateBy { it.getString("id") }
-        if (next.optJSONObject("foundation_state")?.optInt("schema") == InnerFoundations.SCHEMA) {
-            // The former numeric reducer is historical after the atomic handoff. Its report
-            // operations must never create a second live authority beside the new foundations.
-            require(updates.isEmpty() && creates.isEmpty() && revisions.isEmpty()) {
-                "旧数值状态已转档；当下驱力使用 foundation，具体情绪/愿望用 episodes 与 inner"
-            }
+        val foundationActions = report.optJSONArray("foundation") ?: JSONArray()
+        val foundationTargets = (0 until foundationActions.length()).map { foundationActions.getJSONObject(it).getString("id") }.toSet()
+        (updates + revisions).forEach { action ->
+            if (InnerFoundations.alias(next, action.getString("id")) in foundationTargets)
+                throw InternalStateReportIssue("foundation", "foundation", "DUPLICATE_AUTHORITY_WRITE")
         }
         val revisedDefinitions = linkedMapOf<String, JSONObject>()
         revisions.forEach { revision ->
@@ -144,6 +143,7 @@ object InternalStateReports {
             require(definition.has("kind") && definition.getString("kind") in InternalStateEngine.kinds) { "新状态必须明确类别及完整时间参数" }
             InternalStateTimeRules.requireDefined(definition)
             val id = definition.getString("id")
+            InnerFoundations.validateNewDefinition(next, definition)
             require(identifiers.add(id) && id !in definitions) { "新维度 ID 已存在，不能覆盖旧状态" }
             validateExperience(create, definition, frame)
             validateObject(create, definition)
@@ -166,6 +166,11 @@ object InternalStateReports {
         }
         requireStateReport(!unseenChange, InternalStateReportFailure.CONFLICT)
 
+        val priorAliases = (updates + revisions).mapNotNull { action ->
+            InnerFoundations.alias(next, action.getString("id"))?.let {
+                action.getString("id") to InnerFoundations.member(next, it, now).getDouble("current_value")
+            }
+        }.toMap()
         revisions.forEach { revision ->
             val id = revision.getString("id")
             val old = definitions.getValue(id)
@@ -204,6 +209,8 @@ object InternalStateReports {
                 .put("before", JSONObject.NULL).put("after", JSONObject(definition.toString()))
                 .put("changes", JSONArray().put(JSONObject(firstChange.toString()))).put("frame_id", frame.id))
         }
+        (updates.map { it.getString("id") } + revisions.map { it.getString("id") }).distinct()
+            .forEach { InnerFoundations.reconcileAdapter(next, it, priorAliases[it], now) }
         if (changes.length() > 0) {
             // This event says that the assistant reported its own experience. It never impersonates
             // another user message/tool result and does not run that event's triggers a second time.
@@ -297,7 +304,7 @@ object InternalStateReports {
         }
     }
 
-    private fun writeExperience(data: JSONObject, definition: JSONObject, experience: JSONObject,
+    internal fun writeExperience(data: JSONObject, definition: JSONObject, experience: JSONObject,
                                 frame: InternalStateFrame, now: Long, changes: JSONArray): JSONObject {
         val state = InternalStateEngine.instance(data, definition, frame.chatId, now)
         val before = state.getDouble("value")

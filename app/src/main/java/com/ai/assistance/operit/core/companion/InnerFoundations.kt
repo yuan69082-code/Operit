@@ -10,7 +10,7 @@ import kotlin.math.exp
  * report transaction and one common material budget.
  */
 internal object InnerFoundations {
-    const val SCHEMA = 1
+    const val SCHEMA = 2
 
     data class Kind(
         val family: String,
@@ -150,6 +150,85 @@ internal object InnerFoundations {
     }
     private fun Int?.orZero(): Int = this ?: 0
 
+    /** Existing declared rules remain the sole reducer of an aliased drive. The foundation
+     * keeps only its identity/version, never a second independently evolving value. */
+    private fun adapter(data: JSONObject, drive: JSONObject, chat: String, now: Long): JSONObject? {
+        val id = drive.optString("adapter_id").takeIf { it.isNotBlank() } ?: return null
+        val definition = requireNotNull(InternalStateEngine.definitions(data).firstOrNull {
+            it.getString("id") == id && it.optBoolean("active")
+        })
+        val copy = InternalStateDocument.copy(data)
+        copy.remove("foundation_state") // Evaluate this declared rule without recursively reapplying its union projection.
+        InternalStateEngine.advanceDimension(copy, definition, chat, now)
+        val value = InternalStateEngine.instance(copy, definition, chat, now)
+        return JSONObject(definition.toString()).put("value", value.getDouble("value"))
+            .put("at", value.getLong("at"))
+    }
+
+    fun alias(data: JSONObject, id: String): String? = drives.firstOrNull {
+        data.optJSONObject("foundation_state")?.optJSONObject("drives")?.optJSONObject(it.id)
+            ?.optString("adapter_id") == id
+    }?.id
+
+    /** The old ID and installed category are two addresses of this value, not two reducers. */
+    fun projectInherited(data: JSONObject, row: JSONObject, now: Long) {
+        val id = alias(data, row.getString("id")) ?: return
+        val view = member(data, id, now)
+        val value = row.getDouble("min") + view.getDouble("current_value") * (row.getDouble("max") - row.getDouble("min"))
+        row.put("value", value).put("foundation_ref", id)
+            .put("intensity", (value - row.getDouble("baseline")) / (row.getDouble("max") - row.getDouble("min")))
+        view.optJSONObject("time_projection")?.let { row.put("time_projection", it) }
+    }
+
+    private fun inheritedNatural(data: JSONObject, id: String, anchor: Double, seconds: Double, now: Long): Double {
+        val copy = InternalStateDocument.copy(data)
+        copy.remove("foundation_state")
+        val definition = InternalStateEngine.definitions(copy).single { it.getString("id") == id }
+        val state = InternalStateEngine.instance(copy, definition, "global", now)
+        val range = definition.getDouble("max") - definition.getDouble("min")
+        val at = now - (seconds * 1000.0).toLong()
+        state.put("value", definition.getDouble("min") + anchor * range).put("at", at)
+        InternalStateEngine.advanceDimension(copy, definition, "global", now)
+        return (state.getDouble("value") - definition.getDouble("min")) / range
+    }
+
+    fun inheritedTimeProjection(data: JSONObject, id: String, now: Long): Double? {
+        val key = alias(data, id) ?: return null
+        val slot = data.getJSONObject("foundation_state").getJSONObject("drives").getJSONObject(key)
+        return InnerTemporalEffects.projection(data, "foundation:$key", slot.getInt("version"), now) { anchor, seconds ->
+            inheritedNatural(data, id, anchor, seconds, now)
+        }?.getDouble("intensity")
+    }
+
+    fun adapterChanged(data: JSONObject, id: String) {
+        val values = data.optJSONObject("foundation_state")?.optJSONObject("drives") ?: return
+        drives.forEach { kind ->
+            val slot = values.getJSONObject(kind.id)
+            if (slot.optString("adapter_id") == id) slot.put("version", Math.addExact(slot.getInt("version"), 1))
+        }
+    }
+
+    fun reconcileAdapter(data: JSONObject, id: String, priorValue: Double?, now: Long) {
+        val key = alias(data, id) ?: return
+        val definition = InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id }
+        val slot = data.getJSONObject("foundation_state").getJSONObject("drives").getJSONObject(key)
+        if (definition?.optBoolean("active") != true || definition.optString("scope") != "global" || definition.optString("kind") != "drive") {
+            // Explicit retirement/reclassification keeps its last value as history. It must
+            // neither resurrect the old rule nor silently start the default growth curve.
+            slot.remove("adapter_id")
+            slot.put("value", requireNotNull(priorValue)).put("at", now).put("manual_hold", true)
+                .put("origin", "inherited_rule_retired").put("version", Math.addExact(slot.getInt("version"), 1))
+        } else adapterChanged(data, id)
+    }
+
+    fun validateNewDefinition(data: JSONObject, definition: JSONObject) {
+        if (!data.has("foundation_state")) return
+        require(definition.getString("id") !in drives.map { it.key } &&
+            definition.getString("id") != "survival" && definition.optString("name").trim() != "求生欲") {
+            "已安装基础类别不能另建同一权威；使用 foundation，具体事情使用 episodes"
+        }
+    }
+
     /** Read-only member for unions, with one stable identity per installed category. */
     fun member(data: JSONObject, id: String, now: Long): JSONObject {
         val kind = requireNotNull(find(id)) { "基础类别不存在" }
@@ -159,13 +238,24 @@ internal object InnerFoundations {
             val drive = requireNotNull(state.optJSONObject("drives")?.optJSONObject(id))
             val duration = requireNotNull(kind.hours)
             val hours = ((now - drive.optLong("at")).coerceAtLeast(0)) / 3_600_000.0
-            val projected = 1.0 - (1.0 - drive.getDouble("value")) * exp(-hours / duration)
+            val inherited = adapter(data, drive, "global", now)
+            val projected = if (inherited != null) (inherited.getDouble("value") - inherited.getDouble("min")) /
+                (inherited.getDouble("max") - inherited.getDouble("min"))
+            else if (drive.optBoolean("manual_hold")) drive.getDouble("value")
+            else 1.0 - (1.0 - drive.getDouble("value")) * exp(-hours / duration)
             val adopted = InnerTemporalEffects.projection(data, "foundation:$id", drive.getInt("version"), now) { anchor, seconds ->
-                1.0 - (1.0 - anchor) * exp(-seconds / (duration * 3600.0))
+                if (inherited != null) inheritedNatural(data, drive.getString("adapter_id"), anchor, seconds, now)
+                else if (drive.optBoolean("manual_hold")) anchor
+                else 1.0 - (1.0 - anchor) * exp(-seconds / (duration * 3600.0))
             }
             row.put("version", drive.getInt("version")).put("current_value", adopted?.getDouble("intensity") ?: projected.coerceIn(0.0, 1.0))
                 .put("state", "base_drive_running")
             if (adopted != null) row.put("time_projection", adopted)
+            if (inherited != null) {
+                row.put("inherited_rule", inherited).put("state", "inherited_rule_running")
+                if (inherited.optBoolean("private")) row.put("subject_private_material", true)
+            }
+            if (drive.optBoolean("manual_hold")) row.put("state", "inherited_rule_retired")
         }
         if (state != null && id == "foundation:need:survival") {
             val survival = state.getJSONObject("survival")
@@ -235,48 +325,75 @@ internal object InnerFoundations {
     /** Immutable vocabulary, one transactional adoption of legacy facts and one active numeric reducer. */
     fun install(data: JSONObject, now: Long) {
         if (data.optJSONObject("foundation_state")?.optInt("schema") == SCHEMA) return
+        val previous = data.optJSONObject("foundation_state")
         val oldDefinitions = InternalStateEngine.definitions(data)
         val instances = InternalStateEngine.rows(data, "instances")
         val driveStates = JSONObject()
         drives.forEach { kind ->
-            driveStates.put(kind.id, JSONObject().put("value", 0.0).put("at", now).put("version", 0)
-                .put("origin", "foundation_initial").put("source_ref", JSONObject.NULL))
+            driveStates.put(kind.id, previous?.optJSONObject("drives")?.optJSONObject(kind.id)?.let { JSONObject(it.toString()) }
+                ?: JSONObject().put("value", 0.0).put("at", now).put("version", 0)
+                    .put("origin", "foundation_initial").put("source_ref", JSONObject.NULL))
         }
         val legacy = JSONArray()
         val versions = data.optJSONArray("versions") ?: JSONArray().also { data.put("versions", it) }
-        oldDefinitions.filter { it.optBoolean("active") }.forEach { definition ->
+        oldDefinitions.forEach { definition ->
             val id = definition.getString("id")
             val old = JSONObject(definition.toString())
+            val previousIndex = previous?.optJSONArray("legacy")?.let { rows ->
+                (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.optString("id") == id }
+            }
+            // Resume only definitions the unreleased schema-1 handoff itself disabled;
+            // never reactivate a definition deliberately retired by the user/subject.
+            if (!definition.optBoolean("active")) {
+                val migration = InternalStateEngine.rows(data, "versions").lastOrNull {
+                    it.optString("operation") == "foundation_handoff" && it.optString("dimension") == id &&
+                        it.optInt("version") == definition.optInt("version")
+                } ?: (data as? InternalStateDocument)?.history?.definitionChange(id, definition.optInt("version"))
+                    ?.takeIf { it.optString("operation") == "foundation_handoff" }
+                if (previous?.optInt("schema") != 1 || migration == null) return@forEach
+                definition.put("active", true).put("version", definition.getInt("version") + 1)
+                instances.filter { it.optString("dimension") == id }.forEach { it.put("at", now) }
+            }
             val matches = instances.filter { it.optString("dimension") == id }
             val original = matches.filter { it.optString("scope") == "global" }.maxByOrNull { it.optLong("at") }
             // Only a *stable engine key plus explicit kind* maps to a base drive.
             val link = drives.firstOrNull { it.key == id && definition.optString("kind") == "drive" &&
                 definition.optString("scope") == "global" && original != null }
             if (link != null && original != null) {
-                val minimum = definition.getDouble("min")
-                val span = definition.getDouble("max") - minimum
-                driveStates.getJSONObject(link.id).put("value", ((original.getDouble("value") - minimum) / span).coerceIn(0.0, 1.0))
-                    .put("version", 1).put("origin", "legacy_exact_id")
-                    .put("source_ref", id)
+                val slot = driveStates.getJSONObject(link.id)
+                // An explicit newer foundation appraisal must not be overwritten by migration.
+                if (slot.optString("origin") != "subject_report") {
+                    slot.put("adapter_id", id).put("version", maxOf(1, slot.optInt("version")))
+                        .put("origin", "existing_rule_adapter").put("source_ref", id)
+                    slot.remove("value"); slot.remove("at")
+                } else definition.put("active", false)
             }
             legacy.put(JSONObject().put("id", id).put("kind", definition.optString("kind", "unclassified"))
-                .put("name", definition.getString("name")).put("old_version", definition.getInt("version"))
+                .put("name", definition.getString("name")).put("old_version", previousIndex?.optInt("old_version") ?: old.getInt("version"))
                 .put("scope", definition.getString("scope"))
                 .put("source_value", original?.opt("value") ?: JSONObject.NULL)
                 .put("source_at", original?.opt("at") ?: JSONObject.NULL)
                 .put("mapping", link?.id ?: JSONObject.NULL)
-                .put("status", if (link == null) "pending_semantic_mapping" else "linked_by_exact_engine_id")
+                .put("status", if (link == null) "active_rule_pending_mapping" else "linked_by_exact_engine_id")
                 .put("source", "original_definition_and_instances"))
-            definition.put("active", false).put("version", old.getInt("version") + 1)
-            versions.put(JSONObject().put("at", now).put("operation", "foundation_handoff")
-                .put("dimension", id).put("version", definition.getInt("version"))
-                .put("source", "host_migration").put("reason", "旧时间规则停止参与；原始定义、实例和历史保留")
-                .put("before", old).put("after", JSONObject(definition.toString())))
+            // A legacy survival label is not evidence for a new strength, but it must not
+            // continue changing automatically in conflict with the confirmed survival rule.
+            if (id == "survival" || definition.optString("name").trim() == "求生欲") {
+                definition.put("active", false)
+                legacy.getJSONObject(legacy.length() - 1).put("status", "pending_survival_mapping")
+            }
+            if (old.optBoolean("active") != definition.optBoolean("active")) {
+                definition.put("version", old.getInt("version") + 1)
+                versions.put(JSONObject().put("at", now).put("operation", "foundation_handoff")
+                    .put("dimension", id).put("version", definition.getInt("version"))
+                    .put("source", "host_migration").put("reason", "只退出与已确认权威冲突的计算；其余原规则和局部范围继续承接")
+                    .put("before", old).put("after", JSONObject(definition.toString())))
+            }
         }
         val inheritedSurvival = adoptedSurvival(data)?.let { survivalFromAdopted(it, now) }
         data.put("foundation_state", JSONObject().put("schema", SCHEMA).put("drives", driveStates)
-            .put("survival", inheritedSurvival ?: JSONObject().put("formed", false).put("version", 0))
-            .put("legacy", legacy).put("installed_at", now)
+            .put("survival", previous?.optJSONObject("survival") ?: inheritedSurvival ?: JSONObject().put("formed", false).put("version", 0))
+            .put("legacy", legacy).put("installed_at", previous?.optLong("installed_at", now) ?: now)
             .put("catalogue_version", "engine-0567ba4-user-additions-v1"))
         data.put("semantic_revision", InternalStateEngine.semanticRevision(data) + 1L)
     }
@@ -286,6 +403,7 @@ internal object InnerFoundations {
         val states = data.optJSONObject("foundation_state")?.optJSONObject("drives") ?: return
         drives.forEach { kind ->
             val state = states.getJSONObject(kind.id)
+            if (state.has("adapter_id") || state.optBoolean("manual_hold")) return@forEach
             val at = state.optLong("at")
             if (now <= at) return@forEach
             val hours = (now - at).toDouble() / 3_600_000.0
@@ -300,9 +418,11 @@ internal object InnerFoundations {
         val driveValues = JSONArray()
         drives.forEach { kind ->
             val item = state.getJSONObject("drives").getJSONObject(kind.id)
-            val projected = member(data, kind.id, now).getDouble("current_value")
+            val view = member(data, kind.id, now)
+            val projected = view.getDouble("current_value")
             driveValues.put(JSONObject().put("id", kind.id).put("value", (projected.coerceIn(0.0, 1.0) * 1000).toInt() / 1000.0)
-                .put("version", item.getInt("version")))
+                .put("version", item.getInt("version")).put("subject_private_material", view.optBoolean("subject_private_material"))
+                .also { row -> if (item.has("adapter_id")) row.put("same_authority_as", item.getString("adapter_id")) })
         }
         val matched = kinds.filter { input.contains(it.name) || input.contains(it.key, ignoreCase = true) }
         val start = Math.floorMod(cursor, kinds.size.toLong()).toInt()
@@ -311,7 +431,7 @@ internal object InnerFoundations {
         val survival = state.getJSONObject("survival")
         val legacy = state.getJSONArray("legacy")
         val legacyRows = JSONArray((0 until legacy.length()).map { legacy.getJSONObject(it) }
-            .filter { it.optString("status") == "pending_semantic_mapping" }
+            .filter { it.optString("status") in setOf("pending_semantic_mapping", "active_rule_pending_mapping", "pending_survival_mapping") }
             .drop(Math.floorMod(cursor, maxOf(1, legacy.length()).toLong()).toInt()).take(2))
         return JSONObject().put("schema", SCHEMA).put("catalogue_count", kinds.size)
             .put("available", JSONArray(selected.map { JSONObject().put("id", it.id).put("name", it.name)
@@ -323,7 +443,6 @@ internal object InnerFoundations {
                 .put("goals_count", survival.optJSONArray("goals")?.length() ?: 0)
                 else JSONObject().put("formed", false).put("version", survival.optInt("version")))
             .put("legacy_pending", legacyRows)
-            .put("notice", "目录不代表体验已形成；每轮最多六个目录名与少量待承接索引。其他按ID或family查询。价值人格与关系已采用原文另由既有材料选择读取。")
     }
 
     fun page(data: JSONObject, family: String, offset: Int, now: Long): JSONObject {
@@ -357,12 +476,51 @@ internal object InnerFoundations {
             .put("next_offset", if (offset + 8 < found.size) offset + 8 else JSONObject.NULL)
     }
 
-    fun legacyPage(data: JSONObject, offset: Int): JSONObject {
+    fun legacyPage(data: JSONObject, offset: Int, chat: String? = null): JSONObject {
         require(offset >= 0)
         val legacy = data.optJSONObject("foundation_state")?.optJSONArray("legacy") ?: JSONArray()
-        val rows = (0 until legacy.length()).drop(offset).take(8).map { legacy.getJSONObject(it) }
+        val rows = (0 until legacy.length()).drop(offset).take(8).map { index ->
+            val row = JSONObject(legacy.getJSONObject(index).toString())
+            if (chat != null) {
+                val definition = InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == row.getString("id") }
+                if (definition?.optBoolean("active") == true) {
+                    val state = InternalStateEngine.rows(data, "instances").firstOrNull {
+                        it.getString("dimension") == definition.getString("id") &&
+                            it.getString("scope") == if (definition.getString("scope") == "global") "global" else chat
+                    }
+                    if (state != null) row.put("current_value", state.getDouble("value"))
+                        .put("current_scope", state.getString("scope")).put("current_at", state.getLong("at"))
+                    alias(data, row.getString("id"))?.let { key ->
+                        row.remove("current_value") // The category card already shows this same value.
+                        row.put("current_category", key)
+                    }
+                }
+            }
+            row
+        }
         return JSONObject().put("items", JSONArray(rows)).put("count", legacy.length())
             .put("next_offset", if (offset + 8 < legacy.length()) offset + 8 else JSONObject.NULL)
+    }
+
+    /** Original definitions and scoped current instances remain distinct from later interpretations. */
+    fun legacyDetail(data: JSONObject, id: String, chat: String): JSONObject {
+        val entries = data.optJSONObject("foundation_state")?.optJSONArray("legacy") ?: JSONArray()
+        val index = (0 until entries.length()).map { entries.getJSONObject(it) }
+            .firstOrNull { it.getString("id") == id } ?: return JSONObject().put("item", JSONObject.NULL)
+        val version = index.getInt("old_version")
+        val current = InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id }
+        val original = current?.takeIf { it.getInt("version") == version } ?: InternalStateEngine.rows(data, "versions").firstOrNull {
+            it.optString("dimension") == id && it.optJSONObject("before")?.optInt("version") == version
+        }?.getJSONObject("before") ?: (data as? InternalStateDocument)?.history?.definition(id, version)
+            ?: (data as? InternalStateDocument)?.history?.definitionChange(id, version + 1)?.optJSONObject("before")
+        val values = InternalStateEngine.rows(data, "instances").filter {
+            it.optString("dimension") == id && it.optString("scope") in setOf("global", chat)
+        }
+        return JSONObject().put("item", JSONObject(index.toString())
+            .put("original_definition", original ?: JSONObject.NULL).put("scoped_current_instances", JSONArray(values))
+            .put("current_definition", current ?: JSONObject.NULL)
+            .put("not_current_authority", current?.optBoolean("active") != true).put("not_a_new_experience", true)
+            .put("notice", "这些是旧定义与该窗口可读的原始值，不是今天新形成的体验；承接须保留原来源与适用范围。"))
     }
 
     /** Ordinary report changes, not a new model call or a separate psychological authority. */
@@ -377,42 +535,59 @@ internal object InnerFoundations {
             require(row.keys().asSequence().all { it in setOf("id", "expected_version", "value", "evidence", "reason", "objects", "goals") })
             val id = row.getString("id")
             require(targets.add(id)) { "同轮不能更新两次相同基础状态" }
-            val kind = find(id) ?: error("基础类别不存在")
-            require(kind.family == "drive" || id == "foundation:need:survival") { "其他类别以独立心理事件或候选记录演化" }
+            val kind = find(id) ?: throw InternalStateReportIssue("foundation", "foundation[$i].id", "UNKNOWN_CATEGORY")
+            if (kind.family != "drive" && id != "foundation:need:survival")
+                throw InternalStateReportIssue("foundation", "foundation[$i].id", "USE_EPISODE_OR_INNER")
             val current = if (kind.family == "drive") state.getJSONObject("drives").getJSONObject(id)
                 else state.getJSONObject("survival")
-            require(row.get("expected_version") is Number && row.getInt("expected_version") == current.optInt("version") &&
-                frame.foundationVersions[id] == current.optInt("version")) { "基础状态版本已变化" }
+            if (frame.foundationVersions[id] == null)
+                throw InternalStateReportIssue("foundation", "foundation[$i].id", "STATE_NOT_DELIVERED")
+            if (row.get("expected_version") !is Number || row.getInt("expected_version") != current.optInt("version") ||
+                frame.foundationVersions[id] != current.optInt("version"))
+                throw InternalStateReportIssue("foundation", "foundation[$i].expected_version", "STATE_VERSION_CHANGED")
             val raw = row.get("value")
-            require(raw is Number && raw.toDouble().isFinite() && raw.toDouble() >= 0 &&
-                (kind.family != "drive" || raw.toDouble() <= 1.0)) { "强度必须是有效数字；七驱力为0到1，求生欲为非负数" }
+            if (raw !is Number || !raw.toDouble().isFinite() || raw.toDouble() < 0 ||
+                (kind.family == "drive" && raw.toDouble() > 1.0))
+                throw InternalStateReportIssue("foundation", "foundation[$i].value", "VALUE_RANGE")
             val evidence = row.getJSONArray("evidence")
-            require(evidence.length() in 1..6)
+            if (evidence.length() !in 1..6)
+                throw InternalStateReportIssue("foundation", "foundation[$i].evidence", "EVIDENCE_REQUIRED")
             val bindings = JSONObject()
             for (j in 0 until evidence.length()) {
-                require(evidence.get(j) is String && (evidence.getString(j) in frame.eventIds || evidence.getString(j) in frame.materialSources)) {
-                    "基础状态只能依据本轮实际送达的来源"
-                }
+                if (evidence.get(j) !is String || (evidence.getString(j) !in frame.eventIds && evidence.getString(j) !in frame.materialSources))
+                    throw InternalStateReportIssue("foundation", "foundation[$i].evidence[$j]", "SOURCE_NOT_DELIVERED")
                 bindings.put(evidence.getString(j), InnerStructure.source(data, frame, evidence.getString(j)))
             }
             val reason = row.optString("reason")
-            require(reason.length <= 800 && (reason.isNotBlank() || id == "foundation:need:survival"))
+            if (reason.length > 800 || (reason.isBlank() && id != "foundation:need:survival"))
+                throw InternalStateReportIssue("foundation", "foundation[$i].reason", "APPRAISAL_REASON_REQUIRED")
             // Snapshot the old authority BEFORE editing references. Otherwise a survival
             // change records its newly supplied people/goals as if they were already present,
             // making recovery and history audit inaccurate.
             val before = JSONObject(current.toString())
+            if (current.has("adapter_id")) before.put("value", member(data, id, now).getDouble("current_value"))
             if (id == "foundation:need:survival") {
                 if (row.has("objects")) CategoryEvents.strings(row.getJSONArray("objects"), 8)
                 if (row.has("goals")) CategoryEvents.strings(row.getJSONArray("goals"), 8)
                 for (field in listOf("objects", "goals")) if (row.has(field)) current.put(field, JSONArray(row.getJSONArray(field).toString()))
                 current.put("formed", true)
             } else require(!row.has("objects") && !row.has("goals"))
-            current.put("value", raw.toDouble()).put("at", now).put("version", current.optInt("version") + 1)
+            if (current.has("adapter_id")) {
+                val definition = InternalStateEngine.definitions(data).single { it.getString("id") == current.getString("adapter_id") }
+                InternalStateEngine.advanceDimension(data, definition, frame.chatId, now)
+                val changes = JSONArray()
+                val experience = JSONObject().put("value", definition.getDouble("min") + raw.toDouble() *
+                    (definition.getDouble("max") - definition.getDouble("min"))).put("reason", reason).put("evidence", evidence)
+                InternalStateReports.writeExperience(data, definition, experience, frame, now, changes)
+                InternalStateEngine.record(data, "foundation_report:${frame.id}:$id", "state_report", frame.chatId,
+                    "已承接基础状态的同一权威更新", changes, now)
+            } else current.put("value", raw.toDouble()).put("at", now)
+            current.put("version", current.optInt("version") + 1)
                 .put("reason", reason).put("evidence", JSONArray(evidence.toString()))
                 .put("origin", "subject_report").put("source_bindings", bindings)
             CategoryEvents.append(data, frame, JSONObject().put("storage_kind", "foundation_change").put("id", id)
                 .put("parent", kind.family).put("version", current.getInt("version"))
-                .put("content", JSONObject().put("before", before).put("after", JSONObject(current.toString())))
+                .put("content", JSONObject().put("before", before).put("after", JSONObject(current.toString()).put("value", raw.toDouble())))
                 .put("source", "subject_report").put("frame_id", frame.id).put("at", now)
                 .put("owner", frame.roleId))
             } catch (failure: Exception) {
@@ -426,10 +601,11 @@ internal object InnerFoundations {
     val instructions = """
         [已安装基础机制与旧数值接替]
         foundation.available 只是可用概念目录，不等于这些体验已经发生；全目录用 companion_internal_state get section:foundation id:family 分页查看。具体情绪、愿望、感受、关系与人格仍需真实来源和对象。
-        七基础驱力的总量在 foundation.drive_values，按原引擎各自连续时间尺度变化，不是到点提醒或必须行动；每一类的不同事情用 episodes.appraise category_ref:"foundation:family:key" 分别记录，旧事变化请使用原事件ID加 expected_version。一个事件被多种心理类别共同理解，仍只有一次现实来源。
+        七基础驱力的总量在 foundation.drive_values；有原有效规则的继续按原规则，其他按各自连续时间尺度变化，不是到点提醒或必须行动；每一类的不同事情用 episodes.appraise category_ref:"foundation:family:key" 分别记录，旧事变化请使用原事件ID加 expected_version。一个事件被多种心理类别共同理解，仍只有一次现实来源。
         可选 foundation:[{id:"foundation:drive:intimacy",expected_version:0,value:0.5,evidence:["已读本轮事件ID"],reason:"自己的评价"}]，七驱力值在0..1内；也可使用 foundation:need:survival 明确调整求生欲（非负强度、reason可为空、objects和goals可选数组），任何时间、联合、其他关联都不能修改求生欲强度。
         其他基础类别不能用 foundation 数值报告伪造当下体验，应使用真实 episodes.appraise、既有 inner 候选与采用、关系及行动反馈，三者依旧同一个事务保存。人格、价值、立场和长期偏好采用还须原有的跨轮候选版本检查，不由基础目录预填。
-        旧数值维度已冻结并保留原始记录，能可靠对应原引擎稳定驱力ID的才映射数值；其他条目是待语义承接资料，不能按名字猜成新情绪。旧数值更新/创建/定时规则已退出运行，不得同轮又写一套。
+        原有效自定义规则和窗口局部状态继续运行；能可靠对应稳定驱力ID的以别名读取同一个原值与时间规则，不重复计算。原ID和foundation地址不能同轮重复写。无法确认含义的保留原件和原作用域，待语义承接，不按名字猜成新情绪。只停用已确认冲突的计算（如旧求生欲自动涨落），不推测新求生欲强度。新增具体事情用episodes，不能每件事再创建同名类别。
+        待承接项可用 companion_internal_state get section:legacy_handoff id:旧ID 按需读取原定义与本窗口/全局原值；它们是旧资料，不是新经历。没有足够语义时继续保留待承接，不猜对象、不虚构原理由，也不把窗口局部值改成全局。
         持续情感、感受、愿望与短时情绪分别发展，不把完成直接等同满足，不把失败自动等同不甘心。未实现的现实感官仅是需要目录而非实际传感器。
     """.trimIndent()
 }

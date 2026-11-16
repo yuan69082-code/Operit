@@ -47,14 +47,8 @@ internal object SubjectMaterialBudget {
             (0 until minOf(ids.length(), 2)).map { ids.getString(it) }.distinct()
         }.orEmpty()
         inner.remove("_relevance_first")
-        // Short originals and long fragments retain the retrieval order across both lanes.
-        result.optJSONObject("foundation")?.let { foundation ->
-            // Older unit-test and pre-handoff material envelopes remain readable; a real
-            // migrated role always supplies this field in InternalStateStore.prepare.
-            lane(foundation, "available", "foundation.available")
-            lane(foundation, "drive_values", "foundation.drive_values")
-            lane(foundation, "legacy_pending", "foundation.legacy_pending")
-        }
+        // Preserve the established rotation order. Installing vocabulary must not shift
+        // which real adopted content, activity or event the next ordinary request receives.
         lane(inner, "identity", "inner_structure.identity")
         lane(inner, "selected", "inner_structure.selected")
         lane(result.getJSONObject("category_events"), "episodes", "category_events.episodes")
@@ -65,6 +59,11 @@ internal object SubjectMaterialBudget {
         for (key in listOf("states", "important_changes", "experiences", "thoughts", "candidates", "state_catalog"))
             lane(result, key, key)
         for (key in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "catalogue", "pending_ids")) lane(inner, key, "inner_structure.$key")
+        result.optJSONObject("foundation")?.let { foundation ->
+            lane(foundation, "drive_values", "foundation.drive_values")
+            lane(foundation, "available", "foundation.available")
+            lane(foundation, "legacy_pending", "foundation.legacy_pending")
+        }
         result.remove("selection")
         inner.put("selection", "Relevant adopted records/fragments get first budget opportunities; other material rotates. Omitted records remain authoritative; retrieve by ID.")
         val omitted = JSONObject()
@@ -122,12 +121,17 @@ internal object SubjectMaterialBudget {
         directory?.rows?.forEach { include(directory, it) }
         // Rotate detail domains per request so emotion/identity cannot forever exclude
         // contrary material. This is technical exposure, never a change in subjective focus.
-        val rest = lanes.filter { it != directory }
+        val rest = lanes.filter { it != directory && !it.path.startsWith("foundation.") }
         val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
         val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
         val order = rest.drop(start) + rest.take(start)
         for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
             order.forEach { if (index < it.rows.size && (it.path to index) !in prioritized) include(it, it.rows[index]) }
+        // Empty catalogue concepts must not displace actual relevant experience. Omitted
+        // foundation values grant no read/adoption permission and remain retrievable by ID.
+        val foundationLanes = lanes.filter { it.path.startsWith("foundation.") }
+        for (index in 0 until (foundationLanes.maxOfOrNull { it.rows.size } ?: 0))
+            foundationLanes.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
         budget.put("estimated_tokens", estimate(result.toString()) + ENVELOPE_RESERVE)
         check(estimate(result.toString()) + ENVELOPE_RESERVE <= requested)
         return result

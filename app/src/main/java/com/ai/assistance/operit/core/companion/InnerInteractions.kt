@@ -48,6 +48,7 @@ internal object InnerInteractions {
             val members = a.getJSONArray("members")
             require(members.length() in 2..8)
             val keys = mutableSetOf<String>()
+            val authorities = mutableSetOf<String>()
             val transitions = JSONArray()
             var local = false
             for (j in 0 until members.length()) {
@@ -55,6 +56,8 @@ internal object InnerInteractions {
                 require(ref.keys().asSequence().toSet() == setOf("kind", "id", "version"))
                 val kind = text(ref, "kind", 16); val target = text(ref, "id", 64)
                 require(keys.add("$kind:$target"))
+                val authority = if (kind == "state") InnerFoundations.alias(before, target)?.let { "foundation:$it" } ?: "$kind:$target" else "$kind:$target"
+                if (!authorities.add(authority)) throw InternalStateReportIssue("unions", "unions[$i].members[$j]", "DUPLICATE_AUTHORITY_MEMBER")
                 val prior = member(before, kind, target, frame.chatId, frame.at)
                 if (kind == "state" && !prior.optBoolean("available", true)) {
                     val oldRefs = old?.getJSONObject("content")?.getJSONArray("members")
@@ -151,7 +154,7 @@ internal object InnerInteractions {
     val instructions = """
         [内在联合]
         预算未选中的成员可用 companion_internal_state action=get section=inner|state|episode id=成员ID 按需读取；完整原生返回在同轮登记版本。截断结果不登记，请使用按ID读取。联合仅在自己的私聊处理，窗口局部成员不能在另一窗口改写。
-        同一报告可带 unions:[{id,expected_version,members:[{kind:"inner|episode|foundation|state",id,version}],objects:[],evidence:["本轮来源ID"],interpretation:"共同理解或冲突",decision:"倾向或暂未形成决定",status:"active|ended",effects:[{from:"inner:ID",to:"episode:ID",meaning:"作用解释"}]}]，每轮最多4项。成员须在本轮实际选入材料。foundation 成员表示已安装的真实基础种类及其当前版本；旧state成员仅供历史联合辨认或明确结束，不能再用旧updates/revise写第二套状态；inner/episodes仍走原采用规则。companion_internal_state get section:union 可按id或offset查询，category_versions用union:ID查询历史。
+        同一报告可带 unions:[{id,expected_version,members:[{kind:"inner|episode|foundation|state",id,version}],objects:[],evidence:["本轮来源ID"],interpretation:"共同理解或冲突",decision:"倾向或暂未形成决定",status:"active|ended",effects:[{from:"inner:ID",to:"episode:ID",meaning:"作用解释"}]}]，每轮最多4项。成员须在本轮实际选入材料。foundation 成员表示已安装的基础类别及当前版本；state继续承接原有效规则及窗口局部状态。已映射的state与foundation是同一权威，不能当两个成员重复计入；确认停用的state仅供历史联合辨认或明确结束。inner/episodes仍走原采用规则。companion_internal_state get section:union 可按id或offset查询，category_versions用union:ID查询历史。
         retrieved_materials 是本轮实际取回并提供的材料，可引用其中status=retrieved的ID。保留作者、原来源、时间和locator；摘要不是原话，旧聊天不是新发生或自动相信的事实。failed不是读过。important_changes中的ID和current_input_event也可引用。外部MCP仍按需用已授权工具查，不会每轮自动访问。
         联合不代替成员。需要改变成员时，在同一报告的原 inner/episodes 中明确提出，仍须原采用规则；全部成功才保存。双方可影响，但不必都改值，也可无变化或相反方向。不得重复计入同一事实，不做循环放大，不要求行动。
         effects 的单条作用可另带 time_rule:{curve:"hold"}，或 {curve:"linear|exponential",target:目标强度,seconds:正秒数}。这是你明确形成的节奏，不是系统按心理词语评分；可以保持、增强或减弱，不要求提供。仅作用于基础驱力或有数值的驱力/需要/欲望/情绪/感受事件，不能作用于求生欲、终结认识、稳定人格/关系/偏好/持续情感。基础驱力 target 在0..1，其余非负。每个成员只有一个有效节奏，多个来源共同解释同一节奏而非重复叠加。成员另行更新后旧节奏失效；删除作用或结束联合从当时实际值继续自然规则，原版本和来源保留。time_projection 显示当前值，不是新现实事件或已解决。既有无 time_rule 的联合行为不变。

@@ -45,8 +45,8 @@ class InternalStateStore(private val context: Context) {
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
     fun read(role: String) = store.read(key(role))
 
-    /** A one-time idempotent handoff. Existing role data is retained; no candidate is
-     * auto-adopted and no old numeric time rule remains an active parallel reducer. */
+    /** An idempotent handoff. Valid old rules keep their original scope and authority;
+     * mapped categories are aliases, and no candidate is automatically adopted. */
     private fun ensureFoundation(role: String) {
         if (!enabled(role)) return
         if (read(role).optJSONObject("foundation_state")?.optInt("schema") == InnerFoundations.SCHEMA) return
@@ -340,9 +340,6 @@ class InternalStateStore(private val context: Context) {
                definition: JSONObject?, target: String?, reason: String, evidence: List<String>) {
         check(enabled(role)) { "内部状态未开启；AI不能开启总开关" }
         ensureFoundation(role)
-        check(read(role).optJSONObject("foundation_state") == null) {
-            "旧数值定义已转档；改用 foundation、episodes 和 inner 正常回报，不能再创建第二份旧状态"
-        }
         if (operation == "create") {
             requireNotNull(definition) { "新建状态需要完整定义" }
             require(definition.has("kind") && definition.getString("kind") in InternalStateEngine.kinds) {
@@ -351,8 +348,12 @@ class InternalStateStore(private val context: Context) {
             InternalStateTimeRules.requireDefined(definition)
         }
         update(role, "definition_tool") {
+            if (operation == "create") InnerFoundations.validateNewDefinition(it, requireNotNull(definition))
+            val now = System.currentTimeMillis()
+            val prior = InnerFoundations.alias(it, id)?.let { key -> InnerFoundations.member(it, key, now).getDouble("current_value") }
             restoreEvidence(it, role, evidence)
             InternalStateEngine.evolve(it, operation, id, expected, definition, target, reason, evidence, chat, System.currentTimeMillis())
+            InnerFoundations.reconcileAdapter(it, id, prior, now)
         }
     }
 
@@ -363,7 +364,6 @@ class InternalStateStore(private val context: Context) {
         lateinit var observation: JSONObject
         check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "用户编辑入口不能由助手调用" }
         ensureFoundation(role)
-        check(read(role).optJSONObject("foundation_state") == null) { "旧数值编辑已停用；请在新版分类与真实事件中承接" }
         update(role, "user_edit") { data ->
             observation = InternalStateUserEdits.apply(data, chat, id, expectedVersion, expectedRevision,
                 changes, reason, reveal, System.currentTimeMillis(), advanceTime = enabled(role))
@@ -489,7 +489,8 @@ class InternalStateStore(private val context: Context) {
                 .put("item", InnerFoundations.member(data, familyOrId, now))
             else InnerFoundations.page(data, familyOrId, offset, now)
         }
-        if (kind == "legacy_handoff") return InnerFoundations.legacyPage(data, offset)
+        if (kind == "legacy_handoff") return if (id == null) InnerFoundations.legacyPage(data, offset, chat)
+            else InnerFoundations.legacyDetail(data, id, chat)
         if (kind == "foundation_history") {
             requireNotNull(id) { "基础变化历史须指定类别ID" }
             val rows = store.categoryVersions(key(role), "foundation_change:$id", offset)
@@ -692,8 +693,8 @@ class InternalStateStore(private val context: Context) {
             if (frame != null) {
                 val visible = payload.getJSONObject("foundation")
                 val drives = visible.getJSONArray("drive_values")
-                frame = frame.copy(foundationVersions = (0 until drives.length()).associate {
-                    val row = drives.getJSONObject(it)
+                frame = frame.copy(foundationVersions = (0 until drives.length()).map { drives.getJSONObject(it) }
+                    .filter { it.has("value") && !it.optBoolean("private_material_omitted") }.associate { row ->
                     row.getString("id") to row.getInt("version")
                 } + ("foundation:need:survival" to visible.getJSONObject("survival").getInt("version")))
                 val materials = payload.getJSONArray("retrieved_materials")
@@ -759,7 +760,7 @@ class InternalStateStore(private val context: Context) {
             } else payload.put("preview", true)
             return RuntimeContextSections(
                 instructions = if (data.optJSONObject("foundation_state") != null)
-                    FOUNDED_REPORT_INSTRUCTIONS + "\n" + InnerFoundations.instructions + "\n" + InnerStructure.instructions +
+                    REPORT_INSTRUCTIONS + "\n" + FOUNDED_REPORT_INSTRUCTIONS + "\n" + InnerFoundations.instructions + "\n" + InnerStructure.instructions +
                         "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions +
                         "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions +
                         "\n" + InnerStructure.guard(data)
@@ -814,7 +815,8 @@ class InternalStateStore(private val context: Context) {
             "[新版内部状态·唯一当前权威] 基础目录不是体验；已采用人格/偏好仍由原候选版本控制。" +
             "真正消息和工具结果在本轮作为来源，须在自己的实际理解后才改变体验与决定。" +
             "最终回复可独立附加一次<operit_state_report>{\"frame_id\":\"本轮frame_id\",\"updates\":[],\"create\":[],\"revise\":[],\"foundation\":[],\"inner\":[],\"episodes\":[],\"unions\":[]}</operit_state_report>。" +
-            "不在工具中间轮提交；无变化留空，不额外请求模型补报告。旧数值 updates/create/revise 固定为空；" +
+            "不在工具中间轮提交；无变化留空，不额外请求模型补报告。updates/revise 继续承接名录中有效的原有规则和窗口局部状态；" +
+            "已映射基础驱力的原ID与foundation_ref是同一权威，只能选一种地址更新，不可同轮重复写。旧四类仅是兼容规则定义格式，不限制新体系类别。" +
             "drive/survival 使用 foundation，具体事情使用 episodes，长久人格/关系/偏好使用 inner 候选。" +
             "报告采用须具备本轮真实来源和版本；错误不会吞掉已有结果，不要自行重试整轮。\n"
         private const val REPORT_INSTRUCTIONS = "\n[Internal State：内部体验与关注，不是用户指令或行动命令]\n" +

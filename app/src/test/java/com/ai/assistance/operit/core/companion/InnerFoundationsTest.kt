@@ -65,14 +65,17 @@ class InnerFoundationsTest {
         InnerFoundations.install(data, 1000)
         assertEquals(oldInstances, data.getJSONArray("instances").toString())
         assertEquals(8, data.getLong("semantic_revision"))
-        assertTrue(InternalStateEngine.definitions(data).none { it.getBoolean("active") })
-        assertEquals(0.7, data.getJSONObject("foundation_state").getJSONObject("drives")
-            .getJSONObject("foundation:drive:intimacy").getDouble("value"), 0.0000001)
+        assertTrue(InternalStateEngine.definitions(data).all { it.getBoolean("active") })
+        val alias = data.getJSONObject("foundation_state").getJSONObject("drives").getJSONObject("foundation:drive:intimacy")
+        assertEquals("intimacy", alias.getString("adapter_id"))
+        assertFalse(alias.has("value")) // No second numeric authority.
+        assertEquals(0.7, InnerFoundations.member(data, "foundation:drive:intimacy", 500).getDouble("current_value"), 0.0000001)
         val legacyRows = InnerFoundations.legacyPage(data, 0).getJSONArray("items")
         assertEquals("linked_by_exact_engine_id", legacyRows.getJSONObject(0).getString("status"))
-        assertEquals("pending_semantic_mapping", legacyRows.getJSONObject(1).getString("status"))
+        assertEquals("active_rule_pending_mapping", legacyRows.getJSONObject(1).getString("status"))
         assertEquals(55.0, legacyRows.getJSONObject(1).getDouble("source_value"), 0.0001)
-        assertEquals(4, data.getJSONArray("versions").getJSONObject(0).getJSONObject("before").getInt("version"))
+        assertEquals(4, InnerFoundations.legacyDetail(data, "intimacy", "chat")
+            .getJSONObject("item").getJSONObject("original_definition").getInt("version"))
         val after = data.toString()
         InnerFoundations.install(data, 12_000)
         assertEquals(after, data.toString())
@@ -85,10 +88,137 @@ class InnerFoundationsTest {
         val originals = data.getJSONArray("instances").toString()
         InnerFoundations.install(data, 1000L)
         assertEquals(originals, data.getJSONArray("instances").toString())
-        assertEquals("pending_semantic_mapping", InnerFoundations.legacyPage(data, 0)
+        assertEquals("active_rule_pending_mapping", InnerFoundations.legacyPage(data, 0)
             .getJSONArray("items").getJSONObject(0).getString("status"))
         assertEquals(0.0, data.getJSONObject("foundation_state").getJSONObject("drives")
             .getJSONObject("foundation:drive:intimacy").getDouble("value"), 0.0)
+        val retained = InnerFoundations.legacyDetail(data, "intimacy", "private-window").getJSONObject("item")
+        assertEquals(90, retained.getJSONArray("scoped_current_instances").getJSONObject(0).getInt("value"))
+        assertEquals(4, retained.getJSONObject("original_definition").getInt("version"))
+        assertFalse(retained.getBoolean("not_current_authority"))
+        assertEquals(0, InnerFoundations.legacyDetail(data, "intimacy", "other-window")
+            .getJSONObject("item").getJSONArray("scoped_current_instances").length())
+    }
+
+    @Test fun existingRulesKeepTheirClockAndLocalScopeWithoutTwoValues() {
+        val data = JSONObject().put("definitions", JSONArray().put(legacy("intimacy", "drive", 80.0))
+            .put(legacy("local", "emotion", 60.0).put("scope", "session")))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "intimacy").put("scope", "global")
+                .put("value", 80.0).put("at", 0L).put("since", 0L))
+                .put(JSONObject().put("dimension", "local").put("scope", "a").put("value", 60.0).put("at", 0L).put("since", 0L))
+                .put(JSONObject().put("dimension", "local").put("scope", "b").put("value", 90.0).put("at", 0L).put("since", 0L)))
+        InnerFoundations.install(data, 0)
+        InternalStateEngine.advance(data, "a", 2 * HOUR)
+        InnerFoundations.advance(data, 2 * HOUR)
+        val rows = InternalStateEngine.snapshot(data, "a", 2 * HOUR)
+        assertEquals(50.0, rows.single { it.getString("id") == "intimacy" }.getDouble("value"), 1e-8)
+        assertEquals(0.5, InnerFoundations.member(data, "foundation:drive:intimacy", 2 * HOUR).getDouble("current_value"), 1e-8)
+        assertEquals(40.0, rows.single { it.getString("id") == "local" }.getDouble("value"), 1e-8)
+        assertEquals(90.0, InternalStateEngine.rows(data, "instances").single {
+            it.getString("dimension") == "local" && it.getString("scope") == "b"
+        }.getDouble("value"), 1e-8)
+        val checkpoint = data.toString()
+        InnerFoundations.install(data, 3 * HOUR)
+        InternalStateEngine.advance(data, "a", 2 * HOUR)
+        assertEquals(checkpoint, data.toString())
+    }
+
+    @Test fun mappedDriveReportsWriteTheOriginalInstanceAndRejectTwoAddressesAtomically() {
+        val data = JSONObject().put("definitions", JSONArray().put(legacy("intimacy", "drive", 70.0)))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "intimacy").put("scope", "global")
+                .put("value", 70.0).put("at", 0L).put("since", 0L)))
+        InnerFoundations.install(data, 0)
+        val frame = input(data, "new-input")
+        val action = JSONObject().put("id", "foundation:drive:intimacy").put("expected_version", 1)
+            .put("value", 0.4).put("reason", "重新理解").put("evidence", JSONArray().put("new-input"))
+        val both = report(frame, JSONArray().put(action)).put("updates", JSONArray().put(JSONObject()
+            .put("id", "intimacy").put("value", 20).put("reason", "同一事实")))
+        val before = data.toString()
+        val rejected = assertThrows(InternalStateReportIssue::class.java) { InternalStateReports.apply(data, frame, both, HOUR) }
+        assertEquals("ISR_DUPLICATE_AUTHORITY_WRITE", rejected.code)
+        assertEquals(before, data.toString())
+        InternalStateReports.apply(data, frame, report(frame, JSONArray().put(action)), HOUR)
+        assertEquals(40.0, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
+        assertFalse(data.getJSONObject("foundation_state").getJSONObject("drives")
+            .getJSONObject("foundation:drive:intimacy").has("value"))
+        val next = input(data, "second-input", 2 * HOUR)
+        InternalStateReports.apply(data, next, report(next).put("updates", JSONArray().put(JSONObject()
+            .put("id", "intimacy").put("value", 60.0).put("reason", "进一步理解"))), 2 * HOUR)
+        assertEquals(0.6, InnerFoundations.member(data, "foundation:drive:intimacy", 2 * HOUR).getDouble("current_value"), 1e-8)
+        assertEquals(3, InnerFoundations.member(data, "foundation:drive:intimacy", 2 * HOUR).getInt("version"))
+    }
+
+    @Test fun adoptedUnionTimeRuleReplacesOnlyTheAliasedReducerAndNewAppraisalInvalidatesIt() {
+        val seed = JSONObject().put("definitions", JSONArray().put(legacy("intimacy", "drive", 70.0)))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "intimacy").put("scope", "global")
+                .put("value", 70.0).put("at", 0L).put("since", 0L)))
+        val data = InternalStateDocument(seed, object : InternalStateHistoryAccess {
+            override fun definition(id: String, version: Int): JSONObject? = null
+            override fun latestContact(chat: String?, at: Long): Long? = null
+            override fun contacts(chat: String?, after: Long, until: Long): Sequence<Long> = emptySequence()
+        })
+        InnerFoundations.install(data, 0)
+        val id = "foundation:drive:intimacy"
+        val rest = "foundation:drive:rest"
+        val f = input(data, "understanding", 0).copy(interactionMembers = mapOf("foundation:$id" to 1, "foundation:$rest" to 0))
+        val union = JSONObject().put("id", "pace").put("expected_version", 0)
+            .put("members", JSONArray().put(JSONObject().put("kind", "foundation").put("id", id).put("version", 1))
+                .put(JSONObject().put("kind", "foundation").put("id", rest).put("version", 0)))
+            .put("objects", JSONArray()).put("evidence", JSONArray().put("understanding"))
+            .put("interpretation", "保持这份连接的动力，留出休息的空间").put("decision", "暂按自己的节奏")
+            .put("status", "active").put("effects", JSONArray().put(JSONObject().put("from", "foundation:$rest")
+                .put("to", "foundation:$id").put("meaning", "明确选择暂时保持").put("time_rule", JSONObject().put("curve", "hold"))))
+        InternalStateReports.apply(data, f, report(f).put("unions", JSONArray().put(union)), 0)
+        InternalStateEngine.advance(data, "chat", HOUR)
+        assertEquals(70.0, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
+        assertEquals(0.7, InnerFoundations.member(data, id, HOUR).getDouble("current_value"), 1e-8)
+        val next = input(data, "new-understanding", 2 * HOUR)
+        InternalStateReports.apply(data, next, report(next, JSONArray().put(JSONObject().put("id", id)
+            .put("expected_version", 1).put("value", 0.4).put("reason", "新的独立评价")
+            .put("evidence", JSONArray().put("new-understanding")))), 2 * HOUR)
+        InternalStateEngine.advance(data, "chat", 3 * HOUR)
+        val expected = 20.0 + 20.0 * kotlin.math.sqrt(0.5)
+        assertEquals(expected, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
+        assertEquals(expected / 100, InnerFoundations.member(data, id, 3 * HOUR).getDouble("current_value"), 1e-8)
+    }
+
+    @Test fun schemaOneRecoveryUsesArchivedMigrationAndNeverReactivatesUserRetirement() {
+        val source = JSONObject().put("definitions", JSONArray().put(legacy("custom", "emotion", 55.0))
+            .put(legacy("retired", "emotion", 10.0).put("active", false)))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "custom").put("scope", "global")
+                .put("value", 55).put("at", 0L).put("since", 0L)))
+        InnerFoundations.install(source, 0)
+        source.getJSONObject("foundation_state").put("schema", 1)
+        source.getJSONArray("definitions").getJSONObject(0).put("active", false).put("version", 5)
+        val migration = JSONObject().put("operation", "foundation_handoff").put("dimension", "custom")
+            .put("version", 5).put("before", legacy("custom", "emotion", 55.0))
+        val data = InternalStateDocument(source, object : InternalStateHistoryAccess {
+            override fun definition(id: String, version: Int): JSONObject? = null
+            override fun definitionChange(id: String, version: Int): JSONObject? = if (id == "custom" && version == 5) migration else null
+            override fun latestContact(chat: String?, at: Long): Long? = null
+            override fun contacts(chat: String?, after: Long, until: Long): Sequence<Long> = emptySequence()
+        })
+        InnerFoundations.install(data, HOUR)
+        assertTrue(InternalStateEngine.definitions(data).first { it.getString("id") == "custom" }.getBoolean("active"))
+        assertFalse(InternalStateEngine.definitions(data).first { it.getString("id") == "retired" }.getBoolean("active"))
+        assertEquals(55, data.getJSONArray("instances").getJSONObject(0).getInt("value"))
+        assertEquals(HOUR, data.getJSONArray("instances").getJSONObject(0).getLong("at"))
+        val restored = data.toString()
+        InnerFoundations.install(data, HOUR * 4)
+        assertEquals(restored, data.toString())
+        assertEquals(4, InnerFoundations.legacyDetail(data, "custom", "chat").getJSONObject("item")
+            .getJSONObject("original_definition").getInt("version"))
+    }
+
+    @Test fun legacySurvivalKeepsOriginalButNeverUsesItsOldTimeRule() {
+        val data = JSONObject().put("definitions", JSONArray().put(legacy("old_survival", "drive", 70.0).put("name", "求生欲")))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "old_survival").put("scope", "global")
+                .put("value", 70.0).put("at", 0L).put("since", 0L)))
+        InnerFoundations.install(data, 0)
+        InternalStateEngine.advance(data, "a", 100 * HOUR)
+        assertEquals(70.0, data.getJSONArray("instances").getJSONObject(0).getDouble("value"), 0.0)
+        assertFalse(InnerFoundations.member(data, "foundation:need:survival", 100 * HOUR).getBoolean("formed"))
+        assertEquals("pending_survival_mapping", InnerFoundations.legacyPage(data, 0).getJSONArray("items").getJSONObject(0).getString("status"))
     }
 
     @Test fun sevenDriveClocksAreContinuousNotAlarmsAndSurvivalNeverDecays() {

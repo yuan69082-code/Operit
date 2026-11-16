@@ -5,6 +5,7 @@ import org.json.JSONObject
 /** Read-only host port. Never serialized, copied into model output, or used as another writer. */
 internal interface InternalStateHistoryAccess {
     fun definition(id: String, version: Int): JSONObject?
+    fun definitionChange(id: String, version: Int): JSONObject? = null
     fun latestContact(chat: String?, at: Long): Long?
     fun contacts(chat: String?, after: Long, until: Long): Sequence<Long>
     fun categoryRow(kind: String, id: String): JSONObject? = null

@@ -276,6 +276,8 @@ class CompanionStore(context: Context) {
             synchronized(definitions) { definitions[key] = found }
             return found?.let { JSONObject(it.toString()) }
         }
+        override fun definitionChange(id: String, version: Int): JSONObject? =
+            archivedStateRow(scope, "versions", "$id:$version")
         override fun latestContact(chat: String?, at: Long): Long? = synchronized(lock(scope)) {
             history(scope).use { it.latestContact(chat, at) }
         }
