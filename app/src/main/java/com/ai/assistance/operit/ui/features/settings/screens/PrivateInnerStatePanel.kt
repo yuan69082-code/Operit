@@ -226,6 +226,13 @@ internal fun PrivateRecordDialog(role: String, kind: String, row: JSONObject, hi
                     }
                     Text(privateOrigin(full))
                     PrivateContent(full.optJSONObject("content") ?: full.optJSONObject("record") ?: full)
+                    full.optJSONObject("time_projection")?.let { projection ->
+                        PrivateFold("当前时间作用 · 不代表事情已经解决") {
+                            Text("当前强度：${projection.getDouble("intensity")}")
+                            Text("依据：${projection.optString("basis")}")
+                            if (projection.has("union_id")) Text("关联联合：${projection.getString("union_id")}")
+                        }
+                    }
                     full.optJSONObject("request")?.let { PrivateFold("实际操作请求") { PrivateContent(it) } }
                     full.optJSONObject("declaration")?.let { PrivateFold("当时明确形成的操作打算") { PrivateContent(it) } }
                     full.optJSONObject("receipt")?.let { PrivateFold("实际回执 · 不代表愿望满足") { PrivateContent(it) } }

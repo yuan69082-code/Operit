@@ -193,6 +193,49 @@ class InnerFoundationsEntryPointsTest {
         }
     }
 
+    @Test fun adoptedUnionTimeRuleAffectsLaterReadsWithoutOverwritingNewMemberAppraisals(): Unit = runBlocking {
+        val first = frame(chat, "两件事情带来了不同体验")
+        InnerStructureContext.submit(context, first, report(first, listOf(episode(first, "A"), episode(first, "B"))))
+        suspend fun readMembers(): InternalStateFrame {
+            var f = frame(secondChat, "继续理解这两件事之间的作用")
+            f = nativeInnerRead(context, f, "episode", "A")
+            return nativeInnerRead(context, f, "episode", "B")
+        }
+        val f = readMembers()
+        val union = JSONObject().put("id", "time-union").put("expected_version", 0)
+            .put("members", JSONArray(listOf("A", "B").map { id -> JSONObject()
+                .put("kind", "episode").put("id", id).put("version", 1) }))
+            .put("objects", JSONArray().put("self")).put("evidence", JSONArray().put(f.eventIds.first()))
+            .put("interpretation", "本测试模拟主体明确给出节奏，不证明真实模型的心理结论")
+            .put("decision", "暂未决定行动").put("status", "active")
+            .put("effects", JSONArray().put(JSONObject().put("from", "episode:A").put("to", "episode:B")
+                .put("meaning", "明确采用这次节奏，成员仍独立")
+                .put("time_rule", JSONObject().put("curve", "linear").put("target", 0.9).put("seconds", 3600))))
+        val submitted = report(f).put("unions", JSONArray().put(union))
+        val receipt = InnerStructureContext.submit(context, f, submitted)
+        assertEquals(receipt.toString(), InnerStructureContext.submit(context, f, submitted).toString())
+        val data = InternalStateStore(context).read(role)
+        val adopted = CategoryEvents.row(data, "union", "time-union")!!
+        val b = CategoryEvents.row(data, "episode", "B")!!
+        val projection = CategoryEvents.timeView(data, b, adopted.getLong("at") + 3_600_000L)
+        assertEquals(0.9, projection.getJSONObject("time_projection").getDouble("intensity"), 0.00001)
+        assertEquals(0.4, b.getJSONObject("content").getDouble("intensity"), 0.00001)
+        assertEquals("unresolved", b.getJSONObject("content").getString("status"))
+        assertEquals("subject_adopted_time_rule", states.inspectCategory(role, secondChat, "episode", "B", 0)
+            .getJSONObject("item").getJSONObject("time_projection").getString("basis"))
+        // The normal next request, not just the page, consumes the same projection.
+        states.materialBudget(role, chat, 16384)
+        val next = InnerStructureContext.prepare(context, role, chat, true, input = "继续这些已经形成的理解")
+        assertTrue(next.state.contains("subject_adopted_time_rule"))
+        val n = requireNotNull(next.internalStateFrame)
+        InnerStructureContext.submit(context, n, report(n, listOf(episode(n, "B", 1).put("intensity", 0.2))))
+        val after = states.inspectCategory(role, chat, "episode", "B", 0).getJSONObject("item")
+        assertEquals(2, after.getInt("version"))
+        assertEquals(0.2, after.getJSONObject("content").getDouble("intensity"), 0.00001)
+        assertNotEquals("subject_adopted_time_rule", after.getJSONObject("time_projection").getString("basis"))
+        assertEquals(1, states.inspectCategory(role, chat, "episode", "A", 0).getJSONObject("item").getInt("version"))
+    }
+
     @Test fun unformedSurvivalDoesNotMaterializeAsAnInventedExperience(): Unit = runBlocking {
         frame(chat, "今天聊聊真实经历，但并没有报告求生欲")
         val survival = states.inspectCategory(role, chat, "foundation", "foundation:need:survival", 0).getJSONObject("item")

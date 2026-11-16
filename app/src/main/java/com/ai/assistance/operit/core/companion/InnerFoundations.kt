@@ -160,8 +160,12 @@ internal object InnerFoundations {
             val duration = requireNotNull(kind.hours)
             val hours = ((now - drive.optLong("at")).coerceAtLeast(0)) / 3_600_000.0
             val projected = 1.0 - (1.0 - drive.getDouble("value")) * exp(-hours / duration)
-            row.put("version", drive.getInt("version")).put("current_value", projected.coerceIn(0.0, 1.0))
+            val adopted = InnerTemporalEffects.projection(data, "foundation:$id", drive.getInt("version"), now) { anchor, seconds ->
+                1.0 - (1.0 - anchor) * exp(-seconds / (duration * 3600.0))
+            }
+            row.put("version", drive.getInt("version")).put("current_value", adopted?.getDouble("intensity") ?: projected.coerceIn(0.0, 1.0))
                 .put("state", "base_drive_running")
+            if (adopted != null) row.put("time_projection", adopted)
         }
         if (state != null && id == "foundation:need:survival") {
             val survival = state.getJSONObject("survival")
@@ -245,9 +249,9 @@ internal object InnerFoundations {
             val old = JSONObject(definition.toString())
             val matches = instances.filter { it.optString("dimension") == id }
             val original = matches.filter { it.optString("scope") == "global" }.maxByOrNull { it.optLong("at") }
-                ?: matches.maxByOrNull { it.optLong("at") }
             // Only a *stable engine key plus explicit kind* maps to a base drive.
-            val link = drives.firstOrNull { it.key == id && definition.optString("kind") == "drive" }
+            val link = drives.firstOrNull { it.key == id && definition.optString("kind") == "drive" &&
+                definition.optString("scope") == "global" && original != null }
             if (link != null && original != null) {
                 val minimum = definition.getDouble("min")
                 val span = definition.getDouble("max") - minimum
@@ -296,8 +300,7 @@ internal object InnerFoundations {
         val driveValues = JSONArray()
         drives.forEach { kind ->
             val item = state.getJSONObject("drives").getJSONObject(kind.id)
-            val hours = ((now - item.optLong("at")).coerceAtLeast(0)).toDouble() / 3_600_000.0
-            val projected = 1.0 - (1.0 - item.getDouble("value")) * exp(-hours / requireNotNull(kind.hours))
+            val projected = member(data, kind.id, now).getDouble("current_value")
             driveValues.put(JSONObject().put("id", kind.id).put("value", (projected.coerceIn(0.0, 1.0) * 1000).toInt() / 1000.0)
                 .put("version", item.getInt("version")))
         }
@@ -342,8 +345,7 @@ internal object InnerFoundations {
             if (instance != null) {
                 row.put("version", instance.optInt("version")).put("updated_at", instance.optLong("at"))
                 if (instance.has("value") && (kind.family == "drive" || instance.optBoolean("formed"))) {
-                    val value = if (kind.family == "drive") 1.0 - (1.0 - instance.getDouble("value")) *
-                        exp(-((now - instance.optLong("at")).coerceAtLeast(0) / 3_600_000.0) / requireNotNull(kind.hours))
+                    val value = if (kind.family == "drive") member(data, kind.id, now).getDouble("current_value")
                     else instance.getDouble("value")
                     row.put("current_value", value)
                     if (kind.family == "drive") row.put("state", "base_drive_running")
@@ -387,8 +389,12 @@ internal object InnerFoundations {
                 (kind.family != "drive" || raw.toDouble() <= 1.0)) { "强度必须是有效数字；七驱力为0到1，求生欲为非负数" }
             val evidence = row.getJSONArray("evidence")
             require(evidence.length() in 1..6)
-            for (j in 0 until evidence.length()) require(evidence.get(j) is String && evidence.getString(j) in frame.eventIds) {
-                "基础状态只能依据本轮实际送达的来源"
+            val bindings = JSONObject()
+            for (j in 0 until evidence.length()) {
+                require(evidence.get(j) is String && (evidence.getString(j) in frame.eventIds || evidence.getString(j) in frame.materialSources)) {
+                    "基础状态只能依据本轮实际送达的来源"
+                }
+                bindings.put(evidence.getString(j), InnerStructure.source(data, frame, evidence.getString(j)))
             }
             val reason = row.optString("reason")
             require(reason.length <= 800 && (reason.isNotBlank() || id == "foundation:need:survival"))
@@ -404,7 +410,7 @@ internal object InnerFoundations {
             } else require(!row.has("objects") && !row.has("goals"))
             current.put("value", raw.toDouble()).put("at", now).put("version", current.optInt("version") + 1)
                 .put("reason", reason).put("evidence", JSONArray(evidence.toString()))
-                .put("origin", "subject_report")
+                .put("origin", "subject_report").put("source_bindings", bindings)
             CategoryEvents.append(data, frame, JSONObject().put("storage_kind", "foundation_change").put("id", id)
                 .put("parent", kind.family).put("version", current.getInt("version"))
                 .put("content", JSONObject().put("before", before).put("after", JSONObject(current.toString())))

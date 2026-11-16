@@ -284,6 +284,36 @@ class EnhancedReportIsolationTest {
         }
     }
 
+    @Test fun invalidStateFieldIsReportedSafelyAndSuppliedToTheNextNormalRequest(): Unit = runBlocking {
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        try {
+            f.output = { _, frame ->
+                val body = JSONObject().put("frame_id", frame.id).put("updates", JSONArray()).put("create", JSONArray())
+                    .put("foundation", JSONArray().put(JSONObject().put("id", "foundation:drive:expression")
+                        .put("expected_version", 0).put("value", "not-a-number")
+                        .put("reason", "private-description-must-not-be-logged")
+                        .put("evidence", JSONArray().put(frame.eventIds.first()))))
+                emit("正文可以正常保存。<operit_state_report>$body</operit_state_report>")
+            }
+            val first = f.send()
+            assertNull(first.second)
+            assertTrue(first.first.contains("正文可以正常保存"))
+            assertFalse(first.first.contains("operit_state_report"))
+            assertNull(f.savedReport(f.frames.last()))
+            assertTrue(f.warnings.any { it.contains("ISR_FINITE_NUMBER") && it.contains("foundation[0].value") })
+            assertFalse(f.warnings.any { it.contains("private-description-must-not-be-logged") })
+            f.output = { _, frame -> emit("下一条仍然可用。" + Fixture.report(frame)) }
+            val second = f.send()
+            assertNull(second.second)
+            assertTrue(second.first.contains("下一条仍然可用"))
+            assertTrue(f.frames.last().materialText.contains("foundation[0].value"))
+            assertNotNull(f.savedReport(f.frames.last()))
+            assertEquals(2, f.calls)
+            assertEquals(0, f.executions)
+            assertTrue(f.uncaught.isEmpty())
+        } finally { f.close() }
+    }
+
     @Test fun cancellationReachesChatAndFunctionProvidersBeforeReturning(): Unit = runBlocking {
         val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
         try {

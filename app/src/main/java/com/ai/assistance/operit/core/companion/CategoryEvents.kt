@@ -25,16 +25,15 @@ internal object CategoryEvents {
         // A view-only emotional time projection: old intensity and unresolved status are
         // immutable. Reading never reapplies a change or mistakes calming for forgiveness.
         val view = rows.take(8).map { record ->
-            if (kind != "episode") record else emotionTimeView(record, System.currentTimeMillis())
+            if (kind != "episode") record else timeView(data, record, System.currentTimeMillis())
         }
         return JSONObject().put("items", JSONArray(view))
             .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
     }
-    private fun emotionTimeView(source: JSONObject, now: Long): JSONObject {
+    internal fun timeView(data: JSONObject, source: JSONObject, now: Long): JSONObject {
         val content = source.optJSONObject("content") ?: return source
-        val type = InnerFoundations.find(content.optString("category_ref")) ?: return source
-        if (type.family != "emotion") return source
-        val seconds = when (type.key) {
+        val type = InnerFoundations.find(content.optString("category_ref"))
+        val seconds = when (type?.key) {
             "anger" -> 12 * 3600.0
             "surprise" -> 30.0
             else -> 7200.0
@@ -42,6 +41,12 @@ internal object CategoryEvents {
         val elapsed = ((now - source.optLong("at")).coerceAtLeast(0)).toDouble() / 1000.0
         val original = content.optDouble("intensity")
         if (!original.isFinite()) return source
+        val adopted = InnerTemporalEffects.projection(data, "episode:" + source.getString("id"),
+            source.getInt("version"), now) { anchor, age ->
+            if (type?.family == "emotion") anchor * exp(-age / seconds) else anchor
+        }
+        if (adopted != null) return JSONObject(source.toString()).put("time_projection", adopted)
+        if (type?.family != "emotion") return source
         val value = original * exp(-elapsed / seconds)
         return JSONObject(source.toString()).put("time_projection", JSONObject()
             .put("intensity", value).put("at", now)
@@ -184,7 +189,7 @@ internal object CategoryEvents {
         }
     }
 
-    fun material(data: JSONObject, persist: Boolean): JSONObject {
+    fun material(data: JSONObject, persist: Boolean, now: Long = System.currentTimeMillis()): JSONObject {
         val selection = data.optJSONObject("category_selection") ?: JSONObject().also { data.put("category_selection", it) }
         val result = JSONObject().put("schema", 1).put("episodes", JSONArray()).put("focus", JSONArray())
             .put("notice", "重点顺序由主体决定；本轮选材与重点排名不同。未选入不表示遗忘、解决或移出重点。get 可分页查事件、重点、经历关联与版本；原事实仍在 events。旧日志尚未明确关联，不自动升格为心事。")
@@ -195,7 +200,7 @@ internal object CategoryEvents {
             // an unbounded hot index and never changes the subject's chosen focus ordering.
             var consumed = 0
             for (row in rows.take(8)) {
-                result.getJSONArray(field).put(row); consumed++
+                result.getJSONArray(field).put(if (kind == "episode") timeView(data, row, now) else row); consumed++
             }
             if (persist) selection.put(kind, if (rows.size > consumed && consumed > 0) offset + consumed else 0)
         }

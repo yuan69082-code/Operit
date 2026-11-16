@@ -558,7 +558,10 @@ class InternalStateStore(private val context: Context) {
             }
             return page
         }
-        return if (id == null) CategoryEvents.page(data, kind, offset) else JSONObject().put("item", CategoryEvents.row(data, kind, id) ?: JSONObject.NULL)
+        if (id == null) return CategoryEvents.page(data, kind, offset)
+        val row = CategoryEvents.row(data, kind, id)
+        return JSONObject().put("item", if (kind == "episode" && row != null)
+            CategoryEvents.timeView(data, row, System.currentTimeMillis()) else row ?: JSONObject.NULL)
     }
 
     fun prompt(role: String?, chat: String, persist: Boolean, wake: Boolean = false,
@@ -616,7 +619,7 @@ class InternalStateStore(private val context: Context) {
             payload.put("material_selection_cursor", innerCursor)
             payload.put("foundation", InnerFoundations.material(data, currentInput, innerCursor, now))
             payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
-                .put("category_events", CategoryEvents.material(data, persist))
+                .put("category_events", CategoryEvents.material(data, persist, now))
                 .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data, persist, chat, now))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)

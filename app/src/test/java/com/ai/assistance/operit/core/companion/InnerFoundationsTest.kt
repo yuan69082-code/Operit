@@ -6,7 +6,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InnerFoundationsTest {
-    private const val HOUR = 3_600_000L
+    private val HOUR = 3_600_000L
 
     private fun legacy(id: String, kind: String, value: Double) =
         JSONObject().put("id", id).put("name", "旧版：$id").put("description", "原有值不可遗失")
@@ -76,6 +76,19 @@ class InnerFoundationsTest {
         val after = data.toString()
         InnerFoundations.install(data, 12_000)
         assertEquals(after, data.toString())
+    }
+
+    @Test fun windowLocalValuesNeverBecomeTheSharedDriveDuringMigration() {
+        val data = JSONObject().put("definitions", JSONArray().put(legacy("intimacy", "drive", 90.0).put("scope", "session")))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "intimacy")
+                .put("scope", "private-window").put("value", 90).put("at", 500L)))
+        val originals = data.getJSONArray("instances").toString()
+        InnerFoundations.install(data, 1000L)
+        assertEquals(originals, data.getJSONArray("instances").toString())
+        assertEquals("pending_semantic_mapping", InnerFoundations.legacyPage(data, 0)
+            .getJSONArray("items").getJSONObject(0).getString("status"))
+        assertEquals(0.0, data.getJSONObject("foundation_state").getJSONObject("drives")
+            .getJSONObject("foundation:drive:intimacy").getDouble("value"), 0.0)
     }
 
     @Test fun sevenDriveClocksAreContinuousNotAlarmsAndSurvivalNeverDecays() {
