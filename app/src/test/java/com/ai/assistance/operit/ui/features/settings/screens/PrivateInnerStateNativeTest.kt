@@ -115,8 +115,8 @@ class PrivateInnerStateNativeTest {
         runBlocking { ChatHistoryManager.getInstance(context).saveChatHistory(chat) }
         AssistantWindowRouter.selected(context, chat)
         val store = InternalStateStore(context)
-        store.configure(role, true)
         runBlocking {
+            store.configure(role, true)
             val request = com.ai.assistance.operit.core.companion.InnerStructureContext.prepare(context, role, chat.id, true, input = "准备休息")
             val frame = request.internalStateFrame!!
             val report = org.json.JSONObject().put("frame_id", frame.id).put("updates", org.json.JSONArray()).put("create", org.json.JSONArray())

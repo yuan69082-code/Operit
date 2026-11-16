@@ -25,6 +25,16 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
         val parent = if (state.requireRecipient(frame.roleId, frame.chatId)) "group:${frame.chatId}" else "private"
         val parameters = JSONArray(tool.parameters.map { JSONObject().put("name", it.name).put("value", it.value) })
         val request = JSONObject().put("tool", tool.name).put("parameters", parameters)
+        if (tool.name == "companion_life" && tool.parameters.firstOrNull { it.name == "action" }?.value == "ack") {
+            val ids = CategoryEvents.strings(JSONObject(requireNotNull(tool.parameters.firstOrNull { it.name == "details" }?.value))
+                .getJSONArray("ids"), 64)
+            require(ids.all { id -> frame.materialSources.values.any { raw ->
+                val source = JSONObject(raw)
+                source.optString("owner") == frame.roleId && source.optJSONObject("locator")?.let {
+                    it.optString("kind") == "life_event" && it.optString("id") == id
+                } == true
+            } }) { "先实际读取暂存事件材料，再标记处理；仅有触发索引不等于已读" }
+        }
         val declared = declaration?.let { JSONObject(it).also { d -> validateDeclaration(d, frame) } }
         val digest = InnerStructure.hash(JSONObject().put("request", request).put("declaration", declared ?: JSONObject.NULL))
         var fresh = false

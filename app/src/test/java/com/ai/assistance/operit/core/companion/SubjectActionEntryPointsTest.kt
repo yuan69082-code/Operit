@@ -53,7 +53,7 @@ class SubjectActionEntryPointsTest {
         // Fault tests replace only the already-authorized local sleep/read_file executor.
         registerAllTools(handler, context)
         handler.getToolPermissionSystem().saveMasterSwitch(PermissionLevel.ALLOW)
-        for (name in listOf("sleep", "read_file", "companion_software", "companion_internal_state")) {
+        for (name in listOf("sleep", "read_file", "companion_software", "companion_internal_state", "companion_life")) {
             CharacterCardManager.getInstance(context).setToolSelected(role, "builtin", name, true)
             handler.getToolPermissionSystem().saveToolPermission(name, PermissionLevel.ALLOW)
         }
@@ -204,6 +204,22 @@ class SubjectActionEntryPointsTest {
         assertEquals(2, InternalStateStore(context).inspectCategory(role, chat, "direction", "own-work", 0)
             .getJSONObject("item").getInt("version"))
         assertFalse(CompanionStore(context).read("schedule:$chat").has("at"))
+    }
+
+    @Test fun lifeEventAcknowledgementRequiresItsActualDeliveredMaterial(): Unit = runBlocking {
+        val prior = sections()
+        SubjectLife(context).buffer(role, chat, "private-event", "study", "这条批注仍需查看")
+        val ack = invocation("companion_life", mapOf("action" to "ack", "details" to "{\"ids\":[\"private-event\"]}"))
+        val rejected = execute(prior.internalStateFrame!!, listOf(ack)).results.single()
+        assertFalse(rejected.success)
+        assertEquals("pending", CompanionStore(context).activityRead(role, "life_event", "private-event")!!.getString("status"))
+        val read = execute(prior.internalStateFrame!!, listOf(invocation("companion_life", mapOf("action" to "events", "id" to "private-event"))), 1).results.single()
+        assertTrue(read.error, read.success)
+        assertEquals("private-event", JSONObject(read.result.toString()).getJSONObject("item").getString("id"))
+        val provided = delivered(prior, listOf(read))
+        val accepted = execute(provided, listOf(ack), 2).results.single()
+        assertTrue(accepted.error, accepted.success)
+        assertEquals("handled", CompanionStore(context).activityRead(role, "life_event", "private-event")!!.getString("status"))
     }
 
     @Test fun permissionDenialIsPersistedWithoutExecution(): Unit = runBlocking {

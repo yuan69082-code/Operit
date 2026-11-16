@@ -346,7 +346,7 @@ class EnhancedReportIsolationTest {
             val inbox = SubjectMessageInbox(f.app)
             val accepted = inbox.accept(f.role, f.chat, "tool-input", "继续", emptyList())
             f.output = { index, frame ->
-                if (index == 0) emit(Fixture.report(frame) + "<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>")
+                if (index == 1) emit(Fixture.report(frame) + "<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>")
                 else error("controlled failure after the persisted tool result")
             }
             f.sendThroughDelegate(delegate, "tool then failed continuation", turnOptions = ChatTurnOptions(

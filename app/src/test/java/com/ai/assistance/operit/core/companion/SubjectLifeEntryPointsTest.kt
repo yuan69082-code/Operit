@@ -32,6 +32,21 @@ class SubjectLifeEntryPointsTest {
         chat = c.id
         AssistantWindowRouter.selected(context, c)
     }
+    @Test fun existingInternalCapabilityGainsLifeControlOnceAndRespectsLaterDeselection() = runBlocking {
+        val cards = CharacterCardManager.getInstance(context)
+        val other = cards.createCharacterCard(CharacterCard("", "已有助手"))
+        val original = cards.getCharacterCard(other)
+        cards.updateCharacterCard(original.copy(toolAccessConfig = original.toolAccessConfig.copy(
+            enabled = true, allowedBuiltinTools = listOf("companion_internal_state", "sleep"))))
+        InternalStateStore(context).configure(other, true)
+        cards.ensureIndependentSettings(other)
+        assertTrue("companion_life" in cards.getCharacterCard(other).toolAccessConfig.allowedBuiltinTools)
+        assertTrue("sleep" in cards.getCharacterCard(other).toolAccessConfig.allowedBuiltinTools)
+        cards.setToolSelected(other, "builtin", "companion_life", false)
+        cards.ensureIndependentSettings(other)
+        assertFalse("companion_life" in cards.getCharacterCard(other).toolAccessConfig.allowedBuiltinTools)
+    }
+
     private suspend fun adopt(fields: JSONObject) {
         val request = InnerStructureContext.prepare(context, role, chat, true, input = "当前生活选择")
         val f = requireNotNull(request.internalStateFrame)
