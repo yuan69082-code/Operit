@@ -799,6 +799,8 @@ dependencies {
     testImplementation(libs.junit)
     // Exercise real AtomicFile/SQLite migration and normal state entrypoints on the JVM.
     testImplementation("org.robolectric:robolectric:4.14.1")
+    // Render and navigate the actual Android private-state composables on the JVM.
+    testImplementation(libs.ui.test.junit4)
     // JVM tests need a real implementation because Android's org.json methods are throwing stubs.
     testImplementation(libs.json.jvm)
     androidTestImplementation(libs.androidx.junit)

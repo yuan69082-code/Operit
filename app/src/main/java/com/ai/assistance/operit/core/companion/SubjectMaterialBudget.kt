@@ -106,6 +106,17 @@ internal object SubjectMaterialBudget {
         // Reserve an opportunity for the best matching identity and other adopted record before
         // catalogue/filler overhead. Only two rows qualify; other domains still rotate normally.
         val prioritized = mutableSetOf<Pair<String, Int>>()
+        // Keep one real current base drive in the normal request even when historical
+        // catalogues fill the envelope. Rotate this bounded opportunity, not the subject's
+        // importance or stored values. A vocabulary-only row never qualifies as a read.
+        val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
+        lanes.firstOrNull { it.path == "foundation.drive_values" }?.let { drives ->
+            if (drives.rows.isNotEmpty()) {
+                val index = (cursor % drives.rows.size).toInt()
+                include(drives, drives.rows[index])
+                prioritized += drives.path to index
+            }
+        }
         for (id in priority) {
             val match = lanes.asSequence().filter { it.path in setOf("inner_structure.identity",
                 "inner_structure.selected", "inner_structure.record_fragments") }.mapNotNull { lane ->
@@ -122,7 +133,6 @@ internal object SubjectMaterialBudget {
         // Rotate detail domains per request so emotion/identity cannot forever exclude
         // contrary material. This is technical exposure, never a change in subjective focus.
         val rest = lanes.filter { it != directory && !it.path.startsWith("foundation.") }
-        val cursor = source.optLong("material_selection_cursor").coerceAtLeast(0)
         val start = (cursor % rest.size.coerceAtLeast(1)).toInt()
         val order = rest.drop(start) + rest.take(start)
         for (index in 0 until (order.maxOfOrNull { it.rows.size } ?: 0))
@@ -131,7 +141,7 @@ internal object SubjectMaterialBudget {
         // foundation values grant no read/adoption permission and remain retrievable by ID.
         val foundationLanes = lanes.filter { it.path.startsWith("foundation.") }
         for (index in 0 until (foundationLanes.maxOfOrNull { it.rows.size } ?: 0))
-            foundationLanes.forEach { if (index < it.rows.size) include(it, it.rows[index]) }
+            foundationLanes.forEach { if (index < it.rows.size && (it.path to index) !in prioritized) include(it, it.rows[index]) }
         budget.put("estimated_tokens", estimate(result.toString()) + ENVELOPE_RESERVE)
         check(estimate(result.toString()) + ENVELOPE_RESERVE <= requested)
         return result

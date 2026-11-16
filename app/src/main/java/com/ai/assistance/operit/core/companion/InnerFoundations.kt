@@ -157,6 +157,11 @@ internal object InnerFoundations {
         val definition = requireNotNull(InternalStateEngine.definitions(data).firstOrNull {
             it.getString("id") == id && it.optBoolean("active")
         })
+        InternalStateEngine.rows(data, "instances").firstOrNull {
+            it.getString("dimension") == id && it.getString("scope") == "global" && it.getLong("at") >= now
+        }?.let { state ->
+            return JSONObject(definition.toString()).put("value", state.getDouble("value")).put("at", state.getLong("at"))
+        }
         val copy = InternalStateDocument.copy(data)
         copy.remove("foundation_state") // Evaluate this declared rule without recursively reapplying its union projection.
         InternalStateEngine.advanceDimension(copy, definition, chat, now)
@@ -230,7 +235,10 @@ internal object InnerFoundations {
     }
 
     /** Read-only member for unions, with one stable identity per installed category. */
-    fun member(data: JSONObject, id: String, now: Long): JSONObject {
+    fun member(data: JSONObject, id: String, now: Long): JSONObject = memberAt(data, id,
+        data.optJSONObject("foundation_state")?.optLong("paused_at", now)?.coerceAtMost(now) ?: now)
+
+    private fun memberAt(data: JSONObject, id: String, now: Long): JSONObject {
         val kind = requireNotNull(find(id)) { "基础类别不存在" }
         val row = kind.asJson().put("version", 1).put("available", true)
         val state = data.optJSONObject("foundation_state")
@@ -358,8 +366,8 @@ internal object InnerFoundations {
             val original = matches.filter { it.optString("scope") == "global" }.maxByOrNull { it.optLong("at") }
             // Only a *stable engine key plus explicit kind* maps to a base drive.
             val link = drives.firstOrNull { it.key == id && definition.optString("kind") == "drive" &&
-                definition.optString("scope") == "global" && original != null }
-            if (link != null && original != null) {
+                definition.optString("scope") == "global" }
+            if (link != null) {
                 val slot = driveStates.getJSONObject(link.id)
                 // An explicit newer foundation appraisal must not be overwritten by migration.
                 if (slot.optString("origin") != "subject_report") {
@@ -395,20 +403,27 @@ internal object InnerFoundations {
             .put("survival", previous?.optJSONObject("survival") ?: inheritedSurvival ?: JSONObject().put("formed", false).put("version", 0))
             .put("legacy", legacy).put("installed_at", previous?.optLong("installed_at", now) ?: now)
             .put("catalogue_version", "engine-0567ba4-user-additions-v1"))
+        for (field in listOf("paused_at", "paused_elapsed")) if (previous?.has(field) == true)
+            data.getJSONObject("foundation_state").put(field, previous.get(field))
         data.put("semantic_revision", InternalStateEngine.semanticRevision(data) + 1L)
     }
 
     /** Engine's continuous time scale: it is not an interval alarm or an instruction to act. */
     fun advance(data: JSONObject, now: Long) {
+        if (data.optJSONObject("foundation_state")?.has("paused_at") == true) return
         val states = data.optJSONObject("foundation_state")?.optJSONObject("drives") ?: return
         drives.forEach { kind ->
             val state = states.getJSONObject(kind.id)
-            if (state.has("adapter_id") || state.optBoolean("manual_hold")) return@forEach
+            if (state.has("adapter_id")) return@forEach
             val at = state.optLong("at")
             if (now <= at) return@forEach
             val hours = (now - at).toDouble() / 3_600_000.0
             val value = state.getDouble("value")
-            val next = 1.0 - (1.0 - value) * exp(-hours / requireNotNull(kind.hours))
+            val duration = requireNotNull(kind.hours)
+            val adopted = InnerTemporalEffects.projection(data, "foundation:${kind.id}", state.getInt("version"), now) { anchor, seconds ->
+                if (state.optBoolean("manual_hold")) anchor else 1.0 - (1.0 - anchor) * exp(-seconds / (duration * 3600.0))
+            }
+            val next = adopted?.getDouble("intensity") ?: if (state.optBoolean("manual_hold")) value else (1.0 - (1.0 - value) * exp(-hours / duration))
             state.put("value", next.coerceIn(0.0, 1.0)).put("at", now)
         }
     }

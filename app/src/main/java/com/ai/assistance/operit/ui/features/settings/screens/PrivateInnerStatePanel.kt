@@ -44,8 +44,8 @@ internal fun InternalStatePanel(role: String) {
             "当前" -> {
                 Text("基础机制已安装，但不等于每种感受已经发生。已承接的原规则继续使用同一份状态；未确认含义的保留原值和窗口范围。")
                 InnerFamilyPanel(role, listOf("drive", "need", "desire", "emotion", "sentiment", "feeling"))
-                PrivateFold("旧数值历史 · 尚待语义承接的部分") {
-                    Text("原始数值、原规则、原时间与来源仍可追溯，但不再作为第二套当前自动涨落。")
+                PrivateFold("原有规则与承接来源") {
+                    Text("有效规则和窗口局部状态继续保留。已映射类别共用同一个当前值；尚不明确的含义不会被自动改写。")
                     PrivateRows(role, "legacy_handoff")
                 }
             }

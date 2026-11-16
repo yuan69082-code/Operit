@@ -10,6 +10,12 @@ import kotlin.math.exp
 internal object InnerTemporalEffects {
     private const val STORAGE = "inner_time"
 
+    private fun pausedElapsed(data: JSONObject, now: Long): Long {
+        val clock = data.optJSONObject("foundation_state") ?: return 0L
+        return clock.optLong("paused_elapsed") + if (clock.has("paused_at"))
+            (now - clock.getLong("paused_at")).coerceAtLeast(0) else 0L
+    }
+
     private fun profile(data: JSONObject, target: String): JSONObject? {
         val journal = data.optJSONObject("category_commit")?.optJSONArray("rows")
         if (journal != null) for (i in journal.length() - 1 downTo 0) {
@@ -25,7 +31,8 @@ internal object InnerTemporalEffects {
         val rule = saved.getJSONObject("content")
         // A later member appraisal supersedes its old union anchor, including after restart.
         if (rule.getInt("member_version") != version) return null
-        val elapsed = (now - rule.getLong("anchor_at")).coerceAtLeast(0) / 1000.0
+        val elapsed = (now - rule.getLong("anchor_at") -
+            (pausedElapsed(data, now) - rule.optLong("paused_elapsed")).coerceAtLeast(0)).coerceAtLeast(0) / 1000.0
         val anchor = rule.getDouble("anchor_value")
         val value = when (rule.getString("curve")) {
             "natural" -> natural(anchor, elapsed)
@@ -82,6 +89,7 @@ internal object InnerTemporalEffects {
             require(rules.put(effect.getString("to"), effect) == null) { "同一成员不能收到两条相互覆盖的时间规则" }
         }
         fun append(ref: String, body: JSONObject) {
+            body.put("paused_elapsed", pausedElapsed(data, now))
             val current = profile(data, ref)
             CategoryEvents.append(data, frame, JSONObject().put("storage_kind", STORAGE).put("id", ref)
                 .put("parent", unionId).put("version", Math.addExact(current?.getInt("version") ?: 0, 1))

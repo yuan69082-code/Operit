@@ -167,19 +167,46 @@ class InnerFoundationsTest {
             .put("objects", JSONArray()).put("evidence", JSONArray().put("understanding"))
             .put("interpretation", "保持这份连接的动力，留出休息的空间").put("decision", "暂按自己的节奏")
             .put("status", "active").put("effects", JSONArray().put(JSONObject().put("from", "foundation:$rest")
-                .put("to", "foundation:$id").put("meaning", "明确选择暂时保持").put("time_rule", JSONObject().put("curve", "hold"))))
+                .put("to", "foundation:$id").put("meaning", "明确选择暂时保持").put("time_rule", JSONObject().put("curve", "hold")))
+                .put(JSONObject().put("from", "foundation:$id").put("to", "foundation:$rest").put("meaning", "明确选择另一节奏")
+                    .put("time_rule", JSONObject().put("curve", "linear").put("target", 1.0).put("seconds", 3600))))
         InternalStateReports.apply(data, f, report(f).put("unions", JSONArray().put(union)), 0)
         InternalStateEngine.advance(data, "chat", HOUR)
+        InnerFoundations.advance(data, HOUR)
         assertEquals(70.0, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
         assertEquals(0.7, InnerFoundations.member(data, id, HOUR).getDouble("current_value"), 1e-8)
+        assertEquals(1.0, data.getJSONObject("foundation_state").getJSONObject("drives").getJSONObject(rest).getDouble("value"), 1e-8)
         val next = input(data, "new-understanding", 2 * HOUR)
         InternalStateReports.apply(data, next, report(next, JSONArray().put(JSONObject().put("id", id)
             .put("expected_version", 1).put("value", 0.4).put("reason", "新的独立评价")
+            .put("evidence", JSONArray().put("new-understanding"))).put(JSONObject().put("id", rest)
+            .put("expected_version", 0).put("value", 0.3).put("reason", "新的休息评价")
             .put("evidence", JSONArray().put("new-understanding")))), 2 * HOUR)
+        val history = data.getJSONObject("category_commit").getJSONArray("rows")
+        val restChange = (0 until history.length()).map { history.getJSONObject(it) }.single { it.optString("id") == rest }
+        assertEquals(1.0, restChange.getJSONObject("content").getJSONObject("before").getDouble("value"), 1e-8)
         InternalStateEngine.advance(data, "chat", 3 * HOUR)
         val expected = 20.0 + 20.0 * kotlin.math.sqrt(0.5)
         assertEquals(expected, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
         assertEquals(expected / 100, InnerFoundations.member(data, id, 3 * HOUR).getDouble("current_value"), 1e-8)
+    }
+
+    @Test fun explicitDisabledTimeIsExcludedFromAdoptedTimeProjection() {
+        val data = JSONObject()
+        InnerFoundations.install(data, 0)
+        val key = "foundation:foundation:drive:rest"
+        val profile = JSONObject().put("storage_kind", "inner_time").put("id", key).put("parent", "pace").put("version", 1)
+            .put("content", JSONObject().put("member_version", 0).put("anchor_at", 0L).put("anchor_value", 0.0)
+                .put("curve", "linear").put("target", 1.0).put("seconds", 3600).put("paused_elapsed", 0L))
+        data.put("category_commit", JSONObject().put("id", "adopted-rule-fixture").put("rows", JSONArray().put(profile)))
+        val clock = data.getJSONObject("foundation_state")
+        clock.put("paused_at", HOUR / 2)
+        assertEquals(0.5, InnerFoundations.member(data, "foundation:drive:rest", HOUR * 4).getDouble("current_value"), 1e-8)
+        assertEquals(0.5, InnerTemporalEffects.projection(data, key, 0, HOUR * 4) { _, _ -> error("Not a natural curve") }!!.getDouble("intensity"), 1e-8)
+        clock.remove("paused_at")
+        clock.put("paused_elapsed", HOUR * 3)
+        assertEquals(0.5, InnerFoundations.member(data, "foundation:drive:rest", HOUR * 3 + HOUR / 2).getDouble("current_value"), 1e-8)
+        assertEquals(1.0, InnerFoundations.member(data, "foundation:drive:rest", HOUR * 4).getDouble("current_value"), 1e-8)
     }
 
     @Test fun schemaOneRecoveryUsesArchivedMigrationAndNeverReactivatesUserRetirement() {

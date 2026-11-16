@@ -220,12 +220,25 @@ class InternalStateStore(private val context: Context) {
                 if (enable) InnerFoundations.install(data, now)
                 data.optJSONObject("foundation_state")?.let { foundation ->
                     if (!enable) {
+                        // Settle each actual old instance once, including session-local ones.
+                        // Merely restoring the service is not a psychological wake or rest.
+                        val definitions = InternalStateEngine.definitions(data).associateBy { it.getString("id") }
+                        InternalStateEngine.rows(data, "instances").toList().forEach { instance ->
+                            val definition = definitions[instance.getString("dimension")]
+                            if (definition?.optBoolean("active") == true)
+                                InternalStateEngine.advanceDimension(data, definition, instance.getString("scope"), now)
+                        }
                         InnerFoundations.advance(data, now)
                         foundation.put("paused_at", now)
                     } else if (foundation.has("paused_at")) {
+                        val paused = (now - foundation.getLong("paused_at")).coerceAtLeast(0)
+                        foundation.put("paused_elapsed", Math.addExact(foundation.optLong("paused_elapsed"), paused))
                         val values = foundation.getJSONObject("drives")
                         for (kind in InnerFoundations.drives)
-                            values.getJSONObject(kind.id).put("at", now)
+                            if (!values.getJSONObject(kind.id).has("adapter_id")) values.getJSONObject(kind.id).put("at", now)
+                        InternalStateEngine.rows(data, "instances").forEach {
+                            it.put("at", now).put("since", Math.addExact(it.optLong("since", now - paused), paused))
+                        }
                         foundation.remove("paused_at")
                     }
                 }
