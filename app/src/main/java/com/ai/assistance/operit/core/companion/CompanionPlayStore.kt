@@ -248,7 +248,7 @@ class CompanionPlayStore(context: Context) {
     }
 
     fun finishWake(work: Wake, outcome: String) = synchronized(lock) {
-        require(outcome in setOf("handled", "interrupted", "failed"))
+        require(outcome in setOf("handled", "interrupted", "failed", "deferred"))
         val db = helper.writableDatabase
         db.beginTransaction()
         try {

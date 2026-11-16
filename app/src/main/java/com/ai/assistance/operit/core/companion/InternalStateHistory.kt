@@ -164,7 +164,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time") + SubjectRestDreams.kinds)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time") + SubjectRestDreams.kinds + LifeUnderstandings.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -193,7 +193,10 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (row.toString() != before) {
             row.put("version", oldVersion + 1)
             put("category_versions", row)
-            db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
+            if (old != null && kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run")) {
+                db.execSQL("UPDATE category_current SET parent=?,payload=? WHERE scope=? AND kind=? AND id=?",
+                    arrayOf(parent, row.toString(), scope, kind, id))
+            } else db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, id, parent, row.toString()))
         }
         commit()
@@ -253,10 +256,21 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val args = listOf(scope, kind) + listOfNotNull(actualParent) + listOf(limit.toString(), offset.toString())
         // Recent private generated material must not be permanently hidden behind the oldest
         // IDs. The existing scope/kind/parent/rowid index bounds this read before deserialization.
-        val order = if (privateRecent) "rowid DESC" else "id"
-        val index = if (privateRecent) " INDEXED BY category_recent" else ""
+        val orderedQueue = kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step")
+        val order = if (privateRecent) "rowid DESC" else if (orderedQueue) "rowid" else "id"
+        val index = if (privateRecent || (orderedQueue && actualParent != null)) " INDEXED BY category_recent" else ""
         return db().rawQuery("SELECT payload FROM category_current$index WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",
             args.toTypedArray()).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
+    fun activityQueuePage(kind: String, parents: List<String>, offset: Int): List<JSONObject> {
+        require(parents.isNotEmpty() && offset >= 0)
+        if (!file.exists()) return emptyList()
+        val placeholders = parents.joinToString(",") { "?" }
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? AND parent IN ($placeholders) ORDER BY rowid LIMIT 9 OFFSET ?",
+            (listOf(scope, kind) + parents + offset.toString()).toTypedArray()).use { c ->
+            buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) }
+        }
     }
 
     fun latestCategoryRow(kind: String, parent: String): JSONObject? {

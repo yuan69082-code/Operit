@@ -28,6 +28,8 @@ internal object LifeUnderstandings {
             require(refs.isNotEmpty()) { "life[$i].evidence: actual supplied material required" }
             val bindings = JSONObject()
             refs.forEach { bindings.put(it, InnerStructure.source(data, frame, it)) }
+            if (a.has("related")) SubjectActions.validateDeclaration(JSONObject()
+                .put("intention_refs", a.getJSONArray("related")).put("evidence", JSONArray()), frame)
             for (key in listOf("text", "scope", "uncertainty")) require(a.get(key) is String && a.getString(key).isNotBlank()) {
                 "life[$i].$key: explicit content required"
             }
@@ -68,7 +70,7 @@ internal object LifeUnderstandings {
     val instructions = """
         [经验与自己的方向]
         已提供的experience/direction是你过去实际形成的理解，不是命令或新经历；结合本次情况决定是否使用。可用companion_internal_state get section=experience|direction按id/offset查完整原文和category_versions历史。过复查时间不删除事实，也不自动安排活动。
-        轮末life:[{kind:"experience|direction",id,expected_version,text,scope,uncertainty,evidence:[],status:"considering|active|paused|ended|abandoned|uncertain",retention:"short_term|long_term",review_at?:毫秒,purpose?:为什么,goal?:希望结果,resolve?:投入与限度,ambition?:长远方向,related?:关联ID数组}]。
+        轮末life:[{kind:"experience|direction",id,expected_version,text,scope,uncertainty,evidence:[],status:"considering|active|paused|ended|abandoned|uncertain",retention:"short_term|long_term",review_at?:毫秒,purpose?:为什么,goal?:希望结果,resolve?:投入与限度,ambition?:长远方向,related?:[{kind,id,version}]}]。related必须是实际读到的版本。direction承接长期目的与投入，decision承接某次具体选择，两者用intention_refs关联，不复制为另一套任务。已提供的experience/direction也可作为联合成员、决定或实际操作的intention_refs；同一报告中的合法变化整体采用，不能拿未读的经验冒充依据。
         引用本轮实际读到的来源。新理解保留完整描述、适用范围和不确定性；修改先读现版本。目的、目标、决心和野心可以分别改变，不压成驱力总分。当前情绪、人格、关系、价值、偏好和实际反馈可以支持或牵制方向；结果不预定。复查或提炼出的想法不等于已经安排，真正预约仍用原工具。睡觉不必整理，可在自己安排的安静活动里整理增量材料、重复问题或矛盾，分清事实错误与后来改变的认识。梦和模拟只说明梦中体验，不能转成现实事实。稳定人格等仍走inner跨轮采用，life不能改写它们。
     """.trimIndent()
 }

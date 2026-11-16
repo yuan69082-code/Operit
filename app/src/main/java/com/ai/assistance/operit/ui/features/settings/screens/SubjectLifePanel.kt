@@ -28,7 +28,7 @@ internal fun SubjectLifePanel(role: String) {
             try {
                 val projection = withContext(Dispatchers.IO) {
                     val r = SubjectLife(context).rest(role)?.getJSONObject("content")
-                    val streaming = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN).activeStreamingChatIds.value
+                    val streaming = ChatRuntimeHolder.activeChatsIfCreated()
                     val chatBusy = streaming.any { ChatHistoryManager.getInstance(context).getChatMetadata(it)?.characterCardId == role }
                     Triple(r, SubjectRestPolicy.label(r, SubjectLife.busy(role) ?: if (chatBusy) "正在交流" else null, System.currentTimeMillis()),
                         SubjectMessageInbox(context).page(role, offset))

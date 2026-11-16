@@ -152,7 +152,7 @@ class StudyStore(private val context: Context, val role: String) {
         data.put("events", JSONArray(retained).put(event))
     }
     fun finish(id: String, eventIds: Set<String>, state: String, error: String = "") {
-        require(state in setOf("handled", "failed", "unknown"))
+        require(state in setOf("handled", "failed", "unknown", "deferred"))
         store.update(bookKey(id)) { data -> data.getJSONArray("events").objects().filter { it.getString("id") in eventIds }.forEach { it.put("state", state).put("error", error.take(500)) } }; changed(id)
     }
     fun claim(id: String, eventIds: Set<String>): Boolean {

@@ -235,6 +235,9 @@ object InternalStateReports {
         val episodesChanged = InternalStateReportDiagnostics.stage("episodes") {
             CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
         }
+        val lifeChanged = InternalStateReportDiagnostics.stage("life") {
+            LifeUnderstandings.apply(next, frame, report.optJSONArray("life") ?: JSONArray(), now)
+        }
         val unionsChanged = InternalStateReportDiagnostics.stage("unions") {
             InnerInteractions.apply(data, next, frame,
                 if (report.has("unions")) report.getJSONArray("unions") else JSONArray(), now)
@@ -244,9 +247,6 @@ object InternalStateReports {
         }
         val restDreamChanged = InternalStateReportDiagnostics.stage("rest_dream") {
             SubjectRestDreams.apply(next, frame, report, now)
-        }
-        val lifeChanged = InternalStateReportDiagnostics.stage("life") {
-            LifeUnderstandings.apply(next, frame, report.optJSONArray("life") ?: JSONArray(), now)
         }
         val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !survivalSynced && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged && !lifeChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)

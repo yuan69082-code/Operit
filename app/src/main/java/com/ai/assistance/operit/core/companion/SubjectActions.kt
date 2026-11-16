@@ -139,10 +139,10 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                 val kind = ref.getString("kind")
                 val version = ref.getInt("version")
                 require(ref.getDouble("version") == version.toDouble())
-                val providedDecision = kind in setOf("decision", "feedback") && frame.materialSources.values.any { text ->
+                val providedDecision = kind in (setOf("decision", "feedback") + LifeUnderstandings.kinds) && frame.materialSources.values.any { text ->
                     val source = JSONObject(text)
                     val locator = source.optJSONObject("locator")
-                    source.optString("type") == "adopted_$kind" && locator != null && locator.optString("id") == ref.getString("id") &&
+                    source.optString("type") in setOf("adopted_$kind", "subject_$kind") && locator != null && locator.optString("id") == ref.getString("id") &&
                         locator.optInt("version") == version
                 }
                 require(providedDecision || frame.interactionMembers["$kind:${ref.getString("id")}"] == version) {

@@ -50,13 +50,22 @@ internal object SubjectToolMaterials {
         val innerVersions = frame.innerVersions.toMutableMap()
         val pendingBindings = frame.innerPending.toMutableMap()
         val readParts = frame.innerReadParts.toMutableMap()
-        results.filter { it.success && it.toolName == "companion_internal_state" }.forEach { result ->
+        results.filter { it.success && it.toolName in setOf("companion_internal_state", "companion_life") }.forEach { result ->
             val receipt = result.result as? InternalStateReadResultData ?: return@forEach
             // Only complete, actually delivered native reads establish member/version proof.
             // A truncated, transformed, foreign or historical result remains ordinary material.
             if (!receipt.privateContext || receipt.owner != frame.roleId || receipt.chatId != frame.chatId ||
                 !turn.content.contains(receipt.value)) return@forEach
             val body = JSONObject(receipt.value)
+            if (receipt.section in setOf("life_event", "life_activity", "dream_process", "dream_step")) {
+                val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
+                if (rows != null) for (i in 0 until rows.length()) {
+                    val source = SubjectLife.material(requireNotNull(receipt.section), rows.getJSONObject(i))
+                    if (receipt.section == "dream_process") source.put("type", "dream_not_reality")
+                    sources[source.getString("id")] = source.toString()
+                    actionIds.add(source.getString("id"))
+                }
+            }
             if (receipt.section == "inner_record_chunk") body.optJSONObject("fragment")?.let {
                 readParts["record:" + it.getString("record_id")] = it.toString()
             }

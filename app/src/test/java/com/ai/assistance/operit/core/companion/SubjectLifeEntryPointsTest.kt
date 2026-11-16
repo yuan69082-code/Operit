@@ -35,6 +35,9 @@ class SubjectLifeEntryPointsTest {
     private suspend fun adopt(fields: JSONObject) {
         val request = InnerStructureContext.prepare(context, role, chat, true, input = "当前生活选择")
         val f = requireNotNull(request.internalStateFrame)
+        commit(f, fields)
+    }
+    private suspend fun commit(f: InternalStateFrame, fields: JSONObject) {
         val report = JSONObject().put("frame_id", f.id).put("updates", JSONArray()).put("create", JSONArray())
         fields.keys().forEach { report.put(it, fields.get(it)) }
         val parser = InternalStateReportStream()
@@ -50,7 +53,7 @@ class SubjectLifeEntryPointsTest {
     @Test fun sleepBuffersEventsAndOnlyDispatchesTheChosenEndOnce() = runBlocking {
         adopt(rest())
         val life = SubjectLife(context)
-        repeat(12) { assertTrue(life.defer(role, chat, "book-$it", "study", "第$it条批注")) }
+        repeat(12) { assertTrue(life.defer(role, chat, "book-$it", "study", "第${it}条批注")) }
         assertTrue(life.defer(role, chat, "book-0", "study", "第0条批注"))
         assertEquals(12L, CompanionStore(context).activityCount(role, "life_event", "pending"))
         assertNull(life.next(role, chat, System.currentTimeMillis()))
@@ -103,5 +106,70 @@ class SubjectLifeEntryPointsTest {
         } catch (_: IllegalStateException) { }
         assertEquals("记得窗边的一道光。", CompanionStore(context).activityRead(role, "dream_step", "${work.id}:0")!!.getString("text"))
         assertNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
+    }
+
+    @Test fun earlierFailedInputsDoNotStarveNewInputAndCompletedInputDoesNotWakeTwice() = runBlocking {
+        adopt(rest())
+        val inbox = SubjectMessageInbox(context)
+        repeat(12) { i ->
+            inbox.accept(role, chat, "old-$i", "旧输入$i", emptyList())
+            inbox.finish(role, "old-$i", "unknown")
+        }
+        val input = inbox.accept(role, chat, "next", "新输入", emptyList())
+        SubjectLife(context).defer(role, chat, "input:next", "user_message", "新输入")
+        assertEquals("next", inbox.next(role)!!.getString("id"))
+        assertTrue(inbox.claim(role, "next"))
+        inbox.finish(role, "next", "completed")
+        assertFalse(inbox.claim(role, "next"))
+        assertEquals(input.getLong("timestamp"), inbox.accept(role, chat, "next", "新输入", emptyList()).getLong("timestamp"))
+        assertEquals("handled", CompanionStore(context).activityRead(role, "life_event", "input:next")!!.getString("status"))
+        assertNull(inbox.next(role))
+    }
+
+    @Test fun experienceAndDirectionAreReadLaterAndCanSupportRealActionDeclaration() = runBlocking {
+        InternalStateStore(context).materialBudget(role, chat, 16384)
+        val request = InnerStructureContext.prepare(context, role, chat, true, input = "我刚试的资料整理只完成了第一段，其他部分尚未完成。")
+        val frame = request.internalStateFrame!!
+        val source = frame.eventIds.last()
+        fun content(kind: String, id: String, text: String) = JSONObject().put("kind", kind).put("id", id)
+            .put("expected_version", 0).put("text", text).put("scope", "这次资料整理")
+            .put("uncertainty", "下一次是否适用尚待观察").put("status", "considering").put("evidence", JSONArray().put(source))
+        commit(frame, JSONObject().put("life", JSONArray()
+            .put(content("experience", "organize", "实际只完成了一部分；先核对已有结果，不能当成全部成功。"))
+            .put(content("direction", "project", "我仍想把资料整理清楚，也可能改变做法。")
+                .put("purpose", "保留自己的发现").put("goal", "可重新查到出处")
+                .put("resolve", "投入一段有限时间，再看结果").put("ambition", "逐渐形成自己的整理方法"))))
+        val later = InnerStructureContext.prepare(context, role, chat, true, input = "想继续整理时之前有哪些实际结果？")
+        val next = later.internalStateFrame!!
+        val material = next.materialSources.values.map(::JSONObject).first { it.optString("type") == "subject_direction" }
+        assertTrue(later.state.contains("保留自己的发现"))
+        SubjectActions.validateDeclaration(JSONObject().put("intention_refs", JSONArray().put(JSONObject()
+            .put("kind", "direction").put("id", "project").put("version", material.getJSONObject("locator").getInt("version"))))
+            .put("evidence", JSONArray().put(material.getString("id"))), next)
+        val stored = InternalStateStore(context).inspectCategory(role, chat, "experience", "organize", 0).getJSONObject("item")
+        assertTrue(stored.getJSONObject("content").getBoolean("not_a_plan"))
+        assertTrue(stored.getJSONObject("content").getJSONObject("bindings").has(source))
+        assertFalse(CompanionStore(context).read("schedule:$chat").has("at"))
+    }
+
+    @Test fun restDeferralKeepsOriginalScheduleAndActivityBudgetAcrossResume() {
+        val schedule = JSONObject().put("at", 100L).put("purpose", "自己的资料整理").put("owner", "ai")
+        CompanionSchedule.claim(schedule, "ticket", 200)
+        CompanionSchedule.defer(schedule, "ticket")
+        assertEquals(100L, schedule.getLong("at"))
+        assertEquals("deferred", CompanionSchedule.state(schedule))
+        val ref = ActivityNotes.Ref(role, chat, "same-activity")
+        val life = SubjectLife(context)
+        life.checkpoint(ref, "原活动", "executing", exploration = true)
+        life.checkpoint(ref, "原活动", "paused", toolsUsed = 7)
+        life.chooseActivity(role, ref.id, "continue", "先回复，随后接着原处")
+        val work = life.next(role, chat, System.currentTimeMillis())!!
+        assertEquals(ref.id, work.activity)
+        assertTrue(life.isExploration(role, work.activity))
+        val budget = CompanionToolBudget()
+        budget.reset(life.toolsUsed(role, work.activity))
+        repeat(5) { assertTrue(budget.admit("read_file", null)) }
+        assertFalse(budget.admit("write_file", null))
+        assertNull(life.next(role, chat, System.currentTimeMillis()))
     }
 }

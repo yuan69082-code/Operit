@@ -360,17 +360,19 @@ class MessageCoordinationDelegate(
                 com.ai.assistance.operit.core.companion.InternalStateStore(context).enabled(targetRole)) {
                 val captured = messageTextOverride ?: messageProcessingDelegate.userMessage.value.text
                 val capturedAttachments = attachmentDelegate.attachments.value.toList()
+                val capturedReply = uiBridge.getReplyToMessage()?.copy()
                 if (captured.isBlank() && capturedAttachments.isEmpty()) return
                 val inputId = java.util.UUID.randomUUID().toString()
                 coroutineScope.launch {
                     try {
                         val inbox = com.ai.assistance.operit.core.companion.SubjectMessageInbox(context)
-                        val row = withContext(Dispatchers.IO) { inbox.accept(targetRole, targetChat, inputId, captured, capturedAttachments) }
-                        val accepted = turnOptions.copy(subjectInboxId = inputId, subjectInputTimestamp = row.getLong("timestamp"),
-                            acceptedAttachments = capturedAttachments)
+                        val row = withContext(Dispatchers.IO) { inbox.accept(targetRole, targetChat, inputId, captured, capturedAttachments, capturedReply) }
+                        val accepted = turnOptions.copy(subjectInboxId = inputId, subjectDispatch = true, subjectInputTimestamp = row.getLong("timestamp"),
+                            acceptedAttachments = capturedAttachments, acceptedReplyTo = capturedReply)
                         if (messageTextOverride == null && messageProcessingDelegate.userMessage.value.text == captured) {
                             messageProcessingDelegate.clearUserMessageDraft(targetChat)
                             attachmentDelegate.clearAttachments()
+                            uiBridge.clearReplyToMessage()
                         }
                         if (withContext(Dispatchers.IO) { com.ai.assistance.operit.core.companion.SubjectLife(context)
                                 .defer(targetRole, targetChat, "input:$inputId", "user_message", captured) }) {
@@ -688,7 +690,7 @@ class MessageCoordinationDelegate(
             messageProcessingDelegate.sendEngineMessage(
                 chatId, roleCardId, effectiveMessageTextOverride, currentAttachments,
                 isGroupOrchestrationTurn, suppressUserMessageInHistory, turnOptions,
-                if (shouldReadComposerState) uiBridge.getReplyToMessage() else null
+                turnOptions.acceptedReplyTo ?: if (shouldReadComposerState) uiBridge.getReplyToMessage() else null
             )
             return
         }
@@ -836,7 +838,7 @@ class MessageCoordinationDelegate(
             enableMemoryAutoUpdate = shouldEnableMemoryAutoUpdate,
             maxTokens = maxTokensForSend,
             tokenUsageThreshold = tokenUsageThresholdForSend,
-            replyToMessage = if (shouldReadComposerState) uiBridge.getReplyToMessage() else null,
+            replyToMessage = turnOptions.acceptedReplyTo ?: if (shouldReadComposerState) uiBridge.getReplyToMessage() else null,
             isAutoContinuation = isAutoContinuation,
             enableSummary = !forceDisableSummary && (!isBackgroundSend || turnOptions.voiceCall) && chatContextSettings.enableSummary,
             chatModelConfigIdOverride = resolvedChatModelConfigIdOverride,

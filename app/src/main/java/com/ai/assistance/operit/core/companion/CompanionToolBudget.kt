@@ -7,7 +7,7 @@ internal class CompanionToolBudget(private val limit: Int = 12) {
     private val count = AtomicInteger()
     val used: Int get() = count.get()
 
-    fun reset() { count.set(0) }
+    fun reset(alreadyUsed: Int = 0) { require(alreadyUsed >= 0); count.set(alreadyUsed) }
 
     fun admit(tool: String, action: String?): Boolean {
         // Exploration must use its own scheduling switch and interval policy.

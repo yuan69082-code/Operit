@@ -49,12 +49,21 @@ internal object CompanionSchedule {
 
     fun state(data: JSONObject): String = when {
         data.has("running_ticket") -> "running"
+        data.optString("result_status") == "deferred" -> "deferred"
         !data.optBoolean("paused") && data.optLong("at") > 0 -> "scheduled"
         data.optBoolean("self_paused") -> "paused"
         data.optBoolean("interrupted") -> "interrupted"
         data.optString("result_status") == "completed" -> "not_scheduled"
         data.optBoolean("paused") -> "paused"
         else -> "not_scheduled"
+    }
+
+    fun defer(data: JSONObject, ticket: String) {
+        if (data.optString("running_ticket") != ticket) return
+        data.remove("running_ticket")
+        data.put("paused", true).put("result_status", "deferred")
+        // The original time and purpose remain here; the archived trigger carries them into
+        // the next chosen activity. Deferral never pretends the plan was executed.
     }
 
     fun canResume(data: JSONObject): Boolean = state(data) == "interrupted" &&

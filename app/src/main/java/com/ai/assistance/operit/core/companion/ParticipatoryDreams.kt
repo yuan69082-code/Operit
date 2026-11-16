@@ -58,6 +58,7 @@ internal class ParticipatoryDreams(private val context: Context) {
                 .put("source_chat", work.chat).put("at", System.currentTimeMillis()).put("plan", plan)
                 .put("rest_version", rest.getInt("version")).put("reality", "DREAM_NOT_REALITY"))
                 .put("status", status).put("next_step", next)
+                .put("parent", "pending")
         }
         val next = previous?.optInt("next_step") ?: 0
         saveProcess("running", next)
@@ -90,11 +91,21 @@ internal class ParticipatoryDreams(private val context: Context) {
                             .put("text", text).put("status", status)
                     }
                     saveStep("", "requested")
-                    val output = actual.generate(instruction, input.toString()) { partial ->
-                        // Save generated text before cancellation; keep protocol/hidden thought out of display.
-                        withContext(NonCancellable + Dispatchers.IO) {
-                            saveStep(ChatUtils.removeThinkingContent(partial), "partial")
+                    var latestPartial = ""
+                    var savedCharacters = 0
+                    val output = try {
+                        actual.generate(instruction, input.toString()) { partial ->
+                            latestPartial = ChatUtils.removeThinkingContent(partial)
+                            // Bounded paragraph checkpoints, not a full archive version per token.
+                            val paragraphEnd = latestPartial.lastIndexOf('\n') + 1
+                            if (paragraphEnd - savedCharacters >= 512) withContext(NonCancellable + Dispatchers.IO) {
+                                saveStep(latestPartial.substring(0, paragraphEnd), "partial")
+                                savedCharacters = paragraphEnd
+                            }
                         }
+                    } catch (failure: Throwable) {
+                        if (latestPartial.isNotEmpty()) withContext(NonCancellable + Dispatchers.IO) { saveStep(latestPartial, "partial") }
+                        throw failure
                     }
                     val visible = ChatUtils.removeThinkingContent(output).trim()
                     require(visible.isNotBlank()) { "梦境步骤未返回可保存内容" }
@@ -118,7 +129,10 @@ internal class ParticipatoryDreams(private val context: Context) {
     companion object {
         fun materials(context: Context, role: String): List<JSONObject> {
             val store = CompanionStore(context)
-            return store.activityPage(role, "dream_process", "pending", 0).take(2).map { session ->
+            return store.activityQueuePage(role, "dream_process", listOf("pending", "ready"),
+                (InternalStateStore(context).read(role).optLong("material_query_cursor") %
+                    ((store.activityCount(role, "dream_process", "pending") + store.activityCount(role, "dream_process", "ready") + 1) / 2).coerceAtLeast(1) * 2).toInt())
+                .take(2).map { session ->
                 val lastIndex = session.optInt("next_step") - 1
                 val fragment = if (lastIndex >= 0) store.activityRead(role, "dream_step", "${session.getString("id")}:$lastIndex") else null
                 JSONObject().put("id", "material:dream_process:${session.getString("id")}:${session.getInt("version")}")
