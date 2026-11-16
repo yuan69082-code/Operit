@@ -46,6 +46,7 @@ internal object SubjectToolMaterials {
             actionIds.add(source.getString("id"))
         }
         val members = frame.interactionMembers.toMutableMap()
+        val foundations = frame.foundationVersions.toMutableMap()
         val innerVersions = frame.innerVersions.toMutableMap()
         val pendingBindings = frame.innerPending.toMutableMap()
         val readParts = frame.innerReadParts.toMutableMap()
@@ -107,6 +108,8 @@ internal object SubjectToolMaterials {
                     val row = values.getJSONObject(i)
                     members["$kind:${row.getString("id")}"] = row.getInt("version")
                     if (kind == "inner") innerVersions[row.getString("id")] = row.getInt("version")
+                    if (kind == "foundation" && (row.has("current_value") || row.getString("id") == "foundation:need:survival"))
+                        foundations[row.getString("id")] = row.getInt("version")
                 }
             }
             when (receipt.section) {
@@ -124,6 +127,7 @@ internal object SubjectToolMaterials {
         }
         val bound = CurrentRequestContext.bindInternalStateFrame(turns, frame.copy(
             innerVersions = innerVersions, innerPending = pendingBindings, innerReadParts = readParts,
+            foundationVersions = foundations,
             materialSources = sources.entries.toList().takeLast(24).associate { it.key to it.value }, interactionMembers = members))
         return bound.mapIndexed { i, row ->
             if (i != index) row else row.copy(content = row.content +

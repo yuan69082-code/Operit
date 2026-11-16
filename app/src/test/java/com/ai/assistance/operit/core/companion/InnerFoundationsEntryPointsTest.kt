@@ -102,7 +102,8 @@ class InnerFoundationsEntryPointsTest {
         }
         assertEquals("foundation[0].value", fail.path)
         assertEquals(before, states.read(role).getJSONObject("foundation_state").toString())
-        val next = frame(secondChat, "现在仍想表达，但仍要实际自己决定")
+        val next = nativeInnerRead(context, frame(secondChat, "现在仍想表达，但仍要实际自己决定"),
+            "foundation", "foundation:drive:expression")
         val good = JSONObject(change.toString()).put("value", 0.6)
             .put("evidence", JSONArray().put(next.eventIds.first()))
         InnerStructureContext.submit(context, next, report(next, foundations = listOf(good)))
@@ -111,9 +112,11 @@ class InnerFoundationsEntryPointsTest {
     }
 
     @Test fun realFoundationMembersCanFormAConflictWithoutAutomaticAction(): Unit = runBlocking {
-        val first = frame(chat, "亲近和休息都值得考虑，先理解真实情况")
+        var first = frame(chat, "亲近和休息都值得考虑，先理解真实情况")
         val intimacy = "foundation:drive:intimacy"
         val rest = "foundation:drive:rest"
+        first = nativeInnerRead(context, first, "foundation", intimacy)
+        first = nativeInnerRead(context, first, "foundation", rest)
         assertEquals(0, first.interactionMembers["foundation:$intimacy"])
         assertEquals(0, first.interactionMembers["foundation:$rest"])
         val members = JSONArray(listOf(intimacy, rest).map { id ->
@@ -234,6 +237,47 @@ class InnerFoundationsEntryPointsTest {
         assertEquals(0.2, after.getJSONObject("content").getDouble("intensity"), 0.00001)
         assertNotEquals("subject_adopted_time_rule", after.getJSONObject("time_projection").getString("basis"))
         assertEquals(1, states.inspectCategory(role, chat, "episode", "A", 0).getJSONObject("item").getInt("version"))
+    }
+
+    @Test fun unionTimeRulesCannotChangeSurvivalOrPartiallySaveOtherEffects(): Unit = runBlocking {
+        var f = frame(chat, "允许考虑不同方面，但求生欲不能自动改变")
+        val drive = "foundation:drive:rest"
+        val survival = "foundation:need:survival"
+        f = nativeInnerRead(context, f, "foundation", drive)
+        f = nativeInnerRead(context, f, "foundation", survival)
+        val union = JSONObject().put("id", "not-allowed").put("expected_version", 0)
+            .put("members", JSONArray(listOf(drive, survival).map { JSONObject().put("kind", "foundation")
+                .put("id", it).put("version", f.interactionMembers.getValue("foundation:$it")) }))
+            .put("objects", JSONArray()).put("evidence", JSONArray().put(f.eventIds.first()))
+            .put("interpretation", "尝试非法自动作用").put("decision", "没有外部操作").put("status", "active")
+            .put("effects", JSONArray().put(JSONObject().put("from", "foundation:$drive").put("to", "foundation:$survival")
+                .put("meaning", "此规则应被拒绝").put("time_rule", JSONObject().put("curve", "hold"))))
+        assertThrows(InternalStateReportIssue::class.java) {
+            runBlocking { InnerStructureContext.submit(context, f, report(f).put("unions", JSONArray().put(union))) }
+        }
+        assertTrue(states.inspectCategory(role, chat, "union", "not-allowed", 0).isNull("item"))
+        assertFalse(states.inspectCategory(role, chat, "foundation", survival, 0).getJSONObject("item").getBoolean("formed"))
+    }
+
+    @Test fun foundationChangesAreArchivedAndReadAsVersionHistoryAfterRestart(): Unit = runBlocking {
+        val id = "foundation:need:survival"
+        repeat(2) { version ->
+            val f = frame(chat, "明确调整求生欲，允许没有理由")
+            val change = JSONObject().put("id", id).put("expected_version", version)
+                .put("value", if (version == 0) 0.7 else 0.0)
+                .put("objects", JSONArray().put("person:$version"))
+                .put("evidence", JSONArray().put(f.eventIds.first()))
+            InnerStructureContext.submit(context, f, report(f, foundations = listOf(change)))
+        }
+        val restarted = InternalStateStore(context)
+        val rows = restarted.inspectCategory(role, secondChat, "foundation_history", id, 0).getJSONArray("items")
+        assertEquals(2, rows.length())
+        assertEquals(2, rows.getJSONObject(0).getInt("version"))
+        val transition = rows.getJSONObject(0).getJSONObject("content")
+        assertEquals("person:0", transition.getJSONObject("before").getJSONArray("objects").getString(0))
+        assertEquals("person:1", transition.getJSONObject("after").getJSONArray("objects").getString(0))
+        assertEquals(0.0, restarted.inspectCategory(role, secondChat, "foundation", id, 0)
+            .getJSONObject("item").getDouble("current_value"), 0.0)
     }
 
     @Test fun unformedSurvivalDoesNotMaterializeAsAnInventedExperience(): Unit = runBlocking {

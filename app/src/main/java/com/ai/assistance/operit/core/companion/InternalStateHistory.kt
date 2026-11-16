@@ -164,7 +164,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family") + SubjectRestDreams.kinds)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time") + SubjectRestDreams.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -256,6 +256,12 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val index = if (privateRecent) " INDEXED BY category_recent" else ""
         return db().rawQuery("SELECT payload FROM category_current$index WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",
             args.toTypedArray()).use { c -> buildList { while (c.moveToNext()) add(JSONObject(c.getString(0))) } }
+    }
+
+    fun latestCategoryRow(kind: String, parent: String): JSONObject? {
+        if (!file.exists()) return null
+        return db().rawQuery("SELECT payload FROM category_current INDEXED BY category_recent WHERE scope=? AND kind=? AND parent=? ORDER BY rowid DESC LIMIT 1",
+            arrayOf(scope, kind, parent)).use { c -> if (c.moveToFirst()) JSONObject(c.getString(0)) else null }
     }
 
     fun categoryVersions(id: String, offset: Int): List<JSONObject> {

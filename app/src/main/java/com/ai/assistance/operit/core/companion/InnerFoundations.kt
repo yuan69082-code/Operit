@@ -321,7 +321,7 @@ internal object InnerFoundations {
                 .put("value", survival.getDouble("value")).put("version", survival.getInt("version"))
                 .put("objects_count", survival.optJSONArray("objects")?.length() ?: 0)
                 .put("goals_count", survival.optJSONArray("goals")?.length() ?: 0)
-                else JSONObject().put("formed", false))
+                else JSONObject().put("formed", false).put("version", survival.optInt("version")))
             .put("legacy_pending", legacyRows)
             .put("notice", "目录不代表体验已形成；每轮最多六个目录名与少量待承接索引。其他按ID或family查询。价值人格与关系已采用原文另由既有材料选择读取。")
     }
@@ -330,15 +330,14 @@ internal object InnerFoundations {
         require(family in InnerStructure.families && offset >= 0)
         val found = kinds.filter { it.family == family }
         val rows = found.drop(offset).take(8).map { kind ->
-            val row = kind.asJson()
-            val episodes = CategoryEvents.page(data, "episode", 0, kind.id).getJSONArray("items")
+            val row = member(data, kind.id, now)
+            val last = (data as? InternalStateDocument)?.history?.latestCategoryRow("episode", kind.id)
             val instance = data.optJSONObject("foundation_state")?.let { state ->
                 if (kind.family == "drive") state.optJSONObject("drives")?.optJSONObject(kind.id)
                 else if (kind.id == "foundation:need:survival") state.optJSONObject("survival")
                 else null
             }
-            if (episodes.length() > 0) {
-                val last = episodes.getJSONObject(0)
+            if (last != null) {
                 row.put("state", "has_real_appraisals").put("recent_episode_id", last.getString("id"))
                     .put("latest_understanding", last.getJSONObject("content").optString("understanding"))
             }

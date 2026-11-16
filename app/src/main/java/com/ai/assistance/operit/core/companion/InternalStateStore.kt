@@ -458,6 +458,8 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
+        if (kind in setOf("legacy_handoff", "foundation_history"))
+            require(!recipientScope(role, chat)) { "旧状态承接与完整基础变化来源仅在本助手私域读取" }
         require(offset >= 0 && kind in setOf("foundation", "foundation_history", "legacy_handoff", "inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
         if (kind == "thought") {
             require(!recipientScope(role, chat)) { "念头仅在本助手私域读取" }
@@ -488,7 +490,12 @@ class InternalStateStore(private val context: Context) {
             else InnerFoundations.page(data, familyOrId, offset, now)
         }
         if (kind == "legacy_handoff") return InnerFoundations.legacyPage(data, offset)
-        if (kind == "foundation_history") return CategoryEvents.page(data, "foundation_change", offset, id)
+        if (kind == "foundation_history") {
+            requireNotNull(id) { "基础变化历史须指定类别ID" }
+            val rows = store.categoryVersions(key(role), "foundation_change:$id", offset)
+            return JSONObject().put("items", JSONArray(rows.take(8)))
+                .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+        }
         if (kind == "episode_category") return CategoryEvents.page(data, "episode", offset, requireNotNull(id))
         if (kind == "inner_family") {
             val family = requireNotNull(id)
@@ -635,6 +642,7 @@ class InternalStateStore(private val context: Context) {
                 .put("current_input_event", JSONObject().put("id", inputEventId).put("source", source)
                     .put("at", now).put("text_location", "current_request_input"))
             if (groupInput) {
+                payload.getJSONObject("foundation").put("legacy_pending", JSONArray())
                 // Candidate drafts and read-progress are private even when a future adopted
                 // belief can be expressed in a group. Serialized fragments must not evade scrub.
                 val inner = payload.getJSONObject("inner_structure")
@@ -659,7 +667,8 @@ class InternalStateStore(private val context: Context) {
                 val availableFoundations = payload.getJSONObject("foundation").getJSONArray("available")
                 for (i in 0 until availableFoundations.length()) {
                     val id = availableFoundations.getJSONObject(i).getString("id")
-                    members["foundation:$id"] = InnerFoundations.member(data, id, now).getInt("version")
+                    if (InnerFoundations.find(id)?.family != "drive" && id != "foundation:need:survival")
+                        members["foundation:$id"] = InnerFoundations.member(data, id, now).getInt("version")
                 }
                 val projectedDrives = payload.getJSONObject("foundation").getJSONArray("drive_values")
                 for (i in 0 until projectedDrives.length()) {
@@ -676,9 +685,17 @@ class InternalStateStore(private val context: Context) {
                     val row = numeric.getJSONObject(i)
                     members["state:" + row.getString("id")] = row.getInt("version")
                 }
+                val survival = payload.getJSONObject("foundation").getJSONObject("survival")
+                members["foundation:foundation:need:survival"] = survival.getInt("version")
                 frame = frame.copy(interactionMembers = members)
             }
             if (frame != null) {
+                val visible = payload.getJSONObject("foundation")
+                val drives = visible.getJSONArray("drive_values")
+                frame = frame.copy(foundationVersions = (0 until drives.length()).associate {
+                    val row = drives.getJSONObject(it)
+                    row.getString("id") to row.getInt("version")
+                } + ("foundation:need:survival" to visible.getJSONObject("survival").getInt("version")))
                 val materials = payload.getJSONArray("retrieved_materials")
                 val inner = payload.getJSONObject("inner_structure")
                 val versions = mutableMapOf<String, Int>()
