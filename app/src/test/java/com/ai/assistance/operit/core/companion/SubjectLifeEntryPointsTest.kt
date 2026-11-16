@@ -106,6 +106,9 @@ class SubjectLifeEntryPointsTest {
             fail()
         } catch (_: IllegalStateException) { }
         assertEquals("记得窗边的一道光。", CompanionStore(context).activityRead(role, "dream_step", "${work.id}:0")!!.getString("text"))
+        val retained = ParticipatoryDreams.materials(context, role).single().getString("text")
+        assertTrue(retained.contains("记得窗边的一道光。"))
+        assertTrue(retained.contains("partial"))
         assertNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
     }
 
@@ -182,8 +185,44 @@ class SubjectLifeEntryPointsTest {
         val request = life.requestWake(role, chat)
         assertEquals(request.getString("id"), life.requestWake(role, chat).getString("id"))
         val work = life.next(role, chat, System.currentTimeMillis())!!
-        assertTrue(work.text.contains("用户在首页明确请求"))
+        assertTrue(work.text.contains("user_wake_request"))
+        assertTrue(work.text.contains(request.getString("id")))
         assertNull(life.next(role, chat, System.currentTimeMillis()))
         assertEquals("resting", life.rest(role)!!.getJSONObject("content").getString("state"))
+    }
+
+    @Test fun pendingMaterialPagesRotateWithoutChangingAcknowledgement() = runBlocking {
+        adopt(rest())
+        repeat(17) { SubjectLife(context).defer(role, chat, "many-$it", "study", "不同材料$it") }
+        val seen = mutableSetOf<String>()
+        repeat(12) {
+            InnerStructureContext.prepare(context, role, chat, true, input = "这次取用适当材料")
+            seen += SubjectLife(context).materials(role).filter { it.getString("type") == "life_event" }
+                .map { it.getJSONObject("locator").getString("id") }
+        }
+        assertEquals(17, seen.size)
+        assertEquals(17L, CompanionStore(context).activityCount(role, "life_event", "pending"))
+    }
+
+    @Test fun resumedActivityKeepsDistinctRequestVersionsAndOriginalNotes() = runBlocking {
+        val ref = ActivityNotes.begin(context, role, chat, "same-trigger", "exploration")
+        try {
+            val life = SubjectLife(context)
+            life.checkpoint(ref, "想整理一个问题", "executing", exploration = true)
+            val first = InnerStructureContext.prepare(context, role, chat, true, input = "开始").internalStateFrame!!
+            life.recordRequest(ref, first, 0)
+            ActivityNotes.note(context, ref, "${first.id}:0:note:0", "我先保留这个疑问。", false)
+            life.checkpoint(ref, "想整理一个问题", "paused", toolsUsed = 2)
+            life.chooseActivity(role, ref.id, "continue", "接上原来的疑问")
+            val second = InnerStructureContext.prepare(context, role, chat, true, input = "继续").internalStateFrame!!
+            life.recordRequest(ref, second, 0)
+            ActivityNotes.note(context, ref, "${second.id}:0:note:0", "现在接着核对已经取得的结果。", false)
+            val parts = ActivityNotes.page(context, role, "activity_part", ref.id, 0).getJSONArray("items")
+            assertEquals(4, parts.length())
+            assertNotEquals(first.id, second.id)
+            assertTrue(parts.toString().contains("我先保留这个疑问。"))
+            assertTrue(parts.toString().contains("现在接着核对已经取得的结果。"))
+            assertEquals(2, life.toolsUsed(role, ref.id))
+        } finally { ActivityNotes.release(ref) }
     }
 }

@@ -338,6 +338,35 @@ class EnhancedReportIsolationTest {
         } finally { f.close() }
     }
 
+    @Test fun acceptedInputWithCompletedToolIsNotOfferedAsBlindRetryAfterContinuationFailure(): Unit = runBlocking {
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        try {
+            val errors = CopyOnWriteArrayList<String>()
+            val delegate = f.delegate(errors, AtomicInteger())
+            val inbox = SubjectMessageInbox(f.app)
+            val accepted = inbox.accept(f.role, f.chat, "tool-input", "继续", emptyList())
+            f.output = { index, frame ->
+                if (index == 0) emit(Fixture.report(frame) + "<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>")
+                else error("controlled failure after the persisted tool result")
+            }
+            f.sendThroughDelegate(delegate, "tool then failed continuation", turnOptions = ChatTurnOptions(
+                subjectInboxId = "tool-input", subjectInputTimestamp = accepted.getLong("timestamp"),
+                notifyReply = false, disableWarning = true))
+            assertEquals("unknown", inbox.read(f.role, "tool-input").getString("status"))
+            assertNull(inbox.next(f.role))
+            assertEquals(2, f.calls)
+            assertFalse(delegate.isChatLoading(f.chat))
+            assertTrue(f.uncaught.toString(), f.uncaught.isEmpty())
+            val facts = SubjectActions.read(f.app, f.role, f.chat, null, 0).getJSONArray("items")
+            assertEquals(1, facts.length())
+            assertEquals("completed", facts.getJSONObject(0).getString("status"))
+            f.output = { _, frame -> emit("新的消息仍可以继续。" + Fixture.report(frame)) }
+            f.sendThroughDelegate(delegate, "subsequent input remains available")
+            assertEquals(3, f.calls)
+            assertFalse(delegate.isChatLoading(f.chat))
+        } finally { f.close() }
+    }
+
     @Test fun invalidStateFieldIsReportedSafelyAndSuppliedToTheNextNormalRequest(): Unit = runBlocking {
         val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
         try {

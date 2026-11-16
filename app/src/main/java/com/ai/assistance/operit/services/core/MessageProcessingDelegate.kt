@@ -951,6 +951,7 @@ class MessageProcessingDelegate(
             var calculateNextWindowSize: (suspend () -> Long?)? = null
             var cancellationToPropagate: kotlinx.coroutines.CancellationException? = null
             var ownedActivity: com.ai.assistance.operit.core.companion.ActivityNotes.Ref? = null
+            var toolWasRequested = false
             try {
                 // 检查这是否是聊天中的第一条用户消息（忽略AI的开场白）
                 val isFirstMessage = !hasUserMessage(chatId)
@@ -1385,6 +1386,7 @@ class MessageProcessingDelegate(
                     groupParticipantNamesText = groupParticipantNamesText,
                     proxySenderName = proxySenderNameOverride,
                     onToolInvocation = {
+                        toolWasRequested = true
                         incrementCurrentTurnToolInvocationCount(chatId)
                     },
                     notifyReplyOverride = if (isGroupOrchestrationTurn) false else turnOptions.notifyReply,
@@ -1889,7 +1891,12 @@ class MessageProcessingDelegate(
                     turnOptions.subjectInboxId?.let { id ->
                         withContext(NonCancellable + Dispatchers.IO) {
                             try { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).finish(roleCardId, id,
-                                if (cancellationToPropagate != null) "unknown" else if (shouldFinalizeInterruptedMessage || finalInputStateAfterSend is EnhancedInputProcessingState.Error) "failed" else "completed") }
+                                if (cancellationToPropagate != null) "unknown"
+                                else if (shouldFinalizeInterruptedMessage || finalInputStateAfterSend is EnhancedInputProcessingState.Error) {
+                                    // A failed final answer does not establish that earlier tools or
+                                    // saved expressions had no effect. Never expose blind whole-turn retry.
+                                    if (toolWasRequested || aiMessage.content.isNotBlank()) "unknown" else "failed"
+                                } else "completed") }
                             catch (failure: Exception) { AppLogger.e(TAG, "Input receipt finalization failed; do not replay", failure) }
                         }
                     }

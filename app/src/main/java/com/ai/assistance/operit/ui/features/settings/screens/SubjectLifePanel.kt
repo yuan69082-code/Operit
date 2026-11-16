@@ -22,6 +22,7 @@ internal fun SubjectLifePanel(role: String) {
     var inbox by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
     var offset by remember(role) { mutableIntStateOf(0) }
     var error by remember(role) { mutableStateOf("") }
+    var notice by remember(role) { mutableStateOf("") }
     var detail by remember(role) { mutableStateOf(false) }
     LaunchedEffect(role, offset) {
         while (isActive) {
@@ -43,6 +44,7 @@ internal fun SubjectLifePanel(role: String) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(status, style = MaterialTheme.typography.titleMedium)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            if (notice.isNotBlank()) Text(notice)
             TextButton(onClick = { detail = !detail }) { Text(if (detail) "收起" else "查看安排与待发送消息") }
             if (detail) {
                 rest?.let { row ->
@@ -54,7 +56,7 @@ internal fun SubjectLifePanel(role: String) {
                             withContext(Dispatchers.IO) {
                                 SubjectLife(context).requestWake(role, requireNotNull(AssistantWindowRouter.chat(context, role)) { "请先为这位助手打开私聊" })
                             }
-                            error = "唤醒请求已保存，等待可用的执行位置。"
+                            notice = "唤醒请求已保存，等待可用的执行位置。"
                         } catch (failure: Exception) { error = "请求未保存：${failure.message}" }
                     } }) { Text("请求醒来或续接") }
                 }

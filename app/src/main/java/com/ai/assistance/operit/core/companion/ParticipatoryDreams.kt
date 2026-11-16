@@ -141,11 +141,14 @@ internal class ParticipatoryDreams(private val context: Context) {
                 (InternalStateStore(context).read(role).optLong("material_query_cursor") %
                     ((store.activityCount(role, "dream_process", "pending") + store.activityCount(role, "dream_process", "ready") + 1) / 2).coerceAtLeast(1) * 2).toInt())
                 .take(2).map { session ->
-                val lastIndex = session.optInt("next_step") - 1
-                val fragment = if (lastIndex >= 0) store.activityRead(role, "dream_step", "${session.getString("id")}:$lastIndex") else null
+                val nextIndex = session.optInt("next_step")
+                val partial = store.activityRead(role, "dream_step", "${session.getString("id")}:$nextIndex")
+                    ?.takeIf { it.optString("text").isNotBlank() }
+                val fragment = partial ?: if (nextIndex > 0) store.activityRead(role, "dream_step", "${session.getString("id")}:${nextIndex - 1}") else null
                 JSONObject().put("id", "material:dream_process:${session.getString("id")}:${session.getInt("version")}")
                     .put("type", "dream_not_reality").put("owner", role).put("author", role).put("at", session.getLong("at"))
                     .put("text", JSONObject().put("process_status", session.getString("status"))
+                        .put("fragment_status", fragment?.optString("status") ?: "not_recorded")
                         .put("fragment", fragment?.optString("text")?.take(800) ?: JSONObject.NULL)
                         .put("instruction", "这是实际生成并参与的梦中片段，不是现实经历。醒后可写<waking_note>自然随记</waking_note>，允许记不清或只有余波，不补造故事。完整过程按dream_step分页读取。").toString())
                     .put("status", "retrieved").put("not_new_occurrence", true).put("subject_private_material", true)

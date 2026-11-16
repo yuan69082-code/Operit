@@ -41,7 +41,7 @@ internal class SubjectLife(private val context: Context) {
         return true // One dispatcher owns the subsequent admission, including already-due sleep.
     }
 
-    fun requestWake(role: String, chat: String): JSONObject {
+    suspend fun requestWake(role: String, chat: String): JSONObject {
         check(!InternalStateStore(context).requireRecipient(role, chat))
         check(rest(role)?.getJSONObject("content")?.optString("state") == "resting")
         check(busy(role) == null) { "正在处理本次活动，请等本轮结束" }
@@ -131,12 +131,13 @@ internal class SubjectLife(private val context: Context) {
         if (input != null) return Work(role, input.getString("source_chat"), "input:${input.getString("id")}", input.getString("text"), input = input)
         val resume = store.activityPage(role, "life_activity", "ready", 0).firstOrNull()
         if (resume != null) return claim(role, chat, "resume:${resume.getString("id")}:${resume.getInt("version")}",
-            "续接同一活动。已执行的工具与回执必须先核对，未知结果不能盲目重放。原方向：${resume.getString("event")}\n新的决定：${resume.optString("choice_note")}\n" +
+            "续接同一活动。已执行的工具与回执必须先核对，未知结果不能盲目重放。原方向与新的决定保存在life_activity原记录；未进入本轮预算时须按ID读取，不假定已读。\n" +
                 "可用companion_internal_state get section=action或activity_part按需读取已保存步骤。活动ID：${resume.getString("id")}；最后已提供的请求：${resume.optString("last_request_part", "尚未取得响应")}。本次先核对原材料、原随记和回执后选择接续点；不是把旧请求从头再执行。", resume.getString("id"))
         val events = store.activityQueuePage(role, "life_event", listOf("interrupt", "pending", "user_request")).take(8)
         val first = events.firstOrNull() ?: return null
-        val work = claim(role, chat, "event:${first.getString("id")}", "醒后待处理材料（不是新发生）：" + JSONArray(events) +
-            "\n按需继续分页。处理后用companion_life ack明确标记ID；保存过的表达或操作不能重复执行。")
+        val work = claim(role, chat, "event:${first.getString("id")}", "醒后待处理材料（不是新发生），本次索引：" +
+            JSONArray(events.map { JSONObject().put("id", it.getString("id")).put("source", it.getString("source")) }) +
+            "\n正文按统一材料预算提供；不足时用companion_life events按ID或分页读取原文。实际处理后才ack；保存过的表达或操作不能重复执行。")
         if (work != null) events.forEach { event -> store.activityWrite(role, "life_event", event.getString("id"), "offered") {
             requireNotNull(it).put("parent", "offered").put("status", "offered_not_acknowledged")
         } }
@@ -153,7 +154,8 @@ internal class SubjectLife(private val context: Context) {
         val key = if (selected.getString("source") == "user_wake_request") selected.getString("id") else
             "interrupt:${c.optString("session_id")}:${r.getInt("version")}"
         val work = claim(role, chat, key,
-            "休息期间你已选择关注的来源或用户明确的唤醒请求到达。是否醒来、简短处理或继续休息由你决定；这不表示自动提高普通消息的重要性。" + selected.toString())
+            "休息期间你已选择关注的来源或用户明确的唤醒请求到达。是否醒来、简短处理或继续休息由你决定；这不表示自动提高普通消息的重要性。来源：${selected.getString("source")}；事件ID：${selected.getString("id")}。" +
+                "原文在本轮材料中，若未选入，用companion_life events及id取回后再判断。")
         if (work != null) store.activityWrite(role, "life_event", selected.getString("id"), "offered") {
             requireNotNull(it).put("parent", "offered").put("status", "offered_not_acknowledged")
         }
@@ -221,7 +223,10 @@ internal class SubjectLife(private val context: Context) {
     }
     fun materials(role: String): List<JSONObject> = listOf("life_event", "life_activity").flatMap { kind ->
         val parents = if (kind == "life_event") listOf("pending", "interrupt", "offered", "user_request") else listOf("pending", "ready")
-        store.activityQueuePage(role, kind, parents).take(3).map { material(kind, it) }
+        val count = parents.sumOf { store.activityCount(role, kind, it) }
+        val cursor = InternalStateStore(context).read(role).optLong("material_query_cursor")
+        val offset = (cursor % ((count + 2) / 3).coerceAtLeast(1) * 3).toInt()
+        store.activityQueuePage(role, kind, parents, offset).take(3).map { material(kind, it) }
     }
 
     companion object {

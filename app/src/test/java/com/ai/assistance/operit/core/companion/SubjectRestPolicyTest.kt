@@ -39,4 +39,12 @@ class SubjectRestPolicyTest {
         assertEquals("恐惧与好奇交织", result.getJSONObject("dream_plan").getString("tone"))
         assertFalse(SubjectRestPolicy.adopt(change(), null, 100, "none").has("dream_plan"))
     }
+    @Test fun conditionOnlySleepMustActuallyAdmitItsChosenSource() {
+        val arrangement = change().put("mode", "sleep").put("wake_sources", JSONArray().put("study"))
+        val rest = SubjectRestPolicy.adopt(arrangement, null, 100, "f")
+        assertEquals("judge", SubjectRestPolicy.admission(rest, "study", 200))
+        assertEquals("buffer", SubjectRestPolicy.admission(rest, "user_message", 200))
+        try { SubjectRestPolicy.adopt(arrangement.put("interruption", "buffer"), null, 100, "f"); fail() }
+        catch (_: IllegalArgumentException) { }
+    }
 }

@@ -63,8 +63,8 @@ object RoomTools {
                             check(metadata.characterGroupId.isNullOrBlank() && InternalStateStore(context).enabled(actor)) { "仅用于已启用内部状态的助手私聊" }
                             val life = SubjectLife(context)
                             when (action) {
-                                "events" -> life.page(actor, "life_event", offset)
-                                "activities" -> life.page(actor, "life_activity", offset)
+                                "events" -> life.page(actor, "life_event", offset, arg("id"))
+                                "activities" -> life.page(actor, "life_activity", offset, arg("id"))
                                 "ack" -> { life.acknowledge(actor, CategoryEvents.strings(JSONObject(required("details")).getJSONArray("ids"), 64)); JSONObject().put("saved", true) }
                                 "activity" -> JSONObject(required("details")).let { life.chooseActivity(actor, required("id"), it.getString("choice"), it.getString("note")) }
                                 "dream" -> JSONObject(required("details")).let { life.dreamChoice(actor, required("id"), it.getString("choice"), it.getString("note")) }

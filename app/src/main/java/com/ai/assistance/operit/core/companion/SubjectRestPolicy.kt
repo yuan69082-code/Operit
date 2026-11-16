@@ -23,8 +23,11 @@ internal object SubjectRestPolicy {
         }
         require(until == 0L || until > now) { "rest.until: expected end must be in the future" }
         require(mode != "sleep" || until > now || sources.isNotEmpty()) { "rest: sleep needs an end time or a wake condition" }
-        val interruption = change.optString("interruption", "buffer")
+        val interruption = change.optString("interruption", if (sources.isNotEmpty()) "judge" else "buffer")
         require(interruption in setOf("buffer", "judge", "wake")) { "rest.interruption: buffer|judge|wake" }
+        require(mode != "sleep" || until > now || interruption != "buffer") {
+            "rest: sleep without a time must admit its chosen wake condition; use quiet for open-ended rest"
+        }
         val sameSession = prior?.optString("state") == "resting"
         result.put("mode", mode).put("session_id", if (sameSession) prior!!.optString("session_id", frame) else frame)
             .put("started_at", if (sameSession) prior!!.optLong("started_at", now) else now)
