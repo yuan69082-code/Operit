@@ -138,6 +138,7 @@ class ConversationService(
             if (groupSummary) systemPrompt = com.ai.assistance.operit.core.group.GroupProvenance.summaryInstructions(systemPrompt)
             val summaryThoughtAccess = com.ai.assistance.operit.core.companion.HumanThoughtAccess(context)
             val summaryRole = com.ai.assistance.operit.data.preferences.AssistantScope.callerId()
+            if (!groupSummary) systemPrompt += "\n" + com.ai.assistance.operit.core.chat.SummaryAddress.instruction(context, summaryRole)
             val sanitizedMessages =
                 ChatUtils.stripOpenAiResponsesProtocolMarkupTurns(
                     ChatUtils.stripGeminiThoughtSignatureMetaTurns(messages.map { turn ->

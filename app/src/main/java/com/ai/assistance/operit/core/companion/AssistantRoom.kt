@@ -22,6 +22,11 @@ class AssistantRoom(private val context: Context, val role: String) {
     private val scope = "room:$role"
     private val preferences by lazy { UserPreferencesManager.getInstance(context) }
     fun read() = store.read(scope).put("owner", role)
+    fun summaryAddress(value: String): JSONObject {
+        require(value.isNotBlank() && value.length <= 80 && '\n' !in value && '\r' !in value)
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        return store.update(scope) { it.put("summary_user_address", value.trim()).put("summary_address_at", System.currentTimeMillis()) }
+    }
 
     suspend fun grants(decorate: Boolean, diary: Boolean, locks: Set<String>) = mutex.withLock {
         require(locks.all { it in RoomPolicy.fields })

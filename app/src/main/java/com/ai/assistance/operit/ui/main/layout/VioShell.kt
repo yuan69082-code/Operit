@@ -176,8 +176,13 @@ private fun PageFrame(title: String, subtitle: String, content: @Composable Colu
 
 @Composable
 private fun HomePage(onChat: () -> Unit, onSpace: () -> Unit, onTools: () -> Unit, onLife: () -> Unit) {
+    val context = LocalContext.current
+    var role by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { role = (ActivePromptManager.getInstance(context).getActivePrompt() as? ActivePrompt.CharacterCard)?.id }
     val date = LocalDate.now().format(DateTimeFormatter.ofPattern("M 月 d 日 · EEEE", java.util.Locale.CHINA))
     PageFrame("此刻", date) {
+        AssistantTargetPicker(role, true) { role = it }
+        role?.let { com.ai.assistance.operit.ui.features.settings.screens.SubjectLifePanel(it) }
         Card(shape = RoundedCornerShape(30.dp), colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
             Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(
                 MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer)))

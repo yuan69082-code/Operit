@@ -247,6 +247,10 @@ class MessageProcessingDelegate(
     private val summaryTurnGate = com.ai.assistance.operit.core.chat.SummaryTurnGate()
 
     suspend fun awaitSummaryForChat(chatId: String) = summaryTurnGate.awaitAvailable(chatId)
+    suspend fun awaitIdleForChat(chatId: String) {
+        runtimeFor(chatId).isLoading.first { !it }
+        awaitSummaryForChat(chatId)
+    }
 
     private fun claimTurn(chatId: String): Boolean = summaryTurnGate.startTurnIfAllowed(chatId) {
         val runtime = runtimeFor(chatId)
@@ -708,7 +712,7 @@ class MessageProcessingDelegate(
         userMessageDraftsByChatId[chatId] = value
     }
 
-    private fun clearUserMessageDraft(chatId: String) {
+    fun clearUserMessageDraft(chatId: String) {
         userMessageDraftsByChatId.remove(chatId)
         if (activeDraftChatId == chatId) {
             _userMessage.value = TextFieldValue("")
@@ -893,6 +897,13 @@ class MessageProcessingDelegate(
             return
         }
         val turnId = chatRuntime.turnSequence.incrementAndGet()
+        turnOptions.subjectInboxId?.let { inboxId ->
+            if (!com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).claim(roleCardId, inboxId)) {
+                chatRuntime.isLoading.value = false
+                updateGlobalLoadingState()
+                return
+            }
+        }
         chatRuntime.activeTurnId = turnId
 
         val originalMessageText = submittedText.trim()
@@ -1050,7 +1061,7 @@ class MessageProcessingDelegate(
                 userMessage = ChatMessage(
                     sender = "user",
                     content = finalMessageContent,
-                    timestamp = turnOptions.voiceMessageTimestamp ?: com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(),
+                    timestamp = turnOptions.subjectInputTimestamp ?: turnOptions.voiceMessageTimestamp ?: com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator.next(),
                     roleName = context.getString(R.string.message_role_user), // 用户消息的角色名固定为"用户"
                     displayMode =
                         if (effectiveHideUserMessage) {
@@ -1097,6 +1108,7 @@ class MessageProcessingDelegate(
                     val addUserMessageStartTime = messageTimingNow()
                     addMessageToChat(chatId, userMessage)
                     userMessageAdded = true
+                    turnOptions.subjectInboxId?.let { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).finish(roleCardId, it, "saved") }
                     turnOptions.onUserMessagePersisted?.invoke()
                     if (!turnOptions.voiceCallEnded && !turnOptions.proactiveWake && !isAutoContinuation &&
                         !turnOptions.voiceCallEvent && !turnOptions.voiceCallDecision && !turnOptions.voiceCallSilence &&
@@ -1872,6 +1884,13 @@ class MessageProcessingDelegate(
                                     if (cancellationToPropagate != null) "cancelled" else if (shouldFinalizeInterruptedMessage) "failed" else "finished")
                             } catch (failure: Exception) { AppLogger.e(TAG, "活动结束状态未保存；不重跑已完成消息", failure) }
                             finally { com.ai.assistance.operit.core.companion.ActivityNotes.release(ref) }
+                        }
+                    }
+                    turnOptions.subjectInboxId?.let { id ->
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            try { com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).finish(roleCardId, id,
+                                if (cancellationToPropagate != null) "unknown" else if (shouldFinalizeInterruptedMessage || finalInputStateAfterSend is EnhancedInputProcessingState.Error) "failed" else "completed") }
+                            catch (failure: Exception) { AppLogger.e(TAG, "Input receipt finalization failed; do not replay", failure) }
                         }
                     }
                     logMessageTiming(

@@ -94,6 +94,14 @@ internal object SubjectToolMaterials {
                     actionIds.add(source.getString("id"))
                 }
             }
+            if (receipt.section in LifeUnderstandings.kinds) {
+                val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
+                if (rows != null) for (i in 0 until rows.length()) {
+                    val source = LifeUnderstandings.material(rows.getJSONObject(i))
+                    sources[source.getString("id")] = source.toString()
+                    actionIds.add(source.getString("id"))
+                }
+            }
             if (receipt.section == "action") {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {

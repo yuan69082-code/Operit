@@ -113,7 +113,8 @@ internal class SummaryReviewer private constructor(
             }
             return SummaryReviewer(
                 context.applicationContext,
-                "你是本次对话中名为 ${card.name} 的 AI，正在审阅自己的上下文记录。此处只做审阅。",
+                "你是本次对话中名为 ${card.name} 的 AI，正在审阅自己的上下文记录。此处只做审阅。" +
+                    if (isGroupChat) "" else "\n" + SummaryAddress.instruction(context, roleId),
                 model.first,
                 model.second,
                 isGroupChat

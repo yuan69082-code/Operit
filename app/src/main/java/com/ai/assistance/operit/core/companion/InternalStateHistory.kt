@@ -181,7 +181,8 @@ internal class InternalStateArchive(private val file: File, private val scope: S
 
     /** Activity facts reuse the archive. They are not psychological state changes. */
     fun activityWrite(kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
-        require(kind in setOf("activity", "activity_part", "activity_contact", "waking_note", "inner_read", "thought", "thought_meta"))
+        require(kind in setOf("activity", "activity_part", "activity_contact", "waking_note", "inner_read", "thought", "thought_meta",
+            "life_event", "life_activity", "life_run", "dream_process", "dream_step", "message_inbox"))
         val db = db()
         if (!writing) { db.beginTransaction(); writing = true }
         val old = categoryRow(kind, id)

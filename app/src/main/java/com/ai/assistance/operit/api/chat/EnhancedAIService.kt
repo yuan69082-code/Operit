@@ -728,7 +728,9 @@ class EnhancedAIService private constructor(private val context: Context) {
         recordTokenUsage: Boolean = true,
         chatModelConfigIdOverride: String? = null,
         chatModelIndexOverride: Int? = null,
-        stream: Boolean = false
+        stream: Boolean = false,
+        maximumOutputCharacters: Int? = null,
+        onOutput: (suspend (String) -> Unit)? = null
     ): String {
         ensureInitialized()
         val serviceForFunction = getAIServiceForFunction(functionType, chatModelConfigIdOverride, chatModelIndexOverride)
@@ -750,6 +752,10 @@ class EnhancedAIService private constructor(private val context: Context) {
                 )
                 .collect { chunk ->
                     output.append(chunk)
+                    onOutput?.invoke(output.toString())
+                    require(maximumOutputCharacters == null || output.length <= maximumOutputCharacters) {
+                        "本次有界内部活动输出超过限制；保留已产生片段，未自动重试"
+                    }
                 }
         } finally {
             activeFunctionServices.remove(executionId, serviceForFunction)

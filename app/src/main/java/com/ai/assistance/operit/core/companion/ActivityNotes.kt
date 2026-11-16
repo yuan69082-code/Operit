@@ -35,12 +35,13 @@ internal object ActivityNotes {
         }
     }
 
-    suspend fun begin(context: Context, role: String, chat: String, trigger: String, source: String): Ref {
-        val ref = Ref(role, chat, "activity-" + InnerStructure.hash("$role:$trigger"))
+    suspend fun begin(context: Context, role: String, chat: String, trigger: String, source: String, resumeId: String? = null): Ref {
+        val ref = Ref(role, chat, resumeId ?: ("activity-" + InnerStructure.hash("$role:$trigger")))
         return acquire(ref) {
             withContext(Dispatchers.IO) {
                 check(!InternalStateStore(context).recipientScope(role, chat)) { "活动随记仅在本助手私域保存" }
                 CompanionStore(context).activityWrite(role, "activity", ref.id, "private") { old ->
+                    if (resumeId != null) check(old != null && old.getString("owner") == role) { "恢复活动归属不匹配" }
                     old ?: base(ref, "activity", ref.id, "private").put("trigger", trigger).put("source", source)
                         .put("status", "received").put("message_count", 0)
                 }

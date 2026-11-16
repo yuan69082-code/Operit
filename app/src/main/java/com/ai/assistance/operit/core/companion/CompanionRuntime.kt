@@ -131,6 +131,8 @@ object CompanionRuntime {
             com.ai.assistance.operit.core.tasks.TaskEvents.recoverPrivate(app)
             CompanionPlayStore(app).recoverWake()
             ExplorationStore(app).recover()
+            CharacterCardManager.getInstance(app).getAllCharacterCards().filter { InternalStateStore(app).enabled(it.id) }
+                .forEach { SubjectLife(app).recover(it.id) }
             dispatch@ while (isActive) {
                 val event = withTimeoutOrNull(2_000) { events.receive() }
                 if (event != null && event !in setOf("phone_event", "software_event", "exploration_event", "playroom_event")) pendingEvent = event
@@ -144,7 +146,53 @@ object CompanionRuntime {
                 val groupBusy = com.ai.assistance.operit.core.group.GroupStore(app).let { gs ->
                     gs.ids().any { taskHolder.getCore(ChatRuntimeSlot.MAIN).getMessageCoordinationDelegate().isGroupRunning(it) }
                 }
-                for (source in (0 until 7).map { (nextSource + it) % 7 }) {
+                for (source in (0 until 8).map { (nextSource + it) % 8 }) {
+                    if (source == 7 && taskHolder.activeConversationCount.value == 0 && !groupBusy &&
+                        VoiceCallRuntime.controller == null && VoiceCallIncoming.pending == null &&
+                        SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
+                        val life = SubjectLife(app)
+                        val work = CharacterCardManager.getInstance(app).getAllCharacterCards().firstNotNullOfOrNull { card ->
+                            if (!InternalStateStore(app).enabled(card.id)) null else AssistantWindowRouter.chat(app, card.id)?.let {
+                                life.next(card.id, it, System.currentTimeMillis())
+                            }
+                        }
+                        if (work != null) {
+                            val epoch = generation.get()
+                            decision = launch {
+                                var outcome = "failed"
+                                try {
+                                    withTimeout(600_000) {
+                                        if (work.input != null) {
+                                            val input = work.input
+                                            val core = taskHolder.getCore(ChatRuntimeSlot.MAIN)
+                                            core.sendUserMessage(roleCardIdOverride = work.role, chatIdOverride = work.chat,
+                                                messageTextOverride = input.getString("text"), turnOptions = ChatTurnOptions(
+                                                    subjectInboxId = input.getString("id"), subjectDispatch = true, subjectInputTimestamp = input.getLong("timestamp"),
+                                                    acceptedAttachments = SubjectMessageInbox(app).attachments(input)))
+                                        } else if (work.dream) ParticipatoryDreams(app).run(work)
+                                        else evaluate(app, work.chat, work.text, epoch, taskEvent = true,
+                                            triggerId = work.id, lifeAdmission = true, resumeActivity = work.activity)
+                                    }
+                                    outcome = "completed"
+                                } catch (timeout: TimeoutCancellationException) {
+                                    currentCoroutineContext().ensureActive()
+                                    store.log(work.chat, "生活续接超时", "保留已完成片段与回执，没有自动重试")
+                                } catch (cancelled: CancellationException) {
+                                    outcome = "interrupted"
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    store.log(work.chat, "生活续接失败", failure.javaClass.simpleName)
+                                } finally {
+                                    withContext(NonCancellable) { life.finish(work, outcome) }
+                                    SubjectLife.stopped(work.role)
+                                    releaseTurn(epoch)
+                                }
+                            }
+                            decision?.join(); decision = null
+                            nextSource = 0
+                            continue@dispatch
+                        }
+                    }
                     if (source == 0 && taskHolder.activeConversationCount.value == 0 && !groupBusy && VoiceCallRuntime.controller == null &&
                         VoiceCallIncoming.pending == null && SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
                         val softwareStore = com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(app)
@@ -441,7 +489,8 @@ object CompanionRuntime {
     private suspend fun evaluate(context: Context, chatId: String, event: String, epoch: Long, taskEvent: Boolean = false, phoneRole: String? = null,
                                  softwareRole: String? = null, softwareRevision: Long? = null,
                                  explorationWork: ExplorationStore.Work? = null, studyEvent: Boolean = false,
-                                 triggerId: String = java.util.UUID.randomUUID().toString()) = coroutineScope {
+                                 triggerId: String = java.util.UUID.randomUUID().toString(),
+                                 lifeAdmission: Boolean = false, resumeActivity: String? = null) = coroutineScope {
         val store = CompanionStore(context)
         val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
         val chat = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context).getChatMetadata(chatId) ?: error("目标会话不存在")
@@ -449,6 +498,11 @@ object CompanionRuntime {
         val roleId = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
             .getChatMetadata(chatId)?.characterCardId ?: error("请先指定目标会话所属助手")
         check(epoch == generation.get() && AssistantWindowRouter.chat(context, roleId) == chatId) { "助手的活跃私聊已改变" }
+        if (!lifeAdmission && SubjectLife(context).defer(roleId, chatId, triggerId,
+                when { studyEvent -> "study"; phoneRole != null -> "phone"; softwareRole != null -> "software"; taskEvent -> "task"; else -> "notification" }, event)) {
+            store.log(chatId, "已暂存", "休息期间保存了原触发，等待按主体安排续接")
+            return@coroutineScope
+        }
         if (!taskEvent && phoneRole == null && softwareRole == null && explorationWork == null)
             check(store.proactiveEnabled && store.proactiveRole == roleId) { "主动联系助手或开关已改变" }
         if (explorationWork != null) {
@@ -646,7 +700,11 @@ object CompanionRuntime {
         var activity: ActivityNotes.Ref? = null
         var activityOutcome = "not_started"
         try {
-            activity = ActivityNotes.begin(context, roleId, chatId, wakeEventId, event)
+            activity = ActivityNotes.begin(context, roleId, chatId, wakeEventId, event, resumeActivity)
+            if (internalEnabled) {
+                SubjectLife(context).checkpoint(requireNotNull(activity), event, "executing")
+                SubjectLife.started(roleId, if (explorationWork != null) "自主学习" else "处理已唤醒事项")
+            }
             // Preparation can take seconds. Recheck at the same Main-thread boundary as
             // foreground submission, then claim and send without a suspension between them.
             withContext(Dispatchers.Main.immediate) {
@@ -745,6 +803,11 @@ object CompanionRuntime {
                 withContext(kotlinx.coroutines.NonCancellable) {
                     try { ActivityNotes.finish(context, ref, activityOutcome) }
                     catch (failure: Exception) { com.ai.assistance.operit.util.AppLogger.e("CompanionRuntime", "活动结束状态未保存；保留已落盘片段", failure) }
+                    if (internalEnabled) {
+                        SubjectLife.stopped(roleId)
+                        SubjectLife(context).checkpoint(ref, event,
+                            if (activityOutcome in setOf("quiet", "message_saved")) "completed" else "paused")
+                    }
                 }
             }
             // Compression has its own service-owned job. It starts after the experience is

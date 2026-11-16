@@ -390,7 +390,7 @@ class InternalStateStore(private val context: Context) {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
-            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || SubjectRestDreams.requested(report)) {
+            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || report.has("life") || SubjectRestDreams.requested(report)) {
             require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
@@ -474,7 +474,11 @@ class InternalStateStore(private val context: Context) {
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
         if (kind in setOf("legacy_handoff", "foundation_history"))
             require(!recipientScope(role, chat)) { "旧状态承接与完整基础变化来源仅在本助手私域读取" }
-        require(offset >= 0 && kind in setOf("foundation", "foundation_history", "legacy_handoff", "inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback") + SubjectRestDreams.kinds + ActivityNotes.kinds)
+        require(offset >= 0 && kind in setOf("foundation", "foundation_history", "legacy_handoff", "inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback", "life_event", "life_activity", "dream_process", "dream_step") + SubjectRestDreams.kinds + ActivityNotes.kinds + LifeUnderstandings.kinds)
+        if (kind in setOf("life_event", "life_activity", "dream_process", "dream_step")) {
+            require(!recipientScope(role, chat)) { "生活与梦的过程只在本人私域读取" }
+            return SubjectLife(context).page(role, kind, offset, id)
+        }
         if (kind == "thought") {
             require(!recipientScope(role, chat)) { "念头仅在本助手私域读取" }
             return ThoughtPool.page(context, role, offset)
@@ -492,8 +496,8 @@ class InternalStateStore(private val context: Context) {
             return JSONObject().put("items", JSONArray(rows.take(8)))
                 .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
         }
-        if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds ||
-            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds).any { id.orEmpty().startsWith("$it:") }))
+        if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds + LifeUnderstandings.kinds ||
+            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds + LifeUnderstandings.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "foundation") {
@@ -776,7 +780,7 @@ class InternalStateStore(private val context: Context) {
                 instructions = if (data.optJSONObject("foundation_state") != null)
                     REPORT_INSTRUCTIONS + "\n" + FOUNDED_REPORT_INSTRUCTIONS + "\n" + InnerFoundations.instructions + "\n" + InnerStructure.instructions +
                         "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions +
-                        "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions +
+                        "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + LifeUnderstandings.instructions + "\n" + SubjectLife.instructions +
                         "\n" + InnerStructure.guard(data)
                 else REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions +
                     "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions +
