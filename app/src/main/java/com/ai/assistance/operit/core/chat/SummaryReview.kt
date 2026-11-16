@@ -49,23 +49,44 @@ internal object SummaryReview {
     fun canCommit(
         expected: List<ChatMessage>, current: List<ChatMessage>,
         beforeTimestamp: Long, afterTimestamp: Long?
-    ): Boolean = expected.lastOrNull()?.timestamp == beforeTimestamp &&
-        (afterTimestamp == null || afterTimestamp > beforeTimestamp) &&
-        sourceUnchanged(expected, current)
+    ): Boolean = commitMismatchReason(expected, current, beforeTimestamp, afterTimestamp) == null
 
-    // Changes outside the reviewed slice (such as a newly appended reply) do not invalidate it.
-    // Edits, deletion, alternate replies and another summary inside the slice do.
-    fun sourceUnchanged(expected: List<ChatMessage>, current: List<ChatMessage>): Boolean {
+    // Log only structural differences, never the user's chat text.
+    fun commitMismatchReason(
+        expected: List<ChatMessage>, current: List<ChatMessage>,
+        beforeTimestamp: Long, afterTimestamp: Long?
+    ): String? {
+        if (expected.lastOrNull()?.timestamp != beforeTimestamp) return "invalid_source_boundary"
+        if (afterTimestamp != null && afterTimestamp <= beforeTimestamp) return "invalid_anchor_order"
         val source = expected.filter { it.sender in setOf("user", "ai", "summary") }
-        if (source.isEmpty()) return false
+        if (source.isEmpty()) return "empty_source"
         val from = source.minOf { it.timestamp }
         val until = source.maxOf { it.timestamp }
         val actual = current.filter {
             it.timestamp in from..until && it.sender in setOf("user", "ai", "summary")
         }
-        return source.size == actual.size && source.zip(actual).all { (a, b) ->
-            a.timestamp == b.timestamp && a.sender == b.sender &&
-                a.roleName == b.roleName && a.content == b.content
+        if (source.size != actual.size) return "source_count_expected=${source.size}_actual=${actual.size}"
+
+        // The SQL source and a second range query must represent the same *set* of
+        // immutable messages. Equal-timestamp rows may arrive in a different order.
+        // Compare the complete content and attribution; never waive real edits.
+        val order = compareBy<ChatMessage>({ it.timestamp }, { it.sender }, { it.roleName }, { it.content })
+        val orderedSource = source.sortedWith(order)
+        val orderedActual = actual.sortedWith(order)
+        for (i in orderedSource.indices) {
+            val a = orderedSource[i]
+            val b = orderedActual[i]
+            if (a.timestamp != b.timestamp) return "timestamp_mismatch_at=$i"
+            if (a.sender != b.sender) return "sender_mismatch_at=$i"
+            if (a.roleName != b.roleName) return "role_mismatch_at=$i"
+            if (a.content != b.content) return "content_mismatch_at=$i"
         }
+        return null
     }
+
+    // Changes outside the reviewed slice (such as a newly appended reply) do not invalidate it.
+    // Edits, deletion, alternate replies and another summary inside the slice do.
+    fun sourceUnchanged(expected: List<ChatMessage>, current: List<ChatMessage>): Boolean =
+        expected.isNotEmpty() &&
+            commitMismatchReason(expected, current, expected.last().timestamp, null) == null
 }
