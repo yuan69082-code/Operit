@@ -48,7 +48,7 @@ class PrivateInnerStateNativeTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test(timeout = 120_000) fun installedCategoriesAndPagedSurvivalAreRealNativeViews() {
-        val context = RuntimeEnvironment.getApplication<Application>()
+        val context = RuntimeEnvironment.getApplication()
         val role = runBlocking { CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "原生页面验证助手")) }
         val chat = ChatHistory(title = "原生页面验证", messages = emptyList(), characterCardId = role)
         runBlocking { ChatHistoryManager.getInstance(context).saveChatHistory(chat) }
