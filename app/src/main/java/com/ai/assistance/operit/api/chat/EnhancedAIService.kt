@@ -528,7 +528,7 @@ class EnhancedAIService private constructor(private val context: Context) {
 
     private fun activityStream(execution: MessageExecutionContext): ActivityNoteStream? =
         execution.activity?.let { ref ->
-            ActivityNoteStream(execution.activityRound.toString(),
+            ActivityNoteStream((execution.internalStateFrame?.id?.plus(":") ?: "") + execution.activityRound,
                 save = { key, text, waking -> ActivityNotes.note(context, ref, key, text, waking) },
                 withdraw = { key -> ActivityNotes.withdraw(context, ref, key) },
                 privateChoice = { key -> ActivityNotes.part(context, ref, key, "private_choice",
@@ -537,9 +537,12 @@ class EnhancedAIService private constructor(private val context: Context) {
 
     private suspend fun recordInnerDelivery(execution: MessageExecutionContext, history: List<PromptTurn>) {
         val frame = execution.internalStateFrame ?: return
-        if (frame.innerReadParts.isEmpty()) return
         try {
             CurrentRequestContext.subjectMaterial(history)
+            execution.activity?.let { ref ->
+                com.ai.assistance.operit.core.companion.SubjectLife(context).recordRequest(ref, frame, execution.activityRound)
+            }
+            if (frame.innerReadParts.isEmpty()) return
             val delivered = frame.innerReadParts.filterValues { part -> history.any { it.content.contains(part) } }
             execution.internalStateFrame = com.ai.assistance.operit.core.companion.InnerReadProgress.responded(
                 context, frame.copy(innerReadParts = delivered))

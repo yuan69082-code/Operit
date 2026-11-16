@@ -215,6 +215,9 @@ class SubjectRestDreamsEntryPointsTest {
             appraiseFoundation(0.6)
             val foundationBefore = InternalStateStore(context).read(role).getJSONObject("foundation_state").toString()
             val original = item("dream", id).toString()
+            SubjectLife(context).defer(role, chat, "restore-study", "study", "休息期间的一条批注")
+            val input = SubjectMessageInbox(context).accept(role, chat, "restore-input", "重启后仍要保留的消息", emptyList())
+            AssistantRoom(context, role).summaryAddress("园园")
             assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             val databasePath = context.getDatabasePath("app_database")
             val actualPath = requireNotNull(com.ai.assistance.operit.data.db.AppDatabase.getDatabase(context).openHelper.writableDatabase.path)
@@ -256,6 +259,9 @@ class SubjectRestDreamsEntryPointsTest {
             assertEquals(1, foundationHistory.getJSONArray("items").length())
             assertEquals(original, item("dream", id).toString())
             assertEquals("resting", item("rest", "current").getJSONObject("content").getString("state"))
+            assertEquals("休息期间的一条批注", CompanionStore(context).activityRead(role, "life_event", "restore-study")!!.getString("text"))
+            assertEquals(input.getLong("timestamp"), SubjectMessageInbox(context).read(role, "restore-input").getLong("timestamp"))
+            assertEquals("园园", AssistantRoom(context, role).read().getString("summary_user_address"))
             // The extra foundation appraisals are real competing material in the same 2048
             // token budget. Recovery must not force every saved item into the first request.
             // Verify the normal next-turn tool/continuation path really delivers this exact

@@ -31,7 +31,7 @@ internal class ParticipatoryDreams(private val context: Context) {
         val budget = data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS)
         val sections = InnerStructureContext.prepare(context, role, work.chat, false, true,
             JSONObject().put("subject_material_tokens", (budget / 2).coerceAtLeast(256)), input = plan.toString())
-        val seed = sections.state
+        val seed = JSONObject(sections.state.substringAfter("\n[Internal State 本轮名录与选择]\n"))
         val card = CharacterCardManager.getInstance(context).getCharacterCard(role)
         val mapping = if (card.chatModelBindingMode == CharacterCardChatModelBindingMode.FIXED_CONFIG)
             requireNotNull(card.chatModelConfigId) to card.chatModelIndex
@@ -66,7 +66,9 @@ internal class ParticipatoryDreams(private val context: Context) {
         var cursor = next
         var last = if (cursor > 0) store.activityRead(role, "dream_step", "${work.id}:${cursor - 1}")?.optString("text").orEmpty() else ""
         try {
-            withTimeout(600_000) {
+            val scheduledEnd = rest.getJSONObject("content").optLong("until")
+            val remaining = if (scheduledEnd > 0) (scheduledEnd - System.currentTimeMillis()).coerceAtLeast(1) else 600_000L
+            withTimeout(minOf(600_000L, remaining)) {
                 while (cursor < steps * 2) {
                     ensureActive()
                     val environment = cursor % 2 == 0
@@ -74,7 +76,13 @@ internal class ParticipatoryDreams(private val context: Context) {
                         "你只生成梦境环境当前一小段场景或对刚才选择的后果，不扮演主体作决定，不预写后面剧情或结局。允许愉快、恐惧、复杂混合、荒诞、嵌套或日常；不按心理分数固定安排结局。不发消息、不调用现实工具。只输出当前场景；需要自然结束时可用<dream_end/>。"
                     else "你是${card.name}，正在梦中经历刚呈现的场景。带着已提供的自身状态，自由回应、感觉或选择，不要求积极结论。只写当下可留存的经历与选择，不输出隐藏推理，不生成未来场景或现实工具命令。这里的行为完全是梦中模拟；不是新的现实证据。可用<dream_end/>选择结束。"
                     val input = JSONObject().put("plan", plan).put("previous_fragment", last)
-                    if (!environment) input.put("subject_material", seed)
+                    if (!environment || cursor == 0) {
+                        val available = budget - SubjectMaterialBudget.estimate(input.toString()).toInt() - 128
+                        require(available > 0) { "上一段梦境与安排已占满材料预算，保留片段等待续接" }
+                        // Reuse the shared complete-object selector inside this request's ONE
+                        // budget. Do not add another full subject allowance to the dream text.
+                        input.put(if (environment) "initial_background" else "subject_material", SubjectMaterialBudget.select(seed, available))
+                    }
                     check(SubjectMaterialBudget.estimate(input.toString()) <= budget) {
                         "梦境当前片段超出共享材料预算，保存后暂停；可明确恢复或醒后理解，不截断原文"
                     }

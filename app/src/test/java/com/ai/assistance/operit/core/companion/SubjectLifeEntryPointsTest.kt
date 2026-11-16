@@ -74,13 +74,13 @@ class SubjectLifeEntryPointsTest {
         assertFalse(inbox.claim(role, "input-one"))
     }
     @Test fun dreamAlternatesEnvironmentAndSubjectWithoutRealToolsAndReachesLaterRequest() = runBlocking {
-        InternalStateStore(context).materialBudget(role, chat, 16384)
         adopt(rest(JSONObject().put("steps", 2).put("tone", "复杂恐惧").put("form", "跳跃")))
         val work = requireNotNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
         assertTrue(work.dream)
         val requests = mutableListOf<Pair<String, JSONObject>>()
         ParticipatoryDreams(context).run(work, ParticipatoryDreams.Model { system, raw, partial ->
             val input = JSONObject(raw)
+            assertTrue("Dream input must share the default material budget", SubjectMaterialBudget.estimate(raw) <= 2048)
             requests += system to input
             val text = if (input.has("subject_material")) "我先走近看看，同时仍有些犹豫。" else "眼前是一道没见过的门，里面传来不确定的声音。"
             partial(text)
@@ -93,6 +93,7 @@ class SubjectLifeEntryPointsTest {
         val stored = CompanionStore(context).activityRead(role, "dream_process", work.id)!!
         assertEquals("completed", stored.getString("status"))
         assertEquals("DREAM_NOT_REALITY", stored.getString("reality"))
+        InternalStateStore(context).materialBudget(role, chat, 16384)
         val later = InnerStructureContext.prepare(context, role, chat, true, input = "醒来后想接上之前的事")
         assertTrue(later.state.contains("dream_not_reality"))
         assertEquals(0, InternalStateStore(context).inspectCategory(role, chat, "action", null, 0).getJSONArray("items").length())
@@ -171,5 +172,18 @@ class SubjectLifeEntryPointsTest {
         repeat(5) { assertTrue(budget.admit("read_file", null)) }
         assertFalse(budget.admit("write_file", null))
         assertNull(life.next(role, chat, System.currentTimeMillis()))
+    }
+
+    @Test fun explicitWakeIsDistinctFromOrdinaryMessagesAndDoesNotPretendAlreadyAwake() = runBlocking {
+        adopt(rest())
+        val life = SubjectLife(context)
+        repeat(15) { life.defer(role, chat, "quiet-$it", "user_message", "普通输入$it") }
+        assertNull(life.next(role, chat, System.currentTimeMillis()))
+        val request = life.requestWake(role, chat)
+        assertEquals(request.getString("id"), life.requestWake(role, chat).getString("id"))
+        val work = life.next(role, chat, System.currentTimeMillis())!!
+        assertTrue(work.text.contains("用户在首页明确请求"))
+        assertNull(life.next(role, chat, System.currentTimeMillis()))
+        assertEquals("resting", life.rest(role)!!.getJSONObject("content").getString("state"))
     }
 }

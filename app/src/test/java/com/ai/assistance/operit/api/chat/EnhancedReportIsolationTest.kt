@@ -255,12 +255,13 @@ class EnhancedReportIsolationTest {
             phase: String,
             maxTokens: Int = 131_072,
             turnOptions: ChatTurnOptions = ChatTurnOptions(notifyReply = false, disableWarning = true),
+            input: String = "继续",
         ) {
             delegate.sendUserMessage(
                 chatId = chat,
                 roleCardId = role,
-                messageTextOverride = "继续",
-                prebuiltMessageContent = "继续",
+                messageTextOverride = input,
+                prebuiltMessageContent = input,
                 chatModelConfigIdOverride = "simulated",
                 maxTokens = maxTokens,
                 tokenUsageThreshold = 0.9,
@@ -282,6 +283,59 @@ class EnhancedReportIsolationTest {
             fun report(f: InternalStateFrame) = "<operit_state_report>" + JSONObject().put("frame_id", f.id)
                 .put("updates", JSONArray()).put("create", JSONArray()) + "</operit_state_report>"
         }
+    }
+
+    @Test fun receivedInputAndLifeReportCrossRealStreamDelegateAndNextRequest(): Unit = runBlocking {
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        try {
+            InternalStateStore(f.app).materialBudget(f.role, f.chat, 16384)
+            val errors = CopyOnWriteArrayList<String>()
+            val completed = AtomicInteger()
+            val delegate = f.delegate(errors, completed)
+            val inbox = SubjectMessageInbox(f.app)
+            val accepted = inbox.accept(f.role, f.chat, "accepted-input", "继续", emptyList())
+            f.output = { _, frame ->
+                val body = JSONObject().put("frame_id", frame.id).put("updates", JSONArray()).put("create", JSONArray())
+                    .put("rest", JSONObject().put("expected_version", 0).put("state", "resting").put("mode", "sleep")
+                        .put("until", System.currentTimeMillis() + 3_600_000).put("meaning", "我选择休息后再继续")
+                        .put("evidence", JSONArray().put(frame.eventIds.last())))
+                    .put("life", JSONArray().put(JSONObject().put("kind", "experience").put("id", "new-understanding")
+                        .put("expected_version", 0).put("text", "先查看已有进展，再考虑新的投入。")
+                        .put("scope", "这次接续").put("uncertainty", "其他情境尚不确定").put("status", "considering")
+                        .put("evidence", JSONArray().put(frame.eventIds.last()))))
+                emit("我先休息一会儿。<operit_state_report>$body</operit_state_report>")
+            }
+            f.sendThroughDelegate(delegate, "received life choice", turnOptions = ChatTurnOptions(
+                subjectInboxId = "accepted-input", subjectInputTimestamp = accepted.getLong("timestamp"),
+                notifyReply = false, disableWarning = true))
+            assertFalse(delegate.isChatLoading(f.chat))
+            assertEquals("completed", inbox.read(f.role, "accepted-input").getString("status"))
+            assertEquals("sleep", SubjectLife(f.app).rest(f.role)!!.getJSONObject("content").getString("mode"))
+            val actualMessages = ChatHistoryManager.getInstance(f.app).loadChatMessages(f.chat)
+            assertEquals(1, actualMessages.count { it.timestamp == accepted.getLong("timestamp") })
+            assertTrue(actualMessages.any { it.content.contains("我先休息一会儿") })
+            val due = SubjectLife(f.app).rest(f.role)!!.getJSONObject("content").getLong("until")
+            val wake = SubjectLife(f.app).next(f.role, f.chat, due)!!
+            f.wake = true
+            f.output = { _, frame ->
+                val wakeReport = JSONObject().put("frame_id", frame.id).put("updates", JSONArray()).put("create", JSONArray())
+                    .put("rest", JSONObject().put("expected_version", 1).put("state", "awake")
+                        .put("meaning", "按原安排接上之前的事情").put("evidence", JSONArray().put(frame.eventIds.last())))
+                emit("<companion_quiet/><operit_state_report>$wakeReport</operit_state_report>")
+            }
+            f.sendThroughDelegate(delegate, "chosen end arrangement", input = wake.text,
+                turnOptions = ChatTurnOptions(proactiveWake = true, persistTurn = false, notifyReply = false, disableWarning = true))
+            assertEquals("awake", SubjectLife(f.app).rest(f.role)!!.getJSONObject("content").getString("state"))
+            f.wake = false
+            f.output = { _, frame ->
+                assertTrue(frame.materialSources.values.any { it.contains("先查看已有进展") })
+                emit("这次接着看原来的进展。" + Fixture.report(frame))
+            }
+            f.sendThroughDelegate(delegate, "next real input")
+            assertEquals(3, f.calls)
+            assertTrue(f.uncaught.toString(), f.uncaught.isEmpty())
+            assertTrue(errors.toString(), errors.isEmpty())
+        } finally { f.close() }
     }
 
     @Test fun invalidStateFieldIsReportedSafelyAndSuppliedToTheNextNormalRequest(): Unit = runBlocking {

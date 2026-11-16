@@ -19,7 +19,7 @@ internal class SubjectLife(private val context: Context) {
             check(prior.getString("source_chat") == chat && prior.getString("source") == source && prior.getString("text") == text)
             return prior
         }
-        val parent = if (SubjectRestPolicy.admission(rest(role)?.getJSONObject("content"), source, System.currentTimeMillis()) in setOf("judge", "wake")) "interrupt" else "pending"
+        val parent = if (source == "user_wake_request") "user_request" else if (SubjectRestPolicy.admission(rest(role)?.getJSONObject("content"), source, System.currentTimeMillis()) in setOf("judge", "wake")) "interrupt" else "pending"
         return store.activityWrite(role, "life_event", id, parent) { old ->
             if (old != null) {
                 check(old.getString("source_chat") == chat && old.getString("source") == source && old.getString("text") == text) {
@@ -39,6 +39,18 @@ internal class SubjectLife(private val context: Context) {
         if (source == "internal" && !content.optBoolean("defer_internal", true)) return false
         buffer(role, chat, id, source, text)
         return true // One dispatcher owns the subsequent admission, including already-due sleep.
+    }
+
+    fun requestWake(role: String, chat: String): JSONObject {
+        check(!InternalStateStore(context).requireRecipient(role, chat))
+        check(rest(role)?.getJSONObject("content")?.optString("state") == "resting")
+        check(busy(role) == null) { "正在处理本次活动，请等本轮结束" }
+        val existing = store.activityPage(role, "life_event", "user_request", 0).firstOrNull {
+            it.optString("source") == "user_wake_request" && it.optString("status") == "pending"
+        }
+        if (existing != null) return existing
+        return buffer(role, chat, "wake-request:${java.util.UUID.randomUUID()}", "user_wake_request",
+            "用户在首页明确请求醒来或恢复续接。先核对已完成表达和真实结果，再决定如何回应；不是系统自动判定已醒。")
     }
 
     fun page(role: String, kind: String, offset: Int, id: String? = null): JSONObject {
@@ -70,6 +82,19 @@ internal class SubjectLife(private val context: Context) {
         store.activityRead(role, "life_activity", activity)?.optBoolean("exploration") == true
     fun toolsUsed(role: String, activity: String?) = activity?.let { store.activityRead(role, "life_activity", it)?.optInt("tools_used") } ?: 0
 
+    suspend fun recordRequest(ref: ActivityNotes.Ref, frame: InternalStateFrame, round: Int) {
+        if (store.activityRead(ref.role, "life_activity", ref.id) == null) return
+        val key = "request:${frame.id}:$round"
+        ActivityNotes.part(context, ref, key, "request", JSONObject().put("frame_id", frame.id)
+            .put("state_version", frame.stateVersion).put("semantic_revision", frame.revision)
+            .put("round", round).put("material", frame.materialText)
+            .put("source_ids", JSONArray(frame.materialSources.keys.toList())).put("status", "response_started"))
+        store.activityWrite(ref.role, "life_activity", ref.id, "executing") { old ->
+            requireNotNull(old).put("parent", "executing").put("last_request_part", key)
+                .put("last_frame_id", frame.id).put("last_round", round).put("state_version", frame.stateVersion)
+        }
+    }
+
     fun chooseActivity(role: String, id: String, choice: String, note: String): JSONObject {
         require(choice in setOf("continue", "pause", "end"))
         require(note.isNotBlank())
@@ -90,8 +115,11 @@ internal class SubjectLife(private val context: Context) {
         val c = r?.getJSONObject("content")
         if (c?.optString("state") == "resting") {
             val session = c.optString("session_id", "legacy-${r.getInt("version")}")
-            if (SubjectRestPolicy.due(c, now)) return claim(role, chat, "wake:$session:${r.getInt("version")}",
-                "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。休息安排：$c")
+            if (SubjectRestPolicy.due(c, now)) {
+                return claim(role, chat, "wake:$session:${r.getInt("version")}",
+                    "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。休息安排：$c")
+                    ?: nextInterrupt(role, chat, r, now)
+            }
             val resumedDream = store.activityPage(role, "dream_process", "ready", 0).firstOrNull()
             if (resumedDream != null) return Work(role, chat, resumedDream.getString("id"), resumedDream.getJSONObject("plan").toString(), dream = true)
             if (c.has("dream_plan")) claim(role, chat, "dream:$session", c.getJSONObject("dream_plan").toString(), dream = true)?.let { return it }
@@ -104,8 +132,8 @@ internal class SubjectLife(private val context: Context) {
         val resume = store.activityPage(role, "life_activity", "ready", 0).firstOrNull()
         if (resume != null) return claim(role, chat, "resume:${resume.getString("id")}:${resume.getInt("version")}",
             "续接同一活动。已执行的工具与回执必须先核对，未知结果不能盲目重放。原方向：${resume.getString("event")}\n新的决定：${resume.optString("choice_note")}\n" +
-                "可用companion_internal_state action/activity_part按需读取已保存步骤。活动ID：${resume.getString("id")}", resume.getString("id"))
-        val events = store.activityQueuePage(role, "life_event", listOf("interrupt", "pending")).take(8)
+                "可用companion_internal_state get section=action或activity_part按需读取已保存步骤。活动ID：${resume.getString("id")}；最后已提供的请求：${resume.optString("last_request_part", "尚未取得响应")}。本次先核对原材料、原随记和回执后选择接续点；不是把旧请求从头再执行。", resume.getString("id"))
+        val events = store.activityQueuePage(role, "life_event", listOf("interrupt", "pending", "user_request")).take(8)
         val first = events.firstOrNull() ?: return null
         val work = claim(role, chat, "event:${first.getString("id")}", "醒后待处理材料（不是新发生）：" + JSONArray(events) +
             "\n按需继续分页。处理后用companion_life ack明确标记ID；保存过的表达或操作不能重复执行。")
@@ -117,12 +145,19 @@ internal class SubjectLife(private val context: Context) {
 
     private fun nextInterrupt(role: String, chat: String, r: JSONObject, now: Long): Work? {
         val c = r.getJSONObject("content")
-        val rows = store.activityPage(role, "life_event", "interrupt", 0)
-        val selected = rows.firstOrNull { SubjectRestPolicy.admission(c, it.getString("source"), now) in setOf("judge", "wake") } ?: return null
+        val rows = store.activityPage(role, "life_event", "user_request", 0) + store.activityPage(role, "life_event", "interrupt", 0)
+        val selected = rows.firstOrNull { it.getString("source") == "user_wake_request" ||
+            SubjectRestPolicy.admission(c, it.getString("source"), now) in setOf("judge", "wake") } ?: return null
         // A subject-selected source admits one bounded judgement for this rest version.
         // A new rest decision may change the conditions; rereads never restart the old judgement.
-        return claim(role, chat, "interrupt:${c.optString("session_id")}:${r.getInt("version")}",
-            "休息期间你已选择关注的来源到达。是否醒来、简短处理或继续休息由你决定；这不表示自动提高事件重要性。" + selected.toString())
+        val key = if (selected.getString("source") == "user_wake_request") selected.getString("id") else
+            "interrupt:${c.optString("session_id")}:${r.getInt("version")}"
+        val work = claim(role, chat, key,
+            "休息期间你已选择关注的来源或用户明确的唤醒请求到达。是否醒来、简短处理或继续休息由你决定；这不表示自动提高普通消息的重要性。" + selected.toString())
+        if (work != null) store.activityWrite(role, "life_event", selected.getString("id"), "offered") {
+            requireNotNull(it).put("parent", "offered").put("status", "offered_not_acknowledged")
+        }
+        return work
     }
 
     private fun claim(role: String, chat: String, id: String, text: String, activity: String? = null, dream: Boolean = false): Work? {
@@ -185,14 +220,21 @@ internal class SubjectLife(private val context: Context) {
         }
     }
     fun materials(role: String): List<JSONObject> = listOf("life_event", "life_activity").flatMap { kind ->
-        val parents = if (kind == "life_event") listOf("pending", "interrupt", "offered") else listOf("pending", "ready")
+        val parents = if (kind == "life_event") listOf("pending", "interrupt", "offered", "user_request") else listOf("pending", "ready")
         store.activityQueuePage(role, kind, parents).take(3).map { material(kind, it) }
     }
 
     companion object {
+        private val failures = ConcurrentHashMap<String, String>()
+        fun failure(role: String): String? = failures[role]
+        fun recordFailure(role: String, stage: String, error: Exception) {
+            failures[role] = "$stage：${error.javaClass.simpleName}；原记录保留，未自动重做。"
+            com.ai.assistance.operit.util.AppLogger.e("SubjectLife", stage, error)
+        }
+        fun clearFailure(role: String) { failures.remove(role) }
         fun material(kind: String, row: JSONObject): JSONObject =
             JSONObject().put("id", "material:$kind:${row.getString("id")}:${row.optInt("version", 1)}")
-                .put("type", kind).put("owner", role).put("author", row.optString("source", role)).put("at", row.getLong("at"))
+                .put("type", kind).put("owner", row.getString("owner")).put("author", row.optString("source", row.getString("owner"))).put("at", row.getLong("at"))
                 .put("text", row.toString().take(1200)).put("excerpt", row.toString().length > 1200)
                 .put("status", "retrieved").put("not_new_occurrence", true).put("subject_private_material", true)
                 .put("locator", JSONObject().put("kind", kind).put("id", row.getString("id")).put("version", row.getInt("version")))

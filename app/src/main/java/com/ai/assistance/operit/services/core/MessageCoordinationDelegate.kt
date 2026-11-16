@@ -376,7 +376,7 @@ class MessageCoordinationDelegate(
                         }
                         if (withContext(Dispatchers.IO) { com.ai.assistance.operit.core.companion.SubjectLife(context)
                                 .defer(targetRole, targetChat, "input:$inputId", "user_message", captured) }) {
-                            uiStateDelegate.showErrorMessage("消息已保存，等待按休息安排处理。可在首页查看。")
+                            uiStateDelegate.showToast("消息已保存，等待按休息安排处理。可在首页查看。")
                             return@launch
                         }
                         com.ai.assistance.operit.core.companion.CompanionRuntime.noteUserInteraction()?.join()

@@ -139,7 +139,10 @@ object CompanionRuntime {
             CompanionPlayStore(app).recoverWake()
             ExplorationStore(app).recover()
             CharacterCardManager.getInstance(app).getAllCharacterCards().filter { InternalStateStore(app).enabled(it.id) }
-                .forEach { SubjectLife(app).recover(it.id) }
+                .forEach { card ->
+                    try { SubjectLife(app).recover(card.id) }
+                    catch (failure: Exception) { SubjectLife.recordFailure(card.id, "恢复记录读取失败", failure) }
+                }
             dispatch@ while (isActive) {
                 val event = withTimeoutOrNull(2_000) { events.receive() }
                 if (event != null && event !in setOf("phone_event", "software_event", "exploration_event", "playroom_event")) pendingEvent = event
@@ -159,8 +162,14 @@ object CompanionRuntime {
                         SystemClock.elapsedRealtime() - lastInteraction >= 3_000) {
                         val life = SubjectLife(app)
                         val work = CharacterCardManager.getInstance(app).getAllCharacterCards().firstNotNullOfOrNull { card ->
+                            try {
                             if (!InternalStateStore(app).enabled(card.id)) null else AssistantWindowRouter.chat(app, card.id)?.let {
                                 life.next(card.id, it, System.currentTimeMillis())
+                            }
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (failure: Exception) {
+                                if (SubjectLife.failure(card.id) == null) SubjectLife.recordFailure(card.id, "生活安排读取失败", failure)
+                                null
                             }
                         }
                         if (work != null) {
@@ -181,6 +190,7 @@ object CompanionRuntime {
                                             triggerId = work.id, lifeAdmission = true, resumeActivity = work.activity)
                                     }
                                     outcome = "completed"
+                                    SubjectLife.clearFailure(work.role)
                                 } catch (timeout: TimeoutCancellationException) {
                                     currentCoroutineContext().ensureActive()
                                     store.log(work.chat, "生活续接超时", "保留已完成片段与回执，没有自动重试")
@@ -188,9 +198,13 @@ object CompanionRuntime {
                                     outcome = "interrupted"
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    SubjectLife.recordFailure(work.role, "生活活动未完成", failure)
                                     store.log(work.chat, "生活续接失败", failure.javaClass.simpleName)
                                 } finally {
-                                    withContext(NonCancellable) { life.finish(work, outcome) }
+                                    withContext(NonCancellable) {
+                                        try { life.finish(work, outcome) }
+                                        catch (failure: Exception) { SubjectLife.recordFailure(work.role, "活动结束事实未保存", failure) }
+                                    }
                                     SubjectLife.stopped(work.role)
                                     resumedExploration = null
                                     releaseTurn(epoch)
@@ -836,8 +850,10 @@ object CompanionRuntime {
                     catch (failure: Exception) { com.ai.assistance.operit.util.AppLogger.e("CompanionRuntime", "活动结束状态未保存；保留已落盘片段", failure) }
                     if (internalEnabled) {
                         SubjectLife.stopped(roleId)
-                        SubjectLife(context).checkpoint(ref, event,
-                            if (activityOutcome in setOf("quiet", "message_saved")) "completed" else "paused", toolsUsed = toolBudget.used)
+                        try {
+                            SubjectLife(context).checkpoint(ref, event,
+                                if (activityOutcome in setOf("quiet", "message_saved")) "completed" else "paused", toolsUsed = toolBudget.used)
+                        } catch (failure: Exception) { SubjectLife.recordFailure(roleId, "活动检查点未保存", failure) }
                     }
                 }
             }

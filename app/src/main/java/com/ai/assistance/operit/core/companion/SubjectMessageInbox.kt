@@ -10,7 +10,7 @@ import org.json.JSONObject
  * rewritten by sleep, compression or a background cancellation. */
 internal class SubjectMessageInbox(private val context: Context) {
     private val store = CompanionStore(context)
-    fun accept(role: String, chat: String, id: String, text: String, attachments: List<AttachmentInfo>, reply: com.ai.assistance.operit.data.model.ChatMessage? = null): JSONObject {
+    fun accept(role: String, chat: String, id: String, text: String, attachments: List<AttachmentInfo>, reply: com.ai.assistance.operit.data.model.ChatMessage? = null): JSONObject = synchronized(lock) {
         store.activityRead(role, "message_inbox", id)?.let {
             check(it.getString("source_chat") == chat && it.getString("text") == text)
             return it
@@ -33,7 +33,7 @@ internal class SubjectMessageInbox(private val context: Context) {
         kotlinx.serialization.json.Json.decodeFromString(com.ai.assistance.operit.data.model.ChatMessage.serializer(), row.getString("reply"))
     fun page(role: String, offset: Int) = store.activityQueuePage(role, "message_inbox", listOf("queued", "pending"), offset)
     fun next(role: String) = store.activityPage(role, "message_inbox", "queued", 0).firstOrNull()
-    fun claim(role: String, id: String): Boolean {
+    fun claim(role: String, id: String): Boolean = synchronized(lock) {
         if (read(role, id).getString("status") != "queued") return false
         var claimed = false
         store.activityWrite(role, "message_inbox", id, "pending") { old ->
@@ -43,7 +43,7 @@ internal class SubjectMessageInbox(private val context: Context) {
         }
         return claimed
     }
-    fun finish(role: String, id: String, status: String) {
+    fun finish(role: String, id: String, status: String) = synchronized(lock) {
         require(status in setOf("saved", "completed", "failed", "unknown", "queued"))
         val parent = if (status == "completed") "completed" else if (status == "queued") "queued" else "pending"
         store.activityWrite(role, "message_inbox", id, parent) { requireNotNull(it).put("parent", parent)
@@ -56,4 +56,5 @@ internal class SubjectMessageInbox(private val context: Context) {
                 it.getString("content"), if (it.isNull("stickerCategory")) null else it.getString("stickerCategory"))
         } }
     }
+    companion object { private val lock = Any() } // Short receipt transactions only, never model/network work.
 }

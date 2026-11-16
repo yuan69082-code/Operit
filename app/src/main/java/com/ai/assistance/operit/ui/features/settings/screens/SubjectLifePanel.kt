@@ -33,7 +33,7 @@ internal fun SubjectLifePanel(role: String) {
                     Triple(r, SubjectRestPolicy.label(r, SubjectLife.busy(role) ?: if (chatBusy) "正在交流" else null, System.currentTimeMillis()),
                         SubjectMessageInbox(context).page(role, offset))
                 }
-                rest = projection.first; status = projection.second; inbox = projection.third; error = ""
+                rest = projection.first; status = projection.second; inbox = projection.third; error = SubjectLife.failure(role).orEmpty()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = "状态读取失败：${failure.javaClass.simpleName}" }
             delay(2_000)
@@ -49,6 +49,14 @@ internal fun SubjectLifePanel(role: String) {
                     Text(row.optString("meaning"))
                     if (row.optLong("until") > 0) Text("预计结束：" + java.time.Instant.ofEpochMilli(row.getLong("until")).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime())
                     Text("打扰安排：" + when (row.optString("interruption")) { "judge" -> "指定来源到达后由他判断"; "wake" -> "按已选来源续接"; else -> "先暂存，醒后取用" })
+                    if (row.optString("state") == "resting") TextButton(onClick = { scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                SubjectLife(context).requestWake(role, requireNotNull(AssistantWindowRouter.chat(context, role)) { "请先为这位助手打开私聊" })
+                            }
+                            error = "唤醒请求已保存，等待可用的执行位置。"
+                        } catch (failure: Exception) { error = "请求未保存：${failure.message}" }
+                    } }) { Text("请求醒来或续接") }
                 }
                 if (inbox.isEmpty()) Text("没有此页待处理的输入。")
                 inbox.take(8).forEach { row ->
