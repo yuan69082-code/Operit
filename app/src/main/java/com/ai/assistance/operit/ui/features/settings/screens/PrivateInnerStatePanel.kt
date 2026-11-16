@@ -311,6 +311,9 @@ private val readableFields = linkedMapOf("kind" to "类别", "description" to "�
 
 @Composable
 private fun PrivateContent(value: JSONObject) {
+    if (value.has("intensity") && value.isNull("intensity")) {
+        Text("当前强度：未知或尚未量化", style = MaterialTheme.typography.bodyMedium)
+    }
     readableFields.forEach { (field, label) ->
         if (value.has(field) && !value.isNull(field)) {
             val item = value.get(field)

@@ -51,7 +51,6 @@ internal object CategoryEvents {
     }
 
     fun evidence(actions: JSONArray): List<String> {
-        require(actions.length() <= 8)
         return (0 until actions.length()).map { actions.getJSONObject(it) }
             .filter { it.optString("op") == "appraise" }.flatMap { strings(it.getJSONArray("evidence"), 6) }.distinct()
     }
@@ -76,7 +75,6 @@ internal object CategoryEvents {
         rows.put(row)
     }
     fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {
-        require(actions.length() <= 8)
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
             try {
@@ -110,7 +108,12 @@ internal object CategoryEvents {
                 if (old != null) require(old.getString("parent") == parent) { "既有事件不能无声改类" }
                 strings(a.getJSONArray("objects"), 8); strings(a.getJSONArray("goals"), 8)
                 val intensity = a.get("intensity")
-                require(intensity is Number && intensity.toDouble().isFinite() && intensity.toDouble() >= 0)
+                if (intensity === JSONObject.NULL) {
+                    if (category.getString("family") != "feeling")
+                        throw InternalStateReportIssue("episodes", "episodes[$i].intensity", "UNKNOWN_INTENSITY_REQUIRES_FEELING")
+                } else if (intensity !is Number || !intensity.toDouble().isFinite() || intensity.toDouble() < 0) {
+                    throw InternalStateReportIssue("episodes", "episodes[$i].intensity", "NONNEGATIVE_INTENSITY")
+                }
                 text(a, "importance", 300); text(a, "long_term_impact", 300)
                 text(a, "understanding", 600); text(a, "reason", 400)
                 require(text(a, "attention", 20) in setOf("foreground", "background", "aside"))
@@ -202,10 +205,10 @@ internal object CategoryEvents {
     val instructions = """
         [类别内部事件 v1]
         类别使用已采用 inner 记录的 ID，或宿主已安装的 foundation:family:key 目录 ID。不同事情用独立稳定事件 ID；不能按同名对象/关键词合并，也不必每条消息建事件。
-        同一报告可选 episodes:[...]，最多8项；宿主轮末校验采用，无需额外模型调用。
+        同一报告可选 episodes:[...]；没有业务条数上限，按本次模型窗口分批提交，宿主轮末校验采用，无需额外模型调用。
         companion_internal_state action:get section:source id:事实ID 可按ID取得原事件，含已归档来源。section:episode|focus 用 id 精确读取；experience_link 用 id:内在记录ID 查累计经历关联；category_versions 用 id:"episode:事件ID" 或 "focus:类别ID" 查变化过程，offset 分页。
         {op:"appraise",id:"稳定事件ID",expected_version:0或当前版本,category_ref:"类别ID",objects:["对象"],goals:["目标"],intensity:非负强度,importance:"重要性",long_term_impact:"长期意义",attention:"foreground|background|aside",status:"unresolved|processing|resolved",understanding:"当前理解",basis:"input|result|recollection|reinterpretation",evidence:["已读事实ID"],reason:"变化说明",related:[{id:"已有事件ID",relation:"same_matter|split_from|merged_from|corrects"}]}。
-        related 可省略。回忆/重新理解引用原事实；不创建第二次现实发生。不同类别可引用同一个事实。关联修正保留版本和原始来源；不会删除原事件。
+        feeling 类别的 intensity 可明确为 null，表示未知或没有确定分数，不等于0；其他类别仍需非负有限数。感受以后可由主体重新理解并明确强度，旧版本原话与未知事实保留。related 可省略。回忆/重新理解引用原事实；不创建第二次现实发生。不同类别可引用同一个事实。关联修正保留版本和原始来源；不会删除原事件。
         {op:"focus",id:"类别ID",expected_version:0或当前重点版本,capacity:3到6,events:["按你决定的次序排列的事件ID"],reason:"本次安排或替换理由"}。可以不足3件或为空，不凑数。重点外的事件完整保留。
         强度、重要性、注意力、解决状态相互独立。放到背景不是原谅或解决；重新关注不自动回升强度。执念/不甘心不意味着必须行动或不能放下。
         基础九情绪在读取时附 time_projection：愤怒的默认参数12小时，惊讶30秒，其余默认2小时。当前关系亲近分量未核实则不虚构关系修正；该投影不是新经历，也不写回强度或把未解决改为解决，主体仍可明确重新评价。

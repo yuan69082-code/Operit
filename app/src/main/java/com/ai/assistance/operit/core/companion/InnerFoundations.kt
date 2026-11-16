@@ -366,7 +366,6 @@ internal object InnerFoundations {
 
     /** Ordinary report changes, not a new model call or a separate psychological authority. */
     fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {
-        require(actions.length() <= 8)
         if (actions.length() == 0) return false
         val state = data.getJSONObject("foundation_state")
         advance(data, now)

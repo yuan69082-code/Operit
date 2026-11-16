@@ -79,7 +79,10 @@ internal object InternalStateReportDiagnostics {
                         integer(entry, "expected_version", "$path.expected_version")
                         if (entry.optString("op") == "appraise") {
                             string(entry, "category_ref", "$path.category_ref")
-                            number(entry, "intensity", "$path.intensity")
+                            // Explicit unknown is valid for open feelings. The category reducer
+                            // checks that null is not used to bypass numeric states in other families.
+                            if (!entry.has("intensity") || !entry.isNull("intensity"))
+                                number(entry, "intensity", "$path.intensity")
                             stringArray(entry, "evidence", "$path.evidence")
                         }
                     }

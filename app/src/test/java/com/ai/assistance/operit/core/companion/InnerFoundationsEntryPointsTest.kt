@@ -141,6 +141,58 @@ class InnerFoundationsEntryPointsTest {
         assertTrue(second.state.contains("foundation"))
     }
 
+    @Test fun anUnscoredFeelingSurvivesSubmissionReadingAndLaterClarification(): Unit = runBlocking {
+        val first = frame(chat, "有点空，也有点酸，但说不清强度")
+        val feeling = episode(first, "uncertain")
+            .put("category_ref", "foundation:feeling:loneliness")
+            .put("understanding", "有点空，也有点酸，但说不清强度")
+            .put("intensity", JSONObject.NULL)
+        InnerStructureContext.submit(context, first, report(first, listOf(feeling)))
+        val restarted = InternalStateStore(context)
+        val saved = restarted.inspectCategory(role, secondChat, "episode", "uncertain", 0)
+            .getJSONObject("item").getJSONObject("content")
+        assertTrue(saved.has("intensity"))
+        assertTrue(saved.isNull("intensity"))
+        assertEquals(feeling.getString("understanding"), saved.getString("understanding"))
+        val next = InnerStructureContext.prepare(context, role, secondChat, true, input = "后来更明白了这种感觉")
+        assertTrue(next.state.contains("有点空，也有点酸，但说不清强度"))
+        val nextFrame = requireNotNull(next.internalStateFrame)
+        val clarified = JSONObject(feeling.toString()).put("expected_version", 1)
+            .put("intensity", 0.3).put("understanding", "现在更能分辨这种感觉了")
+            .put("evidence", JSONArray().put(nextFrame.eventIds.first()))
+        InnerStructureContext.submit(context, nextFrame, report(nextFrame, listOf(clarified)))
+        val history = restarted.inspectCategory(role, secondChat, "category_versions", "episode:uncertain", 0)
+            .getJSONArray("items")
+        assertEquals(2, history.length())
+        assertTrue((0 until history.length()).any { history.getJSONObject(it).getJSONObject("content").isNull("intensity") })
+        assertFalse(restarted.read(secondRole).has("foundation_state"))
+    }
+
+    @Test fun unknownIntensityCannotBypassOtherCategoriesOrCommitHalfAReport(): Unit = runBlocking {
+        val first = frame(chat, "这次输入需要保留真实的校验结果")
+        val bad = episode(first, "invalid").put("intensity", JSONObject.NULL)
+        val good = episode(first, "not-partially-saved")
+        val failure = assertThrows(InternalStateReportIssue::class.java) {
+            runBlocking { InnerStructureContext.submit(context, first, report(first, listOf(good, bad))) }
+        }
+        assertEquals("episodes[1].intensity", failure.path)
+        assertEquals("ISR_UNKNOWN_INTENSITY_REQUIRES_FEELING", failure.code)
+        assertTrue(states.inspectCategory(role, chat, "episode", "not-partially-saved", 0).isNull("item"))
+        val corrected = episode(first, "valid")
+        InnerStructureContext.submit(context, first, report(first, listOf(corrected)))
+        assertFalse(states.inspectCategory(role, chat, "episode", "valid", 0).isNull("item"))
+    }
+
+    @Test fun aReportCanPreserveMoreThanEightIndependentMatters(): Unit = runBlocking {
+        val first = frame(chat, "这些不同事情都需要分别承接")
+        val changes = (1..12).map { episode(first, "matter-$it") }
+        InnerStructureContext.submit(context, first, report(first, changes))
+        changes.forEach { change ->
+            assertEquals(1, states.inspectCategory(role, secondChat, "episode", change.getString("id"), 0)
+                .getJSONObject("item").getInt("version"))
+        }
+    }
+
     @Test fun unformedSurvivalDoesNotMaterializeAsAnInventedExperience(): Unit = runBlocking {
         frame(chat, "今天聊聊真实经历，但并没有报告求生欲")
         val survival = states.inspectCategory(role, chat, "foundation", "foundation:need:survival", 0).getJSONObject("item")

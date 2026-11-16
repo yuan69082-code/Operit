@@ -18,7 +18,7 @@ class InternalStateStore(private val context: Context) {
     private fun failureKey(role: String) = "isr-failure:$role"
 
     /** Stores only safe failure metadata. Neither report bodies nor personal memories enter logs. */
-    fun noteReportFailure(frame: InternalStateFrame, failure: Exception): InternalStateReportIssue {
+    internal fun noteReportFailure(frame: InternalStateFrame, failure: Exception): InternalStateReportIssue {
         val issue = InternalStateReportDiagnostics.issue(failure, "report_commit")
         store.update(failureKey(frame.roleId)) { state ->
             state.put("status", "unresolved").put("code", issue.code).put("stage", issue.stage)
