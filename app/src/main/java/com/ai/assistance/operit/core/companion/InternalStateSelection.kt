@@ -244,7 +244,7 @@ object InternalStateSelection {
 
     private fun searchable(value: JSONObject): String = listOf(
         "id", "name", "description", "detail", "title", "next", "progress", "text", "reason",
-        "object_ref", "unresolved", "desire", "choice", "effects", "reasons",
+        "object_ref", "unresolved", "desire", "choice", "effects", "reasons", "goal", "conclusion", "latest_note",
     ).filter { value.has(it) && !value.isNull(it) }.joinToString(" ") { value.get(it).toString() }
 
     private fun terms(text: String): Set<String> {

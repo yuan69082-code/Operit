@@ -13,6 +13,7 @@ internal interface InternalStateHistoryAccess {
     fun categoryCount(kind: String, parent: String? = null): Long = 0L
     fun latestCategoryRow(kind: String, parent: String): JSONObject? = null
     fun relevantInnerRows(input: String, parent: String, limit: Int): List<JSONObject> = emptyList()
+    fun relevantSubjectRows(kind: String, input: String, chat: String, limit: Int): List<JSONObject> = emptyList()
 }
 
 internal class InternalStateDocument(data: JSONObject, val history: InternalStateHistoryAccess) : JSONObject(data.toString()) {

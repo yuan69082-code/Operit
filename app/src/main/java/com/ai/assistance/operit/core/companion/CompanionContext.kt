@@ -180,7 +180,9 @@ object CompanionContext {
             appendSections(ThoughtPool.promptSections(ThoughtPool.selected(context, roleId), System.currentTimeMillis()))
         }
         if (store.proactiveEnabled && store.proactiveRole == roleId && roleId != null) {
-            instructions.append("你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。\n")
+            instructions.append(if (internalEnabled)
+                "你可用 companion_schedule 安排有具体目的的下次主动联系，也可取消；是否继续由你决定，不为维持活动而预约。自主研究使用独立的 companion_explore 安排。\n"
+                else "你可用 companion_schedule 决定下次醒来的时间与目的；每次醒来后安排下一次，也可取消。\n")
             state.append("当前主动唤醒安排：").append(store.read(store.scheduleKey(roleId)).toString()).append("\n")
         }
         // Internal state owns todo/thought selection when enabled. Do not reinsert the newest

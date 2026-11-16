@@ -110,11 +110,15 @@ internal object InnerInteractions {
         return actions.length() > 0
     }
 
-    fun material(data: JSONObject, persist: Boolean = false, chat: String = "", at: Long = System.currentTimeMillis()): JSONObject {
+    fun material(data: JSONObject, persist: Boolean = false, chat: String = "", at: Long = System.currentTimeMillis(), input: String = ""): JSONObject {
         val selection = data.optJSONObject("category_selection") ?: JSONObject().also { data.put("category_selection", it) }
-        val page = CategoryEvents.page(data, "union", selection.optInt("union"))
+        val cursor = selection.optInt("union")
+        val page = CategoryEvents.page(data, "union", cursor)
         if (persist) selection.put("union", if (page.isNull("next_offset")) 0 else page.getInt("next_offset"))
-        val rows = page.getJSONArray("items")
+        val rotation = page.getJSONArray("items")
+        val rows = JSONArray(SubjectRecall.selected(data, "union", input, chat, cursor.toLong(),
+            (0 until rotation.length()).map { rotation.getJSONObject(it) }))
+        page.put("items", rows)
         // A persistent union may refer to a session-scoped member. Keep the union/history,
         // but never project that session's private interpretation into another window.
         for (i in rows.length() - 1 downTo 0) {

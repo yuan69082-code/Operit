@@ -270,6 +270,9 @@ class CompanionStore(context: Context) {
         override fun relevantInnerRows(input: String, parent: String, limit: Int) = synchronized(lock(scope)) {
             history(scope).use { it.relevantInnerRows(input, parent, limit) }
         }
+        override fun relevantSubjectRows(kind: String, input: String, chat: String, limit: Int) = synchronized(lock(scope)) {
+            history(scope).use { it.relevantSubjectRows(kind, input, chat, limit) }
+        }
         private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256
         }
