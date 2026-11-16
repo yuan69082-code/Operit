@@ -31,12 +31,18 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
         }
         return saved
     }
-    private fun row(id: String, requireOpen: Boolean = false, change: (JSONObject) -> Unit) = update { data ->
-        if (group && requireOpen) check(data.optBoolean("group_exists", true)) { "群已结束，不能提交执行" }
-        val rows = data.optJSONArray(key) ?: error("待办不存在")
-        val i = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id } ?: error("待办不存在")
-        val row = TaskRecords.normalize(rows.getJSONObject(i))
-        change(row); rows.put(i, row)
+    private fun row(id: String, requireOpen: Boolean = false, change: (JSONObject) -> Unit): JSONObject {
+        lateinit var saved: JSONObject
+        update { data ->
+            if (group && requireOpen) check(data.optBoolean("group_exists", true)) { "群已结束，不能提交执行" }
+            val rows = data.optJSONArray(key) ?: error("待办不存在")
+            val i = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id } ?: error("待办不存在")
+            val row = TaskRecords.normalize(rows.getJSONObject(i))
+            change(row); rows.put(i, row)
+            // Return the exact write, not a later list() that another writer may have changed.
+            saved = TaskRecords.receipt(row)
+        }
+        return saved
     }
     fun comment(id: String, actor: String, text: String) = row(id) { TaskRecords.comment(it, actor, text, System.currentTimeMillis()) }
     fun submit(id: String, actor: String, recipient: String, members: Set<String>, minutes: Int) = row(id, requireOpen = true) {

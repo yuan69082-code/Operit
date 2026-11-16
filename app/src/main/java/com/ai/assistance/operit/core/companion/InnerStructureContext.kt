@@ -32,13 +32,16 @@ internal object InnerStructureContext {
         withContext(Dispatchers.IO) {
             val store = InternalStateStore(context)
             val group = store.requireRecipient(role, chat)
+            // Dispatch instructions describe every possible activity. They are not the
+            // subject's present research question and must not drown it in retrieval matches.
+            val selectionInput = CompanionRuntime.currentExplorationWork(chat)?.takeIf { it.role == role }?.purpose ?: input
             store.prepare(role, chat, persist, wake, capabilities, input, group,
                 sources(context, role),
                 CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user",
                 hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
-                    if (group) emptyList() else SubjectMaterials.read(context, role, input) +
-                        ActionUnderstanding.materials(store.read(role)) + SubjectRestDreams.materials(store.read(role)) +
-                        ActivityNotes.materials(context, role))
+                    (if (group) emptyList() else SubjectMaterials.read(context, role, selectionInput) +
+                        SubjectRestDreams.materials(store.read(role)) + ActivityNotes.materials(context, role)),
+                selectionInput)
         }
 
     suspend fun submit(context: Context, frame: InternalStateFrame, report: JSONObject): JSONObject =

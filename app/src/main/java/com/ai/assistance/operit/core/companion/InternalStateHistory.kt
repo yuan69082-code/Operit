@@ -321,6 +321,45 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         return ids.mapNotNull { id -> categoryRow("inner_record", id)?.getJSONObject("value") }
     }
 
+    /** Current heads only, with a bounded disposable index. New versions invalidate it;
+     * full source bindings/history never enter the cache or the model material budget. */
+    fun relevantSubjectRows(kind: String, input: String, chat: String, limit: Int): List<JSONObject> {
+        require(kind in SubjectRecall.kinds && limit in 1..8)
+        if (input.isBlank() || !file.exists()) return emptyList()
+        val database = db()
+        val revision = database.rawQuery("SELECT COUNT(*),COALESCE(MAX(rowid),0) FROM category_current WHERE scope=? AND kind=?",
+            arrayOf(scope, kind)).use { c -> c.moveToFirst(); c.getLong(0) to c.getLong(1) }
+        val key = Triple(file.absolutePath, scope, kind)
+        val cached = synchronized(recallCache) { recallCache[key]?.takeIf { it.revision == revision } }
+        val ids = if (cached != null) SubjectRecall.ranked(cached.entries.asSequence(), input, chat, limit) else {
+            val entries = mutableListOf<SubjectRecall.Entry>()
+            var weight = 0L
+            var retain = true
+            val matches = database.rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind=? ORDER BY id",
+                arrayOf(scope, kind)).use { cursor ->
+                val stream = sequence {
+                    while (cursor.moveToNext()) {
+                        val row = JSONObject(cursor.getString(0))
+                        if (kind != "union" && row.getString("parent") != "private") continue
+                        val entry = SubjectRecall.entry(row) ?: continue
+                        if (retain) {
+                            weight += entry.weight
+                            if (weight > INNER_INDEX_CACHE_WEIGHT) { entries.clear(); retain = false }
+                            else entries += entry
+                        }
+                        yield(entry)
+                    }
+                }
+                SubjectRecall.ranked(stream, input, chat, limit)
+            }
+            synchronized(recallCache) {
+                if (retain) recallCache[key] = RecallIndex(revision, entries.toList()) else recallCache.remove(key)
+            }
+            matches
+        }
+        return ids.mapNotNull { categoryRow(kind, it) }
+    }
+
     fun page(kind: String, offset: Int, limit: Int, hotIds: Set<String>): List<JSONObject> {
         require(offset >= 0 && limit in 1..21)
         if (!file.exists()) return emptyList()
@@ -355,6 +394,10 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     }
 
     companion object {
+        private data class RecallIndex(val revision: Pair<Long, Long>, val entries: List<SubjectRecall.Entry>)
+        private val recallCache = object : LinkedHashMap<Triple<String, String, String>, RecallIndex>(4, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Triple<String, String, String>, RecallIndex>?) = size > 4
+        }
         private const val INNER_INDEX_CACHE_WEIGHT = 1_048_576L
         private data class InnerSearchIndex(val revision: Pair<Long, Long>, val entries: List<InnerMaterialSelection.Entry>)
         private val innerSearchCache = object : LinkedHashMap<Pair<String, String>, InnerSearchIndex>(4, 0.75f, true) {

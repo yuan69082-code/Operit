@@ -88,6 +88,30 @@ object TaskRecords {
         put("history_total", history.length())
         put("next_history_offset", if (historyOffset + 5 < history.length()) historyOffset + 5 else JSONObject.NULL)
     }
+    /** Exact saved identity and dispatch, independent of list pagination. No history payload. */
+    fun receipt(row: JSONObject): JSONObject = brief(row).apply {
+        row.optJSONObject("dispatch")?.let { put("dispatch", JSONObject(it.toString())) }
+        put("saved", true)
+    }
+    /** Request material is a labelled excerpt, never a replacement of the original task.
+     * Including the whole edit history made long-lived research too large to be selected. */
+    fun material(row: JSONObject): JSONObject = brief(row).apply {
+        for (field in listOf("goal", "next", "conclusion")) {
+            val text = row.optString(field)
+            if (text.isNotBlank()) put(field, text.take(160))
+        }
+        val history = row.optJSONArray("history")
+        if (history != null) for (i in history.length() - 1 downTo 0) {
+            val note = history.getJSONObject(i)
+            if (note.optString("kind") == "批注") {
+                put("latest_note", JSONObject().put("actor", note.getString("actor"))
+                    .put("at", note.getLong("at")).put("text", note.getString("text").take(160)))
+                break
+            }
+        }
+        put("material_excerpt", true).put("not_new_occurrence", true)
+            .put("locator", "companion_todo action=get id=" + row.getString("id"))
+    }
     fun claim(row: JSONObject, event: String, now: Long): Boolean {
         val dispatch = row.optJSONObject("dispatch") ?: return false
         if (dispatch.optString("id") != event || dispatch.optString("state") != "pending" ||
