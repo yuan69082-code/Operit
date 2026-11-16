@@ -1,6 +1,6 @@
 # 睡眠、活动交接与经验续接：实现与验证
 
-基线为 main `2d6b9bdc3fbe1e6dc8e2ab1d5bca488bd0a934a7`（shared +195），施工 PR 为 [#71](https://github.com/yuan69082-code/Operit/pull/71)。最终验证和发布证据完成后填写，不把推送当成发布。
+基线为 main `2d6b9bdc3fbe1e6dc8e2ab1d5bca488bd0a934a7`（shared +195），施工及发布 PR 为 [#71](https://github.com/yuan69082-code/Operit/pull/71)。本文记录实现与验证边界，实际合并提交、发布版本和下载链接以该 PR 的发布检查与交付记录为准，不把推送当成发布。
 
 ## 复用与边界
 
@@ -68,6 +68,12 @@ AssistantRoom.summary_user_address 按助手保存称呼，私域“人格与自
 - PrivateInnerStateNativeTest：Android Compose + Robolectric 原生图形，实际报告后读取睡眠状态并生成 native-life-sleep-arrangement.png；不是物理手机实测。
 - SummaryAddressTest / VoiceCallCleanupTest：称呼隔离、原文及缺省可用，多项清理失败仍释放其余资源。
 
-当前等待最终 Android 全套测试/打包及 shared 双端发布验证。此前构建暴露字符串插值、帮助函数变量、协程声明三项编译错误，已经修正；修复提交不能代替 CI 结果。Windows 先前检查与打包成功，最终提交仍须独立通过。
+实现提交 `0d60f8d90ed800f68af74d97c98e5395ae440266` 的 [完整检查 #202](https://github.com/yuan69082-code/Operit/actions/runs/43942133732) 已通过 Android 2175 项测试，2169 通过、6 项原有跳过、0 失败，并通过设备测试代码编译。Windows 检查与打包成功。打包前回归也通过，最终发布须由同一流程继续核对 APK 签名、身份、版本和实际 Release；不能把工作分支产物当成更新已经发布。
+
+上一轮三项失败已保留断言并重新验证：消息消费测试接回生产使用的 updateMessage 修订语义；测试方法间重新获取 Application 对应的配置管理对象；备份比较点移到梦境准备完成后的实际导出时点，保留合法时间推进与整份状态严格比较。原生截图位于该检查的 operit-android-test-reports-202 → app/build/reports/native-private-state/native-life-sleep-arrangement.png，来源是实际 Android Compose 组件与受控报告，不是网页或物理手机。
+
+整体稳定性核对范围：正常消息/工具续轮/失败后下一条输入走 EnhancedReportIsolationTest；新队列并发与恢复走 SubjectLifeEntryPointsTest；原报告解析、归属、摘要连续压缩、历史工具材料、供应商请求/取消和订阅续轮沿整套已有回归。RawSnapshotBackupManager 的实际导出/恢复保留新旧梦、步骤、待处理消息、称呼与 48 小时原期限。语音接听/录音/转写/发送/播放/再次录音/挂断的调用链已静态核对，资源释放的确认缺陷有定向回归；这不代表实际设备完整通话已经通过。
+
+旧助手一次性接通已经启用的内部状态工具对应生活控制，后续用户取消仍保持取消。已有外部引擎窗口保持原所有权，不由睡眠或输入队列启动第二套本地模型流程。无关订阅、书房存储与外部执行权限不改变。最终合并提交和发布产物由 [PR #71](https://github.com/yuan69082-code/Operit/pull/71) 的发布检查记录，签名、版本和代码树核验是发布条件。
 
 真实账号模型完整过程、实际 MCP、物理手机录音/播放/蓝牙、系统后台准时性与长期运行尚未实测。书房整书扫描原限制保留。不据此宣称意识、真实心理质量或长期稳定已经得到证明。
