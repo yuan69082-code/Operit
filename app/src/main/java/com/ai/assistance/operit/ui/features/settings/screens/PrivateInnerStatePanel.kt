@@ -180,7 +180,16 @@ private fun PrivateRecordCard(role: String, kind: String, row: JSONObject, histo
                     else -> "已安装能力，尚无已形成的主观经历"
                 }
                 Text(meaning, style = MaterialTheme.typography.labelMedium)
-                if (row.has("current_value")) Text("当前投影值：" + row.optDouble("current_value"))
+                if (row.has("current_value")) {
+                    val value = row.getDouble("current_value")
+                    // The card is a readable view; the original precision stays in its detail.
+                    val display = if (row.optString("family") == "drive") {
+                        if (value > 0.0 && value < 0.001) "不足 0.1%"
+                        else java.text.DecimalFormat("0.#").format(value * 100) + "%"
+                    } else if (value > 0.0 && value < 0.0001) "不足 0.0001"
+                    else java.text.DecimalFormat("0.####").format(value)
+                    Text("当前强度：$display")
+                }
             }
             if (kind == "legacy_handoff") Text(
                 when (row.optString("status")) {
@@ -192,7 +201,7 @@ private fun PrivateRecordCard(role: String, kind: String, row: JSONObject, histo
                 style = MaterialTheme.typography.labelMedium)
             if (kind == "legacy_handoff" && row.has("current_value"))
                 Text("原规则当前值：${row.getDouble("current_value")} · " + if (row.optString("scope") == "session") "仅当前窗口" else "同助手共享")
-            Text(privateOrigin(row) + row.optLong("adopted_at", row.optLong("created_at", row.optLong("at"))).takeIf { it > 0 }?.let { " · ${privateTime(it)}" }.orEmpty(),
+            Text((if (kind == "foundation") "类别定义与当前状态 · 原始记录见详情" else privateOrigin(row)) + row.optLong("adopted_at", row.optLong("created_at", row.optLong("at"))).takeIf { it > 0 }?.let { " · ${privateTime(it)}" }.orEmpty(),
                 style = MaterialTheme.typography.labelSmall)
             TextButton(onClick = { open = true }) { Text("查看全文与来源") }
             actions?.invoke(row)
