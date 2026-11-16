@@ -141,7 +141,13 @@ internal object InnerFoundations {
     private val byId = kinds.associateBy { it.id }
     val drives = kinds.filter { it.family == "drive" }
     fun find(id: String): Kind? = byId[id]
-    fun definition(id: String): JSONObject? = byId[id]?.asJson()?.put("status", "active")
+    fun definition(id: String): JSONObject? = byId[id]?.let { kind ->
+        kind.asJson().put("status", "active").also { row ->
+            if (kind.family == "need") row.put("level", if (kind.key == "survival") "specific" else "broad")
+            if (kind.family == "need" && kind.key in setOf("life", "survival", "mortality"))
+                row.put("semantic_rule", kind.key)
+        }
+    }
     fun currentVersions(data: JSONObject): Map<String, Int> {
         val state = data.optJSONObject("foundation_state") ?: return emptyMap()
         val values = state.optJSONObject("drives") ?: return emptyMap()
@@ -232,6 +238,12 @@ internal object InnerFoundations {
             definition.getString("id") != "survival" && definition.optString("name").trim() != "求生欲") {
             "已安装基础类别不能另建同一权威；使用 foundation，具体事情使用 episodes"
         }
+    }
+
+    fun validateLegacyRevision(data: JSONObject, definition: JSONObject) {
+        if (data.has("foundation_state") && (definition.getString("id") == "survival" ||
+            definition.optString("name").trim() == "求生欲"))
+            throw InternalStateReportIssue("definition", "definition.name", "SURVIVAL_EXPLICIT_ONLY")
     }
 
     /** Read-only member for unions, with one stable identity per installed category. */
@@ -481,8 +493,9 @@ internal object InnerFoundations {
                     val value = if (kind.family == "drive") member(data, kind.id, now).getDouble("current_value")
                     else instance.getDouble("value")
                     row.put("current_value", value)
-                    if (kind.family == "drive") row.put("state", "base_drive_running")
-                    else row.put("state", "explicitly_formed")
+                    if (kind.family == "drive") {
+                        if (!instance.optBoolean("manual_hold")) row.put("state", "base_drive_running")
+                    } else row.put("state", "explicitly_formed")
                 }
             }
             row
@@ -491,11 +504,26 @@ internal object InnerFoundations {
             .put("next_offset", if (offset + 8 < found.size) offset + 8 else JSONObject.NULL)
     }
 
+    private fun legacyIndex(data: JSONObject): List<JSONObject> {
+        val saved = data.optJSONObject("foundation_state")?.optJSONArray("legacy") ?: JSONArray()
+        val entries = (0 until saved.length()).map { JSONObject(saved.getJSONObject(it).toString()) }.toMutableList()
+        val known = entries.map { it.getString("id") }.toSet()
+        // Definitions created through the retained normal contract must remain visible too.
+        // This is a read projection of that authority, not another migration or value store.
+        InternalStateEngine.definitions(data).filter { it.getString("id") !in known }.forEach { definition ->
+            entries += JSONObject().put("id", definition.getString("id")).put("name", definition.getString("name"))
+                .put("kind", definition.getString("kind")).put("scope", definition.getString("scope"))
+                .put("old_version", definition.getInt("version")).put("source", "current_definition_and_instances")
+                .put("status", if (definition.getBoolean("active")) "active_rule_pending_mapping" else "retired_rule")
+        }
+        return entries
+    }
+
     fun legacyPage(data: JSONObject, offset: Int, chat: String? = null): JSONObject {
         require(offset >= 0)
-        val legacy = data.optJSONObject("foundation_state")?.optJSONArray("legacy") ?: JSONArray()
-        val rows = (0 until legacy.length()).drop(offset).take(8).map { index ->
-            val row = JSONObject(legacy.getJSONObject(index).toString())
+        val legacy = legacyIndex(data)
+        val rows = legacy.drop(offset).take(8).map { entry ->
+            val row = JSONObject(entry.toString())
             if (chat != null) {
                 val definition = InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == row.getString("id") }
                 if (definition?.optBoolean("active") == true) {
@@ -513,14 +541,13 @@ internal object InnerFoundations {
             }
             row
         }
-        return JSONObject().put("items", JSONArray(rows)).put("count", legacy.length())
-            .put("next_offset", if (offset + 8 < legacy.length()) offset + 8 else JSONObject.NULL)
+        return JSONObject().put("items", JSONArray(rows)).put("count", legacy.size)
+            .put("next_offset", if (offset + 8 < legacy.size) offset + 8 else JSONObject.NULL)
     }
 
     /** Original definitions and scoped current instances remain distinct from later interpretations. */
     fun legacyDetail(data: JSONObject, id: String, chat: String): JSONObject {
-        val entries = data.optJSONObject("foundation_state")?.optJSONArray("legacy") ?: JSONArray()
-        val index = (0 until entries.length()).map { entries.getJSONObject(it) }
+        val index = legacyIndex(data)
             .firstOrNull { it.getString("id") == id } ?: return JSONObject().put("item", JSONObject.NULL)
         val version = index.getInt("old_version")
         val current = InternalStateEngine.definitions(data).firstOrNull { it.getString("id") == id }

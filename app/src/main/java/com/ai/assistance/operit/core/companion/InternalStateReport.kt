@@ -118,6 +118,7 @@ object InternalStateReports {
                 InternalStateTimeRules.requireDefined(definition)
             }
             InternalStateEngine.validate(definition)
+            InnerFoundations.validateLegacyRevision(next, definition)
             revisedDefinitions[id] = definition.put("active", true).put("version", old.getInt("version") + 1)
         }
         val effectiveDefinitions = definitions + revisedDefinitions

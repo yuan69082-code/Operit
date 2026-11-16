@@ -196,6 +196,34 @@ class InnerFoundationsEntryPointsTest {
         }
     }
 
+    @Test fun everyInstalledExperientialCategoryUsesTheNormalReportAndArchivePath(): Unit = runBlocking {
+        // These are controlled provider-style candidates, not claims that a real subject
+        // ought to experience every feeling. No final database state is injected.
+        val categories = InnerFoundations.kinds.filter { it.family in setOf("drive", "need", "desire", "emotion", "sentiment", "feeling") }
+        for (batch in categories.chunked(10)) {
+            val f = frame(chat, "核对这些输入的承接：" + batch.joinToString { it.name })
+            val changes = batch.map { kind -> episode(f, "coverage-${kind.family}-${kind.key}")
+                .put("category_ref", kind.id).put("understanding", "受控输出：仍在理解具体事情，并未决定行动")
+                .put("intensity", if (kind.family == "feeling") JSONObject.NULL else 0.25) }
+            val receipt = InnerStructureContext.submit(context, f, report(f, changes))
+            assertTrue(receipt.getBoolean("episodes_adopted"))
+        }
+        val restored = InternalStateStore(context)
+        categories.forEach { kind ->
+            val id = "coverage-${kind.family}-${kind.key}"
+            val saved = restored.inspectCategory(role, secondChat, "episode", id, 0).getJSONObject("item")
+            assertEquals(kind.id, saved.getString("parent"))
+            assertEquals(1, saved.getInt("version"))
+            assertEquals("unresolved", saved.getJSONObject("content").getString("status"))
+            assertTrue(saved.getJSONObject("content").getJSONObject("original_sources").length() > 0)
+            assertEquals(1, restored.inspectCategory(role, secondChat, "category_versions", "episode:$id", 0)
+                .getJSONArray("items").length())
+        }
+        val next = InnerStructureContext.prepare(context, role, secondChat, true, input = "继续理解之前的事情")
+        assertTrue(next.state.contains("受控输出：仍在理解具体事情"))
+        assertFalse(restored.read(secondRole).has("foundation_state"))
+    }
+
     @Test fun adoptedUnionTimeRuleAffectsLaterReadsWithoutOverwritingNewMemberAppraisals(): Unit = runBlocking {
         val first = frame(chat, "两件事情带来了不同体验")
         InnerStructureContext.submit(context, first, report(first, listOf(episode(first, "A"), episode(first, "B"))))

@@ -35,6 +35,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.LooperMode
 import java.io.File
 
 /** Actual Android Compose + storage, with a new test assistant and no model/network call.
@@ -42,14 +43,15 @@ import java.io.File
 @RunWith(OperitStorageTestRunner::class)
 @Config(sdk = [28], application = Application::class, qualifiers = "zh-rCN-w411dp-h891dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@LooperMode(LooperMode.Mode.PAUSED)
 class PrivateInnerStateNativeTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun installedCategoriesAndPagedSurvivalAreRealNativeViews(): Unit = runBlocking {
+    @Test(timeout = 120_000) fun installedCategoriesAndPagedSurvivalAreRealNativeViews() {
         val context = RuntimeEnvironment.getApplication<Application>()
-        val role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "原生页面验证助手"))
+        val role = runBlocking { CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "原生页面验证助手")) }
         val chat = ChatHistory(title = "原生页面验证", messages = emptyList(), characterCardId = role)
-        ChatHistoryManager.getInstance(context).saveChatHistory(chat)
+        runBlocking { ChatHistoryManager.getInstance(context).saveChatHistory(chat) }
         context.getSharedPreferences("companion_options", Context.MODE_PRIVATE).edit()
             .putBoolean("internal_state:$role", true).commit()
         val states = InternalStateStore(context)

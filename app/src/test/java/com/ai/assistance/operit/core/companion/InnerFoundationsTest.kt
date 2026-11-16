@@ -52,6 +52,37 @@ class InnerFoundationsTest {
             .asJson().getString("state"))
     }
 
+    @Test fun retainedDefinitionReportsRemainVisibleAndCannotReintroduceAutomaticSurvival() {
+        val data = JSONObject()
+        InnerFoundations.install(data, 0)
+        val first = input(data, "create-original-contract")
+        val definition = legacy("custom_state", "emotion", 0.0).apply {
+            remove("version"); remove("active")
+            fun direction() = JSONObject().put("condition", "always").put("reason", "保持当前值")
+                .put("interval_minutes", 0).put("amount", 0)
+            put("time_rules", JSONObject().put("increase", direction()).put("decrease", direction()).put("floor", 0))
+        }
+        val receipt = InternalStateReports.apply(data, first, report(first).put("create", JSONArray().put(
+            JSONObject().put("definition", definition).put("value", 35.0).put("reason", "保留原规则正常入口"))), HOUR)
+        assertEquals("custom_state", receipt.getJSONArray("created").getString(0))
+        val created = data
+        val row = InnerFoundations.legacyPage(created, 0, "chat").getJSONArray("items").getJSONObject(0)
+        assertEquals("custom_state", row.getString("id"))
+        assertEquals(35.0, row.getDouble("current_value"), 0.0)
+        assertEquals("current_definition_and_instances", row.getString("source"))
+        assertEquals("custom_state", InnerFoundations.legacyDetail(created, "custom_state", "chat")
+            .getJSONObject("item").getJSONObject("current_definition").getString("id"))
+        val next = input(created, "rename-attempt", HOUR + 1)
+        val before = created.toString()
+        val failure = assertThrows(InternalStateReportIssue::class.java) {
+            InternalStateReports.apply(created, next, report(next).put("revise", JSONArray().put(JSONObject()
+                .put("id", "custom_state").put("expected_version", 1).put("changes", JSONObject().put("name", "求生欲"))
+                .put("reason", "不能用改名绕过专门规则"))), HOUR + 1)
+        }
+        assertEquals("ISR_SURVIVAL_EXPLICIT_ONLY", failure.code)
+        assertEquals(before, created.toString())
+    }
+
     @Test fun legacyMigrationIsIdempotentAndPreservesUnmappedSources() {
         val data = JSONObject().put("definitions", JSONArray()
             .put(legacy("intimacy", "drive", 70.0))

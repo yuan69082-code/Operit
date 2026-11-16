@@ -362,6 +362,7 @@ class InternalStateStore(private val context: Context) {
         }
         update(role, "definition_tool") {
             if (operation == "create") InnerFoundations.validateNewDefinition(it, requireNotNull(definition))
+            if (operation == "revise") InnerFoundations.validateLegacyRevision(it, requireNotNull(definition))
             val now = System.currentTimeMillis()
             val prior = InnerFoundations.alias(it, id)?.let { key -> InnerFoundations.member(it, key, now).getDouble("current_value") }
             restoreEvidence(it, role, evidence)

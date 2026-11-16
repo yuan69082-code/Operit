@@ -237,16 +237,20 @@ internal object InnerStructure {
             val id = text(row, "legacy_ref", 64)
             require(InternalStateEngine.definitions(data).any { it.getString("id") == id }) { "引用的旧状态不存在" }
         }
+        fun parentContent(id: String): JSONObject? = records.optJSONObject(id)?.getJSONObject("content")
+            ?: if (data.has("foundation_state")) InnerFoundations.definition(id) else null
         fun parent(allowed: Set<String>) {
             val id = text(row, "parent_ref", 64)
             require(id != row.getString("id"))
-            val p = requireNotNull(records.optJSONObject(id)) { "上层需要须先采用" }.getJSONObject("content")
+            // Installed categories are structure, not fabricated personal experiences.
+            // A real specific need must not first invent/adopt a second copy of that category.
+            val p = requireNotNull(parentContent(id)) { "上层类别须已安装或采用" }
             require(p.getString("family") in allowed && p.getString("status") == "active")
             var cursor: String? = id
             val visited = mutableSetOf(row.getString("id"))
             while (cursor != null) {
                 require(visited.add(cursor)) { "需要层级不能成环" }
-                cursor = records.optJSONObject(cursor)?.getJSONObject("content")?.optString("parent_ref")?.takeIf { it.isNotBlank() }
+                cursor = parentContent(cursor)?.optString("parent_ref")?.takeIf { it.isNotBlank() }
             }
         }
         when (family) {
@@ -259,7 +263,7 @@ internal object InnerStructure {
                     if (row.getString("semantic_rule") == "life") require(row.getString("level") == "broad")
                     else {
                         require(row.getString("level") == "specific" && !row.has("legacy_ref"))
-                        val p = records.getJSONObject(row.getString("parent_ref")).getJSONObject("content")
+                        val p = requireNotNull(parentContent(row.getString("parent_ref")))
                         require(p.getString("family") == "need" && p.getString("level") == "broad" && p.optString("semantic_rule") == "life")
                         val strength = row.get("strength")
                         require(strength is Number && strength.toDouble().isFinite() && strength.toDouble() >= 0)
@@ -402,7 +406,7 @@ internal object InnerStructure {
         采用先前候选：{op:"adopt",id:"候选ID",reason:"明确采用理由"}；放下候选用 op:"discard"。不能同轮提出并采用；用户说“你喜欢”只是候选来源，不能当作已采用偏好。
         record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，迁移后只作历史来源索引；当前数值与时间不再由旧维度计算）。
         family 可为 drive,need,desire,emotion,sentiment,feeling,personality,self_knowledge,value,stance,relation,preference；kind 自由命名细分类别，不靠复制同名记录表达不同对象。
-        drive 另填 direction；need 另填 level:"broad|specific"，specific 必须 parent_ref 指向已采用 drive/need；desire 必须 parent_ref 和 object_ref。
+        drive 另填 direction；need 另填 level:"broad|specific"，specific 必须 parent_ref 指向已安装的基础 drive/need 或已采用的个人 drive/need（例如 foundation:need:thought）；desire 必须 parent_ref 和 object_ref。基础目录不是主观经历，无需先复制一条候选来充当上层类别；具体个人内容仍按原候选采用。
         emotion/sentiment/feeling 分别表示当前反应、持续情感、体验解释，另填 unresolved 布尔值和 current_state；强度变弱不等于事情解决。
         relation 必须 object_ref 为本轮已知对象ID、label、understanding、feeling，方向始终是自己看待该对象，称谓与理解分开。
         preference 必须 aspect（自由类别，如语言方式/思维方式/爱好）、orientation:"like|dislike|neutral|uncertain"、horizon:"long_term|short_term|contextual"、ownership:"self|accommodation"、context、exceptions；后两项可为空，配合行为不是自身喜好。
