@@ -218,6 +218,12 @@ class SubjectRestDreamsEntryPointsTest {
             SubjectLife(context).defer(role, chat, "restore-study", "study", "休息期间的一条批注")
             val input = SubjectMessageInbox(context).accept(role, chat, "restore-input", "重启后仍要保留的消息", emptyList())
             AssistantRoom(context, role).summaryAddress("园园")
+            val arrange = readMaterial(second, "rest", "current")
+            submit(arrange, JSONObject().put("rest", rest("resting", 1)
+                .put("dream_plan", JSONObject().put("steps", 1))))
+            val process = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
+            ParticipatoryDreams(context).run(process, ParticipatoryDreams.Model { _, _, _ -> "梦中的纸船停在门边。" })
+            val processBefore = CompanionStore(context).activityRead(role, "dream_process", process.id)!!.toString()
             assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             val databasePath = context.getDatabasePath("app_database")
             val actualPath = requireNotNull(com.ai.assistance.operit.data.db.AppDatabase.getDatabase(context).openHelper.writableDatabase.path)
@@ -242,7 +248,7 @@ class SubjectRestDreamsEntryPointsTest {
                 copy.delete()
             }
             val f = readMaterial(second, "rest", "current")
-            submit(f, JSONObject().put("rest", rest("awake", 1)))
+            submit(f, JSONObject().put("rest", rest("awake", 2)))
             appraiseFoundation(0.2)
             RawSnapshotBackupManager.restoreFromBackupUri(context, Uri.fromFile(zip))
             // The existing restore UI requires an application restart. Simulate only that
@@ -262,6 +268,8 @@ class SubjectRestDreamsEntryPointsTest {
             assertEquals("休息期间的一条批注", CompanionStore(context).activityRead(role, "life_event", "restore-study")!!.getString("text"))
             assertEquals(input.getLong("timestamp"), SubjectMessageInbox(context).read(role, "restore-input").getLong("timestamp"))
             assertEquals("园园", AssistantRoom(context, role).read().getString("summary_user_address"))
+            assertEquals(processBefore, CompanionStore(context).activityRead(role, "dream_process", process.id)!!.toString())
+            assertEquals("梦中的纸船停在门边。", CompanionStore(context).activityRead(role, "dream_step", "${process.id}:1")!!.getString("text"))
             // The extra foundation appraisals are real competing material in the same 2048
             // token budget. Recovery must not force every saved item into the first request.
             // Verify the normal next-turn tool/continuation path really delivers this exact

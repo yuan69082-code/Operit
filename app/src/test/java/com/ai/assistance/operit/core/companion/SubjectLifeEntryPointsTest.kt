@@ -112,6 +112,28 @@ class SubjectLifeEntryPointsTest {
         assertNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
     }
 
+    @Test fun chosenInterruptionPausesDreamAtStepBoundaryAndKeepsCompletedFragment() = runBlocking {
+        adopt(rest(JSONObject().put("steps", 3)))
+        val life = SubjectLife(context)
+        val dream = life.next(role, chat, System.currentTimeMillis())!!
+        var calls = 0
+        try {
+            ParticipatoryDreams(context).run(dream, ParticipatoryDreams.Model { _, _, _ ->
+                calls++
+                life.requestWake(role, chat)
+                "走廊尽头有一点灯光。"
+            })
+            fail("chosen interruption must pause before the next request")
+        } catch (_: kotlinx.coroutines.CancellationException) { }
+        assertEquals(1, calls)
+        assertEquals("completed", CompanionStore(context).activityRead(role, "dream_step", "${dream.id}:0")!!.getString("status"))
+        assertEquals("interrupted", CompanionStore(context).activityRead(role, "dream_process", dream.id)!!.getString("status"))
+        val interruption = life.next(role, chat, System.currentTimeMillis())!!
+        assertFalse(interruption.dream)
+        assertTrue(interruption.text.contains("user_wake_request"))
+        assertNull(life.next(role, chat, System.currentTimeMillis()))
+    }
+
     @Test fun earlierFailedInputsDoNotStarveNewInputAndCompletedInputDoesNotWakeTwice() = runBlocking {
         adopt(rest())
         val inbox = SubjectMessageInbox(context)

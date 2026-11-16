@@ -44,7 +44,7 @@ internal class SubjectLife(private val context: Context) {
     suspend fun requestWake(role: String, chat: String): JSONObject {
         check(!InternalStateStore(context).requireRecipient(role, chat))
         check(rest(role)?.getJSONObject("content")?.optString("state") == "resting")
-        check(busy(role) == null) { "正在处理本次活动，请等本轮结束" }
+        check(busy(role) == null || busy(role) == "梦境活动") { "正在处理本次活动，请等本轮结束" }
         val existing = store.activityPage(role, "life_event", "user_request", 0).firstOrNull {
             it.optString("source") == "user_wake_request" && it.optString("status") == "pending"
         }
@@ -120,12 +120,13 @@ internal class SubjectLife(private val context: Context) {
                     "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。休息安排：$c")
                     ?: nextInterrupt(role, chat, r, now)
             }
+            nextInterrupt(role, chat, r, now)?.let { return it }
             val resumedDream = store.activityPage(role, "dream_process", "ready", 0).firstOrNull()
             if (resumedDream != null) return Work(role, chat, resumedDream.getString("id"), resumedDream.getJSONObject("plan").toString(), dream = true)
             if (c.has("dream_plan")) claim(role, chat, "dream:$session", c.getJSONObject("dream_plan").toString(), dream = true)?.let { return it }
             if (c.optString("consolidation").isNotBlank()) claim(role, chat, "review:$session",
                 "你在休息安排中选择了一次经验整理：${c.getString("consolidation")}。只取实际提供的增量材料，按需检索本地记忆或资料。可形成experience/direction候选或保留不确定；不得把整理建议冒充已决定的计划，不自动安排预约。")?.let { return it }
-            return nextInterrupt(role, chat, r, now)
+            return null
         }
         val input = SubjectMessageInbox(context).next(role)
         if (input != null) return Work(role, input.getString("source_chat"), "input:${input.getString("id")}", input.getString("text"), input = input)
@@ -144,11 +145,23 @@ internal class SubjectLife(private val context: Context) {
         return work
     }
 
+    private fun admittedInterrupt(role: String, r: JSONObject, now: Long): JSONObject? {
+        val c = r.getJSONObject("content")
+        val alreadyJudged = store.activityRead(role, "life_run", "interrupt:${c.optString("session_id")}:${r.getInt("version")}") != null
+        val rows = store.activityPage(role, "life_event", "user_request", 0) + store.activityPage(role, "life_event", "interrupt", 0)
+        return rows.firstOrNull { it.getString("source") == "user_wake_request" ||
+            (!alreadyJudged && SubjectRestPolicy.admission(c, it.getString("source"), now) in setOf("judge", "wake")) }
+    }
+
+    fun shouldPauseDream(role: String, now: Long): Boolean {
+        val r = rest(role) ?: return true
+        val c = r.getJSONObject("content")
+        return c.optString("state") != "resting" || SubjectRestPolicy.due(c, now) || admittedInterrupt(role, r, now) != null
+    }
+
     private fun nextInterrupt(role: String, chat: String, r: JSONObject, now: Long): Work? {
         val c = r.getJSONObject("content")
-        val rows = store.activityPage(role, "life_event", "user_request", 0) + store.activityPage(role, "life_event", "interrupt", 0)
-        val selected = rows.firstOrNull { it.getString("source") == "user_wake_request" ||
-            SubjectRestPolicy.admission(c, it.getString("source"), now) in setOf("judge", "wake") } ?: return null
+        val selected = admittedInterrupt(role, r, now) ?: return null
         // A subject-selected source admits one bounded judgement for this rest version.
         // A new rest decision may change the conditions; rereads never restart the old judgement.
         val key = if (selected.getString("source") == "user_wake_request") selected.getString("id") else

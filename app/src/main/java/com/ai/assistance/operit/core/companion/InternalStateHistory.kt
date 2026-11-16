@@ -189,6 +189,12 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val before = old?.toString()
         val oldVersion = old?.getInt("version") ?: 0
         val row = change(old)
+        if (kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run")) {
+            // The archive's version lookup uses kind:id. Bind the host-owned kind here,
+            // so technical receipts cannot lose their history identity at any entry point.
+            require(!row.has("storage_kind") || row.getString("storage_kind") == kind)
+            row.put("storage_kind", kind)
+        }
         require(row.getString("id") == id && row.getString("parent") == parent)
         if (row.toString() != before) {
             row.put("version", oldVersion + 1)

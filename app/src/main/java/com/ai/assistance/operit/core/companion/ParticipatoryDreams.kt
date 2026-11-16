@@ -71,6 +71,9 @@ internal class ParticipatoryDreams(private val context: Context) {
             withTimeout(minOf(600_000L, remaining)) {
                 while (cursor < steps * 2) {
                     ensureActive()
+                    if (SubjectLife(context).shouldPauseDream(role, System.currentTimeMillis())) {
+                        throw CancellationException("已到休息结束条件或有约定的打扰；在梦境步骤边界保存并暂停")
+                    }
                     val environment = cursor % 2 == 0
                     val instruction = if (environment)
                         "你只生成梦境环境当前一小段场景或对刚才选择的后果，不扮演主体作决定，不预写后面剧情或结局。允许愉快、恐惧、复杂混合、荒诞、嵌套或日常；不按心理分数固定安排结局。不发消息、不调用现实工具。只输出当前场景；需要自然结束时可用<dream_end/>。"
