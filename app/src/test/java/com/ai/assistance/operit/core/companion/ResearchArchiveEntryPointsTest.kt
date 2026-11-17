@@ -107,6 +107,7 @@ class ResearchArchiveEntryPointsTest {
         call("companion_reading", "action" to "progress", "id" to source, "text" to "旧进度：尚未检查误差")
         call("companion_reading", "action" to "progress", "id" to source, "text" to "spectrometer calibration 已核对误差，仍需验证温度影响")
         assertEquals(65, call("companion_reading", "action" to "sources").getInt("total"))
+        assertEquals(source, call("companion_reading", "action" to "sources").getJSONArray("sources").getJSONObject(0).getString("id"))
         assertEquals(5, call("companion_reading", "action" to "sources", "offset" to "60").getJSONArray("sources").length())
         val versions = call("companion_reading", "action" to "versions", "part" to "source", "id" to source).getJSONArray("history").objects()
         assertTrue(versions.any { it.getJSONObject("record").optString("progress") == "旧进度：尚未检查误差" })

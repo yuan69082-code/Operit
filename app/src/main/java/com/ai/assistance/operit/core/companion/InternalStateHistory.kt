@@ -225,7 +225,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val total = db().rawQuery("SELECT COUNT(*) FROM research_current WHERE $where", args.toTypedArray()).use { it.moveToFirst(); it.getLong(0) }
         val order = if (due != null) "due,id" else if (kind == "task") {
             if (displayOrder) "priority,updated DESC,id" else "rowid"
-        } else "updated DESC,id"
+        } else if (kind == "source") "rowid" else "updated DESC,id"
         val rows = db().rawQuery("SELECT brief FROM research_current WHERE $where ORDER BY $order LIMIT ? OFFSET ?",
             (args + limit.toString() + offset.toString()).toTypedArray()).use { c -> JSONArray().apply { while (c.moveToNext()) put(JSONObject(c.getString(0))) } }
         return JSONObject().put("items", rows).put("total", total).put("next_offset", if (offset + rows.length() < total) offset + rows.length() else JSONObject.NULL)
