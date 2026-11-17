@@ -63,7 +63,7 @@ class SubjectGrowthFlowTest {
         try {
             InternalStateStore(f.app).materialBudget(f.role, f.chat, 16384)
             val cards = CharacterCardManager.getInstance(f.app)
-            for (name in listOf("companion_todo", "companion_explore", "calculate", "companion_internal_state")) {
+            for (name in listOf("companion_todo", "companion_explore", "companion_software", "companion_internal_state")) {
                 f.handler.getToolPermissionSystem().saveToolPermission(name, PermissionLevel.ALLOW)
                 cards.setToolSelected(f.role, "builtin", name, true)
             }
@@ -81,6 +81,7 @@ class SubjectGrowthFlowTest {
             var taskId = ""
             var resultSource = ""
             var resultQuote = ""
+            var capabilityVersion = ""
             val calculations = mutableListOf<String>()
             val board = TaskBoard(f.app, "role:" + f.role, false)
             var proposal: JSONObject? = null
@@ -118,15 +119,28 @@ class SubjectGrowthFlowTest {
                         else -> emit("<companion_quiet/>" + tagged(report(frame)))
                     }
                     3 -> when (step) {
-                        1 -> emit(tool("calculate", "expression" to "(1+2+3+100)/4",
+                        1 -> emit(tool("companion_software", "action" to "build", "id" to "sample-method",
+                            "source" to "(\${a}+\${b}+\${c}+\${d})/4"))
+                        2 -> {
+                            val installed = frame.materialSources.values.map(::JSONObject)
+                                .filter { it.optString("type") == "actual_operation" }.map { JSONObject(it.getString("text")) }
+                                .last { it.getString("tool") == "companion_software" }
+                            val artifact = JSONObject(installed.getString("result_excerpt"))
+                            assertEquals("installed", artifact.getString("stage"))
+                            assertEquals("not_run", artifact.getString("execution"))
+                            capabilityVersion = artifact.getString("version")
+                            emit(tool("companion_software", "action" to "run", "version" to capabilityVersion,
+                            "inputs" to """{"a":1,"b":2,"c":3,"d":100}""",
                             "__operit_action" to JSONObject().put("decision", "先检验已保留研究方向的样本均值")
                                 .put("intention_refs", JSONArray().put(JSONObject().put("kind", "decision")
                                     .put("id", "research").put("version", 1)))
                                 .put("evidence", JSONArray().put(event(frame))).toString()))
-                        2 -> {
+                        }
+                        3 -> {
                             val receipt = frame.materialSources.entries.map { it.key to JSONObject(it.value) }
                                 .single { (_, material) -> material.optString("type") == "actual_operation" &&
-                                    JSONObject(material.getString("text")).optString("tool") == "calculate" }
+                                    JSONObject(material.getString("text")).optString("tool") == "companion_software" &&
+                                    material.getString("text").contains("26.5") }
                             resultSource = receipt.first
                             val body = JSONObject(receipt.second.getString("text"))
                             assertEquals("completed", body.getString("execution"))
@@ -164,14 +178,28 @@ class SubjectGrowthFlowTest {
                         }
                         2 -> {
                             assertTrue(frame.innerPending.containsKey("method-v1"))
-                            // This tool choice is a simulated model response. The executor really calculates it.
-                            emit(tool("calculate", "expression" to "(11+12)/2",
+                            // Adjust the real immutable local artifact, through the normal exposed
+                            // capability tool. The hidden calculator is not a top-level model tool.
+                            emit(tool("companion_software", "action" to "build", "id" to "sample-method",
+                                "source" to "(\${b}+\${c})/2", "previous_version" to capabilityVersion))
+                        }
+                        3 -> {
+                            val installed = frame.materialSources.values.map(::JSONObject)
+                                .filter { it.optString("type") == "actual_operation" }.map { JSONObject(it.getString("text")) }
+                                .last { it.getString("tool") == "companion_software" }
+                            val artifact = JSONObject(installed.getString("result_excerpt"))
+                            assertEquals("installed", artifact.getString("stage"))
+                            assertNotEquals(capabilityVersion, artifact.getString("version"))
+                            capabilityVersion = artifact.getString("version")
+                            // Model choice is simulated; artifact construction and execution are real.
+                            emit(tool("companion_software", "action" to "run", "version" to capabilityVersion,
+                                "inputs" to """{"b":11,"c":12}""",
                                 "__operit_action" to JSONObject().put("decision", "用已提供的异常点经验比较另一组样本")
                                     .put("intention_refs", JSONArray().put(JSONObject().put("kind", "experience")
                                         .put("id", "sample-comparison").put("version", 1)))
                                     .put("evidence", JSONArray().put(event(frame))).toString()))
                         }
-                        3 -> {
+                        4 -> {
                             val receipt = frame.materialSources.values.map(::JSONObject).single { material ->
                                 material.optString("type") == "actual_operation" && material.getString("text").contains("11.5")
                             }
@@ -223,7 +251,7 @@ class SubjectGrowthFlowTest {
                     assertTrue("round " + round + ": " + f.warnings, f.warnings.isEmpty())
                     assertTrue(errors.toString(), errors.isEmpty())
                     assertEquals("round=$round did not complete its normal tool continuations; " + f.failureDiagnostics(),
-                        if (round == 4) 5 else 3, step)
+                        when (round) { 3 -> 4; 4 -> 5; else -> 3 }, step)
                     SubjectLife(f.app).checkpoint(activity, work.purpose, "completed")
                 } finally { ActivityNotes.release(activity) }
                 scheduler.finish(work, "completed")
