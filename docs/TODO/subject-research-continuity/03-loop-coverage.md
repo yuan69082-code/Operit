@@ -6,7 +6,7 @@ baseline: 07d2e9ffeba023ed31b0bf813dca15df344a8668
 
 # 多重闭环逐项核对
 
-本文件描述真实生产调用及证据边界。下列“已有”指源码与调用链已核对，不等同于真实模型、手机或长期运行已经验收。当前最终集成 CI 尚未完成，未发布本轮改动。
+本文件描述真实生产调用及证据边界。下列“已有”指源码与调用链已核对，不等同于真实模型、手机或长期运行已经验收。当前检查点的 CI 已通过；待确认的历史存储调整尚未实施，未发布本轮改动。
 
 主要路径统一为 ConversationService.prepareConversationHistory → CompanionContext.compose → InnerStructureContext.prepare → InternalStateStore.prepare → SubjectMaterialBudget.select → CurrentRequestContext → EnhancedAIService → ToolExecutionManager/SubjectToolMaterials → 最终 InternalStateReportStream → InnerStructureContext.submit。工具执行事实先保存，主观变化轮末原子采用，后续业务轮再读；工具续轮只增加实际取得的回执，不额外制造思考轮次。
 
@@ -64,7 +64,7 @@ InnerInteractions.apply 在同一权威事务内核验真实成员版本、来�
 
 单槽覆盖核查：exploration 原本就是一个自由判断预约，不能称多个兴趣均已预约。本次保留正常替换行为，在真实工具回执新增 schedule_scope 与 schedule_replaced，准确返回被替换的时间/目的，不伪造第二计划。私人待办已有逐项独立 dispatch，正常提交两项不会互相覆盖；探索轮禁止 submit 的原防绕额度规则保留。新测试验证两个探索预约只认领新槽位，两个私人事项分别提交、暂停其一不取消另一项。私人待办/阅读存储调整的兼容方案仍等待确认。
 
-五轮验证在 SubjectGrowthFlowTest 中走真实消息消费、实际计算器、原预约认领和轮末报告，模型输出与到期时钟受控。Fixture 将模型路由替换为模拟 Provider，ConversationService 的准备适配器直接调用生产 InnerStructureContext，工具续轮仍用生产 normalizeConversationHistoryForModel；它没有覆盖图像识别或完整普通提示词组装。CompanionContext 的正常材料组合另由既有入口测试覆盖。程序接线通过与否以最终 CI 为准，不能据此声称真实模型长期研究成功。
+五轮验证在 SubjectGrowthFlowTest 中走真实消息消费、companion_software 实际构建/调整/运行、原预约认领和轮末报告，模型输出与到期时钟受控。Fixture 将模型路由替换为模拟 Provider，ConversationService 的准备适配器直接调用生产 InnerStructureContext，工具续轮仍用生产 normalizeConversationHistoryForModel；它没有覆盖图像识别、完整普通提示词组装或 CompanionRuntime 的完整后台服务生命周期。CompanionContext 的正常材料组合另由既有入口测试覆盖。#210 的完整 Android JVM 测试已通过，不能据此声称真实模型长期研究成功。
 
 
 ## 7. 意向、决定、行动与实际结果
@@ -135,4 +135,6 @@ SubjectActions 记录产物及实际结果；反馈经 ActionUnderstanding/life/
 
 引擎本机 HEAD 为 0567ba4；有其他工作区未提交文档，保持原样，只读代码。subject_growth_service.py/learning_service.py 的来源根、版本、候选与后续采用提供参照；Operit 复用已经存在的多助手状态、归档和工具，不照搬引擎单主体部署或建立第二权威。
 
-最终仍需：兼容存储确认与实施、上述真实入口测试取得结果、最终完整 Android/Windows 回归与构建、最终 main 再核对、合并发布及 APK/更新清单/签名/版本验证。本文件在这些步骤完成前不作为“整体闭环完成”结论。
+当前检查点：#210 的完整 Android JVM 测试为 2195 项、2189 通过、6 项原有跳过、0 失败；Windows 25 项检查及打包通过。上述入口测试中的模型为模拟 Provider；实际算术产物构建、版本调整及运行未模拟。APK 构建、原签名、包名及实际版本验证通过；代码、候选、产物与验证边界见 [检查点](02-growth-integration.md)。+210 尚未发布。
+
+最终仍需：兼容存储确认与实施、此后最终代码的完整回归与构建、最终 main 再核对、合并发布及 APK/更新清单/签名/版本验证。本文件在这些步骤完成前不作为“整体闭环完成”结论。
