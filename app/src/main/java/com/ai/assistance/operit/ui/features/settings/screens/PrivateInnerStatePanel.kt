@@ -30,7 +30,7 @@ internal val innerFamilyNames = linkedMapOf("personality" to "人格", "self_kno
  * marks a candidate as read, changes attention, or adopts a state. */
 @Composable
 internal fun InternalStatePanel(role: String) {
-    val sections = listOf("当前", "人格与自我", "偏好", "关系", "牵挂与事件", "相互影响", "打算与行动", "休息")
+    val sections = listOf("当前", "人格与自我", "偏好", "关系", "牵挂与事件", "相互影响", "打算与行动", "自由时间", "休息")
     var section by remember(role) { mutableStateOf("当前") }
     var editor by remember(role) { mutableStateOf(false) }
     Text("内部状态", style = MaterialTheme.typography.headlineSmall)
@@ -74,6 +74,7 @@ internal fun InternalStatePanel(role: String) {
                 Text("想做、决定、实际执行和后来怎样理解分别保留。成功回执不等于愿望已满足。能力的构建、运行和调整可在操作详情中查看。")
                 InnerCollectionTabs(role, listOf("decision" to "打算与选择", "direction" to "目的、目标与投入", "experience" to "经验与方法", "action" to "实际操作与能力", "feedback" to "结果后的理解"))
             }
+            "自由时间" -> PrivateTimePanel(role)
             "休息" -> {
                 Text("休息由主体自己的选择承接。锁屏、断网和程序恢复不自动算作入睡或醒来。")
                 PrivateRows(role, "rest")

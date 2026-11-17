@@ -309,14 +309,14 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     /** Activity facts reuse the archive. They are not psychological state changes. */
     fun activityWrite(kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
         require(kind in setOf("activity", "activity_part", "activity_contact", "waking_note", "inner_read", "thought", "thought_meta",
-            "life_event", "life_activity", "life_run", "dream_process", "dream_step", "message_inbox"))
+            "life_event", "life_activity", "life_run", "dream_process", "dream_step", "message_inbox", "private_time_config", "private_time_plan", "private_time_sleep", "private_time_essence"))
         val db = db()
         if (!writing) { db.beginTransaction(); writing = true }
         val old = categoryRow(kind, id)
         val before = old?.toString()
         val oldVersion = old?.getInt("version") ?: 0
         val row = change(old)
-        if (kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run")) {
+        if (kind.startsWith("private_time_") || kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run")) {
             // The archive's version lookup uses kind:id. Bind the host-owned kind here,
             // so technical receipts cannot lose their history identity at any entry point.
             require(!row.has("storage_kind") || row.getString("storage_kind") == kind)

@@ -502,7 +502,7 @@ class InternalStateStore(private val context: Context) {
                 .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
         }
         if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds + LifeUnderstandings.kinds ||
-            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.privateKinds + LifeUnderstandings.kinds).any { id.orEmpty().startsWith("$it:") }))
+            (kind == "category_versions" && (setOf("decision", "feedback", "private_time_config", "private_time_plan", "private_time_sleep", "private_time_essence") + SubjectRestDreams.privateKinds + LifeUnderstandings.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "foundation") {

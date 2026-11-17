@@ -43,7 +43,7 @@ internal object InnerStructureContext {
                     (if (group) emptyList() else SubjectMaterials.read(context, role, selectionInput) +
                         SubjectRestDreams.materials(store.read(role), selectionInput, chat) +
                         ActivityNotes.materials(context, role) +
-                        SubjectLife(context).materials(role) + ParticipatoryDreams.materials(context, role, selectionInput, chat)),
+                        SubjectLife(context).materials(role) + PrivateTime(context).materials(role) + ParticipatoryDreams.materials(context, role, selectionInput, chat)),
                 selectionInput)
         }
 

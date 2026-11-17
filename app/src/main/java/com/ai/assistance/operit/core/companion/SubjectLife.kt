@@ -138,16 +138,19 @@ internal class SubjectLife(private val context: Context) {
             val resumedDream = store.activityPage(role, "dream_process", "ready", 0).firstOrNull()
             if (resumedDream != null) return Work(role, chat, resumedDream.getString("id"), resumedDream.getJSONObject("plan").toString(), dream = true)
             if (c.has("dream_plan")) claim(role, chat, "dream:$session", c.getJSONObject("dream_plan").toString(), dream = true)?.let { return it }
-            if (c.optString("consolidation").isNotBlank()) claim(role, chat, "review:$session",
-                "你在休息安排中选择了一次经验整理：${c.getString("consolidation")}。只取实际提供的增量材料，按需检索本地记忆或资料，也可查梦的日期/关键词索引，醒后决定保留或归档。可形成experience/direction候选或保留不确定；不得把整理建议冒充已决定的计划，不自动安排预约。")?.let { return it }
             return null
         }
         val input = SubjectMessageInbox(context).next(role)
         if (input != null) return Work(role, input.getString("source_chat"), "input:${input.getString("id")}", input.getString("text"), input = input)
+        PrivateTime(context).next(role, chat, now) { id, text -> claim(role, chat, id, text) }?.let { return it }
         val resume = store.activityPage(role, "life_activity", "ready", 0).firstOrNull()
         if (resume != null) return claim(role, chat, "resume:${resume.getString("id")}:${resume.getInt("version")}",
             "续接同一活动。已执行的工具与回执必须先核对，未知结果不能盲目重放。原方向与新的决定保存在life_activity原记录；未进入本轮预算时须按ID读取，不假定已读。\n" +
                 "可用companion_internal_state get section=action或activity_part按需读取已保存步骤。活动ID：${resume.getString("id")}；最后已提供的请求：${resume.optString("last_request_part", "尚未取得响应")}。本次先核对原材料、原随记和回执后选择接续点；不是把旧请求从头再执行。", resume.getString("id"))
+        c?.optString("awake_consolidation")?.takeIf { it.isNotBlank() }?.let { scope ->
+            claim(role, chat, "awake-review:${c.optString("previous_rest")}",
+                "旧休息安排中的整理范围仍保留：$scope。现在已醒，可用free_status的回顾整理菜单选择如何处理；不会在梦中执行整理。")?.let { return it }
+        }
         val events = store.activityQueuePage(role, "life_event", listOf("interrupt", "pending", "user_request")).take(8)
         val first = events.firstOrNull() ?: return null
         val work = claim(role, chat, "event:${first.getString("id")}", "醒后待处理材料（不是新发生），本次索引：" +
