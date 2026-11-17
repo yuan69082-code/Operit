@@ -38,14 +38,14 @@ internal object InnerInteractions {
             val expected = a.get("expected_version")
             require(expected is Number && expected.toDouble() == (old?.getInt("version") ?: 0).toDouble())
             require(text(a, "status", 16) in setOf("active", "ended"))
-            text(a, "interpretation", 800); text(a, "decision", 500)
-            CategoryEvents.strings(a.getJSONArray("objects"), 8)
-            val evidence = CategoryEvents.strings(a.getJSONArray("evidence"), 8)
+            text(a, "interpretation", Int.MAX_VALUE); text(a, "decision", Int.MAX_VALUE)
+            SubjectContracts.strings(SubjectContracts.array(a, "objects"), path = "objects")
+            val evidence = SubjectContracts.strings(SubjectContracts.array(a, "evidence"), path = "evidence")
             require(evidence.isNotEmpty() && evidence.all { it in frame.eventIds || it in frame.materialSources }) { "只能引用本轮实际提供的来源" }
             val sources = JSONObject()
             evidence.forEach { sources.put(it, InnerStructure.source(before, frame, it)) }
             val members = a.getJSONArray("members")
-            require(members.length() in 2..8)
+            SubjectContracts.expect(members.length() >= 2, "members", "MEMBERS_REQUIRED", "联合至少需要2个不同权威成员。")
             val keys = mutableSetOf<String>()
             val authorities = mutableSetOf<String>()
             val transitions = JSONArray()
@@ -80,14 +80,13 @@ internal object InnerInteractions {
                     .put("before_hash", InnerStructure.hash(prior)).put("after_hash", InnerStructure.hash(current)))
             }
             val effects = a.getJSONArray("effects")
-            require(effects.length() <= 16)
             val edges = mutableSetOf<String>()
             for (j in 0 until effects.length()) {
                 val effect = effects.getJSONObject(j)
                 require(effect.keys().asSequence().all { it in setOf("from", "to", "meaning", "time_rule") })
                 val from = text(effect, "from", 90); val to = text(effect, "to", 90)
                 require(from != to && from in keys && to in keys && edges.add("$from>$to"))
-                text(effect, "meaning", 400)
+                text(effect, "meaning", Int.MAX_VALUE)
             }
             // An optional subject-authored time rule is committed once with this union.
             // Existing meaning-only effects retain their behavior; no guessed coefficient.
@@ -96,7 +95,7 @@ internal object InnerInteractions {
             // Equal before/after versions explicitly represent interpretation without a value change.
             val content = JSONObject(a.toString()).apply { remove("expected_version") }
             content.put("source_bindings", sources).put("transitions", transitions)
-            require(content.toString().length <= 12000)
+            // Host source snapshots and version transitions are not authored-input quota.
             CategoryEvents.append(after, frame, JSONObject().put("storage_kind", "union").put("id", id)
                 .put("parent", frame.roleId).put("version", Math.addExact(old?.getInt("version") ?: 0, 1))
                 .put("content", content).put("owner", frame.roleId).put("frame_id", frame.id)
@@ -117,7 +116,7 @@ internal object InnerInteractions {
         if (persist) selection.put("union", if (page.isNull("next_offset")) 0 else page.getInt("next_offset"))
         val rotation = page.getJSONArray("items")
         val rows = JSONArray(SubjectRecall.selected(data, "union", input, chat, cursor.toLong(),
-            (0 until rotation.length()).map { rotation.getJSONObject(it) }))
+            (0 until rotation.length()).map { rotation.getJSONObject(it) }).map { JSONObject(it.toString()) })
         page.put("items", rows)
         // A persistent union may refer to a session-scoped member. Keep the union/history,
         // but never project that session's private interpretation into another window.
@@ -143,6 +142,7 @@ internal object InnerInteractions {
                 versions.put("$kind:$id", version ?: JSONObject.NULL)
             }
             row.put("current_member_versions", versions)
+            if (SubjectRestDreams.privateProvenance(row)) row.put("subject_private_material", true)
             // The model receives the adopted meaning, not a replay of the transaction's hashes.
             // Full transitions remain available through the existing union/version query.
             row.getJSONObject("content").remove("transitions")
@@ -153,10 +153,7 @@ internal object InnerInteractions {
         return page.put("notice", "联合保留当时理解；当前成员版本单独列出，旧联合不得覆盖成员的新状态。读取不再次生效。")
     }
 
-    private fun text(o: JSONObject, key: String, max: Int): String {
-        require(o.get(key) is String)
-        return o.getString(key).also { require(it.isNotBlank() && it.length <= max) }
-    }
+    private fun text(o: JSONObject, key: String, max: Int): String = SubjectContracts.text(o, key, max)
 
     val instructions = """
         experience/direction也可作为已读联合成员（kind同名），通过实际提供材料的locator版本绑定。它们是经验理解和长期方向，不能通过time_rule自动改写；变化仍走life报告。新建记录须先在后续正常请求读到，才能作为联合成员。
@@ -166,6 +163,6 @@ internal object InnerInteractions {
         retrieved_materials 是本轮实际取回并提供的材料，可引用其中status=retrieved的ID。保留作者、原来源、时间和locator；摘要不是原话，旧聊天不是新发生或自动相信的事实。failed不是读过。important_changes中的ID和current_input_event也可引用。外部MCP仍按需用已授权工具查，不会每轮自动访问。
         联合不代替成员。需要改变成员时，在同一报告的原 inner/episodes 中明确提出，仍须原采用规则；全部成功才保存。双方可影响，但不必都改值，也可无变化或相反方向。不得重复计入同一事实，不做循环放大，不要求行动。
         effects 的单条作用可另带 time_rule:{curve:"hold"}，或 {curve:"linear|exponential",target:目标强度,seconds:正秒数}。这是你明确形成的节奏，不是系统按心理词语评分；可以保持、增强或减弱，不要求提供。仅作用于基础驱力或有数值的驱力/需要/欲望/情绪/感受事件，不能作用于求生欲、终结认识、稳定人格/关系/偏好/持续情感。基础驱力 target 在0..1，其余非负。每个成员只有一个有效节奏，多个来源共同解释同一节奏而非重复叠加。成员另行更新后旧节奏失效；删除作用或结束联合从当时实际值继续自然规则，原版本和来源保留。time_projection 显示当前值，不是新现实事件或已解决。既有无 time_rule 的联合行为不变。
-        求生欲只能通过原明确候选采用改值；联合和时间不会代它改变强度。人格发展和偏好采用仍须原证据与前态核对。只记录必要解释、决定与作用，不输出隐藏思维链。
+        求生欲由主体通过当前权威的明确报告改值：基础求生欲走foundation，已采用的个人需要走inner修订；联合和时间不会代它改变强度。人格发展和偏好采用仍须原证据与前态核对。只记录必要解释、决定与作用，不输出隐藏思维链。
     """.trimIndent()
 }

@@ -8,6 +8,7 @@ class CompanionToolBudgetTest {
         val prompt = CompanionTools.prompts().single { it.name == "companion_internal_state" }
         assertTrue("Tool overview should stay concise", prompt.description.length < 300)
         assertTrue(prompt.description.contains("operit_state_report"))
+        assertTrue(prompt.description.contains("get section=contract"))
         val parameters = prompt.parametersStructured.orEmpty().associateBy { it.name }
         assertTrue(parameters["definition"]?.description?.contains("time_rules") == true)
         assertTrue(parameters["definition"]?.description?.contains("not_contacted") == true)

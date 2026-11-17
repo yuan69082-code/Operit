@@ -55,7 +55,7 @@ internal object InnerStructure {
     fun evidenceToRestore(data: JSONObject, actions: JSONArray): List<String> {
         val ids = (0 until actions.length()).map { actions.getJSONObject(it).optString("id") }.toSet()
         val proposed = (0 until actions.length()).map { actions.getJSONObject(it) }.filter { it.optString("op") == "propose" }
-            .flatMap { strings(it.getJSONArray("evidence"), 6) }
+            .flatMap { strings(it.getJSONArray("evidence"), Int.MAX_VALUE) }
         return (proposed + ids.mapNotNull { candidate(data, it) }.flatMap {
             it.getJSONObject("bindings").keys().asSequence().filter { key -> !key.startsWith("config:") && !key.startsWith("relation:") }.toList()
         }).filter { !it.startsWith("config:") && !it.startsWith("relation:") && !it.startsWith("declaration:") }.distinct()
@@ -91,8 +91,8 @@ internal object InnerStructure {
                     }
                     val origin = text(action, "origin", 40)
                     require(origin in setOf("initial_configuration", "subject_development", "user_proposal", "model_suggestion", EstablishedContent.ORIGIN))
-                    val refs = strings(action.getJSONArray("evidence"), 6)
-                    require(refs.isNotEmpty() || origin == EstablishedContent.ORIGIN) { "候选需要真实来源" }
+                    val refs = SubjectContracts.strings(SubjectContracts.array(action, "evidence"), path = "evidence")
+                    SubjectContracts.expect(refs.isNotEmpty() || origin == EstablishedContent.ORIGIN, "evidence", "EVIDENCE_REQUIRED", "候选须引用已读来源；48小时已有内容承接窗口内可用established_import和空数组。")
                     val bindings = JSONObject()
                     refs.forEach { ref -> bindings.put(ref, source(data, frame, ref)) }
                     if (origin == EstablishedContent.ORIGIN) {
@@ -121,10 +121,11 @@ internal object InnerStructure {
                 }
                 "adopt", "discard" -> {
                     fields(action, setOf("op", "id", "reason", "development"))
-                    val proposal = requireNotNull(pending.optJSONObject(id)) { "候选不存在" }
-                    require(proposal.getString("owner") == frame.roleId &&
-                        frame.innerPending[id] == hash(proposal) && proposal.getString("frame_id") != frame.id) { "只能处理本轮读取到的先前候选" }
-                    val reason = if (action.getString("op") == "adopt") reason(action, proposal.getJSONObject("record")) else text(action, "reason", 600)
+                    val proposal = pending.optJSONObject(id) ?: throw InternalStateReportIssue("input", "id", "CANDIDATE_NOT_FOUND", "候选不存在或已采用/撤回；先get section=inner_pending读取。")
+                    SubjectContracts.expect(proposal.getString("owner") == frame.roleId &&
+                        frame.innerPending[id] == hash(proposal) && proposal.getString("frame_id") != frame.id,
+                        "id", "CANDIDATE_NOT_DELIVERED", "须在后续正常轮次读到该候选的准确完整版本，才能采用或撤回；长内容按inner_chunk继续读取。")
+                    val reason = if (action.getString("op") == "adopt") reason(action, proposal.getJSONObject("record")) else text(action, "reason", Int.MAX_VALUE)
                     if (action.getString("op") == "discard") {
                         history(data, "discarded", id, proposal, JSONObject.NULL, frame, now, reason)
                         pending.remove(id)
@@ -173,7 +174,7 @@ internal object InnerStructure {
 
     private fun development(data: JSONObject, frame: InternalStateFrame, proposal: JSONObject, value: JSONObject) {
         fields(value, setOf("account", "before", "after", "anchors", "candidate_hash", "before_version"))
-        text(value, "account", 1000)
+        text(value, "account", Int.MAX_VALUE)
         if (value.has("candidate_hash")) {
             require(!value.has("before") && !value.has("after") &&
                 value.getString("candidate_hash") == hash(proposal) &&
@@ -187,7 +188,7 @@ internal object InnerStructure {
             require(anchors.length() == 0) { "声明承接不冒充找到了旧原文；原文路径请使用实际来源" }
             return
         }
-        require(anchors.length() in 1..6)
+        SubjectContracts.expect(anchors.length() > 0, "development.anchors", "ANCHORS_REQUIRED", "人格发展需要至少一条真实原文锚点；已有内容声明承接使用空数组。")
         val seen = mutableSetOf<String>()
         for (i in 0 until anchors.length()) {
             val anchor = anchors.getJSONObject(i)
@@ -196,8 +197,8 @@ internal object InnerStructure {
             require(seen.add(ref) && proposal.getJSONObject("bindings").has(ref)) { "人格依据必须绑定候选的原始来源" }
             val raw = proposal.getJSONObject("bindings").getJSONObject(ref).optJSONObject("snapshot")?.getString("text")
                 ?: sourceText(data, frame, ref)
-            require(raw.contains(text(anchor, "quote", 600))) { "人格依据引用不在原文中" }
-            text(anchor, "interpretation", 600)
+            SubjectContracts.expect(raw.contains(text(anchor, "quote", Int.MAX_VALUE)), "development.anchors[$i].quote", "QUOTE_NOT_IN_SOURCE", "引文须与候选保存的原文一致；自己的理解写在interpretation，不改写引文。")
+            text(anchor, "interpretation", Int.MAX_VALUE)
             if (proposal.getString("origin") == "initial_configuration" && ref.startsWith("config:")) continue
             val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
             if (binding.optString("source") == "retrieved_material") {
@@ -276,8 +277,8 @@ internal object InnerStructure {
                         require(p.getString("family") == "need" && p.getString("level") == "broad" && p.optString("semantic_rule") == "life")
                         val strength = row.get("strength")
                         require(strength is Number && strength.toDouble().isFinite() && strength.toDouble() >= 0)
-                        CategoryEvents.strings(row.getJSONArray("objects"), 8)
-                        CategoryEvents.strings(row.getJSONArray("goals"), 8)
+                        SubjectContracts.strings(SubjectContracts.array(row, "objects"), path = "record.objects")
+                        SubjectContracts.strings(SubjectContracts.array(row, "goals"), path = "record.goals")
                     }
                 }
                 if (row.optString("semantic_rule") != "survival") require(!row.has("strength") && !row.has("objects") && !row.has("goals"))
@@ -317,13 +318,14 @@ internal object InnerStructure {
                 .put("not_new_occurrence", true)
         }
         if (ref.startsWith("config:") || ref.startsWith("relation:")) {
-            val raw = requireNotNull(frame.innerSources[ref]) { "配置来源未在本轮提供" }
+            val raw = frame.innerSources[ref] ?: throw InternalStateReportIssue("input", "evidence", "SOURCE_NOT_DELIVERED", "配置来源未在本轮提供；先读取实际来源。")
             return JSONObject().put("hash", hash(raw)).put("source", if (ref.startsWith("config:")) "initial_configuration" else "legacy_relation")
         }
         // History may have been read with the existing get tool rather than selected for this
         // request. Resolve only explicit IDs in this owner's store, bounded above by the frame;
         // personality adoption additionally verifies exact original quotations.
-        val event = requireNotNull(InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }) { "候选事件来源不可用" }
+        val event = InternalStateEngine.rows(data, "events").firstOrNull { it.getString("id") == ref }
+            ?: throw InternalStateReportIssue("input", "evidence", "SOURCE_NOT_DELIVERED", "事件来源不可用；通过get section=source按实际ID读取，不能猜造ID。")
         require(event.getLong("at") <= frame.at && event.getLong("sequence") <= frame.eventSequence)
         return JSONObject().put("hash", hash(event)).put("source", event.getString("source"))
     }
@@ -425,32 +427,25 @@ internal object InnerStructure {
         长候选的 pending_fragments 是同一完整原文的连续片段，不是摘要；hash 绑定准确候选版本。宿主只登记实际请求返回后已提供的片段，完整提供前不能采用。可用 get section=inner_chunk id=候选ID offset=next_offset 按需继续，不能用编造片段补齐。pending_read 表示该版本已完整提供，仍由你决定是否采用或重新查阅。人格采用的大段 before/after 可改为 development:{account:说明,candidate_hash:候选完整hash,before_version:候选expected_version,anchors:[...]}，保存的始终是原候选全文，不是说明的摘要。
         恢复已有确定人格、立场、关系、偏好等，可用 origin:"established_import"，evidence:[]，不伪造历史原文。只在用户明确开启的48小时窗口内提交新候选；formed_at 可省略，提交时间不代表形成时间。人格等采用时仍给 development 的准确 before/after 和 account，anchors:[]。按时提交的候选在截止后仍可采用；改写须新候选标识，不继承旧版本已读事实。get section:inner_pending 查询候选。
         record_fragments 是已采用完整内容的连续原文片段，绝不是替换原文的摘要；同一hash/version的片段共同属于一份内容。可用 get section=inner_record_chunk id=记录ID offset=next_offset 继续读取。片段未出现的限定和例外仍有效，不能猜测它们或退回初始模板。
-        整份报告仍须符合原16384字符上限，复杂变化可分轮提出。来源/对象名录只显示前16/32项，数量字段给出总量，可通过原角色/关系工具查询；未列出不是不存在。
+        整份报告仍须符合原16384字符上限，复杂变化可分轮提出。宿主附加的来源不计入；详细字段规则用companion_internal_state get section=contract id=inner|episodes|unions|action|life|rest|foundation|legacy按需查询。来源/对象名录只显示前16/32项，数量字段给出总量，可通过原角色/关系工具查询；未列出不是不存在。
     """.trimIndent()
 
     private fun values(o: JSONObject) = o.keys().asSequence().map { o.getJSONObject(it) }.toList()
     private fun copy(o: JSONObject) = JSONObject(o.toString())
-    private fun fields(o: JSONObject, allowed: Set<String>) = require(o.keys().asSequence().all { it in allowed }) { "内在结构包含契约外字段" }
-    private fun text(o: JSONObject, key: String, limit: Int): String {
-        require(o.get(key) is String)
-        return o.getString(key).also { require(it.isNotBlank() && it.length <= limit) { "$key 长度或内容不合法" } }
+    private fun fields(o: JSONObject, allowed: Set<String>) = SubjectContracts.fields(o, allowed)
+    private fun text(o: JSONObject, key: String, limit: Int): String = SubjectContracts.text(o, key, limit)
+    private fun optionalText(o: JSONObject, key: String, limit: Int) {
+        if (o.has(key)) SubjectContracts.text(o, key, limit, empty = true)
     }
-    private fun optionalText(o: JSONObject, key: String, limit: Int) { if (o.has(key)) require(o.get(key) is String && o.getString(key).length <= limit) }
     private fun reason(action: JSONObject, content: JSONObject): String {
         if (content.getString("family") == "need" && content.optString("semantic_rule") == "survival") {
-            optionalText(action, "reason", 600)
+            optionalText(action, "reason", Int.MAX_VALUE)
             return action.optString("reason", "")
         }
-        return text(action, "reason", 600)
+        return text(action, "reason", Int.MAX_VALUE)
     }
-    private fun integer(o: JSONObject, key: String): Int {
-        val n = o.get(key); require(n is Number && n.toDouble() >= 0 && n.toDouble() == n.toInt().toDouble()); return n.toInt()
-    }
-    private fun strings(a: JSONArray, limit: Int): List<String> {
-        require(a.length() <= limit)
-        val values = (0 until a.length()).map { require(a.get(it) is String); a.getString(it).also { v -> require(v.isNotBlank() && v.length <= 180) } }
-        require(values.distinct().size == values.size); return values
-    }
+    private fun integer(o: JSONObject, key: String): Int = SubjectContracts.integer(o, key)
+    private fun strings(a: JSONArray, limit: Int): List<String> = SubjectContracts.strings(a, limit)
     internal fun hash(value: Any?): String = MessageDigest.getInstance("SHA-256").digest(canonical(value).toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
     internal fun serialized(value: Any?): String = canonical(value)

@@ -57,14 +57,14 @@ internal object CategoryEvents {
 
     fun evidence(actions: JSONArray): List<String> {
         return (0 until actions.length()).map { actions.getJSONObject(it) }
-            .filter { it.optString("op") == "appraise" }.flatMap { strings(it.getJSONArray("evidence"), 6) }.distinct()
+            .filter { it.optString("op") == "appraise" }.flatMap { strings(it.getJSONArray("evidence"), Int.MAX_VALUE) }.distinct()
     }
     private fun category(data: JSONObject, id: String): JSONObject {
         // Structural vocabulary is installed by the host. It is not an adopted subjective
         // feeling and must not require the model to first invent a candidate about itself.
         val content = InnerStructure.record(data, id)?.getJSONObject("content")
             ?: InnerFoundations.definition(id)
-            ?: error("心理类别不存在；可先查询已安装基础目录")
+            ?: throw InternalStateReportIssue("input", "category_ref", "UNKNOWN_CATEGORY", "心理类别不存在；先查询foundation或inner目录。")
         require(content.getString("family") in families && content.getString("status") == "active") {
             "此记录不是可承接心理事件的类别"
         }
@@ -86,11 +86,11 @@ internal object CategoryEvents {
             val a = actions.getJSONObject(i)
             val op = text(a, "op", 24)
             val id = text(a, "id", 64)
-            require(touched.add("$op:$id")) { "同轮不能重复修改同一事件或重点" }
-            val kind = when (op) { "appraise" -> "episode"; "focus" -> "focus"; else -> error("未知事件候选操作") }
+            SubjectContracts.expect(touched.add("$op:$id"), "id", "DUPLICATE_WRITE", "同一报告不能重复修改同一事件或重点。")
+            val kind = when (op) { "appraise" -> "episode"; "focus" -> "focus"; else -> throw InternalStateReportIssue("input", "op", "ENUM_VALUE", "允许值：appraise|focus。") }
             val old = row(data, kind, id)
-            val expected = a.get("expected_version")
-            require(expected is Number && expected.toDouble() == (old?.getInt("version") ?: 0).toDouble()) { "事件或重点前态已变化" }
+            val expected = SubjectContracts.integer(a, "expected_version")
+            SubjectContracts.expect(expected == (old?.getInt("version") ?: 0), "expected_version", "VERSION_CHANGED", "先读取事件或重点的当前版本；新记录用0。")
             val content = JSONObject(a.toString()).apply { remove("op"); remove("expected_version") }
             val parent: String
             if (op == "appraise") {
@@ -109,9 +109,9 @@ internal object CategoryEvents {
                     }
                 }
                 for (name in listOf("supporting", "opposing"))
-                    if (a.has(name)) strings(a.getJSONArray(name), 8)
+                    if (a.has(name)) SubjectContracts.strings(SubjectContracts.array(a, name), path = name)
                 if (old != null) require(old.getString("parent") == parent) { "既有事件不能无声改类" }
-                strings(a.getJSONArray("objects"), 8); strings(a.getJSONArray("goals"), 8)
+                SubjectContracts.strings(SubjectContracts.array(a, "objects"), path = "objects"); SubjectContracts.strings(SubjectContracts.array(a, "goals"), path = "goals")
                 val intensity = a.get("intensity")
                 if (intensity === JSONObject.NULL) {
                     if (category.getString("family") != "feeling")
@@ -119,13 +119,13 @@ internal object CategoryEvents {
                 } else if (intensity !is Number || !intensity.toDouble().isFinite() || intensity.toDouble() < 0) {
                     throw InternalStateReportIssue("episodes", "episodes[$i].intensity", "NONNEGATIVE_INTENSITY")
                 }
-                text(a, "importance", 300); text(a, "long_term_impact", 300)
-                text(a, "understanding", 600); text(a, "reason", 400)
-                require(text(a, "attention", 20) in setOf("foreground", "background", "aside"))
-                require(text(a, "status", 20) in setOf("unresolved", "processing", "resolved"))
-                require(text(a, "basis", 20) in setOf("input", "result", "recollection", "reinterpretation"))
-                val refs = strings(a.getJSONArray("evidence"), 6)
-                require(refs.isNotEmpty()) { "心理事件须有可查来源，不能猜造经历" }
+                text(a, "importance", Int.MAX_VALUE); text(a, "long_term_impact", Int.MAX_VALUE)
+                text(a, "understanding", Int.MAX_VALUE); text(a, "reason", Int.MAX_VALUE)
+                SubjectContracts.choice(a, "attention", setOf("foreground", "background", "aside"))
+                SubjectContracts.choice(a, "status", setOf("unresolved", "processing", "resolved"))
+                SubjectContracts.choice(a, "basis", setOf("input", "result", "recollection", "reinterpretation"))
+                val refs = SubjectContracts.strings(SubjectContracts.array(a, "evidence"), path = "evidence")
+                SubjectContracts.expect(refs.isNotEmpty(), "evidence", "EVIDENCE_REQUIRED", "心理事件须提供至少一个实际读取的来源ID。")
                 val bindings = JSONObject()
                 refs.forEach { ref ->
                     require(!ref.startsWith("config:") && !ref.startsWith("relation:")) { "配置不是现实经历" }
@@ -134,13 +134,12 @@ internal object CategoryEvents {
                     bindings.put(ref, source)
                 }
                 content.put("source_bindings", bindings)
-                val related = a.optJSONArray("related") ?: JSONArray()
-                require(related.length() <= 6)
+                val related = if (a.has("related")) SubjectContracts.array(a, "related") else JSONArray()
                 for (j in 0 until related.length()) {
                     val link = related.getJSONObject(j)
                     fields(link, setOf("id", "relation"))
                     val other = text(link, "id", 64)
-                    require(other != id && row(data, "episode", other) != null)
+                    SubjectContracts.expect(other != id && row(data, "episode", other) != null, "related[$j].id", "RELATED_EPISODE_REQUIRED", "须引用已存在且不同于自身的心理事件ID。")
                     require(text(link, "relation", 24) in setOf("same_matter", "split_from", "merged_from", "corrects"))
                 }
                 // Original bindings remain immutable even when new input changes interpretation.
@@ -153,9 +152,10 @@ internal object CategoryEvents {
                 require(capacity is Number && capacity.toDouble() == capacity.toInt().toDouble() && capacity.toInt() in 3..6)
                 val ids = strings(a.getJSONArray("events"), capacity.toInt())
                 ids.forEach { require(row(data, "episode", it)?.getString("parent") == parent) { "重点须引用该类别已有事件" } }
-                text(a, "reason", 600) // Presence only; the host never scores importance or sorts.
+                text(a, "reason", Int.MAX_VALUE) // Presence only; the host never scores importance or sorts.
             }
-            require(content.toString().length <= 5000) { "事件概要过长，请明确精简本次概要；旧版本不会删除" }
+            // The report transport already bounds authored input. Provenance is host-owned
+            // and must not make a valid short appraisal fail after expansion.
             append(data, frame, JSONObject().put("storage_kind", kind).put("id", id).put("parent", parent)
                 .put("version", Math.addExact(old?.getInt("version") ?: 0, 1)).put("content", content)
                 .put("owner", frame.roleId).put("frame_id", frame.id).put("at", now).put("source_chat", frame.chatId)
@@ -170,7 +170,7 @@ internal object CategoryEvents {
 
     /** Called only after the existing record-adoption checks, including personality development. */
     fun linkAdopted(data: JSONObject, frame: InternalStateFrame, content: JSONObject, now: Long) {
-        val ids = strings(content.optJSONArray("experience_refs") ?: JSONArray(), 6)
+        val ids = strings(content.optJSONArray("experience_refs") ?: JSONArray(), Int.MAX_VALUE)
         ids.forEach { id ->
             val episode = requireNotNull(row(data, "episode", id)) { "关联经历不存在" }
             val record = content.getString("id")
@@ -184,7 +184,7 @@ internal object CategoryEvents {
     }
 
     fun validateLinks(data: JSONObject, content: JSONObject) {
-        strings(content.optJSONArray("experience_refs") ?: JSONArray(), 6).forEach {
+        strings(content.optJSONArray("experience_refs") ?: JSONArray(), Int.MAX_VALUE).forEach {
             require(row(data, "episode", it) != null) { "关联经历不存在" }
         }
     }
@@ -201,12 +201,25 @@ internal object CategoryEvents {
             // Each complete record has a bounded shape. A separate rotating disk cursor avoids
             // an unbounded hot index and never changes the subject's chosen focus ordering.
             for (row in selected) {
-                result.getJSONArray(field).put(if (kind == "episode") timeView(data, row, now) else row)
+                result.getJSONArray(field).put(if (kind == "episode") requestProjection(timeView(data, row, now)) else row)
             }
             val consumed = minOf(rows.size, 8)
             if (persist) selection.put(kind, if (rows.size > consumed && consumed > 0) offset + consumed else 0)
         }
         return result
+    }
+
+    internal fun requestProjection(source: JSONObject): JSONObject {
+        val view = JSONObject(source.toString())
+        if (SubjectRestDreams.privateProvenance(source)) view.put("subject_private_material", true)
+        view.optJSONObject("content")?.let { content ->
+            for (field in listOf("source_bindings", "original_sources")) {
+                content.optJSONObject(field)?.let { bindings ->
+                    bindings.keys().forEach { id -> bindings.getJSONObject(id).remove("snapshot") }
+                }
+            }
+        }
+        return view.put("projection", "来源快照完整保存在事件版本中；get section=episode或category_versions按ID读取。")
     }
 
     val instructions = """
@@ -220,18 +233,12 @@ internal object CategoryEvents {
         强度、重要性、注意力、解决状态相互独立。放到背景不是原谅或解决；重新关注不自动回升强度。执念/不甘心不意味着必须行动或不能放下。
         基础九情绪在读取时附 time_projection：愤怒的默认参数12小时，惊讶30秒，其余默认2小时。当前关系亲近分量未核实则不虚构关系修正；该投影不是新经历，也不写回强度或把未解决改为解决，主体仍可明确重新评价。
         愿望事件可另带 phase:"arising|strengthening|weakening|sustaining|suppressed|suppression_failed|disappeared|reappeared|conflicted|transformed|acted|abandoned" 以及 supporting/opposing 字符串数组。阶段由主体对实际经历判断，不要求按顺序走完；其他类别不得伪称愿望阶段。
-        inner.record 可带 experience_refs:["已有心理事件ID"]，每次最多6个新增关联；只在通过原采用规则后关联，之前的关联另存并保留，可查询。它们不替代人格采用所需的原文依据。
+        inner.record 可带 experience_refs:["已有心理事件ID"]，不设额外关联条数上限；只在通过原采用规则后关联，之前的关联另存并保留，可查询。它们不替代人格采用所需的原文依据。
         广义生用 need level:broad semantic_rule:"life"；求生欲用 need level:specific parent_ref 指向该广义需要，semantic_rule:"survival",strength:自主给出的非负有限数,objects:[...],goals:[...]。不强制创建，不从旧值推测，不允许 legacy_ref 产生第二强度权威。
-        只有求生欲候选 propose/adopt 的 reason 可以省略或为空。仍须真实 evidence、版本和采用；求生欲不受时间/溢出/联合自动改值，归零不触发停止或删除。其事件强度也不自动改写该需要强度。
+        求生欲候选 propose/adopt 以及基础求生欲 foundation 报告的 reason 可以省略或为空，其他类别仍须明确理由。仍须真实 evidence、版本和采用；求生欲不受时间/溢出/联合自动改值，归零不触发停止或删除。其事件强度也不自动改写该需要强度。
     """.trimIndent()
 
-    private fun fields(o: JSONObject, allowed: Set<String>) = require(o.keys().asSequence().all { it in allowed })
-    private fun text(o: JSONObject, key: String, limit: Int) = o.getString(key).also {
-        require(o.get(key) is String && it.isNotBlank() && it.length <= limit)
-    }
-    internal fun strings(a: JSONArray, limit: Int): List<String> {
-        require(a.length() <= limit)
-        return (0 until a.length()).map { require(a.get(it) is String); a.getString(it).also { s -> require(s.isNotBlank() && s.length <= 180) } }
-            .also { require(it.distinct().size == it.size) }
-    }
+    private fun fields(o: JSONObject, allowed: Set<String>) = SubjectContracts.fields(o, allowed)
+    private fun text(o: JSONObject, key: String, limit: Int) = SubjectContracts.text(o, key, limit)
+    internal fun strings(a: JSONArray, limit: Int): List<String> = SubjectContracts.strings(a, limit)
 }

@@ -35,6 +35,24 @@ class InnerStructureContractsTest {
         attempt("actual_operation", 30, null, false)
         attempt("memory_record", 30, "not-a-receipt", false)
     }
+    @Test fun longOriginalAndNineCandidatesKeepCrossRoundAdoptionAndExactText() {
+        val d = data()
+        val original = "人格的具体限定和例外，不由宿主精简。".repeat(160)
+        val batch = JSONArray((0..8).map { i -> propose("candidate$i", content("record$i", "personality")
+            .put("description", if (i == 0) original else "明确的第${i}条人格")) })
+        val first = frame(d, "first", 20)
+        InnerStructure.apply(d, first, batch, 21)
+        assertEquals(9, InnerStructure.pending(d).size)
+        assertThrows(IllegalArgumentException::class.java) {
+            InnerStructure.apply(d, first, JSONArray().put(adopt(d, "candidate0")), 22)
+        }
+        val later = frame(d, "later", 30)
+        InnerStructure.apply(d, later, JSONArray((0..8).map { adopt(d, "candidate$it") }), 31)
+        assertEquals(9, InnerStructure.records(d).size)
+        assertEquals(original, InnerStructure.record(d, "record0")!!.getJSONObject("content").getString("description"))
+        assertTrue(InnerStructure.pending(d).isEmpty())
+    }
+
     private fun data() = JSONObject().put("sequence", 1).put("semantic_revision", 0)
         .put("events", JSONArray().put(JSONObject().put("id", "fact").put("sequence", 1).put("at", 10)
             .put("source", "assistant_reply").put("detail", "我此前明确选择坦诚").put("chat", "old")))

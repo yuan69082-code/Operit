@@ -8,8 +8,9 @@ import org.json.JSONObject
 internal class InternalStateReportIssue(
     val stage: String,
     val path: String,
-    val rule: String
-) : IllegalArgumentException("ISR_${rule}: ${path}") {
+    val rule: String,
+    val hint: String = ""
+) : IllegalArgumentException("ISR_${rule}: ${path}" + if (hint.isEmpty()) "" else " — $hint") {
     val code: String get() = "ISR_${rule}"
     val summary: String get() = "${code} · ${path} · ${stage}"
 }
@@ -23,6 +24,7 @@ internal object InternalStateReportDiagnostics {
 
     /** Validate only the shared structural protocol. Domain-specific rules remain authoritative. */
     fun validate(report: JSONObject) {
+        SubjectContracts.jsonSize(report)
         val unknown = report.keys().asSequence().any { it !in sections }
         if (unknown) throw InternalStateReportIssue("root", "$", "UNKNOWN_FIELD")
         string(report, "frame_id", "frame_id")
@@ -110,7 +112,9 @@ internal object InternalStateReportDiagnostics {
 
     /** Never surface JSONException.message or a user-provided unknown key as a path. */
     fun issue(failure: Exception, stage: String): InternalStateReportIssue = when (failure) {
-        is InternalStateReportIssue -> failure
+        is InternalStateReportIssue -> if (failure.stage == "input")
+            InternalStateReportIssue(stage, stage + if (failure.path == "$") "" else ".${failure.path}", failure.rule, failure.hint)
+            else failure
         is InternalStateReportRejected ->
             InternalStateReportIssue("contract", failure.reason.name.lowercase(), failure.reason.name)
         is JSONException -> InternalStateReportIssue(stage, stage, "JSON_SHAPE")

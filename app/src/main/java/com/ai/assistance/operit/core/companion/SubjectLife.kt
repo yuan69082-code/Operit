@@ -55,6 +55,7 @@ internal class SubjectLife(private val context: Context) {
     }
 
     fun page(role: String, kind: String, offset: Int, id: String? = null): JSONObject {
+        SubjectContracts.queryId(kind, id)
         require(kind in setOf("life_event", "life_activity", "dream_process", "dream_step") && offset >= 0)
         if (id != null && kind != "dream_step") return JSONObject().put("item", store.activityRead(role, kind, id) ?: JSONObject.NULL)
         val rows = store.activityPage(role, kind, if (kind == "dream_step") requireNotNull(id) else if (kind == "life_event") null else "pending", offset)
@@ -197,7 +198,7 @@ internal class SubjectLife(private val context: Context) {
     fun dreamChoice(role: String, id: String, choice: String, note: String): JSONObject {
         require(choice in setOf("resume", "retry_step", "end") && note.isNotBlank())
         check(rest(role)?.getJSONObject("content")?.optString("state") == "resting" || choice == "end") { "继续梦境须仍在主体选择的休息中" }
-        val prior = requireNotNull(store.activityRead(role, "dream_process", id))
+        val prior = SubjectContracts.dreamProcess(store.activityRead(role, "dream_process", id))
         check(prior.getString("status") in setOf("failed", "interrupted")) { "只有已中断的梦可以继续；不能重复已完成的梦" }
         val step = prior.getInt("next_step")
         val pending = store.activityRead(role, "dream_step", "$id:$step")
