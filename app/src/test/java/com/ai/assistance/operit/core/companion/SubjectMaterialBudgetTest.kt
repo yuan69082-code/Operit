@@ -56,6 +56,24 @@ class SubjectMaterialBudgetTest {
         assertEquals(0, selected.getJSONObject("inner_structure").getJSONArray("identity").length())
         assertEquals(1, source.getJSONObject("inner_structure").getJSONArray("identity").length())
     }
+    @Test fun currentRestControlSurvivesCrowdedHistoryInsideTheSameBudget() {
+        val source = payload()
+        repeat(40) {
+            source.getJSONArray("retrieved_materials").put(JSONObject().put("id", "old-$it").put("text", "旧材料".repeat(200)))
+            source.getJSONObject("inner_structure").getJSONArray("catalogue").put(JSONObject().put("id", "catalog-$it"))
+        }
+        val rest = JSONObject().put("storage_kind", "rest").put("id", "current").put("owner", "one")
+            .put("version", 10).put("at", 100).put("content", JSONObject().put("state", "resting")
+                .put("mode", "sleep").put("until", 200).put("meaning", "原始理由".repeat(10_000))
+                .put("source_bindings", JSONObject().put("old", "历史来源".repeat(10_000))))
+        source.getJSONArray("retrieved_materials").put(SubjectRestDreams.restControl(rest))
+        val selected = SubjectMaterialBudget.select(source)
+        val rows = selected.getJSONArray("retrieved_materials")
+        assertTrue((0 until rows.length()).any { rows.getJSONObject(it).optString("id") == "material:rest:current:10" })
+        assertTrue(SubjectMaterialBudget.estimate(selected.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 2048)
+        assertFalse(selected.toString().contains("历史来源"))
+        assertEquals(40_000, rest.getJSONObject("content").getString("meaning").length)
+    }
 
     @Test fun currentFoundationValuesRemainReachableWithoutDisplacingWholeDomains() {
         val source = payload().put("foundation", JSONObject().put("drive_values", JSONArray((0..6).map {

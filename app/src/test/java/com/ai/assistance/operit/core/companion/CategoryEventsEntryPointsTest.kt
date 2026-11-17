@@ -351,7 +351,7 @@ class CategoryEventsEntryPointsTest {
         val fresh = InternalStateStore(context)
         assertEquals(1, fresh.inspectCategory(role, second, "episode", "A", 0).getJSONObject("item").getInt("version"))
         val next = CompanionContext.compose(context, second, role, JSONObject(), true, "继续")
-        assertTrue(next.state.contains("这是独立事情A")); assertTrue(next.instructions.contains("归零不触发停止"))
+        assertTrue(next.state, next.state.contains("这是独立事情A")); assertTrue(next.instructions, next.instructions.contains("归零不触发停止"))
         rejects { fresh.inspectCategory(other, second, "episode", null, 0) }
         val otherWindow = ChatHistory(title = "另一助手", messages = emptyList(), characterCardId = other)
         ChatHistoryManager.getInstance(context).saveChatHistory(otherWindow)

@@ -86,6 +86,50 @@ class SubjectLifeEntryPointsTest {
         assertEquals(12L, CompanionStore(context).activityCount(role, "life_event", "pending"))
         assertEquals("resting", life.rest(role)!!.getJSONObject("content").getString("state"))
     }
+    @Test fun wakeChoiceHasCurrentReadProofAndPersistsAfterToolContinuation() = runBlocking {
+        val choice = rest(JSONObject().put("steps", 3))
+        choice.getJSONObject("rest").put("meaning", "保留完整休息理由".repeat(2000))
+        adopt(choice)
+        val life = SubjectLife(context)
+        val end = life.rest(role)!!.getJSONObject("content").getLong("until")
+        val wake = requireNotNull(life.next(role, chat, end))
+        assertFalse(wake.text.contains("source_bindings"))
+        assertTrue(wake.text.length < 700)
+        val request = InnerStructureContext.prepare(context, role, chat, true, input = wake.text)
+        val f = requireNotNull(request.internalStateFrame)
+        val control = JSONObject(requireNotNull(f.materialSources["material:rest:current:1"]))
+        assertEquals(1, control.getJSONObject("locator").getInt("version"))
+        assertTrue(control.getBoolean("control_state"))
+        assertTrue(control.getString("text").length < 800)
+        assertTrue(life.rest(role)!!.getJSONObject("content").getString("meaning").length > 10_000)
+        val fields = JSONObject().put("rest", JSONObject().put("expected_version", 1).put("state", "awake")
+            .put("meaning", "梦结束后，我决定醒来并告诉园园").put("evidence", JSONArray().put(f.eventIds.first())))
+        // Reproduce the reported rejection: a notice/version inferred from a dream is not
+        // itself a current rest read. The production composer must supply that read.
+        try {
+            commit(f.copy(materialSources = f.materialSources.filterKeys { !it.startsWith("material:rest:") }), fields)
+            fail("Unread rest version must not be silently adopted")
+        } catch (failure: InternalStateReportIssue) {
+            assertEquals("ISR_UNREAD_VERSION", failure.code)
+            assertEquals("rest.expected_version", failure.path)
+        }
+        val fresh = InnerStructureContext.prepare(context, role, chat, true, input = wake.text)
+        var turns = com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(
+            listOf(com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER, wake.text)), fresh)
+        repeat(2) {
+            turns = SubjectToolMaterials.attach(turns + com.ai.assistance.operit.core.chat.hooks.PromptTurn(
+                com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.TOOL_RESULT, "已读取梦中步骤$it", "companion_internal_state"), end + it)
+        }
+        val afterTools = requireNotNull(com.ai.assistance.operit.core.chat.CurrentRequestContext.internalStateFrame(turns))
+        fields.getJSONObject("rest").put("evidence", JSONArray().put(afterTools.eventIds.first()))
+        commit(afterTools, fields)
+        life.finish(wake, "completed")
+        val reopened = SubjectLife(context).rest(role)!!
+        assertEquals(2, reopened.getInt("version"))
+        assertEquals("awake", reopened.getJSONObject("content").getString("state"))
+        assertEquals("空闲", SubjectRestPolicy.label(reopened.getJSONObject("content"), null, end + 1))
+        assertNull(SubjectLife(context).next(role, chat, end + 1))
+    }
     @Test fun anExistingEngineWindowDoesNotStartASecondLocalLifeRunner() = runBlocking {
         adopt(rest(JSONObject().put("steps", 2)))
         val life = SubjectLife(context)

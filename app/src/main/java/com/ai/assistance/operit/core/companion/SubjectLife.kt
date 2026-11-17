@@ -131,7 +131,7 @@ internal class SubjectLife(private val context: Context) {
             val session = c.optString("session_id", "legacy-${r.getInt("version")}")
             if (SubjectRestPolicy.due(c, now)) {
                 return claim(role, chat, "wake:$session:${r.getInt("version")}",
-                    "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。休息安排：$c")
+                    "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。当前休息索引：rest/current，version=${r.getInt("version")}。以本轮subject_rest材料为准；未取得时先用companion_internal_state get section=rest id=current读取。决定醒来须在报告中提交rest.state=awake，发出消息本身不改变休息状态。")
                     ?: nextInterrupt(role, chat, r, now)
             }
             nextInterrupt(role, chat, r, now)?.let { return it }

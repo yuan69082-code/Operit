@@ -45,13 +45,16 @@ internal object SubjectRestDreams {
     }
     private fun version(old: JSONObject?, action: JSONObject, frame: InternalStateFrame) {
         val expected = old?.getInt("version") ?: 0
-        require(action.get("expected_version") is Number && action.getDouble("expected_version") == expected.toDouble())
-        if (old != null) require(frame.materialSources.values.any {
+        val path = if (old?.optString("storage_kind") == "dream_understanding") "dream_understanding" else "rest"
+        if (action.opt("expected_version") !is Number || action.getDouble("expected_version") != expected.toDouble())
+            throw InternalStateReportIssue("rest_dream", "$path.expected_version", "STALE_VERSION", "先读取当前记录，再按实际版本提交；原状态保留")
+        if (old != null && !frame.materialSources.values.any {
             val source = JSONObject(it)
             val locator = source.optJSONObject("locator")
             source.optString("owner") == frame.roleId && locator?.optString("kind") == old.getString("storage_kind") &&
                 locator.optString("id") == old.getString("id") && locator.optInt("version") == expected
-        }) { "须先读取当前私域记录版本" }
+        }) throw InternalStateReportIssue("rest_dream", "$path.expected_version", "UNREAD_VERSION",
+            "本轮未取得当前私域记录；用companion_internal_state get读取对应section及id后再提交")
     }
     private fun append(data: JSONObject, frame: InternalStateFrame, kind: String, id: String,
                        version: Int, content: JSONObject, now: Long) {
@@ -147,8 +150,18 @@ internal object SubjectRestDreams {
                 .put("id", row.getString("id")).put("version", row.getInt("version")))
             .put("retrieval", "companion_internal_state get section=$kind id=${row.getString("id")}")
     }
+    /** Current rest is control state needed to adopt waking, not a historical dream dump.
+     * Keep the actual version and arrangement in the shared budget; full meaning stays retrievable. */
+    fun restControl(row: JSONObject): JSONObject {
+        val content = row.getJSONObject("content")
+        val brief = JSONObject()
+        for (key in listOf("state", "mode", "until", "wake_sources", "interruption", "defer_internal"))
+            if (content.has(key)) brief.put(key, content.get(key))
+        brief.put("meaning_excerpt", content.optString("meaning").take(160))
+        return material(row).put("text", brief.toString()).put("control_state", true).put("excerpt", true)
+    }
     fun materials(data: JSONObject, input: String = "", chat: String = ""): List<JSONObject> =
-        listOfNotNull(CategoryEvents.row(data, "rest", "current")?.let(::material)) +
+        listOfNotNull(CategoryEvents.row(data, "rest", "current")?.let(::restControl)) +
             SubjectRecall.selected(data, "dream", input, chat, data.optLong("material_query_cursor") * 2).take(2).map { DreamShelf.index(it) } +
             SubjectRecall.selected(data, "dream_understanding", input, chat, data.optLong("material_query_cursor") * 2).take(2).map(::material)
 

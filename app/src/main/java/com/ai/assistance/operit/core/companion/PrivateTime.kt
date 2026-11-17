@@ -269,11 +269,12 @@ internal class PrivateTime(private val context: Context) {
                 .put("slot_id", item.getString("id")).put("version", p.getInt("version"))))
     }
 
+    fun setupInstruction(role: String): String = if (config(role) == null)
+        "\n[自由时间待定义]先用companion_life free_status看菜单，自行定义时段；OB位置由园园在私域页面指定。未设置不自动预约。"
+        else ""
+
     fun materials(role: String, input: String = ""): List<JSONObject> = buildList {
         addAll(planMaterials(role, input))
-        if (config(role) == null) add(JSONObject().put("id", "private-time-setup").put("type", "private_time_setup")
-            .put("owner", role).put("text", "自由时间尚未定义。可用companion_life free_status查看菜单，然后free_config选择自己的时段。OB记忆位置请园园在私域自由时间页指定。没有设置不会自动唤醒。")
-            .put("subject_private_material", true))
         val e = store.activityRead(role, "private_time_essence", "current")
         if (!e?.optString("confirmed").isNullOrBlank()) add(JSONObject().put("id", "essence:${e!!.getInt("version")}")
             .put("type", "confirmed_essence").put("status", "retrieved").put("owner", role).put("author", role).put("at", e.getLong("confirmed_at"))

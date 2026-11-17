@@ -76,7 +76,7 @@ internal object PrivateTimePolicy {
                 for (key in listOf("status", "progress", "notice_keys", "started", "review_results", "activity_ids"))
                     if (previous.has(key)) result.put(key, previous.get(key))
                 require(previous.optString("status") !in terminal ||
-                    listOf("start", "end", "activity", "goal", "targets").all { result.opt(it).toString() == previous.opt(it).toString() }) {
+                    listOf("start", "end", "activity", "goal", "targets").all { result.opt(it)?.toString() == previous.opt(it)?.toString() }) {
                     "已完成或取消的活动保留原记录；新决定请用新id"
                 }
                 if (previous.getString("activity") != a.getString("activity") || previous.getJSONArray("targets").toString() != selected.toString()) {
