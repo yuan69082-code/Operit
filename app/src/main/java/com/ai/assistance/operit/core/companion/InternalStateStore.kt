@@ -655,7 +655,8 @@ class InternalStateStore(private val context: Context) {
                     // Only this group's own actual operations; never private cross-window material.
                     it.optString("type") == "actual_operation" && it.optString("owner") == actor &&
                         it.optJSONObject("locator")?.optString("parent") == "group:$chat"
-                } else (ActionUnderstanding.materials(data, selectionInput, chat) + retrievedMaterials)
+                } else (ActionUnderstanding.materials(data, selectionInput, chat) +
+                    LifeUnderstandings.materials(data, selectionInput, chat) + retrievedMaterials)
                     .distinctBy { it.getString("id") }))
             if (frame != null) payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
                 .put("subject_id", actor).put("state_version", frame.stateVersion).put("at", frame.at)

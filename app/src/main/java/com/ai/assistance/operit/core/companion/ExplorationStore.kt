@@ -73,9 +73,8 @@ class ExplorationStore(private val context: Context) {
 
     data class Work(val role: String, val chat: String, val revision: Long, val ticket: String, val purpose: String)
 
-    suspend fun next(): Work? {
+    suspend fun next(now: Long = System.currentTimeMillis()): Work? {
         AssistantWindowRouter.initialize(context)
-        val now = System.currentTimeMillis()
         val day = ExplorationPolicy.day(now)
         for ((role, candidate) in roles().map { it to read(it) }.sortedBy { it.second.optLong("at", Long.MAX_VALUE) }) {
             if (InternalStateStore(context).enabled(role) && candidate.optInt("continuous_boundary") != 1) {

@@ -4,7 +4,7 @@ import org.json.JSONObject
 
 /** Retrieval of adopted interpretations, not new experience, psychological scoring or dispatch. */
 internal object SubjectRecall {
-    val kinds = setOf("decision", "feedback", "union")
+    val kinds = setOf("decision", "feedback", "union", "experience", "direction")
     data class Entry(val id: String, val localChat: String, val terms: Set<String>) {
         val weight: Long get() = id.length.toLong() + localChat.length + terms.sumOf { it.length.toLong() + 32 }
     }
@@ -14,7 +14,8 @@ internal object SubjectRecall {
         val content = row.getJSONObject("content")
         // Ended unions remain in history/rotation, never compete as a current association.
         if (row.getString("storage_kind") == "union" && content.getString("status") != "active") return null
-        val text = listOf("meaning", "interpretation", "decision", "objects", "members", "effects", "intention_refs")
+        val text = listOf("meaning", "interpretation", "decision", "objects", "members", "effects", "intention_refs",
+            "text", "scope", "uncertainty", "purpose", "goal", "resolve", "ambition", "related")
             .filter { content.has(it) }.joinToString(" ") { content.get(it).toString() }
         // Source snapshots and old quoted evidence must not make an unrelated interpretation match.
         return Entry(row.getString("id"), row.optString("local_chat"), InnerMaterialSelection.terms(text))

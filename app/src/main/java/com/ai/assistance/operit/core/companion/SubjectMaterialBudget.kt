@@ -134,7 +134,11 @@ internal object SubjectMaterialBudget {
         }
         // One relevant adopted association/interpretation gets a bounded opportunity before
         // unrelated directories. It still competes inside the SAME budget, not an extra block.
-        for ((path, type) in listOf("unions.items" to "", "retrieved_materials" to "adopted_feedback", "retrieved_materials" to "adopted_decision")) {
+        val relevantKinds = listOf("unions.items" to "", "retrieved_materials" to "adopted_feedback",
+            "retrieved_materials" to "adopted_decision", "retrieved_materials" to "subject_experience",
+            "retrieved_materials" to "subject_direction")
+        val relevantStart = (cursor % relevantKinds.size).toInt()
+        for ((path, type) in relevantKinds.drop(relevantStart) + relevantKinds.take(relevantStart)) {
             val lane = lanes.firstOrNull { it.path == path } ?: continue
             val index = lane.rows.indexOfFirst { row -> row is JSONObject &&
                 row.optString("selection_reason") == "CURRENT_INPUT_RELEVANCE" && (type.isEmpty() || row.optString("type") == type) }

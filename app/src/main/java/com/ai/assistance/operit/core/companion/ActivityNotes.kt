@@ -16,6 +16,13 @@ internal object ActivityNotes {
     data class Ref(val role: String, val chat: String, val id: String)
     private val active = ConcurrentHashMap<String, Ref>()
     fun current(chat: String?): Ref? = chat?.let { active[it] }
+    /** Reuse the durable original trigger on resume. Dispatch instructions are not the
+     * research question; this read creates no event and grants no adoption rights. */
+    fun selectionInput(context: Context, role: String, chat: String): String? {
+        val ref = current(chat)?.takeIf { it.role == role } ?: return null
+        return CompanionStore(context).activityRead(role, "activity", ref.id)?.optString("source")
+            ?.takeIf { it.isNotBlank() }
+    }
     fun release(ref: Ref) {
         // A retried trigger can have the same data as its predecessor. Only the actual
         // owner may release the lease, including from a cancelled turn's late finally.

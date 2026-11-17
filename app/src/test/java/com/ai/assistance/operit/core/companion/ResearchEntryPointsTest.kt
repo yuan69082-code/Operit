@@ -87,4 +87,17 @@ class ResearchEntryPointsTest {
         assertFalse(ExplorationStore(context).read(role).has("at"))
         assertTrue(TaskBoard(context, CompanionStore(context).scope(chat, role), false).list().isEmpty())
     }
+
+    @Test fun resumedActivityUsesOriginalQuestionAndOtherRolesCannotBorrowIt(): Unit = runBlocking {
+        val first = ActivityNotes.begin(context, role, chat, "research-trigger", "星空观测误差研究")
+        SubjectLife(context).checkpoint(first, "星空观测误差研究", "paused", exploration = true)
+        ActivityNotes.release(first)
+        val resumed = ActivityNotes.begin(context, role, chat, "new-resume-trigger", "恢复控制说明", first.id)
+        try {
+            assertEquals("星空观测误差研究", ActivityNotes.selectionInput(context, role, chat))
+            assertNull(ActivityNotes.selectionInput(context, "another-role", chat))
+            assertNull(ActivityNotes.selectionInput(context, role, "another-window"))
+        } finally { ActivityNotes.release(resumed) }
+        assertNull(ActivityNotes.selectionInput(context, role, chat))
+    }
 }

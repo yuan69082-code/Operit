@@ -202,7 +202,16 @@ internal object InnerStructure {
             val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
             if (binding.optString("source") == "retrieved_material") {
                 val snapshot = binding.getJSONObject("snapshot")
-                require(snapshot.optLong("at", Long.MAX_VALUE) < proposal.getLong("source_frame_at"))
+                val actualReceipt = snapshot.optString("type") == "actual_operation" &&
+                    snapshot.optString("owner") == frame.roleId && snapshot.optString("author") == "host_executor" &&
+                    snapshot.optJSONObject("locator")?.optString("receipt_hash")?.let { it.isNotBlank() && it != "null" } == true
+                // A tool runs after request preparation but before the final proposal.
+                // Its delivered, host-bound receipt is legitimate evidence of that round.
+                // Adoption still requires a DIFFERENT request and the exact candidate version.
+                require(if (actualReceipt) snapshot.optLong("at", Long.MAX_VALUE) <= proposal.getLong("created_at")
+                    else snapshot.optLong("at", Long.MAX_VALUE) < proposal.getLong("source_frame_at")) {
+                    "采用依据尚未在候选提出前实际取得"
+                }
                 // A prior material may inform development; it remains attributed material,
                 // not a claim that a memory summary is an original personal experience.
                 continue

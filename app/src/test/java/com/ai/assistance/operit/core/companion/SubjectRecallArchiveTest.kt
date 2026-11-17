@@ -73,4 +73,47 @@ class SubjectRecallArchiveTest {
             assertNotNull(archive.categoryRow("feedback", "r0"))
         }
     }
+
+    @Test fun thousandsOfExperiencesStayOnDiskAndRelevantMethodSurvivesReopenAndRevision() {
+        val file = File(temporary.newFolder(), "growth.sqlite")
+        InternalStateArchive(file, "owner").use { archive ->
+            repeat(10) { batch ->
+                write(archive, *(0 until 501).map { index ->
+                    row("e%05d".format(batch * 501 + index), "other", kind = "experience").apply {
+                        getJSONObject("content").put("text", "无关经历 " + index).put("scope", "别的问题")
+                    }
+                }.toTypedArray())
+            }
+            val method = row("z-method", "", kind = "experience").apply {
+                getJSONObject("content").put("text", "星空异常点应与其他样本分别比较")
+                    .put("scope", "统计方法").put("uncertainty", "不保证适用于所有分布")
+                    .put("bindings", JSONObject().put("source", "私密原始材料".repeat(2000)))
+            }
+            write(archive, method)
+            val document = InternalStateDocument(JSONObject(), archive)
+            val material = LifeUnderstandings.materials(document, "星空异常点", "chat")
+            assertEquals("z-method", material.first().getJSONObject("locator").getString("id"))
+            assertFalse(material.toString().contains("私密原始材料"))
+            assertTrue(material.first().getString("text").contains("不保证适用于所有分布"))
+            val payload = JSONObject().put("retrieved_materials", JSONArray(material))
+                .put("inner_structure", JSONObject()).put("category_events", JSONObject()).put("unions", JSONObject())
+            val selected = SubjectMaterialBudget.select(payload)
+            assertTrue(selected.toString().contains("z-method"))
+            assertTrue(SubjectMaterialBudget.estimate(selected.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 2048)
+            assertEquals(5011L, archive.categoryCount("experience", "private"))
+            assertEquals(method.getJSONObject("content").toString(), archive.categoryRow("experience", "z-method")!!.getJSONObject("content").toString())
+        }
+        InternalStateArchive(file, "owner").use { archive ->
+            assertEquals(1, archive.relevantSubjectRows("experience", "星空", "chat", 4).size)
+            write(archive, row("z-method", "", 2, "experience").apply {
+                getJSONObject("content").put("text", "现在研究潮汐")
+            })
+            assertTrue(archive.relevantSubjectRows("experience", "星空", "chat", 4).isEmpty())
+            assertEquals(2, archive.relevantSubjectRows("experience", "潮汐", "chat", 4).single().getInt("version"))
+            assertEquals(8, archive.categoryPage("experience", 5000, 8, "private").size)
+        }
+        InternalStateArchive(file, "another-owner").use { archive ->
+            assertTrue(archive.relevantSubjectRows("experience", "潮汐", "chat", 4).isEmpty())
+        }
+    }
 }
