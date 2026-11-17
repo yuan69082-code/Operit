@@ -90,7 +90,15 @@ class SubjectRecallArchiveTest {
                     .put("bindings", JSONObject().put("source", "私密原始材料".repeat(2000)))
             }
             write(archive, method)
-            val document = InternalStateDocument(JSONObject(), archive)
+            val document = InternalStateDocument(JSONObject(), object : InternalStateHistoryAccess {
+                override fun definition(id: String, version: Int): JSONObject? = null
+                override fun latestContact(chat: String?, at: Long): Long? = null
+                override fun contacts(chat: String?, after: Long, until: Long): Sequence<Long> = emptySequence()
+                override fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?) =
+                    archive.categoryPage(kind, offset, limit, parent)
+                override fun relevantSubjectRows(kind: String, input: String, chat: String, limit: Int) =
+                    archive.relevantSubjectRows(kind, input, chat, limit)
+            })
             val material = LifeUnderstandings.materials(document, "星空异常点", "chat")
             assertEquals("z-method", material.first().getJSONObject("locator").getString("id"))
             assertFalse(material.toString().contains("私密原始材料"))

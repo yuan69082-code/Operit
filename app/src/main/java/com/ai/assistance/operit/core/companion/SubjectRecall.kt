@@ -4,7 +4,7 @@ import org.json.JSONObject
 
 /** Retrieval of adopted interpretations, not new experience, psychological scoring or dispatch. */
 internal object SubjectRecall {
-    val kinds = setOf("decision", "feedback", "union", "experience", "direction")
+    val kinds = setOf("decision", "feedback", "union", "experience", "direction", "episode")
     data class Entry(val id: String, val localChat: String, val terms: Set<String>) {
         val weight: Long get() = id.length.toLong() + localChat.length + terms.sumOf { it.length.toLong() + 32 }
     }
@@ -15,7 +15,8 @@ internal object SubjectRecall {
         // Ended unions remain in history/rotation, never compete as a current association.
         if (row.getString("storage_kind") == "union" && content.getString("status") != "active") return null
         val text = listOf("meaning", "interpretation", "decision", "objects", "members", "effects", "intention_refs",
-            "text", "scope", "uncertainty", "purpose", "goal", "resolve", "ambition", "related")
+            "text", "scope", "uncertainty", "purpose", "goal", "resolve", "ambition", "related",
+            "understanding", "category_ref", "goals", "importance", "long_term_impact", "supporting", "opposing")
             .filter { content.has(it) }.joinToString(" ") { content.get(it).toString() }
         // Source snapshots and old quoted evidence must not make an unrelated interpretation match.
         return Entry(row.getString("id"), row.optString("local_chat"), InnerMaterialSelection.terms(text))
@@ -43,7 +44,7 @@ internal object SubjectRecall {
                  rotation: List<JSONObject>? = null): List<JSONObject> {
         require(kind in kinds)
         val history = requireNotNull((data as? InternalStateDocument)?.history)
-        val parent = if (kind == "union") null else "private"
+        val parent = if (kind in setOf("union", "episode")) null else "private"
         val relevant = history.relevantSubjectRows(kind, input, chat, 4)
         val rotating = rotation ?: run {
             val count = history.categoryCount(kind, parent)

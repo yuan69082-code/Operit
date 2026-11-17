@@ -361,7 +361,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
                 val stream = sequence {
                     while (cursor.moveToNext()) {
                         val row = JSONObject(cursor.getString(0))
-                        if (kind != "union" && row.getString("parent") != "private") continue
+                        if (kind !in setOf("union", "episode") && row.getString("parent") != "private") continue
                         val entry = SubjectRecall.entry(row) ?: continue
                         if (retain) {
                             weight += entry.weight

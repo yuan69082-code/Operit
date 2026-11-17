@@ -646,7 +646,7 @@ class InternalStateStore(private val context: Context) {
             payload.put("material_selection_cursor", innerCursor)
             payload.put("foundation", InnerFoundations.material(data, selectionInput, innerCursor, now))
             payload.put("inner_structure", InnerStructure.material(data, selectionInput, innerCursor))
-                .put("category_events", CategoryEvents.material(data, persist, now))
+                .put("category_events", CategoryEvents.material(data, persist, now, selectionInput, chat))
                 .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data, persist, chat, now, selectionInput))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)

@@ -44,10 +44,16 @@ class ExplorationStore(private val context: Context) {
     suspend fun schedule(role: String, chat: String, minutes: Int, purpose: String): JSONObject {
         val work = CompanionRuntime.currentExplorationWork(chat)
         authorize(role, chat)
-        return store.update(scope(role)) {
+        var previous: JSONObject? = null
+        val saved = store.update(scope(role)) {
             if (work != null) check(work.role == role && ExplorationPolicy.valid(it, work.chat, work.revision, work.ticket)) { "旧探索已撤销，不能再安排预约" }
+            if (it.has("at") && !it.optBoolean("paused", true)) previous = JSONObject()
+                .put("at", it.getLong("at")).put("purpose", it.optString("purpose"))
             ExplorationPolicy.schedule(it, minutes, purpose, System.currentTimeMillis())
         }.also { logSaved(chat, "探索安排", "${minutes}分钟后：$purpose") }
+        // An operation receipt, not another stored plan. Preserve the existing single-slot
+        // behavior while making replacement explicit instead of claiming both were booked.
+        return JSONObject(saved.toString()).put("schedule_replaced", previous ?: JSONObject.NULL)
     }
 
     fun pause(role: String): JSONObject = store.update(scope(role)) { ExplorationPolicy.selfPause(it) }.also {
@@ -128,6 +134,8 @@ class ExplorationStore(private val context: Context) {
 
     fun status(role: String, data: JSONObject = read(role)): JSONObject {
         return JSONObject().put("enabled", ExplorationPolicy.enabled(data)).put("assistant_id", role)
+            .put("schedule_scope", "one_current_exploration_opportunity")
+            .put("schedule_replaced", data.optJSONObject("schedule_replaced") ?: JSONObject.NULL)
             .put("chat", AssistantWindowRouter.chat(context, role)).put("activities", org.json.JSONArray(ExplorationPolicy.choices(data).toList()))
             .put("daily_limit", data.optInt("limit", 4)).put("used_today", ExplorationPolicy.used(data, ExplorationPolicy.day(System.currentTimeMillis())))
             .put("paused", data.optBoolean("paused", true)).put("at", data.optLong("at"))

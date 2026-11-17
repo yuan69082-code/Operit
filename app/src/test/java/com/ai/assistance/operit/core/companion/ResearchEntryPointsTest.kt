@@ -38,10 +38,45 @@ class ResearchEntryPointsTest {
         CompanionTools.register(AIToolHandler.getInstance(context), context)
     }
     private fun todo(vararg params: Pair<String, String>): JSONObject {
+        return invoke("companion_todo", *params)
+    }
+    private fun invoke(name: String, vararg params: Pair<String, String>): JSONObject {
         val values = params.toMap() + mapOf("__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role)
-        val result = AIToolHandler.getInstance(context).executeTool(AITool("companion_todo", values.map { ToolParameter(it.key, it.value) }))
+        val result = AIToolHandler.getInstance(context).executeTool(AITool(name, values.map { ToolParameter(it.key, it.value) }))
         assertTrue(result.error, result.success)
         return JSONObject(result.result.toString())
+    }
+
+    @Test fun replacementReceiptDoesNotClaimTwoExplorationOpportunitiesWereScheduled(): Unit = runBlocking {
+        AssistantWindowRouter.selected(context, role, chat)
+        ExplorationStore(context).configure(role, true, setOf("reading"), 4)
+        val a = invoke("companion_explore", "action" to "schedule", "minutes" to "15", "purpose" to "研究星空")
+        val b = invoke("companion_explore", "action" to "schedule", "minutes" to "30", "purpose" to "研究潮汐")
+        assertEquals("one_current_exploration_opportunity", b.getString("schedule_scope"))
+        assertEquals("研究星空", b.getJSONObject("schedule_replaced").getString("purpose"))
+        assertEquals(a.getLong("at"), b.getJSONObject("schedule_replaced").getLong("at"))
+        assertEquals("研究潮汐", b.getString("purpose"))
+        assertFalse(ExplorationStore(context).read(role).has("schedule_replaced")) // receipt, not another queue
+        assertNull(ExplorationStore(context).next(a.getLong("at")))
+        val work = requireNotNull(ExplorationStore(context).next(b.getLong("at")))
+        assertEquals("研究潮汐", work.purpose)
+        assertNull(ExplorationStore(context).next(b.getLong("at")))
+    }
+
+    @Test fun separatelySubmittedPrivateInterestsKeepIndependentReceiptsAndStopIndependently() {
+        val a = todo("action" to "save", "title" to "星空研究").getJSONObject("saved_item").getString("id")
+        val b = todo("action" to "save", "title" to "潮汐研究").getJSONObject("saved_item").getString("id")
+        val dispatchA = todo("action" to "submit", "id" to a).getJSONObject("saved_item").getJSONObject("dispatch")
+        val dispatchB = todo("action" to "submit", "id" to b).getJSONObject("saved_item").getJSONObject("dispatch")
+        assertNotEquals(dispatchA.getString("id"), dispatchB.getString("id"))
+        val board = TaskBoard(context, CompanionStore(context).scope(chat, role), false)
+        todo("action" to "save", "id" to a, "status" to "paused")
+        assertNull(board.claim(a, dispatchA.getString("id")))
+        assertNotNull(board.claim(b, dispatchB.getString("id")))
+        assertNull(board.claim(b, dispatchB.getString("id")))
+        board.dispatchState(b, dispatchB.getString("id"), "handled", "本轮处理完成，不代表目标完成")
+        assertNull(board.pending())
+        assertEquals("paused", board.get(a).getString("status"))
     }
 
     @Test fun offPageSaveCanActuallyBeSubmittedAndReopenedWithoutRepeatingExecution() {

@@ -21,6 +21,23 @@ import org.robolectric.annotation.Config
 @RunWith(OperitStorageTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class CategoryEventsEntryPointsTest {
+
+    @Test fun relevantOldEpisodeBeyondRotatingPageReturnsWithoutBecomingANewOccurrence(): Unit = runBlocking {
+        val f = frame()
+        val reports = (0 until 30).map { n -> appraisal(f, "e%02d".format(n), category = "foundation:emotion:anger")
+            .put("understanding", if (n == 29) "星空仪器损坏这件事仍未解决" else "其他独立事情$n")
+            .put("attention", "background") }
+        submit(f, report(f, reports))
+        val old = episode("e29")
+        val selected = InnerStructureContext.prepare(context, role, second, true, input = "星空仪器修好了吗")
+        val material = requireNotNull(selected.internalStateFrame).materialText
+        assertTrue(material, material.contains("星空仪器损坏这件事仍未解决"))
+        val after = episode("e29")
+        assertEquals(old.getInt("version"), after.getInt("version"))
+        assertEquals("unresolved", after.getJSONObject("content").getString("status"))
+        assertEquals(old.getJSONObject("content").toString(), after.getJSONObject("content").toString())
+        assertEquals(30L, (states.read(role) as InternalStateDocument).history!!.categoryCount("episode", null))
+    }
     private lateinit var context: Context
     private lateinit var role: String
     private lateinit var other: String

@@ -7,6 +7,34 @@ import org.junit.Test
 
 /** Pure contract tests complement the real host/storage integration tests. */
 class InnerStructureContractsTest {
+
+    @Test fun currentTurnReceiptCanSupportLaterAdoptionButNotInventedFutureMaterial() {
+        fun attempt(type: String, at: Long, hash: String?, expected: Boolean) {
+            val d = data()
+            val source = JSONObject().put("id", "material:actual").put("type", type).put("owner", "owner")
+                .put("author", "host_executor").put("status", "retrieved").put("at", at).put("text", "实际结果为26.5")
+                .put("locator", JSONObject().put("action_id", "actual").apply { if (hash != null) put("receipt_hash", hash) })
+            val first = frame(d, "first", 20).copy(materialSources = mapOf("material:actual" to source.toString()))
+            val proposal = propose("p", content("method", "self_knowledge"))
+                .put("evidence", JSONArray().put("material:actual"))
+            InnerStructure.apply(d, first, JSONArray().put(proposal), 40)
+            val adoption = adopt(d, "p").apply { getJSONObject("development").put("anchors", JSONArray()
+                .put(JSONObject().put("ref", "material:actual").put("quote", "26.5").put("interpretation", "实际计算支持新方法认识"))) }
+            assertThrows(IllegalArgumentException::class.java) {
+                InnerStructure.apply(d, first, JSONArray().put(adoption), 41)
+            }
+            if (expected) {
+                InnerStructure.apply(d, frame(d, "later", 50), JSONArray().put(adoption), 51)
+                assertEquals(proposal.getJSONObject("record").toString(), InnerStructure.records(d).single().getJSONObject("content").toString())
+            } else assertThrows(IllegalArgumentException::class.java) {
+                InnerStructure.apply(d, frame(d, "later", 50), JSONArray().put(adoption), 51)
+            }
+        }
+        attempt("actual_operation", 30, "host-bound-hash", true)
+        attempt("actual_operation", 45, "host-bound-hash", false)
+        attempt("actual_operation", 30, null, false)
+        attempt("memory_record", 30, "not-a-receipt", false)
+    }
     private fun data() = JSONObject().put("sequence", 1).put("semantic_revision", 0)
         .put("events", JSONArray().put(JSONObject().put("id", "fact").put("sequence", 1).put("at", 10)
             .put("source", "assistant_reply").put("detail", "我此前明确选择坦诚").put("chat", "old")))

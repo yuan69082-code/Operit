@@ -134,7 +134,7 @@ internal object SubjectMaterialBudget {
         }
         // One relevant adopted association/interpretation gets a bounded opportunity before
         // unrelated directories. It still competes inside the SAME budget, not an extra block.
-        val relevantKinds = listOf("unions.items" to "", "retrieved_materials" to "adopted_feedback",
+        val relevantKinds = listOf("category_events.episodes" to "", "unions.items" to "", "retrieved_materials" to "adopted_feedback",
             "retrieved_materials" to "adopted_decision", "retrieved_materials" to "subject_experience",
             "retrieved_materials" to "subject_direction")
         val relevantStart = (cursor % relevantKinds.size).toInt()
