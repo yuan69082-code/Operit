@@ -131,23 +131,26 @@ internal class SubjectLife(private val context: Context) {
             val session = c.optString("session_id", "legacy-${r.getInt("version")}")
             if (SubjectRestPolicy.due(c, now)) {
                 return claim(role, chat, "wake:$session:${r.getInt("version")}",
-                    "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。休息安排：$c")
+                    "你先前安排的休息时段已到期。当前仍是休息状态，请决定醒来或延长（新结束安排）。这不是新的现实经历。用companion_life events分页取回暂存事件，决定哪些已处理并ack；旧内部预约尚未改期，按需要重新安排。当前休息索引：rest/current，version=${r.getInt("version")}。以本轮subject_rest材料为准；未取得时先用companion_internal_state get section=rest id=current读取。决定醒来须在报告中提交rest.state=awake，发出消息本身不改变休息状态。")
                     ?: nextInterrupt(role, chat, r, now)
             }
             nextInterrupt(role, chat, r, now)?.let { return it }
             val resumedDream = store.activityPage(role, "dream_process", "ready", 0).firstOrNull()
             if (resumedDream != null) return Work(role, chat, resumedDream.getString("id"), resumedDream.getJSONObject("plan").toString(), dream = true)
             if (c.has("dream_plan")) claim(role, chat, "dream:$session", c.getJSONObject("dream_plan").toString(), dream = true)?.let { return it }
-            if (c.optString("consolidation").isNotBlank()) claim(role, chat, "review:$session",
-                "你在休息安排中选择了一次经验整理：${c.getString("consolidation")}。只取实际提供的增量材料，按需检索本地记忆或资料，也可查梦的日期/关键词索引，醒后决定保留或归档。可形成experience/direction候选或保留不确定；不得把整理建议冒充已决定的计划，不自动安排预约。")?.let { return it }
             return null
         }
         val input = SubjectMessageInbox(context).next(role)
         if (input != null) return Work(role, input.getString("source_chat"), "input:${input.getString("id")}", input.getString("text"), input = input)
+        PrivateTime(context).next(role, chat, now) { id, text -> claim(role, chat, id, text) }?.let { return it }
         val resume = store.activityPage(role, "life_activity", "ready", 0).firstOrNull()
         if (resume != null) return claim(role, chat, "resume:${resume.getString("id")}:${resume.getInt("version")}",
             "续接同一活动。已执行的工具与回执必须先核对，未知结果不能盲目重放。原方向与新的决定保存在life_activity原记录；未进入本轮预算时须按ID读取，不假定已读。\n" +
                 "可用companion_internal_state get section=action或activity_part按需读取已保存步骤。活动ID：${resume.getString("id")}；最后已提供的请求：${resume.optString("last_request_part", "尚未取得响应")}。本次先核对原材料、原随记和回执后选择接续点；不是把旧请求从头再执行。", resume.getString("id"))
+        c?.optString("awake_consolidation")?.takeIf { it.isNotBlank() }?.let { scope ->
+            claim(role, chat, "awake-review:${c.optString("previous_rest")}",
+                "旧休息安排中的整理范围仍保留：$scope。现在已醒，可用free_status的回顾整理菜单选择如何处理；不会在梦中执行整理。")?.let { return it }
+        }
         val events = store.activityQueuePage(role, "life_event", listOf("interrupt", "pending", "user_request")).take(8)
         val first = events.firstOrNull() ?: return null
         val work = claim(role, chat, "event:${first.getString("id")}", "醒后待处理材料（不是新发生），本次索引：" +

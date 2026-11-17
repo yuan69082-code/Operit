@@ -86,6 +86,50 @@ class SubjectLifeEntryPointsTest {
         assertEquals(12L, CompanionStore(context).activityCount(role, "life_event", "pending"))
         assertEquals("resting", life.rest(role)!!.getJSONObject("content").getString("state"))
     }
+    @Test fun wakeChoiceHasCurrentReadProofAndPersistsAfterToolContinuation() = runBlocking {
+        val choice = rest(JSONObject().put("steps", 3))
+        choice.getJSONObject("rest").put("meaning", "保留完整休息理由".repeat(2000))
+        adopt(choice)
+        val life = SubjectLife(context)
+        val end = life.rest(role)!!.getJSONObject("content").getLong("until")
+        val wake = requireNotNull(life.next(role, chat, end))
+        assertFalse(wake.text.contains("source_bindings"))
+        assertTrue(wake.text.length < 700)
+        val request = InnerStructureContext.prepare(context, role, chat, true, input = wake.text)
+        val f = requireNotNull(request.internalStateFrame)
+        val control = JSONObject(requireNotNull(f.materialSources["material:rest:current:1"]))
+        assertEquals(1, control.getJSONObject("locator").getInt("version"))
+        assertTrue(control.getBoolean("control_state"))
+        assertTrue(control.getString("text").length < 800)
+        assertTrue(life.rest(role)!!.getJSONObject("content").getString("meaning").length > 10_000)
+        val fields = JSONObject().put("rest", JSONObject().put("expected_version", 1).put("state", "awake")
+            .put("meaning", "梦结束后，我决定醒来并告诉园园").put("evidence", JSONArray().put(f.eventIds.first())))
+        // Reproduce the reported rejection: a notice/version inferred from a dream is not
+        // itself a current rest read. The production composer must supply that read.
+        try {
+            commit(f.copy(materialSources = f.materialSources.filterKeys { !it.startsWith("material:rest:") }), fields)
+            fail("Unread rest version must not be silently adopted")
+        } catch (failure: InternalStateReportIssue) {
+            assertEquals("ISR_UNREAD_VERSION", failure.code)
+            assertEquals("rest.expected_version", failure.path)
+        }
+        val fresh = InnerStructureContext.prepare(context, role, chat, true, input = wake.text)
+        var turns = com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(
+            listOf(com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER, wake.text)), fresh)
+        repeat(2) {
+            turns = SubjectToolMaterials.attach(turns + com.ai.assistance.operit.core.chat.hooks.PromptTurn(
+                com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.TOOL_RESULT, "已读取梦中步骤$it", "companion_internal_state"), end + it)
+        }
+        val afterTools = requireNotNull(com.ai.assistance.operit.core.chat.CurrentRequestContext.internalStateFrame(turns))
+        fields.getJSONObject("rest").put("evidence", JSONArray().put(afterTools.eventIds.first()))
+        commit(afterTools, fields)
+        life.finish(wake, "completed")
+        val reopened = SubjectLife(context).rest(role)!!
+        assertEquals(2, reopened.getInt("version"))
+        assertEquals("awake", reopened.getJSONObject("content").getString("state"))
+        assertEquals("空闲", SubjectRestPolicy.label(reopened.getJSONObject("content"), null, end + 1))
+        assertNull(SubjectLife(context).next(role, chat, end + 1))
+    }
     @Test fun anExistingEngineWindowDoesNotStartASecondLocalLifeRunner() = runBlocking {
         adopt(rest(JSONObject().put("steps", 2)))
         val life = SubjectLife(context)
@@ -417,4 +461,184 @@ class SubjectLifeEntryPointsTest {
             assertEquals(2, life.toolsUsed(role, ref.id))
         } finally { ActivityNotes.release(ref) }
     }
+    private fun privateLifeTool(action: String, details: JSONObject): JSONObject {
+        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
+        RoomTools.register(handler, context)
+        val args = mapOf("action" to action, "details" to details.toString(),
+            "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role)
+        val result = handler.executeTool(com.ai.assistance.operit.data.model.AITool("companion_life",
+            args.map { com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value) }))
+        assertTrue(result.error, result.success)
+        return JSONObject(result.result.toString())
+    }
+
+    private fun privateConfig() = JSONObject().put("expected_version", 0).put("enabled", true)
+        .put("start", "01:00").put("end", "07:00").put("zone", "Asia/Shanghai")
+    private fun privateWindow() = PrivateTimePolicy.window(privateConfig(), java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).plusDays(2))
+
+    @Test fun privateTimePersistsPlanningAndProgressAcrossIndependentActivities() = runBlocking {
+        val time = PrivateTime(context)
+        val w = privateWindow()
+        assertNull(SubjectLife(context).next(role, chat, w.start - 3_600_000))
+        privateLifeTool("free_config", privateConfig())
+        val invitation = SubjectLife(context).next(role, chat, w.start - 3_600_000)!!
+        assertTrue(invitation.text.contains("free_status"))
+        assertTrue(time.status(role, w.date).getString("menu").contains("memory"))
+        assertTrue(invitation.text.contains("园园"))
+        SubjectLife(context).finish(invitation, "completed")
+        assertNull(SubjectLife(context).next(role, chat, w.start - 3_599_999))
+        val item = JSONObject().put("id", "my-review").put("start", w.start).put("end", w.end)
+            .put("activity", "review").put("goal", "回看日记，再查看资料，整理后决定是否提炼")
+            .put("targets", JSONArray(listOf("diary", "files"))).put("checks", JSONArray(listOf(w.start + 1_800_000)))
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", 0).put("items", JSONArray().put(item)))
+        val first = SubjectLife(context).next(role, chat, w.start)!!
+        SubjectLife(context).finish(first, "completed")
+        val current = time.status(role, w.date, false).getJSONObject("plan")
+        assertEquals("planned", current.getJSONArray("items").getJSONObject(0).getString("status"))
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", current.getInt("version"))
+            .put("slot_id", "my-review").put("status", "working").put("note", "已读日记，尚未看资料和整理索引"))
+        SubjectLife(context).recover(role)
+        val inbox = SubjectMessageInbox(context)
+        inbox.accept(role, chat, "during-private-time", "我发来的消息仍须保存", emptyList())
+        val incoming = SubjectLife(context).next(role, chat, w.start + 1_800_000)!!
+        assertNotNull(incoming.input)
+        assertEquals("我发来的消息仍须保存", incoming.text)
+        assertTrue(inbox.claim(role, "during-private-time"))
+        inbox.finish(role, "during-private-time", "completed")
+        val second = SubjectLife(context).next(role, chat, w.start + 1_800_000)!!
+        assertTrue(second.text.contains("续接"))
+        assertTrue(PrivateTime(context).status(role, w.date, false).toString().contains("尚未看资料"))
+        SubjectLife(context).finish(second, "completed")
+        val after = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", after.getInt("version"))
+            .put("slot_id", "my-review").put("status", "cancelled").put("note", "今天改变安排，改天再考虑"))
+        assertNull(SubjectLife(context).next(role, chat, w.end))
+        assertEquals(1, time.history(role, 0).getJSONArray("items").length())
+    }
+
+    @Test fun privateMemoryLocationCannotBeOverwrittenBySubjectConfiguration() {
+        val time = PrivateTime(context)
+        val first = time.configure(role, privateConfig().put("memory_location", "已连接OB工具 / vault-园园 / 沈知屿").put("sleep_time", "03:00"), manual = true)
+        try { time.configure(role, privateConfig().put("expected_version", first.getInt("version")).put("memory_location", "猜测的路径")); fail() }
+        catch (_: IllegalArgumentException) {}
+        val updated = time.configure(role, privateConfig().put("expected_version", first.getInt("version")).put("start", "02:00"))
+        assertTrue(updated.getString("memory_location").contains("vault-园园"))
+        assertEquals("03:00", updated.getString("sleep_time"))
+    }
+
+    @Test fun sleepingDoesNotRunConsolidationAndAwakePreservesItsScope() = runBlocking {
+        val r = rest().getJSONObject("rest").put("consolidation", "整理未完成的旧资料")
+        adopt(JSONObject().put("rest", r))
+        assertNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
+        val asleep = SubjectLife(context).rest(role)!!
+        adopt(JSONObject().put("rest", JSONObject().put("expected_version", asleep.getInt("version"))
+            .put("state", "awake").put("meaning", "现在继续自己的清醒时间").put("evidence", JSONArray())))
+        val work = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
+        assertTrue(work.text.contains("整理未完成的旧资料"))
+        assertFalse(work.dream)
+    }
+
+    @Test fun confirmedEssenceUsesTheNormalBudgetWhileDraftsStayOut() = runBlocking {
+        val time = PrivateTime(context)
+        time.configure(role, privateConfig())
+        val frame = InnerStructureContext.prepare(context, role, chat, true, input = "查看资料").internalStateFrame!!
+        val actions = SubjectActions(context, frame)
+        val tool = com.ai.assistance.operit.data.model.AITool("read_file", emptyList())
+        val claim = actions.claim("essence-source", tool, null)
+        // A controlled tool response through the actual receipt API, not a prewritten DB row.
+        actions.finish(claim.id, com.ai.assistance.operit.data.model.ToolResult("read_file", true,
+            com.ai.assistance.operit.core.tools.StringResultData("实际来源：一次失败后重新核对证据")), "completed")
+        val saved = time.saveEssence(role, JSONObject().put("expected_version", 0).put("text", "先核对实际证据，再修正自己的判断。")
+            .put("source_actions", JSONArray(listOf("essence-source"))), false)
+        assertFalse(InnerStructureContext.prepare(context, role, chat, true, input = "接下来").state.contains("先核对实际证据，再修正自己的判断。"))
+        time.saveEssence(role, JSONObject().put("expected_version", saved.getInt("version")).put("confirmed", true), true)
+        val next = InnerStructureContext.prepare(context, role, chat, true, input = "独立的新活动")
+        assertTrue(next.state, next.state.contains("先核对实际证据，再修正自己的判断。"))
+        assertTrue(next.internalStateFrame!!.materialSources.values.any { JSONObject(it).optString("type") == "confirmed_essence" })
+        val current = time.essence(role)
+        val tooLong = time.saveEssence(role, JSONObject().put("expected_version", current.getInt("version"))
+            .put("text", "尚需继续提炼的草稿。".repeat(500)).put("source_actions", JSONArray(listOf("essence-source"))), false)
+        try { time.saveEssence(role, JSONObject().put("expected_version", tooLong.getInt("version")).put("confirmed", true), true); fail() }
+        catch (expected: IllegalArgumentException) { assertTrue(expected.message.orEmpty().contains("384")) }
+        assertEquals("先核对实际证据，再修正自己的判断。", time.essence(role).getString("confirmed"))
+        assertTrue(time.essence(role).getString("draft").contains("尚需继续提炼"))
+    }
+
+    /** Controlled subject choices and research material, through ordinary request/report/tool
+     * entry points. This proves delivery and persistence, not real-model understanding. */
+    @Test fun daytimeStatePlanActionFeedbackAndNextPlanUseTheSameNormalLoop() = runBlocking {
+        InternalStateStore(context).materialBudget(role, chat, 4096)
+        val time = PrivateTime(context); val w = privateWindow()
+        privateLifeTool("free_config", privateConfig())
+        fun slot(id: String, start: Long, goal: String) = JSONObject().put("id", id).put("start", start)
+            .put("end", start + 3_600_000).put("activity", "explore").put("goal", goal)
+            .put("targets", JSONArray()).put("checks", JSONArray())
+        var first = slot("research", w.start, "今晚先读一篇历史文章")
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", 0).put("items", JSONArray().put(first)))
+        val day = InnerStructureContext.prepare(context, role, chat, true, input = "白天看到星空图片，我有了新的好奇，想重新考虑今晚安排")
+        val frame = day.internalStateFrame!!
+        assertTrue(day.state, day.state.contains("今晚先读一篇历史文章"))
+        assertEquals(1, frame.materialSources.values.count { JSONObject(it).optString("type") == "private_time_plan" })
+        val mood = JSONObject().put("op", "appraise").put("id", "sky-joy").put("expected_version", 0)
+            .put("category_ref", "foundation:emotion:joy").put("objects", JSONArray(listOf("星空"))).put("goals", JSONArray())
+            .put("intensity", 0.7).put("importance", "一个新的兴趣线索").put("long_term_impact", "尚未确定")
+            .put("attention", "foreground").put("status", "processing").put("understanding", "看到星空时的喜悦和好奇，让我想改变今晚的安排")
+            .put("basis", "input").put("evidence", JSONArray(listOf(frame.eventIds.last()))).put("reason", "我现在更想看看天文")
+        commit(frame, JSONObject().put("episodes", JSONArray().put(mood)))
+        val reconsider = InnerStructureContext.prepare(context, role, chat, true, input = "星空带来的喜悦是否改变今晚研究？")
+        assertTrue(reconsider.state, reconsider.state.contains("sky-joy"))
+        assertTrue(reconsider.state.contains("private_time_plan"))
+        // The simulated subject chooses a different activity; the host does not derive it
+        // from the emotion score or automatically rewrite this calendar.
+        first = slot("research", w.start, "查看天文资料，弄清楚星图是什么")
+        val current = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", current.getInt("version"))
+            .put("items", JSONArray().put(first)))
+        val work = SubjectLife(context).next(role, chat, w.start)!!
+        assertTrue(work.text.contains("查看天文资料"))
+        val active = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", active.getInt("version"))
+            .put("slot_id", "research").put("status", "working").put("note", "开始核对资料"))
+        val request = InnerStructureContext.prepare(context, role, chat, true, wake = true, input = "查阅天文资料")
+        val actions = SubjectActions(context, request.internalStateFrame!!)
+        val tool = com.ai.assistance.operit.data.model.AITool("companion_reading", mapOf("action" to "add", "title" to "模拟测试资料：星图",
+            "url" to "https://example.invalid/test-star-map", "text" to "受控研究材料：星图用于定位，需要先建立坐标索引。",
+            "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role).map {
+            com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value)
+        })
+        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
+        RoomTools.register(handler, context)
+        val operation = actions.claim("research-material", tool, null)
+        actions.started(operation.id)
+        val result = handler.executeTool(tool)
+        assertTrue(result.error, result.success)
+        actions.finish(operation.id, result, "completed")
+        val reflect = InnerStructureContext.prepare(context, role, chat, true, input = "刚取得的星图材料让我发现，原来我的研究方法太散乱")
+        val f = reflect.internalStateFrame!!
+        val actual = f.materialSources.values.map(::JSONObject).first {
+            it.optString("type") == "actual_operation" && it.getJSONObject("locator").optString("action_id") == "research-material"
+        }.getString("id")
+        commit(f, JSONObject().put("action_feedback", JSONArray().put(JSONObject().put("id", "sky-result").put("expected_version", 0)
+            .put("action_id", "research-material").put("result_source", actual).put("evidence", JSONArray(listOf(actual)))
+            .put("meaning", "保存了资料不等于我已理解；先画索引可能更合适")))
+            .put("life", JSONArray().put(JSONObject().put("kind", "experience").put("id", "sky-method").put("expected_version", 0)
+                .put("text", "研究星图时先画坐标索引，再继续阅读").put("scope", "天文研究方法").put("uncertainty", "还要看下次效果")
+                .put("status", "active").put("evidence", JSONArray(listOf(actual))))))
+        val finished = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", finished.getInt("version"))
+            .put("slot_id", "research").put("status", "completed").put("note", "取得阶段性材料，发现需要先画索引；理解已保存sky-method"))
+        SubjectLife(context).finish(work, "completed")
+        val independent = InnerStructureContext.prepare(context, role, chat, true, input = "另一次天文研究可以怎样做？")
+        assertTrue(independent.state, independent.state.contains("研究星图时先画坐标索引"))
+        val nextFrame = independent.internalStateFrame!!
+        SubjectActions.validateDeclaration(JSONObject().put("intention_refs", JSONArray().put(JSONObject()
+            .put("kind", "experience").put("id", "sky-method").put("version", 1))).put("evidence", JSONArray()), nextFrame)
+        val latest = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", latest.getInt("version"))
+            .put("items", JSONArray().put(slot("new-method", w.start + 7_200_000, "使用已形成的sky-method，先画坐标索引再读新资料"))))
+        val later = SubjectLife(context).next(role, chat, w.start + 7_200_000)!!
+        assertTrue(later.text.contains("先画坐标索引"))
+        assertFalse(later.text.contains("今晚先读一篇历史文章"))
+    }
+
 }

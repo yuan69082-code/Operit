@@ -35,6 +35,7 @@ object RoomTools {
     ).map { prompt ->
         if (prompt.name == "companion_study") prompt.copy(description = prompt.description +
             " action=activity查询实际近期书房保存/处理事实；action=note用id书目及details.note_id精确读取批注/回复。reply/annotate/review回执带book/chapter/version/reply_to/reply_id/author/saved_at；saved不代表用户已读。仅所属私聊可访问书房，群聊不可读取私人内容。")
+        else if (prompt.name == "companion_life") prompt.copy(description = prompt.description + " 自由时间与精华角：action=free_status读取具体活动菜单和所有写入格式；free_config/free_plan/free_progress/sleep_choice保存自己的安排和进度，free_history分页历史；essence_get/essence_save/essence_confirm管理确认后的精华。未配置先定义时段，OB位置由园园在页面设置。详情按需读取，不用每轮查全部。")
         else if (prompt.name == "companion_reading") prompt.copy(description = prompt.description.replace("覆盖写该来源的学习进度", "更新该来源的当前学习进度") +
             " 连续性助手的进度、来源配置和随记保留旧版本；action=versions 用 id、part=source或entry、offset 分页查看旧版本，每页5条。sources/queue/history按next_offset续读；retained查询已到期或跳过但仍保留的线索，不把它们算成已读或重新入队。当前来源/资料分页每页20条。旧版本未保存的历史不能补造。")
         else if (prompt.name == "companion_room") prompt.copy(description = prompt.description +
@@ -70,7 +71,15 @@ object RoomTools {
                                 "ack" -> { life.acknowledge(actor, CategoryEvents.strings(JSONObject(required("details")).getJSONArray("ids"), 64)); JSONObject().put("saved", true) }
                                 "activity" -> SubjectContracts.parseObject(required("details"), "details").let { life.chooseActivity(actor, required("id"), SubjectContracts.choice(it, "choice", setOf("continue", "pause", "end"), "details.choice"), SubjectContracts.text(it, "note", path = "details.note")) }
                                 "dream" -> SubjectContracts.parseObject(required("details"), "details").let { life.dreamChoice(actor, required("id"), SubjectContracts.choice(it, "choice", setOf("resume", "retry_step", "end"), "details.choice"), SubjectContracts.text(it, "note", path = "details.note")) }
-                                else -> error("未知生活续接操作")
+                                "free_status" -> PrivateTime(context).status(actor, arg("details")?.let(::JSONObject)?.optString("date")?.takeIf(String::isNotBlank))
+                                "free_history" -> PrivateTime(context).history(actor, offset)
+                                "free_config" -> PrivateTime(context).configure(actor, JSONObject(required("details")))
+                                "free_plan" -> PrivateTime(context).savePlan(actor, JSONObject(required("details")))
+                                "free_progress" -> PrivateTime(context).progress(actor, JSONObject(required("details")))
+                                "sleep_choice" -> PrivateTime(context).sleepChoice(actor, JSONObject(required("details")))
+                                "essence_get" -> PrivateTime(context).essence(actor, offset)
+                                "essence_save", "essence_confirm" -> PrivateTime(context).saveEssence(actor, JSONObject(required("details")), action == "essence_confirm")
+                                else -> error("未知生活续接操作；free_status列出自由时间与精华角完整格式")
                             }
                         }
                         "companion_play" -> {

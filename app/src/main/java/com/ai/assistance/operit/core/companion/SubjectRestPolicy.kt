@@ -11,6 +11,7 @@ internal object SubjectRestPolicy {
         if (state == "awake") {
             if (prior != null) result.put("previous_rest", prior.optString("session_id"))
                 .put("actual_end", now).put("previous_expected_end", prior.opt("until"))
+            prior?.optString("consolidation")?.takeIf { it.isNotBlank() }?.let { result.put("awake_consolidation", it) }
             return result
         }
         val mode = change.optString("mode", "quiet") // Published resting means quiet rest, not an invented bedtime.

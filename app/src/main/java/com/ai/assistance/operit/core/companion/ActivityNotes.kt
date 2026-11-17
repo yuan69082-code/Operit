@@ -42,8 +42,10 @@ internal object ActivityNotes {
         }
     }
 
+    fun scheduledId(role: String, trigger: String) = "activity-" + InnerStructure.hash("$role:$trigger")
+
     suspend fun begin(context: Context, role: String, chat: String, trigger: String, source: String, resumeId: String? = null): Ref {
-        val ref = Ref(role, chat, resumeId ?: ("activity-" + InnerStructure.hash("$role:$trigger")))
+        val ref = Ref(role, chat, resumeId ?: scheduledId(role, trigger))
         return acquire(ref) {
             withContext(Dispatchers.IO) {
                 check(!InternalStateStore(context).recipientScope(role, chat)) { "活动随记仅在本助手私域保存" }

@@ -112,6 +112,26 @@ internal object SubjectMaterialBudget {
         // Reserve an opportunity for the best matching identity and other adopted record before
         // catalogue/filler overhead. Only two rows qualify; other domains still rotate normally.
         val prioritized = mutableSetOf<Pair<String, Int>>()
+        // The wake notice alone is not a versioned read. Deliver the one compact current
+        // rest record before rotating history, otherwise a valid wake choice is rejected.
+        lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->
+            val index = materials.rows.indexOfFirst { it is JSONObject &&
+                it.optString("type") == "subject_rest" && it.optBoolean("control_state") }
+            if (index >= 0) {
+                include(materials, materials.rows[index])
+                prioritized += materials.path to index
+            }
+        }
+        // Confirmed essence is a small, explicit choice inside the SAME budget. It is not
+        // a second prompt appended after budgeting. Drafts and old versions never enter here.
+        lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->
+            materials.rows.forEachIndexed { index, row ->
+                if (row is JSONObject && row.optString("type") in setOf("confirmed_essence", "private_time_plan")) {
+                    include(materials, row)
+                    prioritized += materials.path to index
+                }
+            }
+        }
         // Keep one real current base drive in the normal request even when historical
         // catalogues fill the envelope. Rotate this bounded opportunity, not the subject's
         // importance or stored values. A vocabulary-only row never qualifies as a read.

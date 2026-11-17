@@ -36,15 +36,17 @@ internal object InnerStructureContext {
             // subject's present research question and must not drown it in retrieval matches.
             val selectionInput = if (wake) CompanionRuntime.currentExplorationWork(chat)
                 ?.takeIf { it.role == role }?.purpose ?: ActivityNotes.selectionInput(context, role, chat) ?: input else input
-            store.prepare(role, chat, persist, wake, capabilities, input, group,
+            val prepared = store.prepare(role, chat, persist, wake, capabilities, input, group,
                 sources(context, role),
                 CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user",
                 hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
                     (if (group) emptyList() else SubjectMaterials.read(context, role, selectionInput) +
                         SubjectRestDreams.materials(store.read(role), selectionInput, chat) +
                         ActivityNotes.materials(context, role) +
-                        SubjectLife(context).materials(role) + ParticipatoryDreams.materials(context, role, selectionInput, chat)),
+                        SubjectLife(context).materials(role) + PrivateTime(context).materials(role, selectionInput) + ParticipatoryDreams.materials(context, role, selectionInput, chat)),
                 selectionInput)
+            prepared.copy(instructions = prepared.instructions +
+                if (!group && prepared.internalStateFrame != null) PrivateTime(context).setupInstruction(role) else "")
         }
 
     suspend fun submit(context: Context, frame: InternalStateFrame, report: JSONObject): JSONObject =
