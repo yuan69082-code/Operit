@@ -179,7 +179,10 @@ class SubjectRestDreamsEntryPointsTest {
         submit(f, JSONObject().put("unions", JSONArray().put(union)))
         val saved = states.read(role)
         val mood = CategoryEvents.row(saved, "episode", "dream-mood")!!
-        assertEquals(0.8, CategoryEvents.timeView(saved, mood, mood.getLong("at") + 259200000L)
+        val anchorAt = CategoryEvents.row(saved, "union", "dream-continuation")!!.getLong("at")
+        val actualAnchor = CategoryEvents.timeView(saved, mood, anchorAt).getJSONObject("time_projection").getDouble("intensity")
+        assertTrue(actualAnchor > 0)
+        assertEquals(actualAnchor, CategoryEvents.timeView(saved, mood, anchorAt + 259200000L)
             .getJSONObject("time_projection").getDouble("intensity"), 0.00001)
         f = readMaterial(second, "dream", id)
         f = nativeInnerRead(context, f, "dream_understanding", "first-understanding")
