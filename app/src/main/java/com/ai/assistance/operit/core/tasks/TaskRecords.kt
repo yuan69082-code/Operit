@@ -31,7 +31,8 @@ object TaskRecords {
         if (!has("version")) put("version", 0)
     }
 
-    fun save(rows: JSONArray, actor: String, id: String?, patch: JSONObject, members: Set<String>, now: Long): JSONObject {
+    fun save(rows: JSONArray, actor: String, id: String?, patch: JSONObject, members: Set<String>, now: Long,
+             incrementalHistory: Boolean = false, linkedIdExists: ((String) -> Boolean)? = null): JSONObject {
         require(patch.keys().asSequence().all { it in fields || it == "expected_version" }) { "包含不支持的待办字段" }
         val index = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).optString("id") == id }
         require(id == null || index != null) { "待办不存在" }
@@ -39,6 +40,7 @@ object TaskRecords {
         val row = if (index == null) JSONObject().put("id", UUID.randomUUID().toString())
             .put("author", actor).put("created_at", now).put("status", "open").put("priority", "P2")
             .put("horizon", "short").put("version", 0) else normalize(rows.getJSONObject(index))
+        if (incrementalHistory) row.put("_incremental_history", true)
         check(!patch.has("expected_version") || patch.getInt("expected_version") == row.getInt("version")) { "待办已被更新，请刷新后再保存" }
         patch.keys().asSequence().filter { it in fields }.forEach { row.put(it, patch.get(it)) }
         if (patch.has("urgency") && !patch.has("priority")) {
@@ -55,7 +57,7 @@ object TaskRecords {
         if (row.has("linked_ids")) {
             val links = row.getJSONArray("linked_ids")
             val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }.toSet()
-            require(links.length() <= 30 && (0 until links.length()).all { links.getString(it) in ids && links.getString(it) != row.getString("id") }) { "只能关联此列表中的其他待办" }
+            require(links.length() <= 30 && (0 until links.length()).all { (linkedIdExists?.invoke(links.getString(it)) ?: (links.getString(it) in ids)) && links.getString(it) != row.getString("id") }) { "只能关联此列表中的其他待办" }
         }
         row.put("urgency", if (row.getString("priority") in setOf("P0", "P1")) "urgent" else "normal")
         row.put("updated", now).put("updated_by", actor).put("version", row.getInt("version") + 1)
@@ -88,6 +90,31 @@ object TaskRecords {
         put("history_total", history.length())
         put("next_history_offset", if (historyOffset + 5 < history.length()) historyOffset + 5 else JSONObject.NULL)
     }
+    /** Exact saved identity and dispatch, independent of list pagination. No history payload. */
+    fun receipt(row: JSONObject): JSONObject = brief(row).apply {
+        row.optJSONObject("dispatch")?.let { put("dispatch", JSONObject(it.toString())) }
+        put("saved", true)
+    }
+    /** Request material is a labelled excerpt, never a replacement of the original task.
+     * Including the whole edit history made long-lived research too large to be selected. */
+    fun material(row: JSONObject): JSONObject = brief(row).apply {
+        for (field in listOf("goal", "next", "conclusion")) {
+            val text = row.optString(field)
+            if (text.isNotBlank()) put(field, text.take(160))
+        }
+        val history = row.optJSONArray("history")
+        row.optJSONObject("latest_note")?.let { note -> put("latest_note", JSONObject(note.toString()).put("text", note.optString("text").take(160))) }
+        if (history != null) for (i in history.length() - 1 downTo 0) {
+            val note = history.getJSONObject(i)
+            if (note.optString("kind") == "批注") {
+                put("latest_note", JSONObject().put("actor", note.getString("actor"))
+                    .put("at", note.getLong("at")).put("text", note.getString("text").take(160)))
+                break
+            }
+        }
+        put("material_excerpt", true).put("not_new_occurrence", true)
+            .put("locator", "companion_todo action=get id=" + row.getString("id"))
+    }
     fun claim(row: JSONObject, event: String, now: Long): Boolean {
         val dispatch = row.optJSONObject("dispatch") ?: return false
         if (dispatch.optString("id") != event || dispatch.optString("state") != "pending" ||
@@ -99,8 +126,9 @@ object TaskRecords {
     fun history(row: JSONObject, actor: String, kind: String, text: String, now: Long) {
         val old = row.optJSONArray("history") ?: JSONArray()
         val entries = JSONArray()
-        for (i in maxOf(0, old.length() - 79) until old.length()) entries.put(old.get(i))
-        entries.put(JSONObject().put("actor", actor).put("kind", kind).put("text", text.take(5000)).put("at", now))
+        val incremental = row.optBoolean("_incremental_history")
+        for (i in (if (incremental) 0 else maxOf(0, old.length() - 79)) until old.length()) entries.put(old.get(i))
+        entries.put(JSONObject().put("actor", actor).put("kind", kind).put("text", if (incremental) text else text.take(5000)).put("at", now))
         row.put("history", entries)
     }
     fun comment(row: JSONObject, actor: String, text: String, now: Long) {

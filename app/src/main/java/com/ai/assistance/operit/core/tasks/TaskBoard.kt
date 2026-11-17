@@ -12,17 +12,44 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
     private val companionStore = CompanionStore(context)
     private val groups = GroupStore(context)
     private val key = if (group) "tasks" else "todos"
+    private val role = scope.takeIf { !group && it.startsWith("role:") }?.removePrefix("role:")
+    val usesArchive get() = role?.let { companionStore.researchActive(it) } == true
     companion object { val revision = MutableStateFlow(0L) }
     private fun read() = if (group) groups.read(scope) else companionStore.read(scope)
     private fun update(edit: (JSONObject) -> Unit) {
         if (group) groups.update(scope, edit) else companionStore.update(scope, edit)
         revision.update { it + 1 }
     }
-    fun list(): List<JSONObject> {
+    fun list(offset: Int = 0): List<JSONObject> {
+        if (usesArchive) return page(offset).getJSONArray("items").let { rows -> (0 until rows.length()).map { rows.getJSONObject(it) } }
         val rows = read().optJSONArray(key) ?: JSONArray()
         return (0 until rows.length()).map { TaskRecords.normalize(rows.getJSONObject(it)) }
     }
+    fun page(offset: Int = 0, filter: String = "", stage: String = "", assignee: String = "*", category: String = "", query: String = "", limit: Int = 20, displayOrder: Boolean = false): JSONObject {
+        require(offset >= 0 && (stage.isBlank() || stage in TaskRecords.statuses))
+        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { it.researchPage("task", offset, limit, filter = filter, stage = stage, assignee = assignee, category = category, query = query, displayOrder = displayOrder) }
+        val rows = list().filter { row ->
+            (if (filter == "all") TaskRecords.tab(row) != "archived" else filter.isBlank() || TaskRecords.tab(row) == filter) &&
+                (stage.isBlank() || row.optString("status") == stage) && (assignee == "*" || row.optString("assignee") == assignee) &&
+                (category.isBlank() || row.optString("category") == category) &&
+                (query.isBlank() || listOf("title", "detail", "id", "conclusion", "next", "evidence", "origin", "goal", "blocker", "plan", "materials").any { row.optString(it).contains(query, true) })
+        }
+        return JSONObject().put("items", JSONArray(rows.drop(offset).take(limit))).put("total", rows.size)
+            .put("next_offset", if (offset + limit < rows.size) offset + limit else JSONObject.NULL)
+    }
+    fun countOpen(): Long = if (usesArchive) listOf("todo", "doing", "blocked").sumOf { page(filter = it, limit = 1).getLong("total") }
+        else list().count { it.optString("status") !in setOf("done", "archived") }.toLong()
+    fun openPreview(): List<JSONObject> = if (usesArchive) companionStore.withResearch(requireNotNull(role)) {
+        val rows = it.researchPage("task", 0, state = "active_task").getJSONArray("items")
+        (0 until rows.length()).map { i -> rows.getJSONObject(i) }
+    } else list().filter { it.optString("status") !in setOf("done", "archived") }
     fun save(actor: String, id: String?, patch: JSONObject, members: Set<String>): JSONObject {
+        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { archive ->
+            val rows = JSONArray()
+            if (id != null) rows.put(archive.researchRow("task", id) ?: error("待办不存在"))
+            val saved = TaskRecords.save(rows, actor, id, patch, members, System.currentTimeMillis(), true) { archive.researchRow("task", it) != null }
+            archive.researchWrite("task", saved).also { revision.update { it + 1 } }
+        }
         lateinit var saved: JSONObject
         update { data ->
             val rows = data.optJSONArray(key) ?: JSONArray()
@@ -31,24 +58,60 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
         }
         return saved
     }
-    private fun row(id: String, requireOpen: Boolean = false, change: (JSONObject) -> Unit) = update { data ->
-        if (group && requireOpen) check(data.optBoolean("group_exists", true)) { "群已结束，不能提交执行" }
-        val rows = data.optJSONArray(key) ?: error("待办不存在")
-        val i = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id } ?: error("待办不存在")
-        val row = TaskRecords.normalize(rows.getJSONObject(i))
-        change(row); rows.put(i, row)
+    private fun row(id: String, requireOpen: Boolean = false, change: (JSONObject) -> Unit): JSONObject {
+        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { archive ->
+            val row = archive.researchRow("task", id) ?: error("待办不存在")
+            row.put("_incremental_history", true)
+            change(row)
+            TaskRecords.receipt(archive.researchWrite("task", row)).also { revision.update { it + 1 } }
+        }
+        lateinit var saved: JSONObject
+        update { data ->
+            if (group && requireOpen) check(data.optBoolean("group_exists", true)) { "群已结束，不能提交执行" }
+            val rows = data.optJSONArray(key) ?: error("待办不存在")
+            val i = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id } ?: error("待办不存在")
+            val row = TaskRecords.normalize(rows.getJSONObject(i))
+            change(row); rows.put(i, row)
+            // Return the exact write, not a later list() that another writer may have changed.
+            saved = TaskRecords.receipt(row)
+        }
+        return saved
     }
     fun comment(id: String, actor: String, text: String) = row(id) { TaskRecords.comment(it, actor, text, System.currentTimeMillis()) }
     fun submit(id: String, actor: String, recipient: String, members: Set<String>, minutes: Int) = row(id, requireOpen = true) {
         require(recipient in members) { "接手助手不在此范围" }
         TaskRecords.submit(it, actor, recipient, minutes, System.currentTimeMillis())
     }
-    fun get(id: String, historyOffset: Int = 0): JSONObject = TaskRecords.detail(
-        list().firstOrNull { it.getString("id") == id } ?: error("待办不存在"), historyOffset)
+    fun get(id: String, historyOffset: Int = 0): JSONObject {
+        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { archive ->
+            val row = archive.researchRow("task", id) ?: error("待办不存在")
+            val history = archive.researchHistory("task", id, historyOffset)
+            history.keys().forEach { row.put(it, history.get(it)) }
+            row
+        }
+        return TaskRecords.detail(list().firstOrNull { it.getString("id") == id } ?: error("待办不存在"), historyOffset)
+    }
+    internal fun deleteArchived(id: String) = companionStore.withResearch(requireNotNull(role)) { archive ->
+        check(archive.researchRow("task", id) != null) { "待办不存在" }
+        archive.researchDeleteTask(id); revision.update { it + 1 }
+    }
+    fun running(): List<JSONObject> = if (usesArchive) companionStore.withResearch(requireNotNull(role)) {
+        val rows = it.researchPage("task", 0, state = "running").getJSONArray("items")
+        (0 until rows.length()).map { i -> rows.getJSONObject(i) }
+    } else list().filter { it.optJSONObject("dispatch")?.optString("state") == "running" }
 
     // Claim and read the newest notes inside the same storage lock. A removed/cancelled event
     // cannot be resurrected by a worker holding an older snapshot.
     fun claim(id: String, event: String): JSONObject? {
+        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { archive ->
+            val row = archive.researchRow("task", id) ?: return@withResearch null
+            row.put("_incremental_history", true)
+            if (!TaskRecords.claim(row, event, System.currentTimeMillis())) return@withResearch null
+            val saved = archive.researchWrite("task", row)
+            val history = archive.researchHistory("task", id, 0).getJSONArray("history")
+            saved.put("history", JSONArray((history.length() - 1 downTo 0).map { history.getJSONObject(it) }))
+            revision.update { it + 1 }; saved
+        }
         var claimed: JSONObject? = null
         update { data ->
             if (group && !data.optBoolean("group_exists", true)) return@update
@@ -73,7 +136,9 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
                 .put("state", "pending").put("at", dispatch.getLong("followup_at")))
         }
     }
-    fun pending(): JSONObject? = list().firstOrNull {
+    fun pending(): JSONObject? = if (usesArchive) companionStore.withResearch(requireNotNull(role)) {
+        it.researchPage("task", 0, 1, state = "pending", due = System.currentTimeMillis()).getJSONArray("items").optJSONObject(0)
+    } else list().firstOrNull {
         it.optString("status") !in TaskRecords.inactiveStatuses && it.optJSONObject("dispatch")?.let { d -> d.optString("state") == "pending" && d.optLong("at") <= System.currentTimeMillis() } == true
     }
     fun prompt(row: JSONObject): String = """

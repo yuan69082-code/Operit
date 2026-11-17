@@ -604,7 +604,8 @@ class InternalStateStore(private val context: Context) {
     fun prepare(actor: String, chat: String, persist: Boolean, wake: Boolean = false,
                 capabilities: JSONObject = JSONObject(), currentInput: String = "", groupInput: Boolean = false,
                 innerSources: Map<String, String> = emptyMap(), innerObjects: Set<String> = emptySet(),
-                hostMaterials: List<JSONObject> = emptyList(), retrievedMaterials: List<JSONObject> = emptyList()): RuntimeContextSections {
+                hostMaterials: List<JSONObject> = emptyList(), retrievedMaterials: List<JSONObject> = emptyList(),
+                selectionInput: String = currentInput): RuntimeContextSections {
         require(actor.isNotBlank() && chat.isNotBlank())
         check(enabled(actor)) { "内部状态未开启" }
         ensureFoundation(actor)
@@ -626,8 +627,8 @@ class InternalStateStore(private val context: Context) {
             } else {
                 InternalStateEngine.advance(data, chat, now)
             }
-            val selected = InternalStateSelection.select(data, chat, now, currentInput,
-                candidates(data, actor, chat, wake, capabilities), ThoughtPool.selected(context, actor, data.optLong("material_query_cursor")), inputEventId)
+            val selected = InternalStateSelection.select(data, chat, now, selectionInput,
+                candidates(data, actor, chat, wake, capabilities, selectionInput), ThoughtPool.selected(context, actor, data.optLong("material_query_cursor")), inputEventId)
             var frame = requestId?.let {
                 InternalStateFrame(id = "state-frame:$it", roleId = actor, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,
@@ -643,10 +644,10 @@ class InternalStateStore(private val context: Context) {
             // It contains no rejected report text, no identity statements, and no retry command.
             if (!groupInput) failureNotice(actor)?.let { payload.put("last_report_failure", it) }
             payload.put("material_selection_cursor", innerCursor)
-            payload.put("foundation", InnerFoundations.material(data, currentInput, innerCursor, now))
-            payload.put("inner_structure", InnerStructure.material(data, currentInput, innerCursor))
-                .put("category_events", CategoryEvents.material(data, persist, now))
-                .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data, persist, chat, now))
+            payload.put("foundation", InnerFoundations.material(data, selectionInput, innerCursor, now))
+            payload.put("inner_structure", InnerStructure.material(data, selectionInput, innerCursor))
+                .put("category_events", CategoryEvents.material(data, persist, now, selectionInput, chat))
+                .put("unions", if (groupInput) JSONObject().put("restricted", true) else InnerInteractions.material(data, persist, chat, now, selectionInput))
                 .put("inner_source_ids", JSONArray(innerSources.keys.take(16))).put("inner_source_count", innerSources.size)
                 .put("inner_object_ids", JSONArray(innerObjects.sorted().take(32))).put("inner_object_count", innerObjects.size)
                 .put("host_materials", JSONArray(hostMaterials))
@@ -654,7 +655,9 @@ class InternalStateStore(private val context: Context) {
                     // Only this group's own actual operations; never private cross-window material.
                     it.optString("type") == "actual_operation" && it.optString("owner") == actor &&
                         it.optJSONObject("locator")?.optString("parent") == "group:$chat"
-                } else retrievedMaterials))
+                } else (ActionUnderstanding.materials(data, selectionInput, chat) +
+                    LifeUnderstandings.materials(data, selectionInput, chat) + retrievedMaterials)
+                    .distinctBy { it.getString("id") }))
             if (frame != null) payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
                 .put("subject_id", actor).put("state_version", frame.stateVersion).put("at", frame.at)
                 .put("available_event_ids", JSONArray(listOfNotNull(inputEventId)))
@@ -795,7 +798,7 @@ class InternalStateStore(private val context: Context) {
         return sections
     }
 
-    private fun candidates(data: JSONObject, actor: String, chat: String, wake: Boolean, capabilities: JSONObject): List<JSONObject> {
+    private fun candidates(data: JSONObject, actor: String, chat: String, wake: Boolean, capabilities: JSONObject, input: String): List<JSONObject> {
         val exploration = ExplorationStore(context).enabled(actor)
         fun candidate(action: String, id: String, title: String, next: String, available: Boolean = true) =
             JSONObject().put("action", action).put("id", id).put("title", title).put("next", next).put("available", available)
@@ -808,12 +811,13 @@ class InternalStateStore(private val context: Context) {
             candidate("defer", "defer", "暂缓意向", "可暂停待办、沉下念头或暂停探索"),
             candidate("drop", "drop", "放下意向", "检查理由后归档事项或放下念头"),
             candidate("rest", "rest", "休息", "允许本轮不采取行动"))
-        store.todos(store.scope(chat, actor)).filter { it.optString("status") !in setOf("done", "archived") }
+        store.withResearch(actor) { it.researchMaterials("task", data.optLong("material_query_cursor"), input) }
             .forEach {
-                candidates.add(JSONObject(it.toString()).put("action", "todo").put("available", true))
+                candidates.add(com.ai.assistance.operit.core.tasks.TaskRecords.material(it).put("action", "todo")
+                    .put("available", true).put("subject_private_material", true))
             }
-        ReadingRoom(context, actor).sources().filter { it.optBoolean("enabled") }.forEach {
-            candidates.add(JSONObject(it.toString()).put("action", "explore").put("available", exploration)
+        store.withResearch(actor) { it.researchMaterials("source", data.optLong("material_query_cursor"), input) }.forEach {
+            candidates.add(JSONObject(it.toString()).put("action", "explore").put("available", exploration).put("subject_private_material", true)
                 .put("next", if (wake && !CompanionRuntime.isExplorationWake(chat))
                     "预约独立探索后继续：${it.optString("progress")}" else it.optString("progress")))
         }

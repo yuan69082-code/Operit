@@ -49,21 +49,24 @@ internal object LifeUnderstandings {
         return actions.length() > 0
     }
 
-    fun materials(data: JSONObject): List<JSONObject> = kinds.flatMap { kind ->
-        val history = requireNotNull((data as InternalStateDocument).history)
-        val count = history.categoryCount(kind, "private")
-        val offset = if (count == 0L) 0 else (data.optLong("material_query_cursor") % ((count + 7) / 8) * 8).toInt()
-        val rows = CategoryEvents.page(data, kind, offset, "private").getJSONArray("items")
-        (0 until rows.length()).map { material(rows.getJSONObject(it)) }
+    fun materials(data: JSONObject, input: String = "", chat: String = ""): List<JSONObject> = kinds.flatMap { kind ->
+        SubjectRecall.selected(data, kind, input, chat, data.optLong("material_query_cursor") * 8)
+            .map(::material)
     }
     fun material(row: JSONObject): JSONObject {
         val c = row.getJSONObject("content")
-        val text = c.toString()
+        // Original text and source snapshots stay in the journal. Spend the request's
+        // allowance on the interpretation, not on nested copies of old evidence.
+        val text = listOf("text", "scope", "uncertainty", "status", "retention", "review_at",
+            "purpose", "goal", "resolve", "ambition", "related", "reality")
+            .filter(c::has).joinToString("\n") { "$it: ${c.get(it)}" }
         return JSONObject().put("id", "material:${row.getString("storage_kind")}:${row.getString("id")}:${row.getInt("version")}")
             .put("type", "subject_" + row.getString("storage_kind")).put("owner", row.getString("owner"))
             .put("author", row.getString("owner")).put("at", row.getLong("at"))
             .put("text", text.take(1400)).put("excerpt", text.length > 1400).put("status", "retrieved")
             .put("not_new_occurrence", true).put("subject_private_material", true)
+            .put("selection_reason", row.optString("selection_reason", "ROTATION"))
+            .put("full_text_tool", "companion_internal_state get section=${row.getString("storage_kind")} id=${row.getString("id")}")
             .put("locator", JSONObject().put("kind", row.getString("storage_kind")).put("id", row.getString("id"))
                 .put("version", row.getInt("version")))
     }

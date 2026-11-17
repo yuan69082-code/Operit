@@ -202,7 +202,16 @@ internal object InnerStructure {
             val binding = proposal.getJSONObject("bindings").getJSONObject(ref)
             if (binding.optString("source") == "retrieved_material") {
                 val snapshot = binding.getJSONObject("snapshot")
-                require(snapshot.optLong("at", Long.MAX_VALUE) < proposal.getLong("source_frame_at"))
+                val actualReceipt = snapshot.optString("type") == "actual_operation" &&
+                    snapshot.optString("owner") == frame.roleId && snapshot.optString("author") == "host_executor" &&
+                    snapshot.optJSONObject("locator")?.optString("receipt_hash")?.let { it.isNotBlank() && it != "null" } == true
+                // A tool runs after request preparation but before the final proposal.
+                // Its delivered, host-bound receipt is legitimate evidence of that round.
+                // Adoption still requires a DIFFERENT request and the exact candidate version.
+                require(if (actualReceipt) snapshot.optLong("at", Long.MAX_VALUE) <= proposal.getLong("created_at")
+                    else snapshot.optLong("at", Long.MAX_VALUE) < proposal.getLong("source_frame_at")) {
+                    "采用依据尚未在候选提出前实际取得"
+                }
                 // A prior material may inform development; it remains attributed material,
                 // not a claim that a memory summary is an original personal experience.
                 continue
@@ -401,7 +410,7 @@ internal object InnerStructure {
         [内在结构候选契约 v1]
         inner_structure 中的记录是主体自己的有来源认识，不是客观事实或他人的同意。思维方式只记录倾向与方法，不保存隐藏思维链。
         在同一 operit_state_report 增加可选 inner:[...]，缺省或空数组保持所有新结构；不增加另一份报告。
-        提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["已读本主体事件ID或本轮来源ID"],reason:"简短依据"}。历史原文可经 get 分页读取后引用；不能引用本帧开始之后发生的事，也不能猜测未读经历。
+        提出：{op:"propose",id:"候选ID",record:{...},expected_version:已有记录版本或0,origin:"initial_configuration|subject_development|user_proposal|model_suggestion",evidence:["已读本主体事件ID或本轮来源ID"],reason:"简短依据"}。历史原文可经 get 分页读取后引用，不能猜测未读经历。一般发展依据必须早于本帧；本轮工具已实际执行、保存并送入续轮的 actual_operation 回执可作为新候选依据，宿主核验归属、回执哈希及取得时间。不论来源如何，新候选仍须后续正常轮次实际读取才能采用。
         未采用候选可修订：用新id和replaces:"旧候选ID"提出完整新版，须先读取旧版；旧版保留且撤出待处理，新版不继承已读资格。已采用记录不得直接修改；仍须以当前版本为before提出新候选。完整description/context/exceptions等原文保存，标题或预览不是替代；精简只能另提建议，不能在采用时换成自己的摘要。
         采用先前候选：{op:"adopt",id:"候选ID",reason:"明确采用理由"}；放下候选用 op:"discard"。不能同轮提出并采用；用户说“你喜欢”只是候选来源，不能当作已采用偏好。
         record 必填 id,family,kind,description,status:"active|retired"；可带 object_ref,context,exceptions,legacy_ref（原数值维度ID，迁移后只作历史来源索引；当前数值与时间不再由旧维度计算）。

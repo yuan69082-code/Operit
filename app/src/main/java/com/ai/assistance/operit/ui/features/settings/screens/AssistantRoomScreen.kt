@@ -120,11 +120,14 @@ private fun RoomHome(room: AssistantRoom, data: JSONObject, chat: String, revisi
     var tasks by remember { mutableStateOf(emptyList<JSONObject>()) }
     var diaries by remember { mutableStateOf(emptyList<JSONObject>()) }
     var reading by remember { mutableStateOf(emptyList<JSONObject>()) }
+    var readingTotal by remember { mutableLongStateOf(0) }
     LaunchedEffect(revision) { withContext(Dispatchers.IO) {
         entries = CompanionStore(context).entries("role:${room.role}")
-        tasks = TaskBoard(context, "role:${room.role}", false).list().filter { it.optString("status") !in setOf("done", "archived") }
+        tasks = TaskBoard(context, "role:${room.role}", false).openPreview()
         diaries = room.diaries()
-        reading = ReadingRoom(context, room.role).entries()
+        val page = ReadingRoom(context, room.role).entryPage("queue")
+        reading = page.getJSONArray("items").let { rows -> (0 until rows.length()).map { rows.getJSONObject(it) } }
+        readingTotal = page.getLong("total")
     } }
     Card(shape = RoundedCornerShape(24.dp)) {
         Box(Modifier.fillMaxWidth().height(200.dp).background(MaterialTheme.colorScheme.primaryContainer)) {
@@ -168,7 +171,7 @@ private fun RoomHome(room: AssistantRoom, data: JSONObject, chat: String, revisi
                     "todo" -> { if (tasks.isEmpty()) Text("暂时没有未完成的打算")
                         tasks.take(count).forEach { Text(it.optString("title")) }
                         FilledTonalButton(onClick = { showTasks = true }) { Icon(Icons.Default.Checklist, null); Spacer(Modifier.width(6.dp)); Text("打开私人打算") } }
-                    "reading" -> { Text("${reading.size} 条待读")
+                    "reading" -> { Text("$readingTotal 条待读")
                         reading.take(count).forEach { Text(it.optString("title"), maxLines = 2) }
                         FilledTonalButton(onClick = { navigate("阅读角") }) { Icon(Icons.Default.MenuBook, null); Spacer(Modifier.width(6.dp)); Text("打开书房") } }
                     "collection" -> { if (entries.isEmpty()) Text("收藏的资料会在这里出现")

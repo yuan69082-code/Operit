@@ -166,6 +166,85 @@ class CompanionStore(context: Context) {
 
     private fun history(scope: String) = InternalStateArchive(File(root, "internal-state-history.sqlite"), scope)
 
+    internal fun researchActive(role: String): Boolean {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        if (preferences.getBoolean("internal_state:$role", false)) return true
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        // Disabling continuity must not resurrect the old pre-migration copy.
+        return synchronized(lock(scope)) { history(scope).use { it.researchRow("meta", "migration-started-v1") != null || it.researchRow("meta", "migration-v1") != null } }
+    }
+
+    internal fun <T> withResearch(role: String, block: (InternalStateArchive) -> T): T {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) {
+            history(scope).use { archive ->
+                if (archive.researchRow("meta", "migration-v1") == null) {
+                    check(preferences.getBoolean("internal_state:$role", false) || archive.researchRow("meta", "migration-started-v1") != null)
+                    if (archive.researchRow("meta", "migration-started-v1") == null) archive.researchWrite("meta",
+                        JSONObject().put("id", "migration-started-v1").put("owner", role).put("started_at", System.currentTimeMillis()))
+                    // Stream one legacy row at a time. Each row's history and current head are atomic;
+                    // a restart recognizes committed IDs before completing the migration marker.
+                    fun migrateArray(legacy: String, field: String, kind: String) = synchronized(lock(legacy)) {
+                        checkpoint(legacy)
+                        val source = file(legacy)
+                        if (source.baseFile.exists() || File(source.baseFile.path + ".bak").exists()) {
+                            com.google.gson.stream.JsonReader(source.openRead().bufferedReader(Charsets.UTF_8)).use { reader ->
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    if (reader.nextName() != field) { reader.skipValue(); continue }
+                                    reader.beginArray()
+                                    while (reader.hasNext()) {
+                                        val row = JSONObject(com.google.gson.JsonParser.parseReader(reader).toString())
+                                        if (archive.researchRow(kind, row.getString("id")) == null) archive.researchWrite(kind,
+                                            if (kind == "task") com.ai.assistance.operit.core.tasks.TaskRecords.normalize(row) else row, true)
+                                    }
+                                    reader.endArray()
+                                }
+                                reader.endObject()
+                            }
+                        }
+                    }
+                    migrateArray("role:$role", "todos", "task")
+                    migrateArray("reading:$role", "sources", "source")
+                    // Old queue indexes evicted entries, but the entry files still exist. Recover
+                    // only files whose owner AND hashed original scope match this assistant.
+                    java.nio.file.Files.newDirectoryStream(root.toPath()).use { paths ->
+                        for (path in paths) {
+                            val name = path.fileName.toString()
+                            if (!name.endsWith(".json") && !name.endsWith(".json.bak")) continue
+                            val base = if (name.endsWith(".bak")) File(root, name.removeSuffix(".bak")) else path.toFile()
+                            if (!base.exists() && !File(base.path + ".bak").exists()) continue
+                            var owner: String? = null; var id: String? = null; var hasUrl = false
+                            // Discovery must not recover or lock another assistant's AtomicFile.
+                            // Read its committed backup during an in-flight write; the matched own
+                            // entry is then opened normally under its owning file lock below.
+                            val committed = File(base.path + ".bak").takeIf { it.exists() } ?: base
+                            com.google.gson.stream.JsonReader(committed.bufferedReader(Charsets.UTF_8)).use { reader ->
+                                reader.beginObject()
+                                while (reader.hasNext()) when (reader.nextName()) {
+                                    "owner" -> if (reader.peek() == com.google.gson.stream.JsonToken.STRING) owner = reader.nextString() else reader.skipValue()
+                                    "id" -> if (reader.peek() == com.google.gson.stream.JsonToken.STRING) id = reader.nextString() else reader.skipValue()
+                                    "url" -> { hasUrl = true; reader.skipValue() }
+                                    else -> reader.skipValue()
+                                }
+                                reader.endObject()
+                            }
+                            if (owner != role || id == null || !hasUrl) continue
+                            val legacy = "reading-entry:$role:$id"
+                            if (base.name != key(legacy) + ".json") continue
+                            if (archive.researchRow("entry", requireNotNull(id)) == null) archive.researchWrite("entry", read(legacy), true)
+                        }
+                    }
+                    archive.researchWrite("meta", JSONObject().put("id", "migration-v1").put("owner", role)
+                        .put("completed_at", System.currentTimeMillis()).put("legacy_files_retained", true)
+                        .put("missing_legacy_history", "Previously discarded versions cannot be reconstructed"))
+                }
+                block(archive)
+            }
+        }
+    }
+
     /** Existing thought storage migrates once into the same archive; source file stays as
      * a recovery record. All callers now use this one authority. Lock order is state -> legacy. */
     internal fun <T> withThoughts(role: String, block: (InternalStateArchive) -> T): T {
@@ -269,6 +348,9 @@ class CompanionStore(context: Context) {
         }
         override fun relevantInnerRows(input: String, parent: String, limit: Int) = synchronized(lock(scope)) {
             history(scope).use { it.relevantInnerRows(input, parent, limit) }
+        }
+        override fun relevantSubjectRows(kind: String, input: String, chat: String, limit: Int) = synchronized(lock(scope)) {
+            history(scope).use { it.relevantSubjectRows(kind, input, chat, limit) }
         }
         private val definitions = object : LinkedHashMap<String, JSONObject?>(32, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JSONObject?>?) = size > 256

@@ -63,7 +63,7 @@ object CompanionTools {
                 param("minutes", "submit 安排0–43200分钟后处理；thought 时为沉着多少分钟"), param("offset", "list 分页起点，每页20项"),
                 param("choice", "thought 时 now/sink/drop"))),
         ToolPrompt(name = "companion_schedule",
-            description = "安排这位助手下次主动联系判断。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下要留意的事；可以联系或保持安静。学习取材使用独立的 companion_explore 开关与预约。只在软件主动联系开启且这位助手为目标时生效，执行时跟随最近活跃私聊；工具权限与正常聊天相同。醒来后重新安排下一次，不必固定间隔轮询。",
+            description = "安排这位助手下次主动联系判断。action=get|set|cancel。set 用 minutes 指定1至10080分钟后醒来，purpose 写下要留意的事；可以联系或保持安静。学习取材使用独立的 companion_explore 开关与预约。只在软件主动联系开启且这位助手为目标时生效，执行时跟随最近活跃私聊；工具权限与正常聊天相同。启用连续性内部状态时，只有具体后续打算才预约；其他助手沿原机制在醒来后重新安排或取消，不必固定间隔轮询。",
             parametersStructured = listOf(param("action", "操作", true), param("minutes", "下次唤醒距现在的分钟数"), param("purpose", "下次主动联系判断想留意的事，最多500字；学习或探索计划用 companion_explore"))),
         ToolPrompt(name = "companion_capabilities",
             description = "仅指定的软件观察助手在自己私聊中读取本会话最近请求的模型/工具能力与当前软件开关、麦克风和通知权限。可感知能力变化，但不把列出的能力当作已执行操作；没有健康数据源时不能声明能看到心率。",
@@ -167,6 +167,8 @@ object CompanionTools {
                             result
                         } else {
                             check(action != "submit" || !CompanionRuntime.isExplorationWake(chatId)) { "本轮探索请用 companion_explore schedule 安排继续；可以保存或批注待办" }
+                            val board = com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false)
+                            var savedItem: JSONObject? = null
                             when (action) {
                                 "list", "get" -> Unit
                                 "save" -> {
@@ -174,21 +176,30 @@ object CompanionTools {
                                     listOf("title", "urgency", "horizon", "status").forEach { key -> value(tool, key)?.let { patch.put(key, it) } }
                                     value(tool, "content")?.let { patch.put("detail", it) }
                                     if (value(tool, "id") == null) patch.put("assignee", requireNotNull(roleId))
-                                    com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).save(requireNotNull(roleId), value(tool, "id"), patch, setOf(roleId))
+                                    savedItem = board.save(requireNotNull(roleId), value(tool, "id"), patch, setOf(roleId))
                                 }
-                                "comment" -> com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false)
-                                    .comment(required(tool, "id"), requireNotNull(roleId), required(tool, "content"))
-                                "submit" -> com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false)
-                                    .submit(required(tool, "id"), requireNotNull(roleId), roleId, setOf(roleId), value(tool, "minutes")?.toInt() ?: 0)
+                                "comment" -> {
+                                    savedItem = board.comment(required(tool, "id"), requireNotNull(roleId), required(tool, "content"))
+                                }
+                                "submit" -> {
+                                    savedItem = board.submit(required(tool, "id"), requireNotNull(roleId), roleId, setOf(roleId), value(tool, "minutes")?.toInt() ?: 0)
+                                }
                                 "delete", "distill" -> store.finishTodo(scope, required(tool, "id"), action, value(tool, "content").orEmpty())
                                 else -> error("未知待办操作")
                             }
                             val offset = value(tool, "offset")?.toInt() ?: 0
                             require(offset >= 0)
-                            val todos = com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).list()
-                            if (action == "get") com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).get(required(tool, "id"), offset)
-                            else JSONObject().put("total", todos.size).put("todos", JSONArray(todos.drop(offset).take(20).map { com.ai.assistance.operit.core.tasks.TaskRecords.brief(it) }))
-                                .put("next_offset", if (offset + 20 < todos.size) offset + 20 else JSONObject.NULL)
+                            if (action == "get") board.get(required(tool, "id"), offset)
+                            else board.page(offset).let { page ->
+                                val rows = page.getJSONArray("items")
+                                JSONObject().put("total", page.getLong("total")).put("todos", JSONArray((0 until rows.length()).map { com.ai.assistance.operit.core.tasks.TaskRecords.brief(rows.getJSONObject(it)) }))
+                                    .put("next_offset", page.get("next_offset"))
+                            }
+                                .also { result -> savedItem?.let { saved ->
+                                    // The changed row can be outside this page. Without its ID and
+                                    // saved dispatch, a subsequent submit cannot target/verify it.
+                                    result.put("saved_item", com.ai.assistance.operit.core.tasks.TaskRecords.receipt(saved))
+                                } }
                         }
                         "companion_schedule" -> {
                             check(action == "get" || !CompanionRuntime.isExplorationWake(chatId)) { "探索请用 companion_explore 安排继续，主动联系计划保持独立" }

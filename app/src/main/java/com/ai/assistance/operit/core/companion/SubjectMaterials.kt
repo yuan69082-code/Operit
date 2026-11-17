@@ -15,7 +15,7 @@ internal object SubjectMaterials {
             CharacterCardMemoryProfileBindingMode.FIXED_PROFILE || card.memoryProfileId.isNullOrBlank()) return emptyList()
         val profile = requireNotNull(card.memoryProfileId)
         val data = InternalStateStore(context).read(role)
-        val episodes = CategoryEvents.material(data, false).getJSONArray("episodes")
+        val episodes = CategoryEvents.material(data, false, input = input).getJSONArray("episodes")
         val attention = buildList {
             for (i in 0 until episodes.length()) {
                 val c = episodes.getJSONObject(i).getJSONObject("content")

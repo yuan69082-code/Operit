@@ -613,7 +613,7 @@ object CompanionRuntime {
 
         val activities = if (explorationWork != null || resumingExploration) ExplorationPolicy.choices(ExplorationStore(context).read(roleId))
             .mapNotNull { ExplorationPolicy.activities[it] }.joinToString("、") else ""
-        // The enabled internal-state selector reads every todo/source before budgeting. Repeating
+        // The enabled internal-state selector supplies todo/source materials within its budget. Repeating
         // a newest-five list here would bypass that choice and also bias its current-input query.
         val selfContinuity = if (internalEnabled || explorationWork == null) "" else buildString {
             val openTodos = store.todos(store.scope(chatId, roleId))
@@ -646,7 +646,9 @@ object CompanionRuntime {
         }
 
         // 枝芽只提供一个可能的兴趣来源，不把最近聊天升级成默认方向。
-        val sprout = if (explorationWork == null) "" else {
+        val sprout = if (explorationWork == null && !resumingExploration) "" else if (internalEnabled) {
+            "\n【枝芽】本轮已提供的聊天与主体材料也可以引出新的问题，不额外复制聊天摘录。只根据实际读到的材料判断；未保留的兴趣不是任务，已经安排须以真实预约回执为准。公开搜索仍须去除私人信息；可用 companion_reading save_source kind=topic 保留自己选择的题目及真实 parent 来源。\n"
+        } else {
             val digest = BranchSprout.digest(history.filter { it.displayMode != ChatMessageDisplayMode.HIDDEN_PLACEHOLDER }
                 .map { BranchSprout.Line(it.timestamp, it.sender, it.content) }, System.currentTimeMillis())
             "\n【枝芽：最近几天聊天摘录，只是可能的兴趣种子】\n$digest\n" +

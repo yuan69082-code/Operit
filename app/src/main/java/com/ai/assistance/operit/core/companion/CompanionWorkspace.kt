@@ -49,6 +49,7 @@ fun CompanionStore.migrateMemory(chatId: String, scope: String) {
 }
 
 fun CompanionStore.todos(scope: String): List<JSONObject> {
+    if (scope.startsWith("role:") && researchActive(scope.removePrefix("role:"))) return com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).list()
     val rows = read(scope).optJSONArray("todos") ?: JSONArray()
     return (0 until rows.length()).map { rows.getJSONObject(it) }
 }
@@ -60,6 +61,7 @@ fun CompanionStore.saveTodo(scope: String, id: String?, title: String, detail: S
     val actor = scope.removePrefix("role:")
     val patch = JSONObject(details.toString()).put("title", title).put("detail", detail).put("horizon", horizon).put("status", status)
     if (!patch.has("priority")) patch.put("priority", if (urgency == "urgent") "P1" else "P2")
+    if (scope.startsWith("role:") && researchActive(actor)) return com.ai.assistance.operit.core.tasks.TaskBoard(context, scope, false).save(actor, id, patch, setOf(actor))
     lateinit var saved: JSONObject
     update(scope) { data ->
         val rows = data.optJSONArray("todos") ?: JSONArray()
@@ -72,6 +74,31 @@ fun CompanionStore.saveTodo(scope: String, id: String?, title: String, detail: S
 
 fun CompanionStore.finishTodo(scope: String, id: String, action: String, learning: String = "") {
     require(action in setOf("delete", "distill")) { "无效待办操作。" }
+    if (scope.startsWith("role:") && researchActive(scope.removePrefix("role:"))) {
+        withResearch(scope.removePrefix("role:")) { archive ->
+            val todo = archive.researchRow("task", id) ?: error("待办不存在。")
+            check(todo.optJSONObject("dispatch")?.optString("state") != "running") { "此事项正在处理，请本轮结束后再删除或沉淀" }
+            if (action == "distill") {
+                require(todo.optString("status") == "done" && learning.isNotBlank() && learning.length <= 12000) { "完成后填写实际学到的内容，最多12000字" }
+                update(scope) { data ->
+                    val entries = data.optJSONArray("library") ?: JSONArray()
+                    val entryId = "distilled:$id:${todo.optLong("_research_revision")}" // crash after library save must not duplicate it
+                    if ((0 until entries.length()).none { entries.getJSONObject(it).optString("id") == entryId }) {
+                        require(entries.length() < 512) { "资料库已满，请先整理。" }
+                        entries.put(JSONObject().put("id", entryId).put("title", todo.getString("title")).put("category", "待办沉淀")
+                            .put("kind", "knowledge").put("content", learning).put("file", "").put("updated", System.currentTimeMillis()))
+                        data.put("library", entries)
+                    }
+                    val categories = data.optJSONArray("categories") ?: JSONArray()
+                    if ((0 until categories.length()).none { categories.getString(it) == "待办沉淀" }) categories.put("待办沉淀")
+                    data.put("categories", categories)
+                }
+            }
+            archive.researchDeleteTask(id)
+        }
+        com.ai.assistance.operit.core.tasks.TaskBoard.revision.value += 1
+        return
+    }
     update(scope) { data ->
         val rows = data.optJSONArray("todos") ?: JSONArray()
         val index = (0 until rows.length()).firstOrNull { rows.getJSONObject(it).getString("id") == id }

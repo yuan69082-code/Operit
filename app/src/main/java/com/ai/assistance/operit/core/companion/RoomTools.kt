@@ -35,6 +35,8 @@ object RoomTools {
     ).map { prompt ->
         if (prompt.name == "companion_study") prompt.copy(description = prompt.description +
             " action=activity查询实际近期书房保存/处理事实；action=note用id书目及details.note_id精确读取批注/回复。reply/annotate/review回执带book/chapter/version/reply_to/reply_id/author/saved_at；saved不代表用户已读。仅所属私聊可访问书房，群聊不可读取私人内容。")
+        else if (prompt.name == "companion_reading") prompt.copy(description = prompt.description.replace("覆盖写该来源的学习进度", "更新该来源的当前学习进度") +
+            " 连续性助手的进度、来源配置和随记保留旧版本；action=versions 用 id、part=source或entry、offset 分页查看旧版本，每页5条。sources/queue/history按next_offset续读；retained查询已到期或跳过但仍保留的线索，不把它们算成已读或重新入队。当前来源/资料分页每页20条。旧版本未保存的历史不能补造。")
         else if (prompt.name == "companion_room") prompt.copy(description = prompt.description +
             " action=message 用details.message_id读取近期实际活动所列消息原文；details.offset为字符偏移默认0，每页2400个Unicode字符，next_offset继续。仅所属助手私聊可查询自己的私聊消息，不允许群聊查询。") else prompt
     }
@@ -146,18 +148,25 @@ object RoomTools {
                             else -> error("未知日记操作")
                         }
                         else -> {
+                            if (action in setOf("versions", "retained")) {
+                                check(metadata.characterGroupId.isNullOrBlank()) { "阅读旧版本和私人保留线索仅在所属助手私聊中读取" }
+                            }
                             val reading = ReadingRoom(context, actor)
                             when (action) {
-                                "sources" -> page("sources", reading.sources().map { JSONObject(it.toString()).put("due", reading.due().any { due -> due.getString("id") == it.getString("id") }) }, offset)
+                                "sources" -> reading.sourcePage(offset).apply { put("sources", getJSONArray("items")); remove("items") }
+                                "versions" -> reading.versions(required("id"), arg("part") ?: "source", offset)
                                 "save_source" -> {
                                     val data = JSONObject(required("details"))
-                                    reading.saveSource(arg("id"), data.getString("title"), data.getString("kind"), data.getString("address"), data.getInt("hours"), data.getBoolean("enabled"), data.optString("parent").ifBlank { null })
+                                    reading.saveSource(arg("id"), data.getString("title"), data.getString("kind"), data.getString("address"), data.getInt("hours"), data.getBoolean("enabled"), data.optString("parent").ifBlank { null }, actor)
                                 }
                                 "refresh" -> reading.refresh(required("id"), true, chat)
                                 "checked" -> { reading.checked(required("id")); JSONObject().put("recorded", true) }
                                 "progress" -> reading.progress(required("id"), required("text"))
-                                "queue", "history" -> page("entries", reading.entries(action == "history").map { item ->
-                                    ReadingRoom.hoursLeft(item)?.let { JSONObject(item.toString()).put("expires_in_hours", it) } ?: item }, offset)
+                                "queue", "history", "retained" -> reading.entryPage(action, offset).apply {
+                                    val rows = getJSONArray("items")
+                                    rows.objects().forEach { item -> ReadingRoom.hoursLeft(item)?.let { item.put("expires_in_hours", it) } }
+                                    put("entries", rows); remove("items")
+                                }
                                 "add" -> {
                                     // details 可选：forum=true 表示论坛帖子（默认2天过期），days=1..30 自己定
                                     val extra = arg("details")?.let { JSONObject(it) } ?: JSONObject()

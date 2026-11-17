@@ -132,6 +132,18 @@ internal object SubjectMaterialBudget {
             }.firstOrNull() ?: continue
             if (prioritized.add(match.first.path to match.second)) include(match.first, match.first.rows[match.second])
         }
+        // One relevant adopted association/interpretation gets a bounded opportunity before
+        // unrelated directories. It still competes inside the SAME budget, not an extra block.
+        val relevantKinds = listOf("category_events.episodes" to "", "unions.items" to "", "retrieved_materials" to "adopted_feedback",
+            "retrieved_materials" to "adopted_decision", "retrieved_materials" to "subject_experience",
+            "retrieved_materials" to "subject_direction")
+        val relevantStart = (cursor % relevantKinds.size).toInt()
+        for ((path, type) in relevantKinds.drop(relevantStart) + relevantKinds.take(relevantStart)) {
+            val lane = lanes.firstOrNull { it.path == path } ?: continue
+            val index = lane.rows.indexOfFirst { row -> row is JSONObject &&
+                row.optString("selection_reason") == "CURRENT_INPUT_RELEVANCE" && (type.isEmpty() || row.optString("type") == type) }
+            if (index >= 0 && prioritized.add(path to index)) include(lane, lane.rows[index])
+        }
         // Remaining space exposes the compact rotating directory before other details. It
         // carries no psychological ranking and continues to advance through existing records.
         val directory = lanes.firstOrNull { it.path == "inner_structure.catalogue" }

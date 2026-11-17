@@ -64,7 +64,7 @@ class EnhancedReportIsolationTest {
     }
     @OptIn(ExperimentalCoroutinesApi::class)
     @After fun restoreMainDispatcher() { Dispatchers.resetMain() }
-    private class Fixture(val app: Context) {
+    internal class Fixture(val app: Context) {
         lateinit var role: String
         lateinit var chat: String
         lateinit var service: EnhancedAIService
