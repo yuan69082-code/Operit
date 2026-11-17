@@ -30,7 +30,11 @@ class CategoryEventsEntryPointsTest {
         submit(f, report(f, reports))
         val old = episode("e29")
         val selected = InnerStructureContext.prepare(context, role, second, true, input = "星空仪器修好了吗")
-        val material = requireNotNull(selected.internalStateFrame).materialText
+        val turns = com.ai.assistance.operit.core.chat.CurrentRequestContext.project(
+            com.ai.assistance.operit.core.chat.CurrentRequestContext.stage(listOf(
+                com.ai.assistance.operit.core.chat.hooks.PromptTurn(com.ai.assistance.operit.core.chat.hooks.PromptTurnKind.USER,
+                    "星空仪器修好了吗")), selected), "星空仪器修好了吗")
+        val material = requireNotNull(com.ai.assistance.operit.core.chat.CurrentRequestContext.subjectMaterial(turns))
         assertTrue(material, material.contains("星空仪器损坏这件事仍未解决"))
         val after = episode("e29")
         assertEquals(old.getInt("version"), after.getInt("version"))
