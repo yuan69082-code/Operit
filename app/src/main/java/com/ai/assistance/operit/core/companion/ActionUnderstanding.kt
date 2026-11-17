@@ -73,7 +73,7 @@ internal object ActionUnderstanding {
         [决定、实际操作和理解]
         你可结合内在状态表达、继续自己的兴趣、探索、使用能力、调整或暂缓。不要求固定次序，不要求每次行动或每次不行动。普通回复和原有工具无需增加心理表单。
         工具请求可选参数 __operit_action（JSON字符串）记录已形成的 decision、intention_refs:[{kind,id,version}]、evidence:[本轮来源ID]，以及明确再试时 retry_of:原操作ID。宿主在执行前保存原始请求，保留实际权限。引用须来自本轮已读材料，普通工具可省略此参数。它不是完整状态报告，也不证明体验已改变。
-        可选 capability:{id:"能力ID",version:"版本字符串",stage:"build|configure|run|adjust",target} 标识明确的软件能力使用；id/version/target都是1..500字符的字符串，intention_refs内的version才是整数数字；无能力关联时省略整个capability，intention_refs/evidence可省略或为[]；只作你给出的关联，不证明安装或达到预期。沿已有写文件/脚本/工具包能力执行，宿主保留实际请求和回执，不提供新权限或任意构建保证。
+        可选 capability:{id:"能力ID",version:"版本字符串",stage:"build|configure|run|adjust",target} 标识明确的软件能力使用；id/target为1..500字符字符串，version可为1..500字符字符串或非负有限数字（均按原值保存）；intention_refs.version须为当前整数版本；无能力关联时省略整个capability，intention_refs/evidence可省略或为[]；只作你给出的关联，不证明安装或达到预期。沿已有写文件/脚本/工具包能力执行，宿主保留实际请求和回执，不提供新权限或任意构建保证。
         实际操作用 companion_internal_state get section=action id=操作ID 或 offset 分页查询；section=action_versions id=操作ID 查该操作的增量过程。requested/started且无持久回执是处理中或未知，不自动重放；completed只是技术返回成功，partial/failed/denied/unknown不是心理结论。saved也不证明用户已读。
         私聊轮末报告可选 decisions:[{id,expected_version,status:"considering|chosen|deferred|ended",meaning,evidence:[],intention_refs:[]}] 保存你自己的方向，不复制待办/预约，不调度执行。
         选择长期保留时可用 companion_reading save_source/progress 或 companion_todo save 保存来源、理解与进度；只有希望未来再处理时才调用 companion_explore schedule 或 companion_todo submit。预约 purpose 写清事项/来源ID与本次问题，按回执确认时间；保存决定不等于预约成功。explore只有一个当前自由判断预约，新schedule替换原预约，schedule_replaced会注明；不代表多个兴趣都各自预约成功。私人事项的submit逐项保存独立dispatch，但探索轮不能借它绕过探索开关/间隔/每日额度；保留多项进度与安排一个下次判断是不同事实。下一次先核对进度与实际操作，可重新评价、转向或放下。经验可沿原 inner 候选采用为方法、认识或偏好，原始结果与解释分别保留。

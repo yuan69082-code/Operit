@@ -119,9 +119,12 @@ class SubjectContractsTest {
                 .put("version", "1").put("stage", "run").put("target", "companion_explore status"))
         assertEquals(declaration.toString(), SubjectActions.parseDeclaration(declaration.toString(), f).toString())
         declaration.getJSONObject("capability").put("version", 1)
+        val numeric = SubjectActions.parseDeclaration(declaration.toString(), f)
+        assertTrue(numeric.getJSONObject("capability").get("version") is Number)
+        declaration.getJSONObject("capability").put("version", JSONObject().put("invalid", "private-value"))
         val issue = assertThrows(InternalStateReportIssue::class.java) { SubjectActions.parseDeclaration(declaration.toString(), f) }
         assertEquals("__operit_action.capability.version", issue.path)
-        assertEquals("EXPECTED_STRING", issue.rule)
+        assertEquals("CAPABILITY_VERSION", issue.rule)
         assertTrue(issue.hint.contains("字符串"))
         val malformed = assertThrows(InternalStateReportIssue::class.java) { SubjectActions.parseDeclaration("{私人原文", f) }
         assertFalse(malformed.message!!.contains("私人原文"))
@@ -177,7 +180,7 @@ class SubjectContractsTest {
             assertTrue(c.getString("contract").isNotBlank())
         }
         assertTrue(SubjectContracts.query("inner").getString("contract").contains("不能同轮提出并采用"))
-        assertTrue(SubjectContracts.query("action").getString("contract").contains("不是version:1"))
+        assertTrue(SubjectContracts.query("action").getString("contract").contains("和version:1均可"))
         assertTrue(SubjectContracts.query("rest").getString("contract").contains("dream_step必须id="))
     }
 }

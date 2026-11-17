@@ -184,8 +184,15 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                 SubjectContracts.expect(raw is JSONObject, path("capability"), "EXPECTED_OBJECT", "提供{id,version,stage,target}对象；普通工具查询可省略整个capability。")
                 val c = raw as JSONObject
                 SubjectContracts.fields(c, setOf("id", "version", "stage", "target"), path("capability"))
-                for (key in listOf("id", "version", "target"))
+                for (key in listOf("id", "target"))
                     SubjectContracts.text(c, key, 500, path = path("capability.$key"))
+                // Capability versions are descriptive labels, not state-version CAS tokens.
+                // Preserve numeric labels as supplied; rejecting 1 while accepting "1" blocked
+                // otherwise valid calls without protecting any downstream invariant.
+                val version = c.opt("version")
+                if (version is String) SubjectContracts.text(c, "version", 500, path = path("capability.version"))
+                else SubjectContracts.expect(version is Number && version.toDouble().isFinite() && version.toDouble() >= 0,
+                    path("capability.version"), "CAPABILITY_VERSION", "能力版本可以是非空字符串或非负有限数字；不能是对象、数组、布尔值或null。")
                 SubjectContracts.choice(c, "stage", setOf("build", "configure", "run", "adjust"), path("capability.stage"))
             }
         }
