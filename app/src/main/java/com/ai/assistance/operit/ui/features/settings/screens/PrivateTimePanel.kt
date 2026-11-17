@@ -62,7 +62,7 @@ internal fun PrivateTimePanel(role: String) {
     OutlinedTextField(sleepTime, { sleepTime = it }, label = { Text("可选：每日询问睡觉时间 HH:mm") }, enabled = !busy)
     OutlinedTextField(fatigue, { fatigue = it }, label = { Text("可选：已有疲劳事件 ID") },
         supportingText = { Text("绑定真实疲劳事件，达到提醒线只询问，不强制睡；没有事件时不从工作量捏造疲劳。") }, enabled = !busy)
-    if (fatigue.isNotBlank()) OutlinedTextField(threshold, { threshold = it }, label = { Text("提醒强度 0～100") }, enabled = !busy)
+    if (fatigue.isNotBlank()) OutlinedTextField(threshold, { threshold = it }, label = { Text("提醒强度（与所选事件同量纲）") }, enabled = !busy)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(enabled = !busy && snapshot != null, onClick = { run {
             val a = JSONObject().put("expected_version", snapshot?.optJSONObject("configuration")?.optInt("version") ?: 0)
@@ -92,7 +92,7 @@ internal fun PrivateTimePanel(role: String) {
         }
     }
     Text("精华角", style = MaterialTheme.typography.titleMedium)
-    Text("明确确认的当前精华参与后续上下文；草稿、完整来源和历史按需读取。人格等仍使用原候选采用入口。")
+    Text("明确确认的当前精华参与后续上下文，使用原有预算内384 token的份额；长草稿、完整来源和历史按需读取。人格等仍使用原候选采用入口。")
     Text(essence?.optString("confirmed")?.ifBlank { "尚无已确认精华" } ?: "读取中")
     TextButton(enabled = !busy, onClick = { run {
         history = withContext(Dispatchers.IO) { PrivateTime(context).history(role, offset) }

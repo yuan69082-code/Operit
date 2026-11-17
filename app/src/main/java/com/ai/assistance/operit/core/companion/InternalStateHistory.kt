@@ -327,10 +327,18 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             row.put("version", oldVersion + 1)
             // Stream checkpoints replace the durable current checkpoint. They are not new
             // experiences; archiving every growing prefix duplicated the same dream many times.
-            val checkpoint = (kind == "dream_step" && row.optString("status") in setOf("requested", "partial")) ||
+            fun calendarMeaning(text: String): String = JSONObject(text).apply {
+                remove("version"); remove("pending_notice")
+                optJSONArray("items")?.let { items -> for (i in 0 until items.length()) {
+                    items.getJSONObject(i).remove("notice_keys"); items.getJSONObject(i).remove("started"); items.getJSONObject(i).remove("activity_ids")
+                } }
+            }.toString()
+            val calendarDeliveryOnly = kind == "private_time_plan" && before != null &&
+                calendarMeaning(before) == calendarMeaning(row.toString())
+            val checkpoint = calendarDeliveryOnly || (kind == "dream_step" && row.optString("status") in setOf("requested", "partial")) ||
                 (kind == "dream_process" && row.optString("status") == "running")
             if (!checkpoint) put("category_versions", row)
-            if (old != null && kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run")) {
+            if (old != null && (kind.startsWith("private_time_") || kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run"))) {
                 db.execSQL("UPDATE category_current SET parent=?,payload=? WHERE scope=? AND kind=? AND id=?",
                     arrayOf(parent, row.toString(), scope, kind, id))
             } else db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",

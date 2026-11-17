@@ -20,6 +20,7 @@ internal class PrivateTime(private val context: Context) {
     private fun cached(key: String, read: () -> JSONObject?): JSONObject? {
         val now = android.os.SystemClock.elapsedRealtime()
         if (cache.size > 64) cache.entries.removeAll { now - it.value.first >= 30_000 }
+        while (cache.size >= 128) cache.entries.minByOrNull { it.value.first }?.let { cache.remove(it.key, it.value) } ?: break
         val entry = cache[cachePrefix + key]
         val text = if (entry != null && now - entry.first < 30_000) entry.second else read()?.toString().also {
             cache[cachePrefix + key] = now to it
@@ -76,12 +77,19 @@ internal class PrivateTime(private val context: Context) {
         // Read receipts before the plan write transaction, avoiding a second SQLite transaction
         // inside the first one. Their completed outcome is immutable.
         val receipts = mutableMapOf<String, JSONObject?>()
+        val records = mutableMapOf<String, JSONObject?>()
         val priorResults = plan(role, date)?.getJSONArray("items")?.objects()?.firstOrNull { it.getString("id") == a.getString("slot_id") }?.optJSONArray("review_results")
         (a.optJSONArray("review_results") ?: priorResults)?.objects()?.forEach { r ->
             r.optJSONArray("action_ids")?.let { ids -> for (i in 0 until ids.length()) receipts[ids.getString(i)] = store.actionRead(role, ids.getString(i)) }
+            r.optJSONArray("record_refs")?.objects()?.forEach { ref ->
+                val kind = ref.getString("kind"); val id = ref.getString("id")
+                require(kind in setOf("inner", "episode", "experience", "direction", "union")) { "record_refs.kind未知" }
+                records["$kind:$id"] = if (kind == "inner") InnerStructure.record(InternalStateStore(context).read(role), id)
+                    else store.activityRead(role, kind, id)
+            }
         }
         val row = store.activityWrite(role, "private_time_plan", date, "calendar") {
-            PrivateTimePolicy.progress(requireNotNull(it) { "当天没有计划" }, a) { id -> receipts[id] }
+            PrivateTimePolicy.progress(requireNotNull(it) { "当天没有计划" }, a, { ref -> records["${ref.getString("kind")}:${ref.getString("id")}"] }) { id -> receipts[id] }
         }
         invalidate(role, date)
         return row
@@ -105,7 +113,7 @@ internal class PrivateTime(private val context: Context) {
         val w = PrivateTimePolicy.upcoming(c, now)
         if (now >= w.start - 3_600_000 && now < w.end && plan(role, w.date) == null) {
             claim("free-prep:${w.date}", "你的自由时间快到了或已经开始，范围${c.getString("start")}～${c.getString("end")}（${c.getString("zone")}），日期${w.date}。" +
-                "先companion_life free_status读取活动菜单和配置，再自己决定本次做什么，free_plan保存时间表。可以留空、取消，不必把时段填满。主动选checks才有中途续接。" + PrivateTimePolicy.menu)?.let { return it }
+                "先companion_life free_status读取活动菜单和配置，再自己决定本次做什么，free_plan保存时间表。可以留空、取消，不必把时段填满。主动选checks才有中途续接。" + "可以探索、回顾整理提炼、写日记/书房作品、睡觉做梦、随兴趣逛世界或HY；不是必须学习，也可以随时给园园留言。完整活动范围和操作格式先从free_status读取。")?.let { return it }
         }
         // Include the just-ended window so the last slot gets one wrap-up opportunity.
         val zone = ZoneId.of(c.getString("zone"))
@@ -121,7 +129,12 @@ internal class PrivateTime(private val context: Context) {
                     // Recompute from the locked current version; never overwrite a new choice
                     // with the dispatcher snapshot. The notice is a durable outbox.
                     if (!current.has("pending_notice")) PrivateTimePolicy.due(current, now)?.let { notice ->
-                        current.put("pending_notice", JSONObject().put("key", notice.key).put("text", notice.text))
+                        val slot = current.getJSONArray("items").objects().first { it.getString("id") == notice.slotId }
+                        val priorActivities = slot.optJSONArray("activity_ids") ?: JSONArray()
+                        val text = notice.text + " 本时段之前的活动索引：$priorActivities。先companion_life activities按id核对原进度，再读activity_part/action真实回执；索引不代表已经执行。"
+                        current.put("pending_notice", JSONObject().put("key", notice.key).put("text", text).put("slot_id", notice.slotId))
+                        priorActivities.put(ActivityNotes.scheduledId(role, "wake:free:${notice.key}"))
+                        slot.put("activity_ids", priorActivities)
                     }
                     current
                 }
@@ -151,7 +164,7 @@ internal class PrivateTime(private val context: Context) {
         // requests and clock time are not silently converted into a new fatigue score.
         val fatigue = c.optString("fatigue_episode")
         if (fatigue.isNotBlank()) {
-            val episode = cached("$role:fatigue:$fatigue") { CategoryEvents.row(InternalStateStore(context).read(role), "episode", fatigue) }?.optJSONObject("content")
+            val episode = cached("$role:fatigue:$fatigue") { store.activityRead(role, "episode", fatigue) }?.optJSONObject("content")
             val intensity = episode?.optDouble("intensity", Double.NaN) ?: Double.NaN
             val high = intensity.isFinite() && intensity >= c.getDouble("fatigue_threshold")
             val latched = choice?.optBoolean("fatigue_latched") ?: false
@@ -161,7 +174,7 @@ internal class PrivateTime(private val context: Context) {
                 }
                 invalidate(role, "sleep")
                 if (high) return claim("sleep-fatigue:${choice?.optInt("version", 0) ?: 0}:$now",
-                    "你指定的疲劳事件：$fatigue强度达到自定提醒线（$intensity）。要不要睡一会？可以拒绝或延后，sleep_choice保存。提醒不改变任何感受，也不自动入睡。")
+                    "你指定的疲劳事件：${fatigue}强度达到自定提醒线（$intensity）。要不要睡一会？可以拒绝或延后，sleep_choice保存。提醒不改变任何感受，也不自动入睡。")
             }
         }
         return null
@@ -178,8 +191,15 @@ internal class PrivateTime(private val context: Context) {
         }
     }
     fun saveEssence(role: String, a: JSONObject, confirm: Boolean): JSONObject {
-        val bindings = if (!confirm) a.getJSONArray("source_actions").let { ids ->
-            require(ids.length() > 0 || a.getString("text").isBlank()) { "精华草稿须关联实际来源操作source_actions" }
+        val sourceRecords = if (confirm) JSONArray() else a.optJSONArray("source_records") ?: JSONArray()
+        sourceRecords.objects().forEach { ref ->
+            val kind = ref.getString("kind"); val id = ref.getString("id")
+            require(kind in setOf("inner", "episode", "experience", "direction", "union", "dream_understanding")) { "source_records.kind未知" }
+            val row = if (kind == "inner") InnerStructure.record(InternalStateStore(context).read(role), id) else store.activityRead(role, kind, id)
+            require(row?.optInt("version") == ref.getInt("version")) { "精华来源记录或版本不存在，请先实际读取" }
+        }
+        val bindings = if (!confirm) (a.optJSONArray("source_actions") ?: JSONArray()).let { ids ->
+            require(ids.length() + sourceRecords.length() > 0 || a.getString("text").isBlank()) { "精华草稿须关联实际来源操作source_actions或已有理解source_records" }
             JSONArray((0 until ids.length()).map { index ->
                 val id = ids.getString(index)
                 val action = requireNotNull(store.actionRead(role, id)) { "来源操作不存在：$id" }
@@ -194,9 +214,9 @@ internal class PrivateTime(private val context: Context) {
                 require(a.getBoolean("confirmed")) { "只有明确确认才进入上下文" }
                 require(result.has("draft")) { "先保存草稿" }
                 require(SubjectMaterialBudget.estimate(result.getString("draft")) <= 384) { "精华全文超过384 token材料份额；草稿仍在，请再提炼或归档部分内容，未替换当前精华" }
-                result.put("confirmed", result.getString("draft")).put("confirmed_sources", result.getJSONArray("source_actions"))
+                result.put("confirmed", result.getString("draft")).put("confirmed_sources", JSONObject().put("actions", result.getJSONArray("source_actions")).put("records", result.optJSONArray("source_records") ?: JSONArray()))
                     .put("confirmed_at", System.currentTimeMillis())
-            } else result.put("draft", a.getString("text")).put("source_actions", bindings)
+            } else result.put("draft", a.getString("text")).put("source_actions", bindings).put("source_records", sourceRecords)
             result.put("at", System.currentTimeMillis())
         }
         return JSONObject().put("saved", true).put("version", row.getInt("version")).put("confirmed", confirm)
@@ -208,7 +228,7 @@ internal class PrivateTime(private val context: Context) {
             .put("subject_private_material", true))
         val e = store.activityRead(role, "private_time_essence", "current")
         if (!e?.optString("confirmed").isNullOrBlank()) add(JSONObject().put("id", "essence:${e!!.getInt("version")}")
-            .put("type", "confirmed_essence").put("owner", role).put("author", role).put("at", e.getLong("confirmed_at"))
+            .put("type", "confirmed_essence").put("status", "retrieved").put("owner", role).put("author", role).put("at", e.getLong("confirmed_at"))
             .put("text", e.getString("confirmed")).put("subject_private_material", true).put("not_new_occurrence", true)
             .put("locator", JSONObject().put("tool", "companion_life essence_get").put("version", e.getInt("version"))))
     }

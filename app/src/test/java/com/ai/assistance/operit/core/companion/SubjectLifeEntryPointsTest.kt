@@ -417,6 +417,17 @@ class SubjectLifeEntryPointsTest {
             assertEquals(2, life.toolsUsed(role, ref.id))
         } finally { ActivityNotes.release(ref) }
     }
+    private fun privateLifeTool(action: String, details: JSONObject): JSONObject {
+        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
+        RoomTools.register(handler, context)
+        val args = mapOf("action" to action, "details" to details.toString(),
+            "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role)
+        val result = handler.executeTool(com.ai.assistance.operit.data.model.AITool("companion_life",
+            args.map { com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value) }))
+        assertTrue(result.error, result.success)
+        return JSONObject(result.result.toString())
+    }
+
     private fun privateConfig() = JSONObject().put("expected_version", 0).put("enabled", true)
         .put("start", "01:00").put("end", "07:00").put("zone", "Asia/Shanghai")
     private fun privateWindow() = PrivateTimePolicy.window(privateConfig(), java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).plusDays(2))
@@ -425,21 +436,22 @@ class SubjectLifeEntryPointsTest {
         val time = PrivateTime(context)
         val w = privateWindow()
         assertNull(SubjectLife(context).next(role, chat, w.start - 3_600_000))
-        time.configure(role, privateConfig())
+        privateLifeTool("free_config", privateConfig())
         val invitation = SubjectLife(context).next(role, chat, w.start - 3_600_000)!!
-        assertTrue(invitation.text.contains("memory"))
+        assertTrue(invitation.text.contains("free_status"))
+        assertTrue(time.status(role, w.date).getString("menu").contains("memory"))
         assertTrue(invitation.text.contains("园园"))
         SubjectLife(context).finish(invitation, "completed")
         assertNull(SubjectLife(context).next(role, chat, w.start - 3_599_999))
         val item = JSONObject().put("id", "my-review").put("start", w.start).put("end", w.end)
             .put("activity", "review").put("goal", "回看日记，再查看资料，整理后决定是否提炼")
             .put("targets", JSONArray(listOf("diary", "files"))).put("checks", JSONArray(listOf(w.start + 1_800_000)))
-        time.savePlan(role, JSONObject().put("date", w.date).put("expected_version", 0).put("items", JSONArray().put(item)))
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", 0).put("items", JSONArray().put(item)))
         val first = SubjectLife(context).next(role, chat, w.start)!!
         SubjectLife(context).finish(first, "completed")
         val current = time.status(role, w.date, false).getJSONObject("plan")
         assertEquals("planned", current.getJSONArray("items").getJSONObject(0).getString("status"))
-        time.progress(role, JSONObject().put("date", w.date).put("expected_version", current.getInt("version"))
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", current.getInt("version"))
             .put("slot_id", "my-review").put("status", "working").put("note", "已读日记，尚未看资料和整理索引"))
         SubjectLife(context).recover(role)
         val second = SubjectLife(context).next(role, chat, w.start + 1_800_000)!!
@@ -447,7 +459,7 @@ class SubjectLifeEntryPointsTest {
         assertTrue(PrivateTime(context).status(role, w.date, false).toString().contains("尚未看资料"))
         SubjectLife(context).finish(second, "completed")
         val after = time.status(role, w.date, false).getJSONObject("plan")
-        time.progress(role, JSONObject().put("date", w.date).put("expected_version", after.getInt("version"))
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", after.getInt("version"))
             .put("slot_id", "my-review").put("status", "cancelled").put("note", "今天改变安排，改天再考虑"))
         assertNull(SubjectLife(context).next(role, chat, w.end))
         assertEquals(1, time.history(role, 0).getJSONArray("items").length())
