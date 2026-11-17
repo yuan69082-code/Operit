@@ -592,7 +592,7 @@ internal object InnerFoundations {
                 (kind.family == "drive" && raw.toDouble() > 1.0))
                 throw InternalStateReportIssue("foundation", "foundation[$i].value", "VALUE_RANGE")
             val evidence = row.getJSONArray("evidence")
-            if (evidence.length() !in 1..6)
+            if (evidence.length() == 0)
                 throw InternalStateReportIssue("foundation", "foundation[$i].evidence", "EVIDENCE_REQUIRED")
             val bindings = JSONObject()
             for (j in 0 until evidence.length()) {
@@ -601,7 +601,7 @@ internal object InnerFoundations {
                 bindings.put(evidence.getString(j), InnerStructure.source(data, frame, evidence.getString(j)))
             }
             val reason = row.optString("reason")
-            if (reason.length > 800 || (reason.isBlank() && id != "foundation:need:survival"))
+            if (reason.isBlank() && id != "foundation:need:survival")
                 throw InternalStateReportIssue("foundation", "foundation[$i].reason", "APPRAISAL_REASON_REQUIRED")
             // Snapshot the old authority BEFORE editing references. Otherwise a survival
             // change records its newly supplied people/goals as if they were already present,
@@ -609,8 +609,8 @@ internal object InnerFoundations {
             val before = JSONObject(current.toString())
             if (current.has("adapter_id")) before.put("value", member(data, id, now).getDouble("current_value"))
             if (id == "foundation:need:survival") {
-                if (row.has("objects")) CategoryEvents.strings(row.getJSONArray("objects"), 8)
-                if (row.has("goals")) CategoryEvents.strings(row.getJSONArray("goals"), 8)
+                if (row.has("objects")) SubjectContracts.strings(SubjectContracts.array(row, "objects"), path = "objects")
+                if (row.has("goals")) SubjectContracts.strings(SubjectContracts.array(row, "goals"), path = "goals")
                 for (field in listOf("objects", "goals")) if (row.has(field)) current.put(field, JSONArray(row.getJSONArray(field).toString()))
                 current.put("formed", true)
             } else require(!row.has("objects") && !row.has("goals"))

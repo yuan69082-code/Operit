@@ -10,33 +10,37 @@ internal object LifeUnderstandings {
     fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
+            try {
             val a = actions.getJSONObject(i)
-            require(a.keys().asSequence().all { it in setOf("kind", "id", "expected_version", "text", "scope", "uncertainty",
-                "evidence", "status", "retention", "review_at", "purpose", "goal", "resolve", "ambition", "related") })
-            val kind = a.getString("kind")
-            require(kind in kinds)
-            val id = a.getString("id")
-            require(id.isNotBlank() && id.length <= 100 && touched.add("$kind:$id"))
+            SubjectContracts.fields(a, setOf("kind", "id", "expected_version", "text", "scope", "uncertainty",
+                "evidence", "status", "retention", "review_at", "purpose", "goal", "resolve", "ambition", "related"))
+            val kind = SubjectContracts.choice(a, "kind", kinds)
+            val id = SubjectContracts.text(a, "id", 100)
+            SubjectContracts.expect(touched.add("$kind:$id"), "id", "DUPLICATE_WRITE", "同一报告不能重复写入同一条记录。")
             val old = CategoryEvents.row(data, kind, id)
             val version = old?.getInt("version") ?: 0
-            require(a.getInt("expected_version") == version) { "life[$i].expected_version: current version changed" }
-            if (old != null) require(frame.materialSources.values.any { raw ->
+            SubjectContracts.expect(SubjectContracts.integer(a, "expected_version") == version, "expected_version", "VERSION_CHANGED", "当前版本已改变；先读取现版本，再决定是否修订。")
+            if (old != null) SubjectContracts.expect(frame.materialSources.values.any { raw ->
                 JSONObject(raw).optJSONObject("locator")?.let { it.optString("kind") == kind &&
                     it.optString("id") == id && it.optInt("version") == version } == true
-            }) { "life[$i]: read the current version before revising" }
-            val refs = CategoryEvents.strings(a.getJSONArray("evidence"), 32)
-            require(refs.isNotEmpty()) { "life[$i].evidence: actual supplied material required" }
+            }, "expected_version", "MEMBER_NOT_DELIVERED", "修订前须读取该记录的当前版本。")
+            val refs = SubjectContracts.strings(SubjectContracts.array(a, "evidence"), path = "evidence")
+            SubjectContracts.expect(refs.isNotEmpty(), "evidence", "EVIDENCE_REQUIRED", "需要至少一个实际提供的来源ID。")
             val bindings = JSONObject()
             refs.forEach { bindings.put(it, InnerStructure.source(data, frame, it)) }
             if (a.has("related")) SubjectActions.validateDeclaration(JSONObject()
-                .put("intention_refs", a.getJSONArray("related")).put("evidence", JSONArray()), frame)
-            for (key in listOf("text", "scope", "uncertainty")) require(a.get(key) is String && a.getString(key).isNotBlank()) {
-                "life[$i].$key: explicit content required"
+                .put("intention_refs", a.getJSONArray("related")).put("evidence", JSONArray()), frame, prefix = "related_declaration")
+            for (key in listOf("text", "scope", "uncertainty")) SubjectContracts.text(a, key)
+            SubjectContracts.choice(a, "status", setOf("considering", "active", "paused", "ended", "abandoned", "uncertain"))
+            if (a.has("retention")) SubjectContracts.choice(a, "retention", setOf("short_term", "long_term"))
+            if (a.has("review_at")) {
+                val raw = a.opt("review_at")
+                SubjectContracts.expect(raw is Number && raw.toDouble().isFinite() &&
+                    raw.toDouble() == raw.toLong().toDouble() && raw.toLong() >= now,
+                    "review_at", "REVIEW_TIME", "需要不早于提交时间的整数毫秒数字；可省略，不会自动预约。")
             }
-            require(a.getString("status") in setOf("considering", "active", "paused", "ended", "abandoned", "uncertain"))
-            require(a.optString("retention", "long_term") in setOf("short_term", "long_term"))
-            if (a.has("review_at")) require(a.getLong("review_at") >= now)
-            for (key in listOf("purpose", "goal", "resolve", "ambition")) if (a.has(key)) require(a.get(key) is String)
+            for (key in listOf("purpose", "goal", "resolve", "ambition"))
+                if (a.has(key)) SubjectContracts.text(a, key, empty = true)
             val c = JSONObject(a.toString()).apply { remove("expected_version") }
                 .put("bindings", bindings).put("not_a_plan", true).put("not_a_new_occurrence", true)
                 .put("subject_private_material", true)
@@ -45,6 +49,9 @@ internal object LifeUnderstandings {
                 .put("parent", "private").put("owner", frame.roleId).put("source_chat", frame.chatId)
                 .put("version", version + 1).put("frame_id", frame.id).put("at", now)
                 .put("source", "subject_report").put("content", c))
+            } catch (failure: Exception) {
+                throw InternalStateReportDiagnostics.issue(failure, "life[$i]")
+            }
         }
         return actions.length() > 0
     }

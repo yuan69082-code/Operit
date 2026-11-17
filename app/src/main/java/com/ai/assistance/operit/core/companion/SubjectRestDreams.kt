@@ -36,13 +36,10 @@ internal object SubjectRestDreams {
     }
     fun requested(report: JSONObject) = report.has("rest") || report.has("dream") || report.has("dream_understanding")
 
-    private fun text(row: JSONObject, key: String, max: Int): String {
-        require(row.get(key) is String)
-        return row.getString(key).also { require(it.isNotBlank() && it.length <= max) }
-    }
+    private fun text(row: JSONObject, key: String, max: Int): String = SubjectContracts.text(row, key, max)
     private fun bindings(data: JSONObject, frame: InternalStateFrame, refs: JSONArray): JSONObject {
         val result = JSONObject()
-        CategoryEvents.strings(refs, 8).forEach { result.put(it, InnerStructure.source(data, frame, it)) }
+        SubjectContracts.strings(refs, path = "evidence").forEach { result.put(it, InnerStructure.source(data, frame, it)) }
         return result
     }
     private fun version(old: JSONObject?, action: JSONObject, frame: InternalStateFrame) {
@@ -74,7 +71,7 @@ internal object SubjectRestDreams {
             val state = text(change, "state", 10)
             require(state in setOf("resting", "awake"))
             val content = SubjectRestPolicy.adopt(change, rest?.getJSONObject("content"), now, frame.id)
-                .put("meaning", text(change, "meaning", 1000))
+                .put("meaning", text(change, "meaning", Int.MAX_VALUE))
                 .put("source_bindings", bindings(data, frame, change.getJSONArray("evidence")))
                 .put("device_state_inference", false)
             append(data, frame, "rest", "current", (rest?.getInt("version") ?: 0) + 1, content, now)
@@ -86,7 +83,7 @@ internal object SubjectRestDreams {
             require(dream.keys().asSequence().all { it in setOf("title", "content", "sources") })
             val id = "dream-" + InnerStructure.hash(frame.id)
             require(CategoryEvents.row(data, "dream", id) == null)
-            val content = JSONObject().put("title", text(dream, "title", 160)).put("content", text(dream, "content", 12000))
+            val content = JSONObject().put("title", text(dream, "title", 160)).put("content", text(dream, "content", Int.MAX_VALUE))
                 .put("reality", "DREAM_NOT_REALITY").put("generated_in_frame", frame.id)
                 .put("rest_version", requireNotNull(rest).getInt("version"))
                 .put("source_bindings", bindings(data, frame, dream.getJSONArray("sources")))
@@ -96,7 +93,6 @@ internal object SubjectRestDreams {
         if (report.has("dream_understanding")) {
             require(rest?.getJSONObject("content")?.getString("state") == "awake") { "醒后理解须有主体已采用的醒来选择" }
             val changes = report.getJSONArray("dream_understanding")
-            require(changes.length() in 1..4)
             val ids = mutableSetOf<String>()
             for (i in 0 until changes.length()) {
                 val change = changes.getJSONObject(i)
@@ -114,10 +110,10 @@ internal object SubjectRestDreams {
                 val original = requireNotNull(CategoryEvents.row(data, kind, dreamId))
                 require(original.getInt("version") == source.getJSONObject("locator").getInt("version"))
                 val evidence = change.getJSONArray("evidence")
-                require(sourceId in CategoryEvents.strings(evidence, 8))
-                CategoryEvents.strings(change.getJSONArray("objects"), 12).forEach { require(it in frame.innerObjects) }
+                require(sourceId in SubjectContracts.strings(evidence, path = "evidence"))
+                SubjectContracts.strings(SubjectContracts.array(change, "objects"), path = "objects").forEach { require(it in frame.innerObjects) }
                 val content = JSONObject(change.toString()).apply { remove("expected_version") }
-                    .put("meaning", text(change, "meaning", 1500)).put("feeling", text(change, "feeling", 1000))
+                    .put("meaning", text(change, "meaning", Int.MAX_VALUE)).put("feeling", text(change, "feeling", Int.MAX_VALUE))
                     .put("dream_id", dreamId).put("dream_version", original.getInt("version"))
                     .put("reality", "WAKING_INTERPRETATION_OF_DREAM_NOT_EXTERNAL_FACT")
                     .put("source_bindings", bindings(data, frame, evidence))
@@ -155,6 +151,6 @@ internal object SubjectRestDreams {
         resting可选mode="quiet"（没有时长的安静休息）或"sleep"（睡眠，须until毫秒时间或wake_sources结束条件）。until到期只执行你已安排的续接，不凭空推断已醒。wake_sources是愿意打断的来源数组：user_message/study/phone/software/task/notification；interruption="buffer|judge|wake"表示暂存/有界判断/按原安排醒来，未选中的普通事件只保存。defer_internal=true允许把自己的内部预约留待醒后重新安排，原截止不改。醒来用state=awake，延长须新报告与新结束条件。可选dream_plan:{steps:1..6,theme?,tone?,form?,recall?}安排一次有参与的梦，最多每步环境与参与各一次调用；可有愉快、恐惧、混合、荒诞或碎片，没有固定比例。consolidation可写一次整理范围。都非必填，不因每次休息自动安排。
         已选择resting或本轮同时采用resting时，可选 dream:{title,content,sources:[]}，只保存本轮实际生成的梦。sources可空，梦可自由、荒诞、混合或想象，不要求现实情节证据；不要为了休息凑梦。每轮最多一段，重试不重新生成。梦中行为不是任何人的现实行为，不作为现实指控或已证事实。
         选择awake后可选 dream_understanding:[{id,expected_version,dream_source,meaning,feeling,objects:[],evidence:[dream_source]}]；引用本轮实际读取的material:dream:...来源。感受可以真实存在，剧情仍是梦；新理解可联系对象，不能编造其现实行为。以后可重新理解同一梦，读到不等于已理解、不自动叠加余波。既有updates/inner/episodes/unions可引用这些实际材料形成变化；人格、关系和稳定认识仍须原采用规则，不因梦直接越过约束。
-        用companion_internal_state get section=rest|dream|dream_understanding|dream_process|dream_step id=ID或offset查询，section=category_versions id=种类:ID回看过程。参与式梦过程的来源为material:dream_process:...，同样只能作为梦的来源。梦与理解属于私域，不默认表达、写外部记忆或进入群聊。材料未选入本轮不代表遗忘。新记录在轮末报告采用后才供后续请求读取；普通报告不新增调用，无周期造梦。只有明确采用dream_plan后才运行已安排的额外有界调用，中断步骤不会自动重试。
+        用companion_internal_state get section=rest|dream|dream_understanding|dream_process按id或offset查询；dream_step必须id=参与式dream_process的ID，再用offset分页读取步骤，section=category_versions id=种类:ID回看过程。参与式梦过程的来源为material:dream_process:...，同样只能作为梦的来源。梦与理解属于私域，不默认表达、写外部记忆或进入群聊。材料未选入本轮不代表遗忘。新记录在轮末报告采用后才供后续请求读取；普通报告不新增调用，无周期造梦。只有明确采用dream_plan后才运行已安排的额外有界调用，中断步骤不会自动重试。
     """.trimIndent()
 }

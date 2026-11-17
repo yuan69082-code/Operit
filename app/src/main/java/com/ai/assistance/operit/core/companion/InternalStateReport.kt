@@ -102,7 +102,7 @@ object InternalStateReports {
             requireStateReport(expected is Number && expected.toDouble() == old.getInt("version").toDouble() &&
                 frame.definitionVersions[id] == old.getInt("version"), InternalStateReportFailure.DEFINITION)
             require(old.getInt("version") < Int.MAX_VALUE) { "维度版本已达上限" }
-            string(revision, "reason", 1500)
+            string(revision, "reason", Int.MAX_VALUE)
             evidence(revision, frame)
             val patch = revision.getJSONObject("changes")
             require(patch.length() > 0 && patch.keys().asSequence().all { it in editableDefinitionFields }) {
@@ -292,11 +292,11 @@ object InternalStateReports {
                 throw InternalStateReportRejected(InternalStateReportFailure.CONDITION)
             }
         }
-        string(experience, "reason", 1500)
+        string(experience, "reason", Int.MAX_VALUE)
         if (experience.has("object_ref")) string(experience, "object_ref", 160)
         if (experience.has("unresolved")) require(experience.get("unresolved") is Boolean) { "unresolved 必须是布尔值" }
         listOf("desire", "choice").filter { experience.has(it) }.forEach { key ->
-            require(experience.get(key) is String && experience.getString(key).length <= 1500) { "$key 必须为不超过 1500 字的文本" }
+            SubjectContracts.text(experience, key, empty = true)
         }
         evidence(experience, frame)
     }
@@ -364,7 +364,7 @@ object InternalStateReports {
             require(evidence.get(index) is String)
             evidence.getString(index)
         }
-        requireStateReport(ids.distinct().size == ids.size && ids.size <= 16 &&
+        requireStateReport(ids.distinct().size == ids.size &&
             ids.all { it in frame.eventIds || it in frame.materialSources }, InternalStateReportFailure.SOURCE)
         return JSONArray(ids)
     }

@@ -23,6 +23,7 @@ class InternalStateStore(private val context: Context) {
         store.update(failureKey(frame.roleId)) { state ->
             state.put("status", "unresolved").put("code", issue.code).put("stage", issue.stage)
                 .put("path", issue.path).put("rule", issue.rule)
+                .put("hint", issue.hint)
                 .put("frame_id", frame.id).put("frame_revision", frame.revision)
                 .put("state_version", frame.stateVersion).put("at", System.currentTimeMillis())
         }
@@ -35,6 +36,7 @@ class InternalStateStore(private val context: Context) {
         return JSONObject().put("code", saved.optString("code").take(36))
             .put("stage", saved.optString("stage").take(40))
             .put("path", saved.optString("path").take(75))
+            .put("hint", saved.optString("hint"))
             .put("frame_revision", saved.optLong("frame_revision"))
             .put("at", saved.optLong("at"))
             .put("state", "previous_report_not_adopted")
@@ -472,6 +474,9 @@ class InternalStateStore(private val context: Context) {
     }
 
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
+        SubjectContracts.expect(offset >= 0, "offset", "PAGE_OFFSET", "分页起点须为非负整数。")
+        if (kind == "contract") return SubjectContracts.query(id)
+        SubjectContracts.queryId(kind, id)
         if (kind in setOf("legacy_handoff", "foundation_history"))
             require(!recipientScope(role, chat)) { "旧状态承接与完整基础变化来源仅在本助手私域读取" }
         require(offset >= 0 && kind in setOf("foundation", "foundation_history", "legacy_handoff", "inner", "inner_family", "inner_pending", "inner_chunk", "inner_record_chunk", "state", "episode", "episode_category", "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions", "decision", "feedback", "life_event", "life_activity", "dream_process", "dream_step") + SubjectRestDreams.kinds + ActivityNotes.kinds + LifeUnderstandings.kinds)

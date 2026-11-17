@@ -14,7 +14,7 @@ import org.json.JSONObject
  * Reports inside quoted/tool/companion payloads are not host framing.
  * Calls, including provider savepoint/rollback events, must be serialized by the stream's owner.
  */
-class InternalStateReportStream(private val maxReportChars: Int = 16_384) {
+class InternalStateReportStream(private val maxReportChars: Int = SubjectContracts.JSON_CHARS) {
     enum class ErrorCode {
         MALFORMED_REPORT_TAG,
         LATE_REPORT,

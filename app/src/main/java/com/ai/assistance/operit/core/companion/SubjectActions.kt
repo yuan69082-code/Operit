@@ -35,7 +35,7 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
                 } == true
             } }) { "先实际读取暂存事件材料，再标记处理；仅有触发索引不等于已读" }
         }
-        val declared = declaration?.let { JSONObject(it).also { d -> validateDeclaration(d, frame) } }
+        val declared = declaration?.let { parseDeclaration(it, frame) }
         val digest = InnerStructure.hash(JSONObject().put("request", request).put("declaration", declared ?: JSONObject.NULL))
         var fresh = false
         val row = store.actionWrite(frame.roleId, id) { old ->
@@ -134,44 +134,59 @@ internal class SubjectActions(private val context: Context, val frame: InternalS
 
     companion object {
         const val DECLARATION = "__operit_action"
-        fun validateDeclaration(d: JSONObject, frame: InternalStateFrame) {
-            require(d.keys().asSequence().all { it in setOf("decision", "intention_refs", "evidence", "retry_of", "capability") })
-            require(d.toString().length <= 5000)
-            for (key in listOf("intention_refs", "evidence")) if (d.has(key)) require(d.get(key) is JSONArray)
-            if (d.has("capability")) require(d.get("capability") is JSONObject)
-            if (d.has("retry_of")) require(d.get("retry_of") is String && d.getString("retry_of").isNotBlank())
-            if (d.has("decision")) require(d.get("decision") is String && d.getString("decision").length <= 1000)
-            val refs = d.optJSONArray("intention_refs") ?: JSONArray()
-            require(refs.length() <= 8)
+        fun parseDeclaration(raw: String, frame: InternalStateFrame): JSONObject {
+            SubjectContracts.expect(raw.length <= SubjectContracts.JSON_CHARS, DECLARATION, "INPUT_SIZE",
+                "行动关联JSON最多16384个UTF-16字符；详情可引用已保存决定。")
+            val declaration = try { JSONObject(raw) } catch (_: org.json.JSONException) {
+                throw InternalStateReportIssue("action", DECLARATION, "JSON_SHAPE", "需要JSON对象字符串；先检查引号、括号和逗号。")
+            }
+            validateDeclaration(declaration, frame)
+            return declaration
+        }
+
+        fun validateDeclaration(d: JSONObject, frame: InternalStateFrame, prefix: String = DECLARATION) {
+            fun path(key: String) = if (prefix.isEmpty()) key else "$prefix.$key"
+            SubjectContracts.fields(d, setOf("decision", "intention_refs", "evidence", "retry_of", "capability"), prefix.ifEmpty { "$" })
+            SubjectContracts.jsonSize(d, prefix.ifEmpty { "$" })
+            if (d.has("decision")) SubjectContracts.text(d, "decision", empty = true, path = path("decision"))
+            val refs = if (d.has("intention_refs")) SubjectContracts.array(d, "intention_refs", path("intention_refs")) else JSONArray()
             for (i in 0 until refs.length()) {
-                val ref = refs.getJSONObject(i)
-                require(ref.keys().asSequence().toSet() == setOf("kind", "id", "version"))
-                val kind = ref.getString("kind")
-                val version = ref.getInt("version")
-                require(ref.getDouble("version") == version.toDouble())
+                val p = path("intention_refs[$i]")
+                val raw = refs.opt(i)
+                SubjectContracts.expect(raw is JSONObject, p, "EXPECTED_OBJECT", "需要{kind,id,version}对象。")
+                val ref = raw as JSONObject
+                SubjectContracts.fields(ref, setOf("kind", "id", "version"), p)
+                val kind = SubjectContracts.text(ref, "kind", path = "$p.kind")
+                val id = SubjectContracts.text(ref, "id", path = "$p.id")
+                val version = SubjectContracts.integer(ref, "version", "$p.version")
                 val providedDecision = kind in (setOf("decision", "feedback") + LifeUnderstandings.kinds) && frame.materialSources.values.any { text ->
                     val source = JSONObject(text)
                     val locator = source.optJSONObject("locator")
-                    source.optString("type") in setOf("adopted_$kind", "subject_$kind") && locator != null && locator.optString("id") == ref.getString("id") &&
+                    source.optString("type") in setOf("adopted_$kind", "subject_$kind") && locator != null && locator.optString("id") == id &&
                         locator.optInt("version") == version
                 }
-                require(providedDecision || frame.interactionMembers["$kind:${ref.getString("id")}"] == version) {
-                    "意向依据必须是本轮实际读取的版本"
-                }
+                SubjectContracts.expect(providedDecision || frame.interactionMembers["$kind:$id"] == version,
+                    p, "MEMBER_NOT_DELIVERED", "先通过get读取该成员的当前版本；没有关联时可以省略intention_refs或使用[]。")
             }
-            CategoryEvents.strings(d.optJSONArray("evidence") ?: JSONArray(), 8).forEach {
-                require(it in frame.eventIds || it in frame.materialSources) { "决定来源未提供" }
+            val evidence = if (d.has("evidence")) SubjectContracts.array(d, "evidence", path("evidence")) else JSONArray()
+            SubjectContracts.strings(evidence, path = path("evidence")).forEachIndexed { i, ref ->
+                SubjectContracts.expect(ref in frame.eventIds || ref in frame.materialSources,
+                    path("evidence[$i]"), "SOURCE_NOT_DELIVERED", "引用本轮已提供的来源ID，或先按需读取来源；不能猜造。")
             }
             if (d.has("retry_of")) {
-                val id = d.getString("retry_of")
-                require(frame.materialSources.values.any { JSONObject(it).optJSONObject("locator")?.optString("action_id") == id }) {
-                    "明确再试须先读取原操作的实际回执或未知状态"
-                }
+                val id = SubjectContracts.text(d, "retry_of", path = path("retry_of"))
+                SubjectContracts.expect(frame.materialSources.values.any {
+                    JSONObject(it).optJSONObject("locator")?.optString("action_id") == id
+                }, path("retry_of"), "RECEIPT_NOT_DELIVERED", "明确再试须先读取原操作的实际回执或未知状态。")
             }
-            d.optJSONObject("capability")?.let {
-                require(it.keys().asSequence().toSet() == setOf("id", "version", "stage", "target"))
-                for (k in listOf("id", "version", "target")) require(it.get(k) is String && it.getString(k).length in 1..500)
-                require(it.getString("stage") in setOf("build", "configure", "run", "adjust"))
+            if (d.has("capability")) {
+                val raw = d.opt("capability")
+                SubjectContracts.expect(raw is JSONObject, path("capability"), "EXPECTED_OBJECT", "提供{id,version,stage,target}对象；普通工具查询可省略整个capability。")
+                val c = raw as JSONObject
+                SubjectContracts.fields(c, setOf("id", "version", "stage", "target"), path("capability"))
+                for (key in listOf("id", "version", "target"))
+                    SubjectContracts.text(c, key, 500, path = path("capability.$key"))
+                SubjectContracts.choice(c, "stage", setOf("build", "configure", "run", "adjust"), path("capability.stage"))
             }
         }
 

@@ -83,6 +83,69 @@ class SubjectActionEntryPointsTest {
             System.currentTimeMillis(), results, context)))
     }
 
+    @Test fun optionalActionDeclarationRunsNormallyAndBadCapabilityIsActionableWithoutExecution(): Unit = runBlocking {
+        val calls = AtomicInteger()
+        handler.registerTool("sleep", executor = { _: AITool ->
+            calls.incrementAndGet(); ToolResult("sleep", true, StringResultData("实际返回"))
+        })
+        val f = requireNotNull(sections().internalStateFrame)
+        val declaration = JSONObject().put("decision", "检查工具返回").put("intention_refs", JSONArray())
+            .put("evidence", JSONArray()).put("capability", JSONObject().put("id", "check")
+                .put("version", "1").put("stage", "run").put("target", "sleep"))
+        val valid = execute(f, listOf(invocation("sleep", mapOf("__operit_action" to declaration.toString())))).results.single()
+        assertTrue(valid.error, valid.success)
+        assertEquals(1, calls.get())
+        assertEquals(declaration.toString(), SubjectActions.read(context, role, chat, valid.subjectActionId, 0)
+            .getJSONObject("item").getJSONObject("declaration").toString())
+        declaration.getJSONObject("capability").put("version", 1)
+        val invalid = execute(f, listOf(invocation("sleep", mapOf("__operit_action" to declaration.toString()))), 1).results.single()
+        assertFalse(invalid.success)
+        assertTrue(invalid.error.orEmpty(), invalid.error.orEmpty().contains("__operit_action.capability.version"))
+        assertEquals(1, calls.get())
+        assertEquals(1, SubjectActions.read(context, role, chat, null, 0).getJSONArray("items").length())
+    }
+
+    @Test fun contractAndDreamQueryDiagnosticsArriveThroughNormalToolResults(): Unit = runBlocking {
+        val f = requireNotNull(sections().internalStateFrame)
+        val contract = execute(f, listOf(invocation("companion_internal_state", mapOf(
+            "action" to "get", "section" to "contract", "id" to "action")))).results.single()
+        assertTrue(contract.error, contract.success)
+        assertTrue(contract.result.toString().contains("不是version:1"))
+        val query = execute(f, listOf(invocation("companion_internal_state", mapOf(
+            "action" to "get", "section" to "dream_step"))), 1).results.single()
+        assertFalse(query.success)
+        assertTrue(query.error.orEmpty(), query.error.orEmpty().contains("QUERY_ID_REQUIRED"))
+        val oldDream = execute(f, listOf(invocation("companion_life", mapOf(
+            "action" to "dream", "id" to "static-dream", "details" to "{\"choice\":\"end\",\"note\":\"结束\"}"))), 2).results.single()
+        assertFalse(oldDream.success)
+        assertTrue(oldDream.error.orEmpty(), oldDream.error.orEmpty().contains("DREAM_PROCESS_NOT_FOUND"))
+    }
+
+    @Test fun retrievedFoundationEvidenceCanSaveAnEpisodeThroughNormalReportCommit(): Unit = runBlocking {
+        val s = sections()
+        val original = requireNotNull(s.internalStateFrame)
+        val lookup = execute(original, listOf(invocation("companion_internal_state", mapOf(
+            "action" to "get", "section" to "foundation", "id" to "feeling")))).results
+        assertTrue(lookup.single().error, lookup.single().success)
+        val f = delivered(s, lookup)
+        val source = f.materialSources.entries.first { JSONObject(it.value).optString("type") == "tool_result" }.key
+        val episode = JSONObject().put("op", "appraise").put("id", "current-experience").put("expected_version", 0)
+            .put("category_ref", "foundation:feeling:guilt").put("objects", JSONArray()).put("goals", JSONArray())
+            .put("intensity", 0.8).put("importance", "当前重要").put("long_term_impact", "留待之后重新理解")
+            .put("understanding", "具体理解与适用情境。".repeat(180)).put("reason", "根据实际材料")
+            .put("attention", "foreground").put("status", "unresolved").put("basis", "reinterpretation")
+            .put("evidence", JSONArray().put(f.eventIds.first()).put(source))
+        submit(f, JSONObject().put("episodes", JSONArray().put(episode)))
+        val saved = InternalStateStore(context).inspectCategory(role, chat, "episode", "current-experience", 0).getJSONObject("item")
+        assertEquals(1, saved.getInt("version"))
+        val content = saved.getJSONObject("content")
+        assertTrue(content.toString().length > 5000)
+        assertEquals(episode.getString("understanding"), content.getString("understanding"))
+        assertTrue(content.getJSONObject("source_bindings").getJSONObject(source).has("snapshot"))
+        assertEquals(saved.toString(), InternalStateStore(context).inspectCategory(role, chat,
+            "category_versions", "episode:current-experience", 0).getJSONArray("items").getJSONObject(0).toString())
+    }
+
     @Test fun actualRequestAndReceiptSurviveFinalReportRejectionAndReparse(): Unit = runBlocking {
         val calls = AtomicInteger()
         handler.registerTool("sleep", executor = { _: AITool ->
