@@ -63,7 +63,7 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
         try {
             val result = withContext(Dispatchers.IO) {
                 val migrated = board.usesArchive
-                val page = if (migrated) board.page(offset, filter, stage, owner, category, query) else null
+                val page = if (migrated) board.page(offset, filter, stage, owner, category, query, displayOrder = true) else null
                 val records = page?.getJSONArray("items")?.let { (0 until it.length()).map { i -> it.getJSONObject(i) } } ?: board.list()
                 val counts = if (migrated) listOf("todo", "doing", "blocked", "done", "all", "archived").associateWith { board.page(filter = it, limit = 1).getLong("total") } else emptyMap()
                 Triple(migrated, page, records to counts)
@@ -77,6 +77,7 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
         finally { loading = false }
     }
     LaunchedEffect(query, filter, stage, owner, category) { offset = 0; expanded = null }
+    LaunchedEffect(offset, query, filter, stage, owner, category) { selected = emptySet() }
     LaunchedEffect(expanded, historyOffset, revision, refresh, archived) {
         val id = expanded
         if (archived && id != null) try {
@@ -146,7 +147,7 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
         IconButton(onClick = { refresh++ }) { Icon(Icons.Default.Refresh, "刷新待办") }
     }
     if (selecting) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        TextButton(onClick = { selected = filtered.map { it.getString("id") }.toSet() }) { Text("全选当前列表") }
+        TextButton(onClick = { selected = filtered.map { it.getString("id") }.toSet() }) { Text(if (archived) "全选当前页" else "全选当前列表") }
         TextButton(onClick = { selected = emptySet() }) { Text("清空选择") }
         FilledTonalButton(enabled = selected.isNotEmpty(), onClick = { work {
             rows.filter { it.getString("id") in selected }.forEach {
@@ -249,7 +250,7 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } })
     }
     editing?.let { original ->
-        TaskEditor(original, rows, names, error, onDismiss = { editing = null }, onSave = { patch -> work {
+        TaskEditor(original, rows, names, error, lookup = if (archived) { queryText, pageOffset -> board.page(pageOffset, query = queryText) } else null, onDismiss = { editing = null }, onSave = { patch -> work {
             board.save("user", original.optString("id").takeIf { it.isNotBlank() }, patch, members.keys)
             editing = null
         } })
@@ -259,12 +260,23 @@ fun TaskBoardPanel(board: TaskBoard, members: Map<String, String>, privateOwner:
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskEditor(original: JSONObject, rows: List<JSONObject>, names: Map<String, String>, error: String?,
+                       lookup: ((String, Int) -> JSONObject)? = null,
                        onDismiss: () -> Unit, onSave: (JSONObject) -> Unit) {
     var patch by remember(original) { mutableStateOf(JSONObject().apply {
         TaskRecords.fields.filter { original.has(it) }.forEach { put(it, original.get(it)) }
         if (original.has("version")) put("expected_version", original.getInt("version"))
     }) }
     fun change(key: String, value: Any) { patch = JSONObject(patch.toString()).put(key, value) }
+    var linkQuery by remember(original) { mutableStateOf("") }
+    var linkOffset by remember(original) { mutableIntStateOf(0) }
+    var linkPage by remember(original) { mutableStateOf<JSONObject?>(null) }
+    var linkError by remember(original) { mutableStateOf<String?>(null) }
+    LaunchedEffect(linkQuery) { linkOffset = 0 }
+    LaunchedEffect(original, linkQuery, linkOffset) {
+        if (lookup != null) try { linkPage = withContext(Dispatchers.IO) { lookup(linkQuery, linkOffset) }; linkError = null }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { linkError = failure.message }
+    }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("待办与心愿") },
         text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("title" to "标题", "detail" to "要做什么", "origin" to "原话原文（谁说的、什么时间）",
@@ -283,7 +295,21 @@ private fun TaskEditor(original: JSONObject, rows: List<JSONObject>, names: Map<
             FlowRow { TaskRecords.statuses.forEach { (id, label) -> FilterChip(patch.optString("status") == id, onClick = { change("status", id) }, label = { Text(label) }) } }
             Row { Checkbox(patch.optString("horizon") == "long", onCheckedChange = { change("horizon", if (it) "long" else "short") }); Text("长期的事", Modifier.padding(top = 12.dp)) }
             Text("关联已有事项")
-            rows.filter { it.getString("id") != original.optString("id") }.forEach { row ->
+            if (lookup != null) {
+                OutlinedTextField(linkQuery, { linkQuery = it }, label = { Text("查找全部事项，不限当前页") })
+                linkError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                val currentLinks = patch.optJSONArray("linked_ids") ?: JSONArray()
+                for (i in 0 until currentLinks.length()) {
+                    val linkedId = currentLinks.getString(i)
+                    TextButton(onClick = { change("linked_ids", JSONArray((0 until currentLinks.length()).map { currentLinks.getString(it) }.filter { it != linkedId })) }) { Text("取消关联：$linkedId") }
+                }
+                Row {
+                    TextButton(enabled = linkOffset > 0, onClick = { linkOffset = maxOf(0, linkOffset - 20) }) { Text("上一页") }
+                    TextButton(enabled = linkPage?.isNull("next_offset") == false, onClick = { linkOffset = requireNotNull(linkPage).getInt("next_offset") }) { Text("下一页") }
+                }
+            }
+            val availableLinks = if (lookup == null) rows else linkPage?.getJSONArray("items")?.let { values -> (0 until values.length()).map { values.getJSONObject(it) } } ?: emptyList()
+            availableLinks.filter { it.getString("id") != original.optString("id") }.forEach { row ->
                 val links = patch.optJSONArray("linked_ids") ?: JSONArray()
                 val ids = (0 until links.length()).map { links.getString(it) }.toSet()
                 Row {

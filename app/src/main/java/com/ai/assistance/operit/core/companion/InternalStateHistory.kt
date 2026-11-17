@@ -120,7 +120,8 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             db.execSQL("CREATE INDEX IF NOT EXISTS category_recent ON category_current(scope,kind,parent)")
             db.execSQL("CREATE TABLE IF NOT EXISTS category_commits (scope TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(scope,id))")
             db.execSQL("CREATE TABLE IF NOT EXISTS research_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, brief TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tab TEXT NOT NULL, assignee TEXT NOT NULL, category TEXT NOT NULL, priority TEXT NOT NULL, updated INTEGER NOT NULL, due INTEGER NOT NULL, search TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
-            db.execSQL("CREATE INDEX IF NOT EXISTS research_page ON research_current(scope,kind,priority,updated)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS research_page_order ON research_current(scope,kind,priority,updated DESC,id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS research_recent ON research_current(scope,kind,updated DESC,id)")
             db.execSQL("CREATE INDEX IF NOT EXISTS research_due ON research_current(scope,kind,state,due)")
         }
     }
@@ -160,7 +161,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     }
 
     /** Current record, immutable version and newly written notes commit together. No history in the head. */
-    internal fun researchWrite(kind: String, record: JSONObject, imported: Boolean = false): JSONObject {
+    internal fun researchWrite(kind: String, record: JSONObject, imported: Boolean = false, commitNow: Boolean = true): JSONObject {
         require(kind in setOf("task", "source", "entry", "meta"))
         val db = db()
         if (!writing) { db.beginTransaction(); writing = true }
@@ -190,17 +191,18 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val due = when (kind) { "task" -> dispatch?.optLong("at") ?: 0; "source" -> row.optLong("checked") + row.optInt("hours") * 3_600_000L; else -> row.optLong("expires") }
         val search = listOf("title", "detail", "id", "conclusion", "next", "evidence", "origin", "goal", "blocker", "plan", "materials", "address", "progress", "url", "note", "user_note")
             .joinToString("\n") { row.optString(it) }
-        db.execSQL("INSERT OR REPLACE INTO research_current(scope,kind,id,payload,brief,revision,state,tab,assignee,category,priority,updated,due,search) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            arrayOf(scope, kind, id, row.toString(), brief.toString(), revision, state,
+        // Preserve insertion order for the existing tool list; editing a row must not move it.
+        db.execSQL("INSERT OR REPLACE INTO research_current(rowid,scope,kind,id,payload,brief,revision,state,tab,assignee,category,priority,updated,due,search) VALUES((SELECT rowid FROM research_current WHERE scope=? AND kind=? AND id=?),?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            arrayOf(scope, kind, id, scope, kind, id, row.toString(), brief.toString(), revision, state,
                 if (kind == "task") com.ai.assistance.operit.core.tasks.TaskRecords.tab(row) else row.optString("status"),
                 row.optString("assignee"), row.optString("category"), row.optString("priority"),
                 row.optLong("updated", row.optLong("added")), due, search))
-        commit()
+        if (commitNow) commit()
         return row
     }
 
     internal fun researchPage(kind: String, offset: Int, limit: Int = 20, filter: String = "", stage: String = "",
-        assignee: String = "*", category: String = "", query: String = "", state: String = "", due: Long? = null): JSONObject {
+        assignee: String = "*", category: String = "", query: String = "", state: String = "", due: Long? = null, displayOrder: Boolean = false): JSONObject {
         require(offset >= 0 && limit in 1..21)
         val clauses = mutableListOf("scope=?", "kind=?")
         val args = mutableListOf(scope, kind)
@@ -221,7 +223,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         if (due != null) { clauses.add("due<=?"); args.add(due.toString()) }
         val where = clauses.joinToString(" AND ")
         val total = db().rawQuery("SELECT COUNT(*) FROM research_current WHERE $where", args.toTypedArray()).use { it.moveToFirst(); it.getLong(0) }
-        val order = if (due != null) "due,id" else if (kind == "task") "priority,updated DESC,id" else "updated DESC,id"
+        val order = if (due != null) "due,id" else if (kind == "task") {
+            if (displayOrder) "priority,updated DESC,id" else "rowid"
+        } else "updated DESC,id"
         val rows = db().rawQuery("SELECT brief FROM research_current WHERE $where ORDER BY $order LIMIT ? OFFSET ?",
             (args + limit.toString() + offset.toString()).toTypedArray()).use { c -> JSONArray().apply { while (c.moveToNext()) put(JSONObject(c.getString(0))) } }
         return JSONObject().put("items", rows).put("total", total).put("next_offset", if (offset + rows.length() < total) offset + rows.length() else JSONObject.NULL)
@@ -241,6 +245,22 @@ internal class InternalStateArchive(private val file: File, private val scope: S
 
     internal fun researchDeleteTask(id: String) {
         val db = db(); if (!writing) { db.beginTransaction(); writing = true }
+        // Link removal and explicit deletion are one transaction, including their versions.
+        // A crash must not leave surviving tasks referring to a deleted task.
+        var offset = 0
+        while (true) {
+            val page = researchPage("task", offset)
+            val rows = page.getJSONArray("items")
+            for (i in 0 until rows.length()) {
+                val row = rows.getJSONObject(i)
+                if (row.getString("id") == id) continue
+                val links = row.optJSONArray("linked_ids") ?: continue
+                val remaining = (0 until links.length()).map { links.getString(it) }.filter { it != id }
+                if (remaining.size != links.length()) researchWrite("task", row.put("linked_ids", JSONArray(remaining)), commitNow = false)
+            }
+            if (page.isNull("next_offset")) break
+            offset = page.getInt("next_offset")
+        }
         db.execSQL("DELETE FROM research_current WHERE scope=? AND kind='task' AND id=?", arrayOf(scope, id))
         db.execSQL("DELETE FROM history WHERE scope=? AND ((kind='research_notes' AND lookup=?) OR (kind='research_versions' AND lookup=?))", arrayOf(scope, id, "task:$id"))
         commit()
@@ -250,7 +270,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val state = if (kind == "task") "active_task" else "enabled"
         val first = researchPage(kind, 0, 8, state = state)
         val total = first.getLong("total")
-        val rotated = if (total == 0L) emptyList() else researchPage(kind, ((cursor.coerceAtLeast(0) * 8) % total).toInt(), 8, state = state).getJSONArray("items").objects()
+        val rotated = if (total == 0L) emptyList() else researchPage(kind, ((cursor.coerceAtLeast(0) % total * 8) % total).toInt(), 8, state = state).getJSONArray("items").objects()
         val related = InnerMaterialSelection.terms(input).take(3).flatMap { term ->
             researchPage(kind, 0, 2, state = state, query = term).getJSONArray("items").objects()
         }

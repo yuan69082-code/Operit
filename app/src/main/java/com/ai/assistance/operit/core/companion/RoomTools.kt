@@ -148,6 +148,9 @@ object RoomTools {
                             else -> error("未知日记操作")
                         }
                         else -> {
+                            if (action in setOf("versions", "retained")) {
+                                check(metadata.characterGroupId.isNullOrBlank()) { "阅读旧版本和私人保留线索仅在所属助手私聊中读取" }
+                            }
                             val reading = ReadingRoom(context, actor)
                             when (action) {
                                 "sources" -> reading.sourcePage(offset).apply { put("sources", getJSONArray("items")); remove("items") }

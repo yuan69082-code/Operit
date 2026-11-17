@@ -813,10 +813,11 @@ class InternalStateStore(private val context: Context) {
             candidate("rest", "rest", "休息", "允许本轮不采取行动"))
         store.withResearch(actor) { it.researchMaterials("task", data.optLong("material_query_cursor"), input) }
             .forEach {
-                candidates.add(com.ai.assistance.operit.core.tasks.TaskRecords.material(it).put("action", "todo").put("available", true))
+                candidates.add(com.ai.assistance.operit.core.tasks.TaskRecords.material(it).put("action", "todo")
+                    .put("available", true).put("subject_private_material", true))
             }
         store.withResearch(actor) { it.researchMaterials("source", data.optLong("material_query_cursor"), input) }.forEach {
-            candidates.add(JSONObject(it.toString()).put("action", "explore").put("available", exploration)
+            candidates.add(JSONObject(it.toString()).put("action", "explore").put("available", exploration).put("subject_private_material", true)
                 .put("next", if (wake && !CompanionRuntime.isExplorationWake(chat))
                     "预约独立探索后继续：${it.optString("progress")}" else it.optString("progress")))
         }

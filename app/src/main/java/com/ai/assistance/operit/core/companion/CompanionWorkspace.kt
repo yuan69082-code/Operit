@@ -94,19 +94,6 @@ fun CompanionStore.finishTodo(scope: String, id: String, action: String, learnin
                     data.put("categories", categories)
                 }
             }
-            var offset = 0
-            while (true) {
-                val page = archive.researchPage("task", offset)
-                val rows = page.getJSONArray("items")
-                for (i in 0 until rows.length()) {
-                    val row = rows.getJSONObject(i)
-                    val links = row.optJSONArray("linked_ids") ?: continue
-                    val remaining = (0 until links.length()).map { links.getString(it) }.filter { it != id }
-                    if (remaining.size != links.length()) archive.researchWrite("task", row.put("linked_ids", JSONArray(remaining)))
-                }
-                if (page.isNull("next_offset")) break
-                offset = page.getInt("next_offset")
-            }
             archive.researchDeleteTask(id)
         }
         com.ai.assistance.operit.core.tasks.TaskBoard.revision.value += 1

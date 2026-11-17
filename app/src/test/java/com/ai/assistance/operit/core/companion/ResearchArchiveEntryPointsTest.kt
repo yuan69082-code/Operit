@@ -177,4 +177,45 @@ class ResearchArchiveEntryPointsTest {
         assertEquals(0, board.page().getInt("total"))
         assertEquals(0, TaskBoard(context, "role:$role", false).page().getInt("total"))
     }
+
+    @Test fun deletingAnOffPageTaskPreservesOtherFullRecordsAndRemovesTheirLinks() {
+        enable()
+        val target = task("明确删除的旧事项")
+        val full = "仍需保留的原文和例外".repeat(150)
+        val survivors = (0 until 24).map {
+            board.save(role, null, JSONObject().put("title", "相关事项$it").put("detail", full)
+                .put("linked_ids", JSONArray().put(target)), setOf(role)).getString("id")
+        }
+        store.finishTodo("role:$role", target, "delete")
+        assertEquals(24, board.page().getInt("total"))
+        survivors.forEach {
+            val current = TaskBoard(context, "role:$role", false).get(it)
+            assertEquals(full, current.getString("detail"))
+            assertEquals(0, current.getJSONArray("linked_ids").length())
+        }
+    }
+
+    @Test fun newPrivateReadingHistoryCannotBeReadFromGroupTools(): Unit = runBlocking {
+        enable()
+        val source = reading.saveSource(null, "私人来源", "topic", "private research", 24, true).getString("id")
+        reading.progress(source, "不能送进群聊的旧进度")
+        val other = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "另一个助手"))
+        val groupId = com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+            .createCharacterGroupCard(CharacterGroupCard("", "群", members = listOf(GroupMemberConfig(role), GroupMemberConfig(other))))
+        val group = ChatHistory(title = "群", messages = emptyList(), characterGroupId = groupId)
+        ChatHistoryManager.getInstance(context).saveChatHistory(group)
+        val secretTask = task("只在私人事项中的未完成研究")
+        val groupFrame = InnerStructureContext.prepare(context, role, group.id, true, input = "私人来源 研究进度")
+        assertFalse(groupFrame.state, groupFrame.state.contains("不能送进群聊的旧进度"))
+        assertFalse(groupFrame.state, groupFrame.state.contains("只在私人事项中的未完成研究"))
+        assertEquals(secretTask, board.get(secretTask).getString("id"))
+        listOf("versions", "retained").forEach { action ->
+            val args = mapOf("action" to action, "id" to source, "part" to "source",
+                "__operit_package_chat_id" to group.id, "__operit_package_caller_card_id" to role)
+            val result = AIToolHandler.getInstance(context).executeTool(AITool("companion_reading", args.map { ToolParameter(it.key, it.value) }))
+            assertFalse(result.success)
+            assertFalse(result.result.toString().contains("不能送进群聊的旧进度"))
+        }
+        assertTrue(reading.versions(source, "source").getInt("history_total") > 1)
+    }
 }

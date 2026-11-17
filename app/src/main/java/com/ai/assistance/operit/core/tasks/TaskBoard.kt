@@ -25,9 +25,9 @@ class TaskBoard(context: Context, val scope: String, val group: Boolean) {
         val rows = read().optJSONArray(key) ?: JSONArray()
         return (0 until rows.length()).map { TaskRecords.normalize(rows.getJSONObject(it)) }
     }
-    fun page(offset: Int = 0, filter: String = "", stage: String = "", assignee: String = "*", category: String = "", query: String = "", limit: Int = 20): JSONObject {
+    fun page(offset: Int = 0, filter: String = "", stage: String = "", assignee: String = "*", category: String = "", query: String = "", limit: Int = 20, displayOrder: Boolean = false): JSONObject {
         require(offset >= 0 && (stage.isBlank() || stage in TaskRecords.statuses))
-        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { it.researchPage("task", offset, limit, filter = filter, stage = stage, assignee = assignee, category = category, query = query) }
+        if (usesArchive) return companionStore.withResearch(requireNotNull(role)) { it.researchPage("task", offset, limit, filter = filter, stage = stage, assignee = assignee, category = category, query = query, displayOrder = displayOrder) }
         val rows = list().filter { row ->
             (if (filter == "all") TaskRecords.tab(row) != "archived" else filter.isBlank() || TaskRecords.tab(row) == filter) &&
                 (stage.isBlank() || row.optString("status") == stage) && (assignee == "*" || row.optString("assignee") == assignee) &&
