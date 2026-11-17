@@ -86,6 +86,14 @@ class SubjectGrowthFlowTest {
             var proposal: JSONObject? = null
             f.output = { _, frame ->
                 step++
+                // A model turn continuing after an ordinary tool denial is valid product
+                // behavior. This successful-flow fixture must inspect the real receipt,
+                // rather than let its scripted model announce a schedule that was not saved.
+                frame.materialSources.values.map(::JSONObject)
+                    .filter { it.optString("type") == "actual_operation" }.forEach { source ->
+                        val operation = JSONObject(source.getString("text"))
+                        assertEquals("phase=$phase step=$step receipt=$operation", "completed", operation.getString("execution"))
+                    }
                 when (phase) {
                     1 -> when (step) {
                         1 -> emit(tool("companion_todo", "action" to "save", "title" to "星空测量研究",
@@ -201,7 +209,9 @@ class SubjectGrowthFlowTest {
             for (round in 2..5) {
                 phase = round; step = 0; f.wake = true
                 val scheduler = ExplorationStore(f.app) // Reopened store, no final-state DB writes.
-                val due = scheduler.read(f.role).getLong("at")
+                val savedPlan = scheduler.read(f.role)
+                assertTrue("round=$round plan=$savedPlan; " + f.failureDiagnostics(), savedPlan.has("at"))
+                val due = savedPlan.getLong("at")
                 val work = requireNotNull(scheduler.next(due))
                 assertNull(scheduler.next(due))
                 assertTrue(work.purpose.contains("星空"))
@@ -212,6 +222,8 @@ class SubjectGrowthFlowTest {
                         turnOptions = ChatTurnOptions(proactiveWake = true, persistTurn = false, notifyReply = false, disableWarning = true))
                     assertTrue("round " + round + ": " + f.warnings, f.warnings.isEmpty())
                     assertTrue(errors.toString(), errors.isEmpty())
+                    assertEquals("round=$round did not complete its normal tool continuations; " + f.failureDiagnostics(),
+                        if (round == 4) 5 else 3, step)
                     SubjectLife(f.app).checkpoint(activity, work.purpose, "completed")
                 } finally { ActivityNotes.release(activity) }
                 scheduler.finish(work, "completed")
