@@ -15,7 +15,10 @@ import com.ai.assistance.operit.core.companion.PrivateTimePolicy.objects
 internal class PrivateTime(private val context: Context) {
     private val store = CompanionStore(context)
     private val cachePrefix = context.filesDir.absolutePath + ":"
-    fun config(role: String): JSONObject? = cached("$role:config") { store.activityRead(role, "private_time_config", "current") }
+    fun config(role: String): JSONObject? {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        return cached("$role:config") { store.activityRead(role, "private_time_config", "current") }
+    }
     private fun plan(role: String, date: String) = cached("$role:$date") { store.activityRead(role, "private_time_plan", date) }
     private fun cached(key: String, read: () -> JSONObject?): JSONObject? {
         val now = android.os.SystemClock.elapsedRealtime()
@@ -23,11 +26,16 @@ internal class PrivateTime(private val context: Context) {
         while (cache.size >= 128) cache.entries.minByOrNull { it.value.first }?.let { cache.remove(it.key, it.value) } ?: break
         val entry = cache[cachePrefix + key]
         val text = if (entry != null && now - entry.first < 30_000) entry.second else read()?.toString().also {
-            cache[cachePrefix + key] = now to it
+            if (it == null || it.length <= 64_000) cache[cachePrefix + key] = now to it
+            while (cache.values.sumOf { value -> value.second?.length?.toLong() ?: 0L } > 512_000L)
+                cache.entries.minByOrNull { entry -> entry.value.first }?.let { entry -> cache.remove(entry.key, entry.value) } ?: break
         }
         return text?.let(::JSONObject)
     }
-    private fun invalidate(role: String, date: String = "config") { cache.remove(cachePrefix + "$role:$date") }
+    private fun invalidate(role: String, date: String = "config") {
+        cache.remove(cachePrefix + "$role:$date")
+        cache.remove(cachePrefix + "$role:recent-plans")
+    }
 
     fun configure(role: String, a: JSONObject, manual: Boolean = false): JSONObject {
         SubjectContracts.fields(a, setOf("expected_version", "enabled", "start", "end", "zone", "sleep_time", "fatigue_episode", "fatigue_threshold") +
@@ -95,6 +103,7 @@ internal class PrivateTime(private val context: Context) {
         }
         val row = store.activityWrite(role, "private_time_plan", date, "calendar") {
             PrivateTimePolicy.progress(requireNotNull(it) { "当天没有计划" }, a, { ref -> records["${ref.getString("kind")}:${ref.getString("id")}"] }) { id -> receipts[id] }
+                .put("updated_at", System.currentTimeMillis())
         }
         invalidate(role, date)
         return row
@@ -227,7 +236,41 @@ internal class PrivateTime(private val context: Context) {
         return JSONObject().put("saved", true).put("version", row.getInt("version")).put("confirmed", confirm)
     }
 
-    fun materials(role: String): List<JSONObject> = buildList {
+    /** A small current-plan index lets ordinary daytime requests reconsider arrangements.
+     * Completed progress remains a subject report; actual outcomes must still be read from
+     * the existing operation receipts. No numerical emotion-to-calendar rule is introduced. */
+    private fun planMaterials(role: String, input: String): List<JSONObject> {
+        val now = System.currentTimeMillis()
+        val c = config(role) ?: return emptyList()
+        val date = PrivateTimePolicy.upcoming(c, now).date
+        val current = plan(role, date)
+        val recent = cached("$role:recent-plans") {
+            JSONObject().put("items", JSONArray(store.activityPage(role, "private_time_plan", "calendar", 0).take(8)))
+        }?.getJSONArray("items")?.objects().orEmpty()
+        val query = InnerMaterialSelection.terms(input)
+        val candidates = (listOfNotNull(current) + recent).distinctBy { it.getString("date") }.flatMap { p ->
+            p.getJSONArray("items").objects().map { p to it }
+        }.filter { (p, item) -> item.getString("status") !in PrivateTimePolicy.terminal || p.optLong("updated_at") >= now - 86_400_000 }
+        val selected = candidates.sortedWith(compareByDescending<Pair<JSONObject, JSONObject>> { (_, item) ->
+            InnerMaterialSelection.terms(item.getString("goal") + " " + item.optString("progress")).count { it in query }
+        }.thenBy { (_, item) -> if (item.getString("status") in PrivateTimePolicy.terminal) 1 else 0 }
+            .thenBy { (_, item) -> kotlin.math.abs(item.getLong("start") - now) }).firstOrNull() ?: return emptyList()
+        val (p, item) = selected
+        val index = JSONObject().put("date", p.getString("date")).put("slot_id", item.getString("id"))
+            .put("activity", item.getString("activity")).put("status", item.getString("status"))
+            .put("start", item.getLong("start")).put("end", item.getLong("end"))
+            .put("goal", item.getString("goal").take(160)).put("progress", item.optString("progress").take(160))
+            .put("scheduling_enabled", c.getBoolean("enabled"))
+        return listOf(JSONObject().put("id", "material:private-plan:${p.getString("date")}:${item.getString("id")}:${p.getInt("version")}")
+            .put("type", "private_time_plan").put("status", "retrieved").put("owner", role).put("author", role)
+            .put("at", p.optLong("updated_at")).put("not_new_occurrence", true).put("subject_private_material", true)
+            .put("index_only", true).put("text", index.toString() + "\n这是可重新考虑的安排。结合当前情绪、驱力、需要和新的理解，可保持、修改、暂停或结束；progress是自述，实际结果须核对action/activity_part。")
+            .put("locator", JSONObject().put("tool", "companion_life free_status").put("date", p.getString("date"))
+                .put("slot_id", item.getString("id")).put("version", p.getInt("version"))))
+    }
+
+    fun materials(role: String, input: String = ""): List<JSONObject> = buildList {
+        addAll(planMaterials(role, input))
         if (config(role) == null) add(JSONObject().put("id", "private-time-setup").put("type", "private_time_setup")
             .put("owner", role).put("text", "自由时间尚未定义。可用companion_life free_status查看菜单，然后free_config选择自己的时段。OB记忆位置请园园在私域自由时间页指定。没有设置不会自动唤醒。")
             .put("subject_private_material", true))

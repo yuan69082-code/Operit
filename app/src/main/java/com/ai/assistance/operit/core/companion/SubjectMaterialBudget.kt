@@ -116,7 +116,7 @@ internal object SubjectMaterialBudget {
         // a second prompt appended after budgeting. Drafts and old versions never enter here.
         lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->
             materials.rows.forEachIndexed { index, row ->
-                if (row is JSONObject && row.optString("type") in setOf("confirmed_essence", "private_time_setup")) {
+                if (row is JSONObject && row.optString("type") in setOf("confirmed_essence", "private_time_setup", "private_time_plan")) {
                     include(materials, row)
                     prioritized += materials.path to index
                 }

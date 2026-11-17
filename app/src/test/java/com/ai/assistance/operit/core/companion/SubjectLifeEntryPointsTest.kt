@@ -520,4 +520,81 @@ class SubjectLifeEntryPointsTest {
         assertTrue(time.essence(role).getString("draft").contains("尚需继续提炼"))
     }
 
+    /** Controlled subject choices and research material, through ordinary request/report/tool
+     * entry points. This proves delivery and persistence, not real-model understanding. */
+    @Test fun daytimeStatePlanActionFeedbackAndNextPlanUseTheSameNormalLoop() = runBlocking {
+        InternalStateStore(context).materialBudget(role, chat, 4096)
+        val time = PrivateTime(context); val w = privateWindow()
+        privateLifeTool("free_config", privateConfig())
+        fun slot(id: String, start: Long, goal: String) = JSONObject().put("id", id).put("start", start)
+            .put("end", start + 3_600_000).put("activity", "explore").put("goal", goal)
+            .put("targets", JSONArray()).put("checks", JSONArray())
+        var first = slot("research", w.start, "今晚先读一篇历史文章")
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", 0).put("items", JSONArray().put(first)))
+        val day = InnerStructureContext.prepare(context, role, chat, true, input = "白天看到星空图片，我有了新的好奇，想重新考虑今晚安排")
+        val frame = day.internalStateFrame!!
+        assertTrue(day.state, day.state.contains("今晚先读一篇历史文章"))
+        assertEquals(1, frame.materialSources.values.count { JSONObject(it).optString("type") == "private_time_plan" })
+        val mood = JSONObject().put("op", "appraise").put("id", "sky-joy").put("expected_version", 0)
+            .put("category_ref", "foundation:emotion:joy").put("objects", JSONArray(listOf("星空"))).put("goals", JSONArray())
+            .put("intensity", 0.7).put("importance", "一个新的兴趣线索").put("long_term_impact", "尚未确定")
+            .put("attention", "foreground").put("status", "processing").put("understanding", "看到星空时的喜悦和好奇，让我想改变今晚的安排")
+            .put("basis", "input").put("evidence", JSONArray(listOf(frame.eventIds.last()))).put("reason", "我现在更想看看天文")
+        commit(frame, JSONObject().put("episodes", JSONArray().put(mood)))
+        val reconsider = InnerStructureContext.prepare(context, role, chat, true, input = "星空带来的喜悦是否改变今晚研究？")
+        assertTrue(reconsider.state, reconsider.state.contains("sky-joy"))
+        assertTrue(reconsider.state.contains("private_time_plan"))
+        // The simulated subject chooses a different activity; the host does not derive it
+        // from the emotion score or automatically rewrite this calendar.
+        first = slot("research", w.start, "查看天文资料，弄清楚星图是什么")
+        val current = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", current.getInt("version"))
+            .put("items", JSONArray().put(first)))
+        val work = SubjectLife(context).next(role, chat, w.start)!!
+        assertTrue(work.text.contains("查看天文资料"))
+        val active = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", active.getInt("version"))
+            .put("slot_id", "research").put("status", "working").put("note", "开始核对资料"))
+        val request = InnerStructureContext.prepare(context, role, chat, true, wake = true, input = "查阅天文资料")
+        val actions = SubjectActions(context, request.internalStateFrame!!)
+        val tool = com.ai.assistance.operit.data.model.AITool("companion_reading", mapOf("action" to "add", "title" to "模拟测试资料：星图",
+            "url" to "https://example.invalid/test-star-map", "text" to "受控研究材料：星图用于定位，需要先建立坐标索引。",
+            "__operit_package_chat_id" to chat, "__operit_package_caller_card_id" to role).map {
+            com.ai.assistance.operit.data.model.ToolParameter(it.key, it.value)
+        })
+        val handler = com.ai.assistance.operit.core.tools.AIToolHandler.getInstance(context)
+        RoomTools.register(handler, context)
+        val operation = actions.claim("research-material", tool, null)
+        actions.started(operation.id)
+        val result = handler.executeTool(tool)
+        assertTrue(result.error, result.success)
+        actions.finish(operation.id, result, "completed")
+        val reflect = InnerStructureContext.prepare(context, role, chat, true, input = "刚取得的星图材料让我发现，原来我的研究方法太散乱")
+        val f = reflect.internalStateFrame!!
+        val actual = f.materialSources.values.map(::JSONObject).first {
+            it.optString("type") == "actual_operation" && it.getJSONObject("locator").optString("action_id") == "research-material"
+        }.getString("id")
+        commit(f, JSONObject().put("action_feedback", JSONArray().put(JSONObject().put("id", "sky-result").put("expected_version", 0)
+            .put("action_id", "research-material").put("result_source", actual).put("evidence", JSONArray(listOf(actual)))
+            .put("meaning", "保存了资料不等于我已理解；先画索引可能更合适")))
+            .put("life", JSONArray().put(JSONObject().put("kind", "experience").put("id", "sky-method").put("expected_version", 0)
+                .put("text", "研究星图时先画坐标索引，再继续阅读").put("scope", "天文研究方法").put("uncertainty", "还要看下次效果")
+                .put("status", "active").put("evidence", JSONArray(listOf(actual))))))
+        val finished = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", finished.getInt("version"))
+            .put("slot_id", "research").put("status", "completed").put("note", "取得阶段性材料，发现需要先画索引；理解已保存sky-method"))
+        SubjectLife(context).finish(work, "completed")
+        val independent = InnerStructureContext.prepare(context, role, chat, true, input = "另一次天文研究可以怎样做？")
+        assertTrue(independent.state, independent.state.contains("研究星图时先画坐标索引"))
+        val nextFrame = independent.internalStateFrame!!
+        SubjectActions.validateDeclaration(JSONObject().put("intention_refs", JSONArray().put(JSONObject()
+            .put("kind", "experience").put("id", "sky-method").put("version", 1))).put("evidence", JSONArray()), nextFrame)
+        val latest = time.status(role, w.date, false).getJSONObject("plan")
+        privateLifeTool("free_plan", JSONObject().put("date", w.date).put("expected_version", latest.getInt("version"))
+            .put("items", JSONArray().put(slot("new-method", w.start + 7_200_000, "使用已形成的sky-method，先画坐标索引再读新资料"))))
+        val later = SubjectLife(context).next(role, chat, w.start + 7_200_000)!!
+        assertTrue(later.text.contains("先画坐标索引"))
+        assertFalse(later.text.contains("今晚先读一篇历史文章"))
+    }
+
 }
