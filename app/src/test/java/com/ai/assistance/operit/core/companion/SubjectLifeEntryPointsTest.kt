@@ -260,7 +260,7 @@ class SubjectLifeEntryPointsTest {
         assertNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
     }
 
-    @Test fun streamingCheckpointsDoNotBecomeDozensOfDreamHistoryCopies() = runBlocking {
+    @Test fun streamingCheckpointsDoNotBecomeDozensOfDreamHistoryCopies(): Unit = runBlocking {
         adopt(rest(JSONObject().put("steps", 1)))
         val work = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
         ParticipatoryDreams(context).run(work, ParticipatoryDreams.Model { _, raw, partial ->
