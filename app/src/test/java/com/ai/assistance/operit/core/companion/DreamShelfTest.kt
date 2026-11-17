@@ -31,5 +31,6 @@ class DreamShelfTest {
         assertTrue(d.getJSONObject("content").getString("content").contains("完整梦境"))
         assertFalse(d.has("emotion"))
         assertTrue(DreamShelf.index(d, 172800100L).getString("text").contains("月亮"))
+        assertEquals(listOf("dream-a"), SubjectRecall.ranked(sequenceOf(requireNotNull(SubjectRecall.entry(d))), "月亮", "", 1))
     }
 }

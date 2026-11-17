@@ -17,8 +17,9 @@ internal object SubjectRecall {
         val text = listOf("meaning", "interpretation", "decision", "objects", "members", "effects", "intention_refs",
             "text", "scope", "uncertainty", "purpose", "goal", "resolve", "ambition", "related",
             "understanding", "category_ref", "goals", "importance", "long_term_impact", "supporting", "opposing",
-            "title", "feeling", "keywords", "index_text", "design", "dream_review")
+            "title", "feeling", "keywords", "index_text", "design")
             .filter { content.has(it) }.joinToString(" ") { content.get(it).toString() } +
+            " " + row.optJSONObject("dream_review")?.toString().orEmpty() +
             if (row.getString("storage_kind") in setOf("dream", "dream_process", "dream_understanding"))
                 " " + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(row.getLong("at"))) else ""
         // Source snapshots and old quoted evidence must not make an unrelated interpretation match.
