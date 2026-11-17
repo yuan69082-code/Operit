@@ -232,6 +232,14 @@ class SubjectRestDreamsEntryPointsTest {
             // Normal dream preparation can advance valid time rules. Compare restore
             // against the exact export point, not an earlier pre-dream observation.
             val foundationBefore = InternalStateStore(context).read(role).getJSONObject("foundation_state").toString()
+            val researchBoard = com.ai.assistance.operit.core.tasks.TaskBoard(context, "role:$role", false)
+            val researchId = researchBoard.save(role, null, JSONObject().put("title", "备份中的研究进度"), setOf(role)).getString("id")
+            repeat(90) { researchBoard.comment(researchId, role, "备份进度$it") }
+            val readingRoom = ReadingRoom(context, role)
+            val sourceId = readingRoom.saveSource(null, "备份中的方向", "topic", "research backup", 24, true).getString("id")
+            readingRoom.progress(sourceId, "备份前第一版"); readingRoom.progress(sourceId, "备份前第二版")
+            val researchBefore = researchBoard.get(researchId).toString()
+            val sourceBefore = readingRoom.versions(sourceId, "source").toString()
             val zip = RawSnapshotBackupManager.exportToBackupDir(context)
             assertTrue(zip.length() > 0)
             val window = InternalStateStore(context).openEstablishedWindow(role)
@@ -252,6 +260,8 @@ class SubjectRestDreamsEntryPointsTest {
             val f = readMaterial(second, "rest", "current")
             submit(f, JSONObject().put("rest", rest("awake", 2)))
             appraiseFoundation(0.2)
+            researchBoard.comment(researchId, role, "备份后新内容")
+            readingRoom.progress(sourceId, "备份后第三版")
             RawSnapshotBackupManager.restoreFromBackupUri(context, Uri.fromFile(zip))
             // The existing restore UI requires an application restart. Simulate only that
             // singleton lifetime boundary; do not edit any persisted subject or chat data.
@@ -263,6 +273,9 @@ class SubjectRestDreamsEntryPointsTest {
             assertEquals(window.getLong("opened_at"), restoredWindow.getLong("opened_at"))
             assertEquals(window.getLong("closes_at"), restoredWindow.getLong("closes_at"))
             assertEquals(foundationBefore, InternalStateStore(context).read(role).getJSONObject("foundation_state").toString())
+            assertEquals(researchBefore, com.ai.assistance.operit.core.tasks.TaskBoard(context, "role:$role", false).get(researchId).toString())
+            assertEquals(sourceBefore, ReadingRoom(context, role).versions(sourceId, "source").toString())
+            assertEquals(91L, researchBoard.get(researchId).getLong("history_total"))
             val foundationHistory = InternalStateStore(context).inspectCategory(role, second, "foundation_history", foundationId, 0)
             assertEquals(1, foundationHistory.getJSONArray("items").length())
             assertEquals(original, item("dream", id).toString())

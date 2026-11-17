@@ -15,9 +15,13 @@ object TaskEvents {
         }
     }
     fun recover(board: TaskBoard) {
-        board.list().filter { it.optJSONObject("dispatch")?.optString("state") == "running" }.forEach {
-            board.dispatchState(it.getString("id"), it.getJSONObject("dispatch").getString("id"),
-                "interrupted", "上次运行被中断，请查看实际进展后再提交，避免重复执行")
+        while (true) {
+            val page = board.running()
+            if (page.isEmpty()) break
+            page.forEach {
+                board.dispatchState(it.getString("id"), it.getJSONObject("dispatch").getString("id"),
+                    "interrupted", "上次运行被中断，请查看实际进展后再提交，避免重复执行")
+            }
         }
     }
     suspend fun nextPrivate(context: Context): Work? {

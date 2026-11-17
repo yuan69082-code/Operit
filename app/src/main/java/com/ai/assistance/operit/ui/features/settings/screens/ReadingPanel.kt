@@ -46,10 +46,27 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
     var loadError by remember { mutableStateOf("") }
     var reload by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
-    LaunchedEffect(role, revision, reload) {
+    var archive by remember(role) { mutableStateOf(false) }
+    var queueOffset by remember(role) { mutableIntStateOf(0) }
+    var historyOffset by remember(role) { mutableIntStateOf(0) }
+    var sourceOffset by remember(role) { mutableIntStateOf(0) }
+    var retainedOffset by remember(role) { mutableIntStateOf(0) }
+    var pages by remember(role) { mutableStateOf(emptyMap<String, JSONObject>()) }
+    var retained by remember(role) { mutableStateOf(emptyList<JSONObject>()) }
+    LaunchedEffect(filter) { queueOffset = 0; historyOffset = 0; sourceOffset = 0; retainedOffset = 0 }
+    LaunchedEffect(role, revision, reload, queueOffset, historyOffset, sourceOffset, retainedOffset, filter) {
         loading = true
         try {
-            val records = withContext(Dispatchers.IO) { listOf(reading.entries(), reading.entries(true), room.diaries(), reading.sources()) }
+            val records = withContext(Dispatchers.IO) {
+                archive = reading.usesArchive
+                if (archive) {
+                    pages = mapOf("queue" to reading.entryPage("queue", queueOffset, filter), "history" to reading.entryPage("history", historyOffset, filter),
+                        "sources" to reading.sourcePage(sourceOffset, filter), "retained" to reading.entryPage("retained", retainedOffset, filter))
+                    fun items(key: String) = pages.getValue(key).getJSONArray("items").let { rows -> (0 until rows.length()).map { rows.getJSONObject(it) } }
+                    retained = items("retained")
+                    listOf(items("queue"), items("history"), room.diaries(), items("sources"))
+                } else listOf(reading.entries(), reading.entries(true), room.diaries(), reading.sources())
+            }
             queued = records[0]; history = records[1]; diaries = records[2]; sources = records[3]
             loadError = ""
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -87,6 +104,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
           "资料" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { LibraryPanel(role, revision = revision) }
           "关注来源" -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
               ReadingSources(reading, chat, sources, sourceId, { sourceId = it }, title, { title = it }, address, { address = it }, kind, { kind = it }, hours, { hours = it }, work)
+              if (archive) ReadingPager(pages["sources"], sourceOffset) { sourceOffset = it }
           }
           else -> {
             if (add) {
@@ -99,15 +117,23 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
                     TextButton(onClick = { add = false }) { Text("取消添加") }
                 }
             }
-            fun matching(items: List<JSONObject>) = items.filter { item -> listOf("title", "url", "date", "preview", "summary", "body", "note", "user_note").any { item.optString(it).contains(filter, true) } }
+            fun matching(items: List<JSONObject>) = if (archive && items !== diaries) items else items.filter { item -> listOf("title", "url", "date", "preview", "summary", "body", "note", "user_note").any { item.optString(it).contains(filter, true) } }
             BookshelfLayer("日记", matching(diaries), if (filter.isBlank()) "还没有写下日记。想记的时候，这里会留一本书。" else "没有找到相符的日记", diary = true) { item ->
                 work { val record = room.diary(item.getString("id")); withContext(Dispatchers.Main) { diary = record } }
             }
             BookshelfLayer("待读", matching(queued), if (filter.isBlank()) "想读的线索放在这一层。可以添加链接，或让助手在探索时收集。" else "没有找到相符的待读") { item ->
                 work { val record = reading.entry(item.getString("id")); withContext(Dispatchers.Main) { selected = record } }
             }
+            if (archive) ReadingPager(pages["queue"], queueOffset) { queueOffset = it }
             BookshelfLayer("已读", matching(history), if (filter.isBlank()) "读过的材料与保存过批注的书，会留在这一层。" else "没有找到相符的已读") { item ->
                 work { val record = reading.entry(item.getString("id")); withContext(Dispatchers.Main) { selected = record } }
+            }
+            if (archive) {
+                ReadingPager(pages["history"], historyOffset) { historyOffset = it }
+                BookshelfLayer("已移出待读的线索", retained, "没有到期或跳过的线索；原文会保留，不自动标成已读。") { item ->
+                    work { val record = reading.entry(item.getString("id")); withContext(Dispatchers.Main) { selected = record } }
+                }
+                ReadingPager(pages["retained"], retainedOffset) { retainedOffset = it }
             }
             if (searching) Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 LibraryPanel(role, query = filter, revision = revision)
@@ -126,6 +152,7 @@ internal fun ReadingPanel(role: String, chat: String, name: String, revision: Lo
                 source = { work { withContext(Dispatchers.Main) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(item.getString("url"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } },
                 saveNote = { note -> work { val record = reading.note(item.getString("id"), note, false); withContext(Dispatchers.Main) { selected = record } } },
                 skip = { work { reading.skip(item.getString("id")); withContext(Dispatchers.Main) { selected = null } } })
+            if (archive) ReadingVersions(reading, item.getString("id"), "entry")
         }
     } }
     if (editingDiary) DiaryEditor(room, chat, diary, work, { editingDiary = false }, { saved -> diary = saved; editingDiary = false })
@@ -151,6 +178,7 @@ private fun ReadingSources(reading: ReadingRoom, chat: String, sources: List<JSO
             Text(item.getString("address"), maxLines = 3)
             item.optString("parent").takeIf { it.isNotBlank() }?.let { p -> sources.firstOrNull { it.getString("id") == p }?.let { Text("延伸自：${it.getString("title")}", style = MaterialTheme.typography.bodySmall) } }
             item.optString("progress").takeIf { it.isNotBlank() }?.let { Text("进度：$it", style = MaterialTheme.typography.bodySmall, maxLines = 6) }
+            ReadingVersions(reading, item.getString("id"), "source")
             RoomSwitch("关注", item.optBoolean("enabled")) { enabled -> work { reading.saveSource(item.getString("id"), item.getString("title"), item.getString("kind"), item.getString("address"), item.getInt("hours"), enabled) } }
             Row {
                 if (item.getString("kind") == "rss") TextButton(enabled = item.optBoolean("enabled"), onClick = { work { reading.refresh(item.getString("id"), false, chat) } }) { Text("现在刷新") }
@@ -165,4 +193,46 @@ private fun ReadingSources(reading: ReadingRoom, chat: String, sources: List<JSO
         OutlinedTextField(hours, setHours, label = { Text("检查间隔，1–168小时") })
         Button(onClick = { work { reading.saveSource(sourceId, title, kind, address, hours.toInt(), true); withContext(Dispatchers.Main) { setId(null); setTitle(""); setAddress("") } } }) { Text("保存关注") }
 
+}
+
+@Composable
+private fun ReadingPager(page: JSONObject?, offset: Int, change: (Int) -> Unit) {
+    if (page == null) return
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Text("共 ${page.getLong("total")} 条 · 第 ${offset / 20 + 1} 页", Modifier.weight(1f))
+        TextButton(enabled = offset > 0, onClick = { change(maxOf(0, offset - 20)) }) { Text("上一页") }
+        TextButton(enabled = !page.isNull("next_offset"), onClick = { change(page.getInt("next_offset")) }) { Text("下一页") }
+    }
+}
+
+@Composable
+private fun ReadingVersions(reading: ReadingRoom, id: String, kind: String) {
+    var expanded by remember(id) { mutableStateOf(false) }
+    var offset by remember(id) { mutableIntStateOf(0) }
+    var page by remember(id) { mutableStateOf<JSONObject?>(null) }
+    var error by remember(id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(id, expanded, offset) {
+        if (expanded) try { page = withContext(Dispatchers.IO) { reading.versions(id, kind, offset) }; error = null }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { error = failure.message }
+    }
+    TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起变化记录" else "查看进度与随记的旧版本") }
+    if (expanded) {
+        error?.let { Text("读取失败：$it", color = MaterialTheme.colorScheme.error) }
+        page?.let { data ->
+            data.optString("notice").takeIf { it.isNotBlank() }?.let { Text(it) }
+            val rows = data.getJSONArray("history")
+            for (i in 0 until rows.length()) {
+                val version = rows.getJSONObject(i); val record = version.getJSONObject("record")
+                Text("第 ${version.getLong("revision")} 版 · ${bookDate(version.getLong("recorded_at"))}" + if (version.optBoolean("legacy_import")) " · 旧内容承接，非历史形成时间" else "")
+                listOf("progress" to "学习进度", "note" to "助手随记", "user_note" to "你的批注").forEach { (field, label) ->
+                    if (record.has(field)) Text("$label：${record.optString(field)}")
+                }
+            }
+            Row {
+                TextButton(enabled = offset > 0, onClick = { offset = maxOf(0, offset - 5) }) { Text("较新版本") }
+                TextButton(enabled = !data.isNull("next_history_offset"), onClick = { offset = data.getInt("next_history_offset") }) { Text("更早版本") }
+            }
+        }
+    }
 }

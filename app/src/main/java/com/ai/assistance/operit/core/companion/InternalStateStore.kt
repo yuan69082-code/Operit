@@ -628,7 +628,7 @@ class InternalStateStore(private val context: Context) {
                 InternalStateEngine.advance(data, chat, now)
             }
             val selected = InternalStateSelection.select(data, chat, now, selectionInput,
-                candidates(data, actor, chat, wake, capabilities), ThoughtPool.selected(context, actor, data.optLong("material_query_cursor")), inputEventId)
+                candidates(data, actor, chat, wake, capabilities, selectionInput), ThoughtPool.selected(context, actor, data.optLong("material_query_cursor")), inputEventId)
             var frame = requestId?.let {
                 InternalStateFrame(id = "state-frame:$it", roleId = actor, chatId = chat,
                     revision = InternalStateEngine.semanticRevision(data), at = now,
@@ -798,7 +798,7 @@ class InternalStateStore(private val context: Context) {
         return sections
     }
 
-    private fun candidates(data: JSONObject, actor: String, chat: String, wake: Boolean, capabilities: JSONObject): List<JSONObject> {
+    private fun candidates(data: JSONObject, actor: String, chat: String, wake: Boolean, capabilities: JSONObject, input: String): List<JSONObject> {
         val exploration = ExplorationStore(context).enabled(actor)
         fun candidate(action: String, id: String, title: String, next: String, available: Boolean = true) =
             JSONObject().put("action", action).put("id", id).put("title", title).put("next", next).put("available", available)
@@ -811,11 +811,11 @@ class InternalStateStore(private val context: Context) {
             candidate("defer", "defer", "暂缓意向", "可暂停待办、沉下念头或暂停探索"),
             candidate("drop", "drop", "放下意向", "检查理由后归档事项或放下念头"),
             candidate("rest", "rest", "休息", "允许本轮不采取行动"))
-        store.todos(store.scope(chat, actor)).filter { it.optString("status") !in setOf("done", "archived") }
+        store.withResearch(actor) { it.researchMaterials("task", data.optLong("material_query_cursor"), input) }
             .forEach {
                 candidates.add(com.ai.assistance.operit.core.tasks.TaskRecords.material(it).put("action", "todo").put("available", true))
             }
-        ReadingRoom(context, actor).sources().filter { it.optBoolean("enabled") }.forEach {
+        store.withResearch(actor) { it.researchMaterials("source", data.optLong("material_query_cursor"), input) }.forEach {
             candidates.add(JSONObject(it.toString()).put("action", "explore").put("available", exploration)
                 .put("next", if (wake && !CompanionRuntime.isExplorationWake(chat))
                     "预约独立探索后继续：${it.optString("progress")}" else it.optString("progress")))

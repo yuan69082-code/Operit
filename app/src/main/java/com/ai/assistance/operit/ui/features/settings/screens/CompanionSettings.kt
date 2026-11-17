@@ -124,9 +124,9 @@ private fun AssistantSpaceOverview(role: String?, navigate: (AssistantSpacePage)
         if (role != null) try {
             counts = withContext(Dispatchers.IO) { listOf(
                 AssistantRoom(context, role).diaries().size,
-                ReadingRoom(context, role).entries().size,
+                ReadingRoom(context, role).entryPage("queue").getLong("total").toInt(),
                 store.entries("role:$role").size,
-                TaskBoard(context, "role:$role", false).list().count { it.optString("status") !in setOf("done", "archived") }
+                TaskBoard(context, "role:$role", false).countOpen().toInt()
             ) }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { error = "概览读取失败：${failure.message}" }

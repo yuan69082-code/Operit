@@ -189,10 +189,12 @@ object CompanionTools {
                             }
                             val offset = value(tool, "offset")?.toInt() ?: 0
                             require(offset >= 0)
-                            val todos = board.list()
                             if (action == "get") board.get(required(tool, "id"), offset)
-                            else JSONObject().put("total", todos.size).put("todos", JSONArray(todos.drop(offset).take(20).map { com.ai.assistance.operit.core.tasks.TaskRecords.brief(it) }))
-                                .put("next_offset", if (offset + 20 < todos.size) offset + 20 else JSONObject.NULL)
+                            else board.page(offset).let { page ->
+                                val rows = page.getJSONArray("items")
+                                JSONObject().put("total", page.getLong("total")).put("todos", JSONArray((0 until rows.length()).map { com.ai.assistance.operit.core.tasks.TaskRecords.brief(rows.getJSONObject(it)) }))
+                                    .put("next_offset", page.get("next_offset"))
+                            }
                                 .also { result -> savedItem?.let { saved ->
                                     // The changed row can be outside this page. Without its ID and
                                     // saved dispatch, a subsequent submit cannot target/verify it.

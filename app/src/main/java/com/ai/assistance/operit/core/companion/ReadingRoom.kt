@@ -23,18 +23,64 @@ class ReadingRoom(private val context: Context, private val role: String) {
     private val store = CompanionStore(context)
     private val scope = "reading:$role"
     init { require(role.isNotBlank()) }
-    fun sources() = store.read(scope).optJSONArray("sources").objects()
-    fun entries(history: Boolean = false): List<JSONObject> {
+    val usesArchive get() = store.researchActive(role)
+    fun sources(offset: Int = 0): List<JSONObject> = if (usesArchive) sourcePage(offset).getJSONArray("items").objects()
+        else store.read(scope).optJSONArray("sources").objects()
+    fun sourcePage(offset: Int = 0, query: String = ""): JSONObject {
+        val page = if (usesArchive) store.withResearch(role) { it.researchPage("source", offset, query = query) }
+            else legacyPage(sources().filter { query.isBlank() || it.toString().contains(query, true) }, offset)
+        page.getJSONArray("items").objects().forEach { it.put("due", it.optBoolean("enabled") && it.optLong("checked") + it.getInt("hours") * 3_600_000L <= System.currentTimeMillis()) }
+        return page
+    }
+    fun entries(history: Boolean = false, offset: Int = 0): List<JSONObject> {
+        if (usesArchive) return entryPage(if (history) "history" else "queue", offset).getJSONArray("items").objects()
         val now = System.currentTimeMillis()
         return store.read(scope).optJSONArray("entries").objects().filter {
             if (history) it.optString("state") in setOf("read", "saved") else it.optString("state") == "queued" && it.optLong("expires") > now
         }.sortedByDescending { it.optLong("added") }
     }
-    fun saveSource(id: String?, title: String, kind: String, address: String, hours: Int, enabled: Boolean, parent: String? = null): JSONObject {
+    fun entryPage(state: String, offset: Int = 0, query: String = ""): JSONObject {
+        require(state in setOf("queue", "history", "retained"))
+        if (usesArchive) return store.withResearch(role) { it.researchPage("entry", offset, state = state, query = query) }
+        return legacyPage((if (state == "retained") emptyList() else entries(state == "history")).filter { query.isBlank() || it.toString().contains(query, true) }, offset)
+    }
+    private fun legacyPage(rows: List<JSONObject>, offset: Int): JSONObject {
+        require(offset >= 0)
+        return JSONObject().put("items", JSONArray(rows.drop(offset).take(20))).put("total", rows.size)
+            .put("next_offset", if (offset + 20 < rows.size) offset + 20 else JSONObject.NULL)
+    }
+    fun source(id: String): JSONObject = if (usesArchive) store.withResearch(role) { it.researchRow("source", id) ?: error("来源不存在") }
+        else sources().firstOrNull { it.getString("id") == id } ?: error("来源不存在")
+    fun versions(id: String, kind: String, offset: Int = 0): JSONObject {
+        require(kind in setOf("source", "entry"))
+        if (!usesArchive) return JSONObject().put("history", JSONArray()).put("history_total", 0).put("next_history_offset", JSONObject.NULL).put("notice", "旧版本未留存，不补造过去的进度或随记")
+        return store.withResearch(role) { check(it.researchRow(kind, id) != null) { "资料不存在" }; it.researchHistory(kind, id, offset) }
+    }
+    private fun changeEntry(id: String, edit: (JSONObject) -> Unit): JSONObject = if (usesArchive) store.withResearch(role) {
+        val row = it.researchRow("entry", id) ?: error("资料不存在或不属于当前助手")
+        edit(row); it.researchWrite("entry", row)
+    } else store.update("reading-entry:$role:$id", edit)
+    fun saveSource(id: String?, title: String, kind: String, address: String, hours: Int, enabled: Boolean, parent: String? = null, actor: String = "user"): JSONObject {
         require(title.length in 1..160 && hours in 1..168 && kind in setOf("rss", "topic")) { "请填写来源名称、类型和1–168小时的间隔" }
         require(address.length in 2..1500)
         if (kind == "rss") address.toHttpUrl().also { require(it.scheme in setOf("http", "https") && it.username.isEmpty() && it.password.isEmpty()) }
         val sourceId = id ?: UUID.randomUUID().toString()
+        if (usesArchive) return store.withResearch(role) { archive ->
+            val old = archive.researchRow("source", sourceId)
+            require(id == null || old != null) { "来源不存在" }
+            val result = old ?: JSONObject().put("id", sourceId).put("checked", 0L)
+            val origin = parent?.takeIf { it.isNotBlank() } ?: result.optString("parent").takeIf { it.isNotBlank() }
+            if (origin != null) {
+                if (origin.startsWith("chat:")) {
+                    require(BranchSprout.validOrigin(origin)) { "聊天来源写成 chat:YYYY-MM-DD" }
+                    if (kind == "topic") BranchSprout.privacyProblem(address)?.let { throw IllegalArgumentException(it) }
+                } else require(origin != sourceId && archive.researchRow("source", origin) != null) { "延伸自的来源不存在" }
+                result.put("parent", origin)
+            }
+            result.put("title", title).put("kind", kind).put("address", address).put("hours", hours).put("enabled", enabled)
+                .put("updated", System.currentTimeMillis()).put("updated_by", actor)
+            archive.researchWrite("source", result).also { AssistantRoom.revision.updateValue() }
+        }
         lateinit var result: JSONObject
         store.update(scope) { data ->
             val sources = data.optJSONArray("sources").objects().toMutableList()
@@ -72,18 +118,20 @@ class ReadingRoom(private val context: Context, private val role: String) {
         require(keep in 1..30) { "待读有效期须为1–30天" }
         val normalized = if (hyThread != null) "hy:thread:${hyThread.groupValues[1]}" else url.toHttpUrl().newBuilder().fragment(null).build().toString()
         val id = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray()).joinToString("") { "%02x".format(it) }
-        val existing = store.read("reading-entry:$role:$id")
+        val existing = if (usesArchive) store.withResearch(role) { it.researchRow("entry", id) ?: JSONObject() } else store.read("reading-entry:$role:$id")
         if (existing.has("id")) return@synchronized existing
         val now = System.currentTimeMillis()
         val result = JSONObject().put("id", id).put("owner", role).put("title", title).put("url", normalized)
             .put("summary", summary).put("source", if (hyThread != null) FORUM else source).put("added", now).put("expires", now + keep * 86_400_000L)
             .put("state", "queued").put("material", "summary").put("note", "")
-        store.update("reading-entry:$role:$id") { data -> result.keys().forEach { data.put(it, result.get(it)) } }
+        if (usesArchive) store.withResearch(role) { it.researchWrite("entry", result) }
+        else store.update("reading-entry:$role:$id") { data -> result.keys().forEach { data.put(it, result.get(it)) } }
         index(result)
         return@synchronized result
     }
 
     private fun index(entry: JSONObject) {
+        if (usesArchive) { AssistantRoom.revision.updateValue(); return }
         store.update(scope) { data ->
             val old = data.optJSONArray("entries").objects().filter { it.getString("id") != entry.getString("id") }
             val brief = JSONObject(entry.toString()).also { it.remove("body"); it.remove("page_blocks"); it.remove("summary"); it.remove("note"); it.remove("receipts") }
@@ -95,13 +143,14 @@ class ReadingRoom(private val context: Context, private val role: String) {
         }
         AssistantRoom.revision.updateValue()
     }
-    fun entry(id: String): JSONObject = store.read("reading-entry:$role:$id").also { check(it.has("id")) { "资料不存在或不属于当前助手" } }
+    fun entry(id: String): JSONObject = (if (usesArchive) store.withResearch(role) { it.researchRow("entry", id) ?: JSONObject() }
+        else store.read("reading-entry:$role:$id")).also { check(it.has("id")) { "资料不存在或不属于当前助手" } }
     fun open(id: String, part: String, ai: Boolean): JSONObject = synchronized(lock) {
         require(part in setOf("summary", "body"))
         val data = entry(id)
         check(data.has(part)) { "尚未取得正文，请先 fetch；当前只有来源摘要" }
         if (ai) {
-            store.update("reading-entry:$role:$id") {
+            changeEntry(id) {
                 val level = if (part == "summary" && it.optString("delivered") == "partial") "partial"
                     else if (part == "summary") "summary" else it.getString("material")
                 it.put("delivered", level).put("delivered_at", System.currentTimeMillis())
@@ -116,20 +165,26 @@ class ReadingRoom(private val context: Context, private val role: String) {
         require(text.length <= 6000)
         val data = entry(id)
         if (ai) check(data.has("delivered_at")) { "先打开实际材料，再记录自己的随记" }
-        store.update("reading-entry:$role:$id") {
+        changeEntry(id) {
             // User annotations are separate from the assistant's own reading reflection.
             val now = System.currentTimeMillis()
             it.put(if (ai) "note" else "user_note", text).put("state", "saved").put("noted_at", now)
                 .put(if (ai) "ai_note_at" else "user_note_at", now)
+            if (usesArchive) it.put("updated_by", if (ai) role else "user")
         }.also { index(it) }
     }
     fun skip(id: String) = synchronized(lock) {
         check(entry(id).optString("state") == "queued") { "已读材料与随记保留在历史中，无需从待读移开" }
-        store.update("reading-entry:$role:$id") { it.put("state", "skipped") }.also { index(it) }
+        changeEntry(id) { it.put("state", "skipped") }.also { index(it) }
     }
-    /** 自己写的学习进度：学到哪了、下一步想看什么。覆盖写，只保留最新一份。 */
+    /** Current progress is separate from immutable versions for migrated continuous assistants. */
     fun progress(id: String, text: String): JSONObject {
         require(text.isNotBlank() && text.length <= 2000) { "进度须为1–2000字" }
+        if (usesArchive) return store.withResearch(role) { archive ->
+            val source = archive.researchRow("source", id) ?: error("来源不存在")
+            source.put("progress", text).put("progress_at", System.currentTimeMillis()).put("updated", System.currentTimeMillis()).put("updated_by", role)
+            archive.researchWrite("source", source).also { AssistantRoom.revision.updateValue() }
+        }
         lateinit var result: JSONObject
         store.update(scope) { data ->
             val sources = data.optJSONArray("sources").objects()
@@ -141,6 +196,13 @@ class ReadingRoom(private val context: Context, private val role: String) {
         AssistantRoom.revision.updateValue(); return result
     }
     fun checked(id: String) {
+        if (usesArchive) {
+            store.withResearch(role) { archive ->
+                val source = archive.researchRow("source", id) ?: error("来源不存在")
+                source.put("checked", System.currentTimeMillis()); archive.researchWrite("source", source)
+            }
+            return
+        }
         store.update(scope) { data ->
             val sources = data.optJSONArray("sources").objects()
             val source = sources.firstOrNull { it.getString("id") == id } ?: error("来源不存在")
@@ -148,7 +210,8 @@ class ReadingRoom(private val context: Context, private val role: String) {
             data.put("sources", JSONArray(sources))
         }
     }
-    fun due() = sources().filter { it.optBoolean("enabled") && it.optLong("checked") + it.getInt("hours") * 3_600_000L <= System.currentTimeMillis() }
+    fun due() = if (usesArchive) store.withResearch(role) { it.researchPage("source", 0, state = "enabled", due = System.currentTimeMillis()).getJSONArray("items").objects() }
+        else sources().filter { it.optBoolean("enabled") && it.optLong("checked") + it.getInt("hours") * 3_600_000L <= System.currentTimeMillis() }
 
     private fun authorizeNetwork(ai: Boolean, chat: String) {
         if (!ai || !CompanionRuntime.isExplorationWake(chat)) return
@@ -157,7 +220,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
     }
     suspend fun refresh(id: String, ai: Boolean, chat: String): JSONObject = withContext(Dispatchers.IO) {
         authorizeNetwork(ai, chat)
-        val source = sources().firstOrNull { it.getString("id") == id } ?: error("来源不存在")
+        val source = source(id)
         check(source.optBoolean("enabled") && source.getString("kind") == "rss") { "此来源已暂停或是需要通过搜索工具探索的话题" }
         val (url, xml) = download(source.getString("address"))
         currentCoroutineContext().ensureActive()
@@ -188,7 +251,7 @@ class ReadingRoom(private val context: Context, private val role: String) {
         val body = ReadingPage.text(blocks)
         check(body.isNotBlank()) { "网页未提供可读取的正文" }
         synchronized(lock) {
-            store.update("reading-entry:$role:$id") {
+            changeEntry(id) {
                 // A parsed page may omit dynamic/paywalled content; never label the original work fully read.
                 it.put("body", body).put("page_blocks", blocks).put("material", "partial").put("fetched", System.currentTimeMillis()).put("resolved_url", url)
             }
