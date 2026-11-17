@@ -68,9 +68,40 @@ class SubjectRecallArchiveTest {
             write(archive, *(0 until 700).map { n -> row("r$n", "星空 " + (0..40).joinToString(" ") { "term${n}_$it" }) }.toTypedArray())
             assertTrue(archive.relevantSubjectRows("feedback", "term699_40", "chat", 4).any { it.getString("id") == "r699" })
             val field = InternalStateArchive::class.java.getDeclaredField("recallCache").apply { isAccessible = true }
-            assertFalse((field.get(null) as Map<*, *>).containsKey(Triple(file.absolutePath, "large-owner", "feedback")))
+            val subject = (field.get(null) as Map<*, *>)[file.absolutePath to "large-owner"] as? Map<*, *>
+            assertFalse(subject?.containsKey("feedback") == true)
             assertEquals(700L, archive.categoryCount("feedback", "private"))
             assertNotNull(archive.categoryRow("feedback", "r0"))
+        }
+    }
+
+    @Test fun sixCurrentDomainsDoNotEvictEachOtherAndSharedWeightRemainsBounded() {
+        val file = File(temporary.newFolder(), "six-domains.sqlite")
+        InternalStateArchive(file, "owner").use { archive ->
+            SubjectRecall.kinds.forEach { kind -> write(archive,
+                row("$kind-current", "星空与方法", kind = kind)) }
+            val field = InternalStateArchive::class.java.getDeclaredField("recallCache").apply { isAccessible = true }
+            fun cached() = ((field.get(null) as Map<*, *>)[file.absolutePath to "owner"] as Map<*, *>).toMap()
+            SubjectRecall.kinds.forEach { kind ->
+                assertEquals(1, archive.relevantSubjectRows(kind, "星空", "chat", 4).size)
+            }
+            val first = cached()
+            assertEquals(SubjectRecall.kinds, first.keys)
+            SubjectRecall.kinds.forEach { archive.relevantSubjectRows(it, "方法", "chat", 4) }
+            val second = cached()
+            first.forEach { (kind, index) -> assertSame(index, second[kind]) }
+            // Several individually small indexes must share one subject allowance.
+            SubjectRecall.kinds.forEach { kind ->
+                write(archive, *(0 until 150).map { n -> row("$kind-$n",
+                    (0..40).joinToString(" ") { "term${n}_$it" }, kind = kind) }.toTypedArray())
+                assertTrue(archive.relevantSubjectRows(kind, "term149_40", "chat", 4).isNotEmpty())
+            }
+            val weight = cached().values.sumOf { index ->
+                index!!.javaClass.getDeclaredField("weight").apply { isAccessible = true }.getLong(index)
+            }
+            assertTrue(weight <= 1_048_576L)
+            assertTrue((field.get(null) as Map<*, *>).size <= 4)
+            SubjectRecall.kinds.forEach { assertEquals(151L, archive.categoryCount(it, "private")) }
         }
     }
 

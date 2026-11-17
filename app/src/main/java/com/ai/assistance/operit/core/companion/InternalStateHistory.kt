@@ -350,8 +350,8 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val database = db()
         val revision = database.rawQuery("SELECT COUNT(*),COALESCE(MAX(rowid),0) FROM category_current WHERE scope=? AND kind=?",
             arrayOf(scope, kind)).use { c -> c.moveToFirst(); c.getLong(0) to c.getLong(1) }
-        val key = Triple(file.absolutePath, scope, kind)
-        val cached = synchronized(recallCache) { recallCache[key]?.takeIf { it.revision == revision } }
+        val key = file.absolutePath to scope
+        val cached = synchronized(recallCache) { recallCache[key]?.get(kind)?.takeIf { it.revision == revision } }
         val ids = if (cached != null) SubjectRecall.ranked(cached.entries.asSequence(), input, chat, limit) else {
             val entries = mutableListOf<SubjectRecall.Entry>()
             var weight = 0L
@@ -374,7 +374,16 @@ internal class InternalStateArchive(private val file: File, private val scope: S
                 SubjectRecall.ranked(stream, input, chat, limit)
             }
             synchronized(recallCache) {
-                if (retain) recallCache[key] = RecallIndex(revision, entries.toList()) else recallCache.remove(key)
+                if (retain) {
+                    val subject = recallCache.getOrPut(key) { LinkedHashMap(8, 0.75f, true) }
+                    subject[kind] = RecallIndex(revision, entries.toList(), weight)
+                    // Six small domains must not evict one another merely because they
+                    // were read in one request. Keep the old aggregate four-MiB weight
+                    // bound, grouped by subject, with an LRU within each subject too.
+                    while (subject.values.sumOf { it.weight } > INNER_INDEX_CACHE_WEIGHT) {
+                        subject.remove(subject.keys.first())
+                    }
+                } else recallCache[key]?.remove(kind)
             }
             matches
         }
@@ -415,9 +424,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     }
 
     companion object {
-        private data class RecallIndex(val revision: Pair<Long, Long>, val entries: List<SubjectRecall.Entry>)
-        private val recallCache = object : LinkedHashMap<Triple<String, String, String>, RecallIndex>(4, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Triple<String, String, String>, RecallIndex>?) = size > 4
+        private data class RecallIndex(val revision: Pair<Long, Long>, val entries: List<SubjectRecall.Entry>, val weight: Long)
+        private val recallCache = object : LinkedHashMap<Pair<String, String>, LinkedHashMap<String, RecallIndex>>(4, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, String>, LinkedHashMap<String, RecallIndex>>?) = size > 4
         }
         private const val INNER_INDEX_CACHE_WEIGHT = 1_048_576L
         private data class InnerSearchIndex(val revision: Pair<Long, Long>, val entries: List<InnerMaterialSelection.Entry>)

@@ -68,6 +68,9 @@ class SubjectGrowthFlowTest {
             AssistantWindowRouter.selected(f.app, f.role, f.chat)
             ExplorationStore(f.app).configure(f.role, true, setOf("reading"), 12)
             assertFalse(ExplorationStore(f.app).read(f.role).has("at"))
+            // The ordinary scheduler applies the existing continuity boundary without
+            // inventing work. Enabling exploration alone must remain quiet.
+            assertNull(ExplorationStore(f.app).next())
             val errors = CopyOnWriteArrayList<String>()
             val completed = AtomicInteger()
             val delegate = f.delegate(errors, completed)
@@ -76,6 +79,7 @@ class SubjectGrowthFlowTest {
             var taskId = ""
             var resultSource = ""
             var resultQuote = ""
+            val calculations = mutableListOf<String>()
             val board = TaskBoard(f.app, "role:" + f.role, false)
             var proposal: JSONObject? = null
             f.output = { _, frame ->
@@ -104,7 +108,11 @@ class SubjectGrowthFlowTest {
                         else -> emit("<companion_quiet/>" + tagged(report(frame)))
                     }
                     3 -> when (step) {
-                        1 -> emit(tool("calculate", "expression" to "(1+2+3+100)/4"))
+                        1 -> emit(tool("calculate", "expression" to "(1+2+3+100)/4",
+                            "__operit_action" to JSONObject().put("decision", "先检验已保留研究方向的样本均值")
+                                .put("intention_refs", JSONArray().put(JSONObject().put("kind", "decision")
+                                    .put("id", "research").put("version", 1)))
+                                .put("evidence", JSONArray().put(event(frame))).toString()))
                         2 -> {
                             val receipt = frame.materialSources.entries.map { it.key to JSONObject(it.value) }
                                 .single { (_, material) -> material.optString("type") == "actual_operation" &&
@@ -114,6 +122,7 @@ class SubjectGrowthFlowTest {
                             assertEquals("completed", body.getString("execution"))
                             assertTrue(body.getString("result_excerpt").contains("26.5"))
                             resultQuote = "26.5"
+                            calculations += receipt.second.getJSONObject("locator").getString("action_id")
                             emit(tool("companion_explore", "action" to "schedule", "minutes" to "15",
                                 "purpose" to "把星空异常点经验用于另一组样本，并重新评价方法"))
                         }
@@ -137,12 +146,29 @@ class SubjectGrowthFlowTest {
                     4 -> when (step) {
                         1 -> {
                             assertTrue(frame.materialSources.values.any { it.contains("换一组样本时也比较中位数") })
+                            // A large source-bound candidate is only previewed in the shared
+                            // budget. Read its exact full version through the normal tool before
+                            // adopting; a fragment must never grant adoption on its own.
+                            emit(tool("companion_internal_state", "action" to "get",
+                                "section" to "inner_pending", "id" to "method-v1"))
+                        }
+                        2 -> {
                             assertTrue(frame.innerPending.containsKey("method-v1"))
                             // This tool choice is a simulated model response. The executor really calculates it.
-                            emit(tool("calculate", "expression" to "(11+12)/2"))
+                            emit(tool("calculate", "expression" to "(11+12)/2",
+                                "__operit_action" to JSONObject().put("decision", "用已提供的异常点经验比较另一组样本")
+                                    .put("intention_refs", JSONArray().put(JSONObject().put("kind", "experience")
+                                        .put("id", "sample-comparison").put("version", 1)))
+                                    .put("evidence", JSONArray().put(event(frame))).toString()))
                         }
-                        2 -> emit(tool("companion_explore", "action" to "schedule", "minutes" to "15",
-                            "purpose" to "重新评价星空测量方向与研究方法，核对已经得到的结果"))
+                        3 -> {
+                            val receipt = frame.materialSources.values.map(::JSONObject).single { material ->
+                                material.optString("type") == "actual_operation" && material.getString("text").contains("11.5")
+                            }
+                            calculations += receipt.getJSONObject("locator").getString("action_id")
+                            emit(tool("companion_explore", "action" to "schedule", "minutes" to "15",
+                                "purpose" to "重新评价星空测量方向与研究方法，核对已经得到的结果"))
+                        }
                         else -> {
                             assertTrue(frame.materialSources.values.any { it.contains("11.5") })
                             val pending = InnerStructure.pending(InternalStateStore(f.app).read(f.role)).single { it.getString("id") == "method-v1" }
@@ -193,6 +219,13 @@ class SubjectGrowthFlowTest {
             assertEquals(proposal!!.getJSONObject("record").toString(), InnerStructure.record(state, "sample-method")!!.getJSONObject("content").toString())
             assertEquals("paused", board.get(taskId).getString("status"))
             assertTrue(board.get(taskId).toString().contains("已核对样本"))
+            assertEquals(2, calculations.distinct().size)
+            calculations.forEachIndexed { index, id ->
+                val action = SubjectActions.read(f.app, f.role, f.chat, id, 0).getJSONObject("item")
+                assertEquals("completed", action.getString("status"))
+                assertEquals(if (index == 0) "decision" else "experience", action.getJSONObject("declaration")
+                    .getJSONArray("intention_refs").getJSONObject(0).getString("kind"))
+            }
             assertNull(ExplorationStore(f.app).next(System.currentTimeMillis() + 30L * 86_400_000))
             val actions = SubjectActions.read(f.app, f.role, f.chat, null, 0).getJSONArray("items")
             assertTrue(actions.length() > 0)
