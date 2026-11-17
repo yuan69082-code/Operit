@@ -502,7 +502,7 @@ class InternalStateStore(private val context: Context) {
                 .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
         }
         if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds + LifeUnderstandings.kinds ||
-            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.kinds + LifeUnderstandings.kinds).any { id.orEmpty().startsWith("$it:") }))
+            (kind == "category_versions" && (setOf("decision", "feedback") + SubjectRestDreams.privateKinds + LifeUnderstandings.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
         val data = snapshot(role, chat, false)
         if (kind == "foundation") {
@@ -593,6 +593,11 @@ class InternalStateStore(private val context: Context) {
             // Keep the published static-dream page intact and expose the other archive
             // alongside it, rather than copying process text into a second authority.
             if (kind == "dream") {
+                put("items", JSONArray(getJSONArray("items").objects().map { row -> JSONObject(row.toString()).apply {
+                    put("content", JSONObject(row.getJSONObject("content").toString()).apply { remove("content"); remove("source_bindings") })
+                    put("index_only", true)
+                } }))
+                put("index_only", true)
                 put("participatory_processes", SubjectLife(context).page(role, "dream_process", offset))
                 put("process_retrieval", "get section=dream_process id=过程ID；get section=dream_step id=过程ID offset=0。两种梦均已留存，分别分页，拒答原文不是梦中经历。")
             }

@@ -80,6 +80,8 @@ internal class ParticipatoryDreams(private val context: Context) {
                 session = store.activityWrite(role, "dream_process", work.id, "pending") { requireNotNull(it).put("design", design) }
             }
             val design = session.getJSONObject("design")
+            val interactions = design.optInt("interactions", steps)
+            require(interactions in 1..steps)
             if (!session.has("ingredients")) {
                 val sections = InnerStructureContext.prepare(context, role, work.chat, false, true, input = "梦境当前状态")
                 val seed = JSONObject(sections.state.substringAfter("\n[Internal State 本轮名录与选择]\n"))
@@ -93,15 +95,16 @@ internal class ParticipatoryDreams(private val context: Context) {
             var last = if (cursor > 0) requireNotNull(store.activityRead(role, "dream_step", "${work.id}:${cursor - 1}")).getString("text") else ""
             val scheduledEnd = rest.getJSONObject("content").optLong("until")
             val remaining = if (scheduledEnd > 0) (scheduledEnd - System.currentTimeMillis()).coerceAtLeast(1) else 600_000L
-            var endReason = "planned_steps_reached"
+            var endReason = if (design.has("interactions")) "drawn_rhythm_reached" else "planned_steps_reached"
             withTimeout(minOf(600_000L, remaining)) {
-                while (cursor < steps * 2) {
+                while (cursor < interactions * 2) {
                     ensureActive()
                     if (SubjectLife(context).shouldPauseDream(role, System.currentTimeMillis()))
                         throw CancellationException("已到休息结束条件或有约定的打扰；在梦境步骤边界保存并暂停")
                     val isEnvironment = cursor % 2 == 0
                     val actor = if (isEnvironment) "environment" else "subject"
                     val input = JSONObject().put("dream_design", design).put("previous_fragment", last)
+                    design.optJSONArray("pace")?.let { input.put("pace", it.getString(cursor / 2)) }
                     if (cursor >= 2) input.put("previous_own_fragment",
                         requireNotNull(store.activityRead(role, "dream_step", "${work.id}:${cursor - 2}")).getString("text"))
                     // Shared budget: previous fragments and both material lanes count together.
@@ -119,7 +122,9 @@ internal class ParticipatoryDreams(private val context: Context) {
                             .put("at", System.currentTimeMillis()).put("actor", actor).put("step", cursor)
                             .put("reality", "DREAM_NOT_REALITY")).put("input_hash", InnerStructure.hash(input)).put("input", input)
                             .put("protocol_version", 1).put("model_binding", (if (isEnvironment) environmentBinding else subjectBinding).json())
-                            .put("text", text).put("status", status).apply { if (raw != null) put("raw_response", raw) }
+                            .put("text", text).put("status", status).apply {
+                                if (raw != null) put("raw_response", raw) else if (status == "requested") remove("raw_response")
+                            }
                     }
                     saveStep("", "requested")
                     var latest = ""
@@ -144,6 +149,9 @@ internal class ParticipatoryDreams(private val context: Context) {
                         throw IllegalStateException("梦境模型未参与本步；原始说明已保存，未计作梦境完成")
                     }
                     saveStep(response.text, "completed", visible)
+                    store.activityWrite(role, "dream_process", work.id, "pending") {
+                        requireNotNull(it).put("index_text", response.text.take(120))
+                    }
                     cursor++
                     saveProcess("running", cursor)
                     last = response.text
@@ -163,27 +171,10 @@ internal class ParticipatoryDreams(private val context: Context) {
     }
 
     companion object {
-        fun materials(context: Context, role: String): List<JSONObject> {
-            val store = CompanionStore(context)
-            return store.activityQueuePage(role, "dream_process", listOf("pending", "ready"),
-                (InternalStateStore(context).read(role).optLong("material_query_cursor") %
-                    ((store.activityCount(role, "dream_process", "pending") + store.activityCount(role, "dream_process", "ready") + 1) / 2).coerceAtLeast(1) * 2).toInt())
-                .take(2).map { session ->
-                val nextIndex = session.optInt("next_step")
-                val partial = store.activityRead(role, "dream_step", "${session.getString("id")}:$nextIndex")
-                    ?.takeIf { it.optString("status") == "completed" && it.optString("text").isNotBlank() }
-                val fragment = partial ?: if (nextIndex > 0) store.activityRead(role, "dream_step", "${session.getString("id")}:${nextIndex - 1}")?.takeIf { it.optString("status") == "completed" } else null
-                JSONObject().put("id", "material:dream_process:${session.getString("id")}:${session.getInt("version")}")
-                    .put("type", "dream_not_reality").put("owner", role).put("author", role).put("at", session.getLong("at"))
-                    .put("text", JSONObject().put("process_status", session.getString("status"))
-                        .put("end_reason", session.optString("end_reason")).put("design", session.optJSONObject("design") ?: JSONObject.NULL)
-                        .put("fragment_status", fragment?.optString("status") ?: "not_recorded")
-                        .put("fragment", fragment?.optString("text")?.take(800) ?: JSONObject.NULL)
-                        .put("fragment_actor", fragment?.optString("actor") ?: JSONObject.NULL)
-                        .put("instruction", "仅completed步骤是已生成的梦中内容；environment是环境，subject才是主体参与。失败或拒答说明不是梦境经历。醒后可写<waking_note>自然随记</waking_note>，允许记不清或只有余波，不补造故事。完整过程按dream_step分页读取。").toString())
-                    .put("status", "retrieved").put("not_new_occurrence", true).put("subject_private_material", true)
-                    .put("locator", JSONObject().put("kind", "dream_process").put("id", session.getString("id")).put("version", session.getInt("version")))
-            }
+        fun materials(context: Context, role: String, input: String = "", chat: String = ""): List<JSONObject> {
+            val data = InternalStateStore(context).read(role)
+            return SubjectRecall.selected(data, "dream_process", input, chat, data.optLong("material_query_cursor") * 2)
+                .take(2).map { DreamShelf.index(it) }
         }
     }
 }

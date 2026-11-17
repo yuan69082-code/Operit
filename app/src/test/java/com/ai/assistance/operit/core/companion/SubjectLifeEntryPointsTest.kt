@@ -126,6 +126,10 @@ class SubjectLifeEntryPointsTest {
         .put("actor", if (JSONObject(raw).has("subject_material")) "subject" else "environment")
         .put("outcome", outcome).put("text", text).toString()
 
+    private fun fullLength(plan: JSONObject): kotlin.random.Random = kotlin.random.Random((0..1000).first {
+        DreamDesign.draw(plan, kotlin.random.Random(it)).getInt("interactions") == plan.getInt("steps")
+    })
+
     @Test fun dreamAlternatesEnvironmentAndSubjectWithoutRealToolsAndReachesLaterRequest() = runBlocking {
         adopt(rest(JSONObject().put("steps", 2).put("tone", "复杂恐惧").put("form", "跳跃")))
         val work = requireNotNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
@@ -139,7 +143,7 @@ class SubjectLifeEntryPointsTest {
             val response = dreamResponse(raw, text)
             partial(response)
             response
-        })
+        }, random = fullLength(JSONObject(work.text)))
         assertEquals(4, requests.size)
         assertEquals("眼前是一道没见过的门，里面传来不确定的声音。", requests[2].second.getString("previous_own_fragment"))
         assertEquals("我先走近看看，同时仍有些犹豫。", requests[2].second.getString("previous_fragment"))
@@ -152,7 +156,7 @@ class SubjectLifeEntryPointsTest {
         assertEquals("DREAM_NOT_REALITY", stored.getString("reality"))
         InternalStateStore(context).materialBudget(role, chat, 16384)
         val later = InnerStructureContext.prepare(context, role, chat, true, input = "醒来后想接上之前的事")
-        assertTrue(later.state.contains("dream_not_reality"))
+        assertTrue(later.state.contains("dream_index"))
         assertEquals(0, InternalStateStore(context).inspectCategory(role, chat, "action", null, 0).getJSONArray("items").length())
     }
     @Test fun refusalIsNotCompletedAndExplicitRetryRetainsTheDrawAndIngredients() = runBlocking {
@@ -167,7 +171,7 @@ class SubjectLifeEntryPointsTest {
                 environmentModel = ParticipatoryDreams.Model { system, raw, _ ->
                     scenes++; assertTrue(system.contains("固定职能")); assertFalse(system.contains("你是生活测试"))
                     dreamResponse(raw, "门外是正在落雪的街道。")
-                }, random = kotlin.random.Random(19))
+                }, random = fullLength(JSONObject(work.text)))
             fail("a refusal must not complete the dream")
         } catch (_: IllegalStateException) { }
         val store = CompanionStore(context)
@@ -254,6 +258,28 @@ class SubjectLifeEntryPointsTest {
         assertFalse(retained.contains("记得窗边的一道光。"))
         assertTrue(retained.contains("failed"))
         assertNull(SubjectLife(context).next(role, chat, System.currentTimeMillis()))
+    }
+
+    @Test fun streamingCheckpointsDoNotBecomeDozensOfDreamHistoryCopies() = runBlocking {
+        adopt(rest(JSONObject().put("steps", 1)))
+        val work = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
+        ParticipatoryDreams(context).run(work, ParticipatoryDreams.Model { _, raw, partial ->
+            repeat(12) { partial("原始流式片段".repeat((it + 1) * 100)) }
+            dreamResponse(raw, "这一段已经实际生成。")
+        })
+        for (i in 0..1) {
+            val history = InternalStateStore(context).inspectCategory(role, chat, "category_versions", "dream_step:${work.id}:$i", 0)
+                .getJSONArray("items")
+            assertEquals(1, history.length())
+            assertEquals("completed", history.getJSONObject(0).getString("status"))
+        }
+        val group = com.ai.assistance.operit.data.preferences.CharacterGroupCardManager.getInstance(context)
+            .createCharacterGroupCard(com.ai.assistance.operit.data.model.CharacterGroupCard("", "群", members = listOf(com.ai.assistance.operit.data.model.GroupMemberConfig(role))))
+        val groupChat = ChatHistory(title = "群", messages = emptyList(), characterGroupId = group)
+        ChatHistoryManager.getInstance(context).saveChatHistory(groupChat)
+        assertThrows(IllegalArgumentException::class.java) {
+            InternalStateStore(context).inspectCategory(role, groupChat.id, "category_versions", "dream_step:${work.id}:0", 0)
+        }
     }
 
     @Test fun chosenInterruptionPausesDreamAtStepBoundaryAndKeepsCompletedFragment() = runBlocking {

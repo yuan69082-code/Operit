@@ -8522,7 +8522,7 @@
     <string name="provider_vertex_ai">Vertex AI (API Key)</string>
     <string name="vertex_ai_manual_model">Vertex AI（API Key）请手动填写模型 ID，例如 gemini-2.5-flash；此接口不提供模型列表。</string>
     <string name="dream_settings_title">梦境安排</string>
-    <string name="dream_lottery_description">睡眠安排里可选单主题、多主题或交给抽签；再分别抽类型与材料方式。梦可以转调，也可维持。资料随机打乱，共用一个上下文预算。</string>
+    <string name="dream_lottery_description">睡眠安排里可选单主题、多主题或交给抽签；同时抽长短与段落节奏，再分别抽类型与材料方式。梦可以转调，也可维持。资料随机打乱，共用一个上下文预算。</string>
     <string name="dream_model_description">辅助模型只生成场景与后果，主体仍用自己的模型参与。设置只作用于这位助手；场景生成按所选模型渠道计费。</string>
     <string name="dream_model_same">使用主体聊天模型生成场景</string>
     <string name="dream_model_missing">所选模型已不可用，请重新选择</string>

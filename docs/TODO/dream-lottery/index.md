@@ -28,8 +28,20 @@ fork: https://github.com/yuan69082-code/Operit
 
 `SubjectLife` 原入口支持明确重试，沿用抽签和材料并跳过完成步骤。`get section=dream` 增加参与过程索引，旧静态梦列表保留；过程列表不重复携带全部材料，按 ID 才读取。旧历史不做迁移、不靠关键词回写已经保存的梦。
 
+## 同轮追加：余韵、索引与节奏
+
+用户在首轮 CI 期间补充了梦醒闭环与节奏要求，PR 转为草稿阻止旧候选发布；补充完重新验证后交付。
+
+第一阶段还独立抽整体 short/medium/long，在主体给出的 steps 调用预算内采用约三分之一、三分之二或全部组数，每组另抽 linger/flow/jump。它们不分配主题，也不要求切换主题；抽签持久化并在恢复时沿用，主动结束仍有效。
+
+余韵沿用 `dream_understanding → episodes/inner/foundation/unions → 下一次请求与选择`，没有独立情绪副本。已有联合时间规则可以 hold，或 linear/exponential 向主体给出的强度演化；不因归档、到期或读过一次梦自动归零。梦与现实区分继续生效。集成新增验证正常梦醒报告、实际读取、情绪/探索事件、三天 hold、后续正常请求，以及归档后余韵仍保留。模型判断均为受控模拟。
+
+`DreamShelf` 是现有档案的索引投影，不是另一套记忆。普通请求只选择少量日期、关键词卡片；上下文预算不变，列表不能冒充实际读过全文。`SubjectRecall` 复用现有有界索引进行相关检索；按 ID 取正文和步骤。醒后理解可附 retention=active/archive、retain_until、review_at、keywords；归档或主体自定保留期到期只退出普通轮换，相关回忆仍可查阅。设置 active 且不提供 retain_until 表示重新持续保留；时间0用于清除既有安排。review_at 仅提示复查，不新增闹钟。原有自选经验整理入口明确包含梦的筛查。
+
+采用归档而非删除：完整经历和已形成认识保留在 `companion/internal-state-history.sqlite`，不驻留所有正文，也不每轮发送。磁盘仍随保留的梦增长，不能把归档宣传成释放全部磁盘。流式 requested/partial 与进程 running 只替换持久恢复点，不为每个增长前缀再存一份历史；完成、失败、明确重试等结果继续存版本。旧历史不回删。参与梦的版本查询也补上与正文相同的私域限制。
+
 ## 验证记录
 
-本地隔离 JVM：`DreamDesignTest` 5 项、`SubjectRestPolicyTest` 6 项通过。存储集成新增覆盖：场景/主体分别调用、未参与与格式错误保存、原抽签与材料恢复、自然结束、过程查询和列表体积、按助手配置。
+本地隔离 JVM：`DreamDesignTest` 6 项、`DreamShelfTest` 2 项、`SubjectRestPolicyTest` 6 项通过。存储集成新增覆盖：场景/主体分别调用、未参与与格式错误保存、原抽签与材料恢复、自然结束、过程查询和列表体积、按助手配置、技术检查点去重和私域历史、余韵与归档后的相关回忆。
 
 全量 Android/Robolectric、安装包和共享端结果以本分支的发布工作流为准。模型回答使用注入的受控模拟响应；不能据此宣称真实模型体验、真实手机后台时序或长期运行已通过。

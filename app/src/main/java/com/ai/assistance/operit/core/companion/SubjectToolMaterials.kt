@@ -60,8 +60,10 @@ internal object SubjectToolMaterials {
             if (receipt.section in setOf("life_event", "life_activity", "dream_process", "dream_step")) {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {
-                    val source = SubjectLife.material(requireNotNull(receipt.section), rows.getJSONObject(i))
-                    if (receipt.section == "dream_process") source.put("type", "dream_not_reality")
+                    val source = if (receipt.section == "dream_process" && body.optBoolean("index_only")) DreamShelf.index(rows.getJSONObject(i))
+                        else SubjectLife.material(requireNotNull(receipt.section), rows.getJSONObject(i)).apply {
+                            if (receipt.section == "dream_process") put("type", "dream_not_reality")
+                        }
                     sources[source.getString("id")] = source.toString()
                     actionIds.add(source.getString("id"))
                 }
@@ -98,7 +100,8 @@ internal object SubjectToolMaterials {
             if (receipt.section in SubjectRestDreams.kinds) {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {
-                    val source = SubjectRestDreams.material(rows.getJSONObject(i))
+                    val source = if (receipt.section == "dream" && body.optBoolean("index_only")) DreamShelf.index(rows.getJSONObject(i))
+                        else SubjectRestDreams.material(rows.getJSONObject(i))
                     sources[source.getString("id")] = source.toString()
                     actionIds.add(source.getString("id"))
                 }

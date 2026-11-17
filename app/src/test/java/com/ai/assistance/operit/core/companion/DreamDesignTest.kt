@@ -28,6 +28,21 @@ class DreamDesignTest {
         assertTrue(result.getBoolean("not_a_sequence"))
         assertTrue(result.getBoolean("may_change_during_dream"))
     }
+    @Test fun rhythmVariesWithinTheExistingCallBudgetWithoutAssigningThemesToSlots() {
+        val lengths = mutableSetOf<Int>()
+        val paces = mutableSetOf<String>()
+        repeat(100) { seed ->
+            val d = DreamDesign.draw(JSONObject().put("steps", 6).put("theme_mode", "multiple"), Random(seed))
+            lengths += d.getInt("interactions")
+            val pace = d.getJSONArray("pace")
+            assertEquals(d.getInt("interactions"), pace.length())
+            for (i in 0 until pace.length()) paces += pace.getString(i)
+            assertTrue(d.getInt("interactions") in 1..6)
+            assertTrue(d.getBoolean("not_a_sequence"))
+        }
+        assertEquals(setOf(2, 4, 6), lengths)
+        assertEquals(setOf("linger", "flow", "jump"), paces)
+    }
     @Test fun materialsAreBoundedShuffledAndDoNotMutateTheirOrigins() {
         val source = JSONObject().put("states", JSONArray((0..15).map { JSONObject().put("id", "state$it").put("value", it)
             .put("understanding", "当前具体的内在感受。".repeat(80)) }))

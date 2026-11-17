@@ -145,6 +145,58 @@ class SubjectRestDreamsEntryPointsTest {
         assertEquals(1, item("rest", "current").getInt("version"))
     }
 
+    @Test fun wakingReviewArchivesDreamButKeepsItsAdoptedAftereffectAndRelevantIndex(): Unit = runBlocking {
+        val states = InternalStateStore(context)
+        states.materialBudget(role, chat, 16384)
+        val id = createDream()
+        var f = readMaterial(second, "dream", id)
+        var source = f.materialSources.entries.first { JSONObject(it.value).optString("type") == "dream_not_reality" }.key
+        submit(f, JSONObject().put("rest", rest("awake", 1)).put("dream_understanding", JSONArray().put(
+            interpretation(source).put("retention", "active").put("retain_until", System.currentTimeMillis() + 172800000L)
+                .put("keywords", JSONArray().put("月亮鲸鱼")))))
+        f = readMaterial(chat, "dream", id)
+        source = f.materialSources.entries.first { JSONObject(it.value).optString("type") == "dream_not_reality" }.key
+        fun episode(name: String, category: String) = JSONObject().put("op", "appraise").put("id", name)
+            .put("expected_version", 0).put("category_ref", category).put("objects", JSONArray().put("self"))
+            .put("goals", JSONArray()).put("intensity", 0.8).put("importance", "梦后的真实感受")
+            .put("long_term_impact", "可能影响今天的探索").put("attention", "foreground").put("status", "unresolved")
+            .put("understanding", "知道那是梦，仍想弄清这份余韵").put("basis", "recollection")
+            .put("reason", "受控模拟主体解释，程序不替主体选择情绪").put("evidence", JSONArray().put(source))
+        submit(f, JSONObject().put("episodes", JSONArray().put(episode("dream-mood", "foundation:emotion:joy"))
+            .put(episode("dream-curiosity", "foundation:drive:exploration"))))
+        f = readMaterial(chat, "dream", id)
+        f = nativeInnerRead(context, f, "episode", "dream-mood")
+        f = nativeInnerRead(context, f, "episode", "dream-curiosity")
+        source = f.materialSources.entries.first { JSONObject(it.value).optString("type") == "dream_not_reality" }.key
+        val union = JSONObject().put("id", "dream-continuation").put("expected_version", 0).put("status", "active")
+            .put("members", JSONArray(listOf("dream-mood", "dream-curiosity").map {
+                JSONObject().put("kind", "episode").put("id", it).put("version", 1)
+            })).put("objects", JSONArray()).put("evidence", JSONArray().put(source))
+            .put("interpretation", "这份好奇牵住了梦后的愉快，暂时保持，不把梦当现实")
+            .put("decision", "以后相关探索可再考虑这个感受")
+            .put("effects", JSONArray().put(JSONObject().put("from", "episode:dream-curiosity").put("to", "episode:dream-mood")
+                .put("meaning", "主体选择持续保持，后续可以改变").put("time_rule", JSONObject().put("curve", "hold"))))
+        submit(f, JSONObject().put("unions", JSONArray().put(union)))
+        val saved = states.read(role)
+        val mood = CategoryEvents.row(saved, "episode", "dream-mood")!!
+        assertEquals(0.8, CategoryEvents.timeView(saved, mood, mood.getLong("at") + 259200000L)
+            .getJSONObject("time_projection").getDouble("intensity"), 0.00001)
+        f = readMaterial(second, "dream", id)
+        f = nativeInnerRead(context, f, "dream_understanding", "first-understanding")
+        source = f.materialSources.entries.first { JSONObject(it.value).optString("type") == "dream_not_reality" }.key
+        submit(f, JSONObject().put("dream_understanding", JSONArray().put(interpretation(source, 1).put("retention", "archive"))))
+        assertTrue(DreamShelf.archived(item("dream", id), System.currentTimeMillis()))
+        val ordinary = SubjectRestDreams.materials(states.read(role), "unrelatedzzzzzz", second)
+        assertFalse(ordinary.any { it.optString("type") == "dream_index" && it.getJSONObject("locator").getString("id") == id })
+        val remembered = InnerStructureContext.prepare(context, role, second, true, input = "想起月亮鲸鱼的梦")
+        assertTrue(remembered.state.contains("dream_index"))
+        assertTrue(remembered.state.contains("subject_adopted_time_rule"))
+        assertTrue(requireNotNull(remembered.internalStateFrame).materialSources.values.map(::JSONObject)
+            .filter { it.optString("type") == "dream_index" }.all { !it.toString().contains("书页变成鲸鱼") })
+        assertEquals(1, item("episode", "dream-mood").getInt("version"))
+        assertTrue(item("dream", id).getJSONObject("content").getString("content").contains("书页变成鲸鱼"))
+    }
+
     @Test fun duplicatedReportDoesNotGenerateSecondDreamAndStaleReportCannotOverwrite(): Unit = runBlocking {
         val f = requireNotNull(request().internalStateFrame)
         val fields = dreaming(); submit(f, fields); submit(f, fields)

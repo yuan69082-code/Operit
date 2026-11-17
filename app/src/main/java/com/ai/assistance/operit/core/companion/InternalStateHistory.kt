@@ -291,7 +291,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time") + SubjectRestDreams.kinds + LifeUnderstandings.kinds)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time", "dream_process") + SubjectRestDreams.kinds + LifeUnderstandings.kinds)
             put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
@@ -325,12 +325,17 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         require(row.getString("id") == id && row.getString("parent") == parent)
         if (row.toString() != before) {
             row.put("version", oldVersion + 1)
-            put("category_versions", row)
+            // Stream checkpoints replace the durable current checkpoint. They are not new
+            // experiences; archiving every growing prefix duplicated the same dream many times.
+            val checkpoint = (kind == "dream_step" && row.optString("status") in setOf("requested", "partial")) ||
+                (kind == "dream_process" && row.optString("status") == "running")
+            if (!checkpoint) put("category_versions", row)
             if (old != null && kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run")) {
                 db.execSQL("UPDATE category_current SET parent=?,payload=? WHERE scope=? AND kind=? AND id=?",
                     arrayOf(parent, row.toString(), scope, kind, id))
             } else db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, id, parent, row.toString()))
+            if (kind in SubjectRecall.kinds) synchronized(recallCache) { recallCache[file.absolutePath to scope]?.remove(kind) }
         }
         commit()
         return row
@@ -488,7 +493,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
                 val stream = sequence {
                     while (cursor.moveToNext()) {
                         val row = JSONObject(cursor.getString(0))
-                        if (kind !in setOf("union", "episode") && row.getString("parent") != "private") continue
+                        if (kind !in setOf("union", "episode", "dream_process") && row.getString("parent") != "private") continue
                         val entry = SubjectRecall.entry(row) ?: continue
                         if (retain) {
                             weight += entry.weight

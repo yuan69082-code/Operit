@@ -68,6 +68,7 @@ internal class SubjectLife(private val context: Context) {
             } else row
         }
         return JSONObject().put("items", JSONArray(items)).put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+            .apply { if (kind == "dream_process") put("index_only", true) }
     }
 
     fun acknowledge(role: String, ids: List<String>) {
@@ -138,7 +139,7 @@ internal class SubjectLife(private val context: Context) {
             if (resumedDream != null) return Work(role, chat, resumedDream.getString("id"), resumedDream.getJSONObject("plan").toString(), dream = true)
             if (c.has("dream_plan")) claim(role, chat, "dream:$session", c.getJSONObject("dream_plan").toString(), dream = true)?.let { return it }
             if (c.optString("consolidation").isNotBlank()) claim(role, chat, "review:$session",
-                "你在休息安排中选择了一次经验整理：${c.getString("consolidation")}。只取实际提供的增量材料，按需检索本地记忆或资料。可形成experience/direction候选或保留不确定；不得把整理建议冒充已决定的计划，不自动安排预约。")?.let { return it }
+                "你在休息安排中选择了一次经验整理：${c.getString("consolidation")}。只取实际提供的增量材料，按需检索本地记忆或资料，也可查梦的日期/关键词索引，醒后决定保留或归档。可形成experience/direction候选或保留不确定；不得把整理建议冒充已决定的计划，不自动安排预约。")?.let { return it }
             return null
         }
         val input = SubjectMessageInbox(context).next(role)
