@@ -589,7 +589,14 @@ class InternalStateStore(private val context: Context) {
             }
             return page
         }
-        if (id == null) return CategoryEvents.page(data, kind, offset)
+        if (id == null) return CategoryEvents.page(data, kind, offset).apply {
+            // Keep the published static-dream page intact and expose the other archive
+            // alongside it, rather than copying process text into a second authority.
+            if (kind == "dream") {
+                put("participatory_processes", SubjectLife(context).page(role, "dream_process", offset))
+                put("process_retrieval", "get section=dream_process id=过程ID；get section=dream_step id=过程ID offset=0。两种梦均已留存，分别分页，拒答原文不是梦中经历。")
+            }
+        }
         val row = CategoryEvents.row(data, kind, id)
         return JSONObject().put("item", if (kind == "episode" && row != null)
             CategoryEvents.timeView(data, row, System.currentTimeMillis()) else row ?: JSONObject.NULL)

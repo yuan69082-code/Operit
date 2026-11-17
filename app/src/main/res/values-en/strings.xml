@@ -8535,4 +8535,11 @@
     <string name="assistant_create_and_open">Create and open</string>
     <string name="provider_vertex_ai">Vertex AI (API Key)</string>
     <string name="vertex_ai_manual_model">For Vertex AI (API Key), enter a model ID manually, such as gemini-2.5-flash. This API does not provide a model list.</string>
+    <string name="dream_settings_title">Dream settings</string>
+    <string name="dream_lottery_description">Choose one theme, several, or leave it to chance in the sleep plan. Themes and material basis are drawn separately; dreams may change tone. Source fragments are shuffled within one shared context budget.</string>
+    <string name="dream_model_description">The auxiliary model creates scenes and consequences only. The subject participates using its own model. This setting applies to this assistant and may change the channel used for scene-generation charges.</string>
+    <string name="dream_model_same">Use the subject’s chat model for scenes</string>
+    <string name="dream_model_missing">Selected model is unavailable — choose again</string>
+    <string name="dream_model_choose">Choose dream scene model</string>
+    <string name="dream_settings_close">Close</string>
 </resources>

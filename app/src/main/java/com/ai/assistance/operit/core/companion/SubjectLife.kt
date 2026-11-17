@@ -58,8 +58,16 @@ internal class SubjectLife(private val context: Context) {
         SubjectContracts.queryId(kind, id)
         require(kind in setOf("life_event", "life_activity", "dream_process", "dream_step") && offset >= 0)
         if (id != null && kind != "dream_step") return JSONObject().put("item", store.activityRead(role, kind, id) ?: JSONObject.NULL)
-        val rows = store.activityPage(role, kind, if (kind == "dream_step") requireNotNull(id) else if (kind == "life_event") null else "pending", offset)
-        return JSONObject().put("items", JSONArray(rows.take(8))).put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
+        val rows = store.activityPage(role, kind, if (kind == "dream_step") requireNotNull(id) else if (kind in setOf("life_event", "dream_process")) null else "pending", offset)
+        // The list is an index, not eight copies of saved dream material. Full content remains
+        // available by process ID; browsing the dream list must not inflate model context.
+        val items = rows.take(8).map { row ->
+            if (kind == "dream_process") JSONObject(row.toString()).apply {
+                remove("ingredients")
+                put("materials_available", row.has("ingredients"))
+            } else row
+        }
+        return JSONObject().put("items", JSONArray(items)).put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
     }
 
     fun acknowledge(role: String, ids: List<String>) {
@@ -199,7 +207,7 @@ internal class SubjectLife(private val context: Context) {
         require(choice in setOf("resume", "retry_step", "end") && note.isNotBlank())
         check(rest(role)?.getJSONObject("content")?.optString("state") == "resting" || choice == "end") { "继续梦境须仍在主体选择的休息中" }
         val prior = SubjectContracts.dreamProcess(store.activityRead(role, "dream_process", id))
-        check(prior.getString("status") in setOf("failed", "interrupted")) { "只有已中断的梦可以继续；不能重复已完成的梦" }
+        check(prior.getString("status") in setOf("failed", "interrupted", "refused", "invalid_response")) { "只有未完成的梦可以继续；不能重复已完成的梦" }
         val step = prior.getInt("next_step")
         val pending = store.activityRead(role, "dream_step", "$id:$step")
         if (pending != null && choice == "resume") error("此步骤已发起且结果不完整；须明确选择retry_step重新生成该步骤或end保留片段")

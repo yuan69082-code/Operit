@@ -221,7 +221,7 @@ class SubjectRestDreamsEntryPointsTest {
             submit(arrange, JSONObject().put("rest", rest("resting", 1)
                 .put("dream_plan", JSONObject().put("steps", 1))))
             val process = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
-            ParticipatoryDreams(context).run(process, ParticipatoryDreams.Model { _, _, _ -> "梦中的纸船停在门边。" })
+            ParticipatoryDreams(context).run(process, ParticipatoryDreams.Model { _, raw, _ -> JSONObject().put("actor", if (JSONObject(raw).has("subject_material")) "subject" else "environment").put("outcome", "continue").put("text", "梦中的纸船停在门边。").toString() })
             val processBefore = CompanionStore(context).activityRead(role, "dream_process", process.id)!!.toString()
             assertNotNull("source window must exist before export", ChatHistoryManager.getInstance(context).getChatMetadata(chat))
             val databasePath = context.getDatabasePath("app_database")
