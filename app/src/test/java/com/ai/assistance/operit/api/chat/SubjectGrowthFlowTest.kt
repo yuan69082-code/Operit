@@ -28,7 +28,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * Five independently triggered business turns through EnhancedAIService, its shared
  * stream/readers, MessageProcessingDelegate, production tool execution, scheduling,
  * persisted reports and subsequent material composition. Model outputs and the due
- * clock are controlled. This is wiring evidence, NOT evidence of model growth.
+ * clock are controlled. The fixture's prepare adapter invokes production
+ * InnerStructureContext; image handling and general prompt assembly are not exercised.
+ * This is wiring evidence, NOT evidence of model growth.
  */
 @RunWith(OperitStorageTestRunner::class)
 @Config(sdk = [28], application = Application::class)

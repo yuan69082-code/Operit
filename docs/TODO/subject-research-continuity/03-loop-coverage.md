@@ -64,7 +64,7 @@ InnerInteractions.apply 在同一权威事务内核验真实成员版本、来�
 
 单槽覆盖核查：exploration 原本就是一个自由判断预约，不能称多个兴趣均已预约。本次保留正常替换行为，在真实工具回执新增 schedule_scope 与 schedule_replaced，准确返回被替换的时间/目的，不伪造第二计划。私人待办已有逐项独立 dispatch，正常提交两项不会互相覆盖；探索轮禁止 submit 的原防绕额度规则保留。新测试验证两个探索预约只认领新槽位，两个私人事项分别提交、暂停其一不取消另一项。私人待办/阅读存储调整的兼容方案仍等待确认。
 
-五轮验证在 SubjectGrowthFlowTest 中走真实消息消费、实际计算器、原预约认领和轮末报告，模型输出与到期时钟受控。程序接线通过与否以最终 CI 为准，不能据此声称真实模型长期研究成功。
+五轮验证在 SubjectGrowthFlowTest 中走真实消息消费、实际计算器、原预约认领和轮末报告，模型输出与到期时钟受控。Fixture 将模型路由替换为模拟 Provider，ConversationService 的准备适配器直接调用生产 InnerStructureContext，工具续轮仍用生产 normalizeConversationHistoryForModel；它没有覆盖图像识别或完整普通提示词组装。CompanionContext 的正常材料组合另由既有入口测试覆盖。程序接线通过与否以最终 CI 为准，不能据此声称真实模型长期研究成功。
 
 
 ## 7. 意向、决定、行动与实际结果
