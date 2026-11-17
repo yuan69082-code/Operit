@@ -454,6 +454,13 @@ class SubjectLifeEntryPointsTest {
         privateLifeTool("free_progress", JSONObject().put("date", w.date).put("expected_version", current.getInt("version"))
             .put("slot_id", "my-review").put("status", "working").put("note", "已读日记，尚未看资料和整理索引"))
         SubjectLife(context).recover(role)
+        val inbox = SubjectMessageInbox(context)
+        inbox.accept(role, chat, "during-private-time", "我发来的消息仍须保存", emptyList())
+        val incoming = SubjectLife(context).next(role, chat, w.start + 1_800_000)!!
+        assertNotNull(incoming.input)
+        assertEquals("我发来的消息仍须保存", incoming.text)
+        assertTrue(inbox.claim(role, "during-private-time"))
+        inbox.finish(role, "during-private-time", "completed")
         val second = SubjectLife(context).next(role, chat, w.start + 1_800_000)!!
         assertTrue(second.text.contains("续接"))
         assertTrue(PrivateTime(context).status(role, w.date, false).toString().contains("尚未看资料"))
@@ -467,11 +474,12 @@ class SubjectLifeEntryPointsTest {
 
     @Test fun privateMemoryLocationCannotBeOverwrittenBySubjectConfiguration() {
         val time = PrivateTime(context)
-        val first = time.configure(role, privateConfig().put("memory_location", "已连接OB工具 / vault-园园 / 沈知屿"), manual = true)
+        val first = time.configure(role, privateConfig().put("memory_location", "已连接OB工具 / vault-园园 / 沈知屿").put("sleep_time", "03:00"), manual = true)
         try { time.configure(role, privateConfig().put("expected_version", first.getInt("version")).put("memory_location", "猜测的路径")); fail() }
         catch (_: IllegalArgumentException) {}
         val updated = time.configure(role, privateConfig().put("expected_version", first.getInt("version")).put("start", "02:00"))
         assertTrue(updated.getString("memory_location").contains("vault-园园"))
+        assertEquals("03:00", updated.getString("sleep_time"))
     }
 
     @Test fun sleepingDoesNotRunConsolidationAndAwakePreservesItsScope() = runBlocking {
@@ -503,6 +511,13 @@ class SubjectLifeEntryPointsTest {
         val next = InnerStructureContext.prepare(context, role, chat, true, input = "独立的新活动")
         assertTrue(next.state, next.state.contains("先核对实际证据，再修正自己的判断。"))
         assertTrue(next.internalStateFrame!!.materialSources.values.any { JSONObject(it).optString("type") == "confirmed_essence" })
+        val current = time.essence(role)
+        val tooLong = time.saveEssence(role, JSONObject().put("expected_version", current.getInt("version"))
+            .put("text", "尚需继续提炼的草稿。".repeat(500)).put("source_actions", JSONArray(listOf("essence-source"))), false)
+        try { time.saveEssence(role, JSONObject().put("expected_version", tooLong.getInt("version")).put("confirmed", true), true); fail() }
+        catch (expected: IllegalArgumentException) { assertTrue(expected.message.orEmpty().contains("384")) }
+        assertEquals("先核对实际证据，再修正自己的判断。", time.essence(role).getString("confirmed"))
+        assertTrue(time.essence(role).getString("draft").contains("尚需继续提炼"))
     }
 
 }

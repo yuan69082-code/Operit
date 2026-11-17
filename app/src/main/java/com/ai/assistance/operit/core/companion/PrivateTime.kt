@@ -35,7 +35,12 @@ internal class PrivateTime(private val context: Context) {
         PrivateTimePolicy.validateConfig(a)
         val row = store.activityWrite(role, "private_time_config", "current", "settings") { old ->
             require(a.getInt("expected_version") == (old?.getInt("version") ?: 0)) { "配置版本已变化，请先读取" }
-            JSONObject(a.toString()).apply { remove("expected_version") }
+            JSONObject(a.toString()).apply {
+                remove("expected_version")
+                for (key in listOf("sleep_time", "fatigue_episode", "fatigue_threshold"))
+                    if (!has(key) && old?.has(key) == true) put(key, old.get(key))
+                PrivateTimePolicy.validateConfig(this)
+            }
                 .put("id", "current").put("parent", "settings").put("owner", role)
                 .put("memory_location", if (manual) a.optString("memory_location") else old?.optString("memory_location").orEmpty())
                 .put("at", System.currentTimeMillis())
