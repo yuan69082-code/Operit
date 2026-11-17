@@ -4,20 +4,24 @@ import org.json.JSONObject
 
 /** Retrieval of adopted interpretations, not new experience, psychological scoring or dispatch. */
 internal object SubjectRecall {
-    val kinds = setOf("decision", "feedback", "union", "experience", "direction", "episode")
+    val kinds = setOf("decision", "feedback", "union", "experience", "direction", "episode", "dream", "dream_process", "dream_understanding")
     data class Entry(val id: String, val localChat: String, val terms: Set<String>) {
         val weight: Long get() = id.length.toLong() + localChat.length + terms.sumOf { it.length.toLong() + 32 }
     }
 
     fun entry(row: JSONObject): Entry? {
         if (row.optBoolean("closed")) return null
-        val content = row.getJSONObject("content")
+        val content = if (row.getString("storage_kind") == "dream_process") row else row.getJSONObject("content")
         // Ended unions remain in history/rotation, never compete as a current association.
         if (row.getString("storage_kind") == "union" && content.getString("status") != "active") return null
         val text = listOf("meaning", "interpretation", "decision", "objects", "members", "effects", "intention_refs",
             "text", "scope", "uncertainty", "purpose", "goal", "resolve", "ambition", "related",
-            "understanding", "category_ref", "goals", "importance", "long_term_impact", "supporting", "opposing")
-            .filter { content.has(it) }.joinToString(" ") { content.get(it).toString() }
+            "understanding", "category_ref", "goals", "importance", "long_term_impact", "supporting", "opposing",
+            "title", "feeling", "keywords", "index_text", "design")
+            .filter { content.has(it) }.joinToString(" ") { content.get(it).toString() } +
+            " " + row.optJSONObject("dream_review")?.toString().orEmpty() +
+            if (row.getString("storage_kind") in setOf("dream", "dream_process", "dream_understanding"))
+                " " + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(row.getLong("at"))) else ""
         // Source snapshots and old quoted evidence must not make an unrelated interpretation match.
         return Entry(row.getString("id"), row.optString("local_chat"), InnerMaterialSelection.terms(text))
     }
@@ -44,7 +48,7 @@ internal object SubjectRecall {
                  rotation: List<JSONObject>? = null): List<JSONObject> {
         require(kind in kinds)
         val history = requireNotNull((data as? InternalStateDocument)?.history)
-        val parent = if (kind in setOf("union", "episode")) null else "private"
+        val parent = if (kind in setOf("union", "episode", "dream_process")) null else "private"
         val relevant = history.relevantSubjectRows(kind, input, chat, 4)
         val rotating = rotation ?: run {
             val count = history.categoryCount(kind, parent)
@@ -53,7 +57,8 @@ internal object SubjectRecall {
             first + if (offset > 0 && first.size < 8)
                 history.categoryPage(kind, 0, minOf(offset, 8 - first.size), parent) else emptyList()
         }
-        return (relevant + rotating).distinctBy { it.getString("id") }
+        val rotatingVisible = if (kind in setOf("dream", "dream_process")) rotating.filterNot { DreamShelf.archived(it, System.currentTimeMillis()) } else rotating
+        return (relevant + rotatingVisible).distinctBy { it.getString("id") }
             .filter { it.optString("local_chat").isBlank() || it.optString("local_chat") == chat }.take(8)
             .map { row -> JSONObject(row.toString()).apply {
                 if (relevant.any { it.getString("id") == row.getString("id") }) put("selection_reason", "CURRENT_INPUT_RELEVANCE")

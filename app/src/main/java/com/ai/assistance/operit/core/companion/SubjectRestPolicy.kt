@@ -35,8 +35,13 @@ internal object SubjectRestPolicy {
             .put("wake_sources", wake).put("interruption", interruption)
             .put("defer_internal", change.optBoolean("defer_internal", true))
         change.optJSONObject("dream_plan")?.let { plan ->
-            require(plan.keys().asSequence().all { it in setOf("steps", "theme", "tone", "form", "recall") })
+            require(plan.keys().asSequence().all { it in setOf("steps", "theme", "tone", "form", "recall", "theme_mode", "theme_count") })
             require(plan.getInt("steps") in 1..6) { "rest.dream_plan.steps: one bounded session, 1..6 interactions" }
+            if (plan.has("theme_mode")) require(plan.get("theme_mode") in setOf("single", "multiple", "random")) { "dream_plan.theme_mode: single|multiple|random" }
+            if (plan.has("theme_count")) {
+                val count = SubjectContracts.integer(plan, "theme_count")
+                require(count in 2..DreamDesign.themes.size && plan.optString("theme_mode") == "multiple") { "dream_plan.theme_count仅用于multiple，范围2..${DreamDesign.themes.size}" }
+            }
             for (key in listOf("theme", "tone", "form", "recall")) if (plan.has(key)) {
                 require(plan.get(key) is String && plan.getString(key).length <= 1000) { "rest.dream_plan.$key" }
             }

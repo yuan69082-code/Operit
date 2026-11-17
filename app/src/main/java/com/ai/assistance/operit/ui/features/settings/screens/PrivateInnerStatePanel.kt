@@ -78,6 +78,7 @@ internal fun InternalStatePanel(role: String) {
                 Text("休息由主体自己的选择承接。锁屏、断网和程序恢复不自动算作入睡或醒来。")
                 PrivateRows(role, "rest")
                 SubjectLifePanel(role)
+                DreamSettingsPanel(role)
                 Text("梦醒随记", style = MaterialTheme.typography.titleLarge)
                 Text("只呈现明确留给园园看的醒后记录；旧的私密梦境全文不会在这里自动公开。")
                 ActivityNotesPanel(role, wakingOnly = true)

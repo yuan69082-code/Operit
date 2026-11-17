@@ -41,9 +41,9 @@ internal object InnerStructureContext {
                 CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user",
                 hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
                     (if (group) emptyList() else SubjectMaterials.read(context, role, selectionInput) +
-                        SubjectRestDreams.materials(store.read(role)) +
+                        SubjectRestDreams.materials(store.read(role), selectionInput, chat) +
                         ActivityNotes.materials(context, role) +
-                        SubjectLife(context).materials(role) + ParticipatoryDreams.materials(context, role)),
+                        SubjectLife(context).materials(role) + ParticipatoryDreams.materials(context, role, selectionInput, chat)),
                 selectionInput)
         }
 

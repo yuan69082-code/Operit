@@ -20,6 +20,11 @@ class SubjectRecallArchiveTest {
         .put("storage_kind", kind).put("id", id).put("parent", "private").put("version", version)
         .put("frame_id", "$id:$version").put("owner", "owner").put("at", version)
         .put("content", JSONObject().put("meaning", meaning).put("status", "active"))
+        .apply {
+            // A process stores its searchable scene excerpt at the root, not in the
+            // subjective report's content object. Exercise its actual archive shape.
+            if (kind == "dream_process") { remove("content"); put("index_text", meaning) }
+        }
     private fun write(archive: InternalStateArchive, vararg rows: JSONObject) {
         archive.applyCategoryJournal(JSONObject().put("schema", 1).put("id", InnerStructure.hash(JSONArray(rows)))
             .put("rows", JSONArray(rows)))
@@ -75,7 +80,7 @@ class SubjectRecallArchiveTest {
         }
     }
 
-    @Test fun sixCurrentDomainsDoNotEvictEachOtherAndSharedWeightRemainsBounded() {
+    @Test fun currentDomainsDoNotEvictEachOtherAndSharedWeightRemainsBounded() {
         val file = File(temporary.newFolder(), "six-domains.sqlite")
         InternalStateArchive(file, "owner").use { archive ->
             SubjectRecall.kinds.forEach { kind -> write(archive,
@@ -83,7 +88,7 @@ class SubjectRecallArchiveTest {
             val field = InternalStateArchive::class.java.getDeclaredField("recallCache").apply { isAccessible = true }
             fun cached() = ((field.get(null) as Map<*, *>)[file.absolutePath to "owner"] as Map<*, *>).toMap()
             SubjectRecall.kinds.forEach { kind ->
-                assertEquals(1, archive.relevantSubjectRows(kind, "星空", "chat", 4).size)
+                assertEquals(kind, 1, archive.relevantSubjectRows(kind, "星空", "chat", 4).size)
             }
             val first = cached()
             assertEquals(SubjectRecall.kinds, first.keys)
