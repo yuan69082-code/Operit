@@ -7,6 +7,17 @@ import org.junit.Test
 
 class PendingMessageQueueStoreTest {
     @Test
+    fun messageAddedDuringIdleDebounceDoesNotErasePendingDispatch() {
+        val store = PendingMessageQueueStore()
+        store.enqueue("chat-a", "first", true)
+        // The background turn ends; the UI waits before consuming the transition.
+        store.enqueue("chat-a", "second", false)
+        assertTrue(store.consumeAutoDequeueSignal("chat-a", false))
+        assertFalse(store.consumeAutoDequeueSignal("chat-a", false))
+        assertEquals(listOf("first", "second"), store.states.value.getValue("chat-a").messages.map { it.text })
+    }
+
+    @Test
     fun queueRemainsAvailableWhenAnotherChatIsVisited() {
         val store = PendingMessageQueueStore()
 
