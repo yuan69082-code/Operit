@@ -65,9 +65,8 @@ internal object CategoryEvents {
         val content = InnerStructure.record(data, id)?.getJSONObject("content")
             ?: InnerFoundations.definition(id)
             ?: throw InternalStateReportIssue("input", "category_ref", "UNKNOWN_CATEGORY", "心理类别不存在；先查询foundation或inner目录。")
-        require(content.getString("family") in families && content.getString("status") == "active") {
-            "此记录不是可承接心理事件的类别"
-        }
+        SubjectContracts.expect(content.getString("family") in families && content.getString("status") == "active",
+            "category_ref", "INACTIVE_PSYCHOLOGICAL_CATEGORY", "须引用已启用的驱力、需要、欲望、情绪、情感或感受类别；先查询foundation或inner目录。")
         return content
     }
     internal fun append(data: JSONObject, frame: InternalStateFrame, row: JSONObject) {
@@ -100,18 +99,26 @@ internal object CategoryEvents {
                 parent = text(a, "category_ref", 64)
                 val category = category(data, parent)
                 if (a.has("phase")) {
-                    require(category.getString("family") == "desire") { "发展阶段仅适用于具体愿望" }
-                    require(a.get("phase") is String &&
-                        a.getString("phase") in setOf("arising", "strengthening", "weakening",
+                    SubjectContracts.expect(category.getString("family") == "desire", "phase", "DESIRE_PHASE_ONLY",
+                        "phase仅用于desire愿望事件；其他类别用understanding说明变化，不填写phase。")
+                    SubjectContracts.choice(a, "phase", setOf("arising", "strengthening", "weakening",
                             "sustaining", "suppressed", "suppression_failed", "disappeared",
-                            "reappeared", "conflicted", "transformed", "acted", "abandoned")) {
-                        "具体愿望阶段必须使用已约定的十二种状态之一"
-                    }
+                            "reappeared", "conflicted", "transformed", "acted", "abandoned"))
                 }
                 for (name in listOf("supporting", "opposing"))
                     if (a.has(name)) SubjectContracts.strings(SubjectContracts.array(a, name), path = name)
-                if (old != null) require(old.getString("parent") == parent) { "既有事件不能无声改类" }
-                SubjectContracts.strings(SubjectContracts.array(a, "objects"), path = "objects"); SubjectContracts.strings(SubjectContracts.array(a, "goals"), path = "goals")
+                if (old != null) SubjectContracts.expect(old.getString("parent") == parent,
+                    "category_ref", "EPISODE_CATEGORY_CHANGED",
+                    "同一事件ID须保持原类别。先get section=episode id=该事件ID核对；另一类别的感受用新ID和related:[{id:原事件ID,relation:same_matter}]关联。原事件可另行更新强度、理解或状态，不自动消除。")
+                // Object/goal associations are optional metadata, not a requirement to invent
+                // a target for every feeling. Omission retains existing associations; [] clears.
+                for (name in listOf("objects", "goals")) {
+                    val values = if (a.has(name)) SubjectContracts.array(a, name)
+                        else if (old != null) JSONArray(old.getJSONObject("content").getJSONArray(name).toString())
+                        else JSONArray()
+                    SubjectContracts.strings(values, path = name)
+                    content.put(name, values)
+                }
                 val intensity = a.get("intensity")
                 if (intensity === JSONObject.NULL) {
                     if (category.getString("family") != "feeling")
@@ -127,10 +134,12 @@ internal object CategoryEvents {
                 val refs = SubjectContracts.strings(SubjectContracts.array(a, "evidence"), path = "evidence")
                 SubjectContracts.expect(refs.isNotEmpty(), "evidence", "EVIDENCE_REQUIRED", "心理事件须提供至少一个实际读取的来源ID。")
                 val bindings = JSONObject()
-                refs.forEach { ref ->
-                    require(!ref.startsWith("config:") && !ref.startsWith("relation:")) { "配置不是现实经历" }
+                refs.forEachIndexed { index, ref ->
+                    SubjectContracts.expect(!ref.startsWith("config:") && !ref.startsWith("relation:"),
+                        "evidence[$index]", "EPISODE_EXPERIENCE_SOURCE", "配置不是现实经历；引用实际消息、操作结果或已读取材料的来源ID。")
                     val source = InnerStructure.source(data, frame, ref)
-                    require(source.getString("source") !in setOf("state_report", "time")) { "状态变化不能伪装成现实经历" }
+                    SubjectContracts.expect(source.getString("source") !in setOf("state_report", "time"),
+                        "evidence[$index]", "EPISODE_EXPERIENCE_SOURCE", "状态报告或时间投影不是新的现实经历；引用原事实，用basis说明回忆或重新理解。")
                     bindings.put(ref, source)
                 }
                 content.put("source_bindings", bindings)
@@ -140,7 +149,7 @@ internal object CategoryEvents {
                     fields(link, setOf("id", "relation"))
                     val other = text(link, "id", 64)
                     SubjectContracts.expect(other != id && row(data, "episode", other) != null, "related[$j].id", "RELATED_EPISODE_REQUIRED", "须引用已存在且不同于自身的心理事件ID。")
-                    require(text(link, "relation", 24) in setOf("same_matter", "split_from", "merged_from", "corrects"))
+                    SubjectContracts.choice(link, "relation", setOf("same_matter", "split_from", "merged_from", "corrects"), "related[$j].relation")
                 }
                 // Original bindings remain immutable even when new input changes interpretation.
                 content.put("original_sources", old?.getJSONObject("content")?.getJSONObject("original_sources") ?: bindings)
@@ -148,10 +157,11 @@ internal object CategoryEvents {
                 fields(a, setOf("op", "id", "expected_version", "capacity", "events", "reason"))
                 parent = id
                 category(data, parent)
-                val capacity = a.get("capacity")
-                require(capacity is Number && capacity.toDouble() == capacity.toInt().toDouble() && capacity.toInt() in 3..6)
-                val ids = strings(a.getJSONArray("events"), capacity.toInt())
-                ids.forEach { require(row(data, "episode", it)?.getString("parent") == parent) { "重点须引用该类别已有事件" } }
+                val capacity = SubjectContracts.integer(a, "capacity")
+                SubjectContracts.expect(capacity in 3..6, "capacity", "FOCUS_CAPACITY", "重点位置capacity须为3..6；实际events可以为空或不足3项。")
+                val ids = SubjectContracts.strings(SubjectContracts.array(a, "events"), capacity, "events")
+                ids.forEachIndexed { index, event -> SubjectContracts.expect(row(data, "episode", event)?.getString("parent") == parent,
+                    "events[$index]", "FOCUS_CATEGORY_MISMATCH", "重点须引用该类别已有的心理事件；先查询事件的category_ref。") }
                 text(a, "reason", Int.MAX_VALUE) // Presence only; the host never scores importance or sorts.
             }
             // The report transport already bounds authored input. Provenance is host-owned
@@ -228,6 +238,7 @@ internal object CategoryEvents {
         同一报告可选 episodes:[...]；没有业务条数上限，按本次模型窗口分批提交，宿主轮末校验采用，无需额外模型调用。
         companion_internal_state action:get section:source id:事实ID 可按ID取得原事件，含已归档来源。section:episode|focus 用 id 精确读取；experience_link 用 id:内在记录ID 查累计经历关联；category_versions 用 id:"episode:事件ID" 或 "focus:类别ID" 查变化过程，offset 分页。
         {op:"appraise",id:"稳定事件ID",expected_version:0或当前版本,category_ref:"类别ID",objects:["对象"],goals:["目标"],intensity:非负强度,importance:"重要性",long_term_impact:"长期意义",attention:"foreground|background|aside",status:"unresolved|processing|resolved",understanding:"当前理解",basis:"input|result|recollection|reinterpretation",evidence:["已读事实ID"],reason:"变化说明",related:[{id:"已有事件ID",relation:"same_matter|split_from|merged_from|corrects"}]}。
+        同一事件ID的category_ref保持原类别；这不限制感受改变。同一事情从悲伤转为依恋时，可更新原悲伤事件，并用新ID保存依恋事件，related:[{id:"原悲伤事件ID",relation:"same_matter"}]保留关联；不能把原ID直接换类。objects/goals可省略：更新时保留原关联，新建时无关联；显式[]表示无关联，不必为每种感受编目标。提供时必须是字符串数组，不能是null或单个字符串。
         feeling 类别的 intensity 可明确为 null，表示未知或没有确定分数，不等于0；其他类别仍需非负有限数。感受以后可由主体重新理解并明确强度，旧版本原话与未知事实保留。related 可省略。回忆/重新理解引用原事实；不创建第二次现实发生。不同类别可引用同一个事实。关联修正保留版本和原始来源；不会删除原事件。
         {op:"focus",id:"类别ID",expected_version:0或当前重点版本,capacity:3到6,events:["按你决定的次序排列的事件ID"],reason:"本次安排或替换理由"}。可以不足3件或为空，不凑数。重点外的事件完整保留。
         强度、重要性、注意力、解决状态相互独立。放到背景不是原谅或解决；重新关注不自动回升强度。执念/不甘心不意味着必须行动或不能放下。
