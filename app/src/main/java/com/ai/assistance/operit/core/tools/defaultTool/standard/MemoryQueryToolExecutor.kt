@@ -204,6 +204,7 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
         val query = tool.parameters.find { it.name == "query" }?.value ?: ""
         val folderPath = tool.parameters.find { it.name == "folder_path" }?.value
         val settings = getMemorySearchSettingsPreferences(profileId).load()
+        val automaticRecall = tool.parameters.any { it.name == "automatic_recall" && it.value == "true" }
         val limitParam = tool.parameters.find { it.name == "limit" }?.value
         val limit = limitParam?.toIntOrNull()
         val startTimeParam = tool.parameters.find { it.name == "start_time" }?.value
@@ -293,7 +294,8 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
                 edgeWeight = settings.edgeWeight,
                 relevanceThreshold = threshold ?: DEFAULT_RELEVANCE_THRESHOLD,
                 createdAtStartMs = startTimeMs,
-                createdAtEndMs = endTimeMs
+                createdAtEndMs = endTimeMs,
+                automaticRecall = automaticRecall
             )
 
             // Keep de-duplication stable even when multiple calls share the same snapshot in parallel.
@@ -315,7 +317,8 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
                 limit = validLimit,
                 snapshotId = snapshotState.id,
                 snapshotCreated = snapshotCreated,
-                excludedBySnapshotCount = excludedBySnapshotCount
+                excludedBySnapshotCount = excludedBySnapshotCount,
+                automaticRecall = automaticRecall
             )
             AppLogger.d(TAG, "Memory query result for '$query':\n$formattedResult")
             ToolResult(toolName = tool.name, success = true, result = formattedResult.copy(memories = formattedResult.memories.map { item ->
@@ -1287,7 +1290,8 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
         limit: Int,
         snapshotId: String? = null,
         snapshotCreated: Boolean = false,
-        excludedBySnapshotCount: Int = 0
+        excludedBySnapshotCount: Int = 0,
+        automaticRecall: Boolean = false
     ): MemoryQueryResultData = withContext(Dispatchers.IO) {
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
         val isWildcardQuery = query.trim() == "*"
@@ -1349,7 +1353,9 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
 
             MemoryQueryResultData.MemoryInfo(
                 title = memory.title,
-                content = content,
+                content = if (automaticRecall) com.ai.assistance.operit.data.repository.ChineseRecall.excerpt(
+                    content, com.ai.assistance.operit.data.repository.ChineseRecall.terms(query,
+                        com.ai.assistance.operit.util.TextSegmenter.segment(query)), 218) else content,
                 source = memory.source,
                 tags = memory.tags.map { it.name },
                 createdAt = sdf.format(memory.createdAt),

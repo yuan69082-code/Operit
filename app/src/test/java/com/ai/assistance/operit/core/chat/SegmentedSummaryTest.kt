@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SegmentedSummaryTest {
+    @Test fun currentQuestionRecallsAnOlderSameWindowFactWithinTheExistingBudget() {
+        val blocks = (1..30).map { i ->
+            "§ 已结束｜事件$i\n索引：chat_id=c from=${i * 1000L} to=${i * 1000L + 100}\n内容：" +
+                if (i == 2) "她16点吃完馄饨，明确说已经吃饱。" else "第${i}件已经结束。"
+        }
+        val archive = SegmentedSummary.render(emptyList(), blocks)
+        val prompt = SegmentedSummary.forPrompt(archive, query = "馄饨是什么时候吃完的？")
+        assertTrue(prompt.contains("她16点吃完馄饨"))
+        assertTrue(prompt.contains("chat_id=c from=2000 to=2100"))
+        assertTrue(prompt.length <= SummaryPromptBudget.MAX_CHARS)
+        assertEquals(30, SegmentedSummary.parse(archive).closed.size)
+    }
+
     private val msgs = (1..6).map { ChatMessage(if (it % 2 == 1) "user" else "ai", "第" + it + "条", timestamp = 1_000L * it) }
 
     @Test fun modelNumbersBecomeTimestampIndexes() {

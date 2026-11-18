@@ -51,9 +51,14 @@ object InternalStateSelection {
         require(detailCharacters >= 0)
         // snapshot can instantiate an untouched dimension; preview/selection must remain pure.
         val view = InternalStateDocument.copy(data)
-        val states = InternalStateEngine.snapshot(view, chat, now)
+        val allStates = InternalStateEngine.snapshot(view, chat, now)
+        val states = allStates.filter {
+            InnerFoundations.alias(view, it.getString("id")) == null
+        }
         val byId = states.associateBy { it.getString("id") }
-        val definitions = InternalStateEngine.definitions(view)
+        val definitions = InternalStateEngine.definitions(view).filter {
+            InnerFoundations.alias(view, it.getString("id")) == null
+        }
         val catalogue = JSONArray(definitions.map { definition ->
             JSONObject().put("id", definition.getString("id"))
                 .put("name", definition.getString("name"))
@@ -135,7 +140,7 @@ object InternalStateSelection {
                 currentExperience && hasUnresolved(experience),
                 currentExperience && (hasText(experience, "desire") || hasText(experience, "choice")), false)
         }
-        InternalStateEngine.rank(states, candidates).forEach { candidate ->
+        InternalStateEngine.rank(allStates, candidates).forEach { candidate ->
             val action = candidate.getString("action")
             val id = candidate.getString("id")
             items += Item("candidate:$action:$id", "candidates", candidate, relevance(candidate),

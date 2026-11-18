@@ -160,6 +160,9 @@ jobs:
           mapfile -t apks < <(find artifacts/android -name app-debug.apk -type f)
           test "${#apks[@]}" -eq 1
           test -s "${apks[0]}"
+          node --check examples/message_insert/dist/shared.js
+          (cd examples/message_insert && zip -q -r "$GITHUB_WORKSPACE/artifacts/windows/message_insert.toolpkg" manifest.json dist)
+          unzip -t artifacts/windows/message_insert.toolpkg
       - name: Merge verified candidate and authorize publication
         id: delivery
         uses: actions/github-script@v7
@@ -188,8 +191,8 @@ jobs:
           cat artifacts/windows/mobile-release-notes.md >> "$notes"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/existing-draft" 2>/dev/null; then
             test "$(cat "$RUNNER_TEMP/existing-draft")" = true
-            gh release upload "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json artifacts/windows/message_insert.toolpkg --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET" --title "Operit 双端预览 $version" --notes-file "$notes" --draft --prerelease --latest=false
+            gh release create "$tag" artifacts/windows/operit-windows.zip artifacts/windows/app-debug.apk artifacts/windows/shared-release.json artifacts/windows/message_insert.toolpkg --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET" --title "Operit 双端预览 $version" --notes-file "$notes" --draft --prerelease --latest=false
           fi
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false

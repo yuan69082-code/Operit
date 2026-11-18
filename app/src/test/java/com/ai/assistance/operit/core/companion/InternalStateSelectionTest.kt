@@ -6,6 +6,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InternalStateSelectionTest {
+    @Test fun mappedDriveHasOnePromptAddressWithoutChangingItsRuleOrValue() {
+        val mapped = definition("intimacy").put("kind", "drive")
+        mapped.put("effects", JSONArray().put(JSONObject().put("action", "explore").put("weight", 2.0).put("cue", "existing interest")))
+        val custom = definition("unwilling_rollback").put("kind", "psychology")
+        val data = JSONObject().put("definitions", JSONArray().put(mapped).put(custom))
+        InternalStateEngine.snapshot(data, "chat", 100)
+        InternalStateEngine.instance(data, mapped, "chat", 100).put("value", 90.0)
+        InnerFoundations.install(data, 100)
+        val before = data.toString()
+        val candidate = JSONObject().put("id", "explore").put("action", "explore")
+        val expected = InternalStateEngine.rank(InternalStateEngine.snapshot(data, "chat", 100), listOf(candidate)).single()
+        val selected = InternalStateSelection.select(data, "chat", 100, "", listOf(candidate), emptyList())
+        assertEquals(expected.getDouble("score"), selected.payload.getJSONArray("candidates").getJSONObject(0).getDouble("score"), 0.00001)
+        val catalog = selected.payload.getJSONArray("state_catalog")
+        assertEquals(1, catalog.length())
+        assertEquals("unwilling_rollback", catalog.getJSONObject(0).getString("id"))
+        assertFalse(selected.payload.getJSONArray("states").toString().contains("\"id\":\"intimacy\""))
+        assertEquals(before, data.toString())
+        assertEquals("intimacy", InnerFoundations.member(data, "foundation:drive:intimacy", 100)
+            .getJSONObject("inherited_rule").getString("id"))
+    }
+
     @Test fun catalogueDeclaresOnlyModelReportableConditionsEvenWithoutDetails() {
         fun rule(condition: String) = JSONObject().put("condition", condition)
             .put("reason", "private rule reason").put("interval_minutes", 10).put("amount", 1)
