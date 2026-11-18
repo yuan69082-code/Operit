@@ -36,7 +36,7 @@ internal object SubjectConcerns {
         val next = JSONObject(action.toString())
         val prior = old?.getJSONObject("content")
         if (prior?.has("attention") == true) {
-            for (key in listOf("text", "scope", "uncertainty", "status", "attention", "retention", "purpose", "goal", "resolve", "ambition", "related"))
+            for (key in listOf("text", "scope", "uncertainty", "status", "attention", "retention", "review_at", "purpose", "goal", "resolve", "ambition", "related"))
                 if (!next.has(key) && prior.has(key)) next.put(key, prior.get(key))
             if (action.opt("attention") is JSONObject) {
                 val merged = JSONObject(prior.getJSONObject("attention").toString())

@@ -103,7 +103,8 @@ class SubjectConcernsEntryPointsTest {
     @Test fun standingOriginalSurvivesProgressAndReopenWithoutBeingPouredIntoContext(): Unit = runBlocking {
         val original = "完整本意不能变成一句空话。".repeat(500)
         val f = requireNotNull(sections().internalStateFrame)
-        submit(f, JSONObject().put("life", JSONArray().put(life(f).put("text", original).put("purpose", "为什么要做"))))
+        val reviewAt = f.at + 86400000L
+        submit(f, JSONObject().put("life", JSONArray().put(life(f).put("text", original).put("purpose", "为什么要做").put("review_at", reviewAt))))
         repeat(4) { round ->
             val s = sections(if (round % 2 == 0) second else chat, wake = round % 2 == 0)
             val current = requireNotNull(s.internalStateFrame)
@@ -116,6 +117,7 @@ class SubjectConcernsEntryPointsTest {
         }
         assertEquals(original, saved().getJSONObject("content").getString("text"))
         assertEquals("为什么要做", saved().getJSONObject("content").getString("purpose"))
+        assertEquals(reviewAt, saved().getJSONObject("content").getLong("review_at"))
         assertEquals("第4步已核对", saved().getJSONObject("content").getJSONObject("attention").getString("progress"))
         assertTrue(saved().getJSONObject("content").getJSONObject("attention").getBoolean("pinned"))
         assertEquals(5, InternalStateStore(context).inspectCategory(role, chat, "category_versions", "direction:interest", 0).getJSONArray("items").length())

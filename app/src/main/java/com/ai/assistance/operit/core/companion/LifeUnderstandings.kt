@@ -34,7 +34,9 @@ internal object LifeUnderstandings {
             for (key in listOf("text", "scope", "uncertainty")) SubjectContracts.text(a, key)
             SubjectContracts.choice(a, "status", setOf("considering", "active", "paused", "ended", "abandoned", "uncertain"))
             if (a.has("retention")) SubjectContracts.choice(a, "retention", setOf("short_term", "long_term"))
-            if (a.has("review_at")) {
+            // A progress-only concern patch keeps the previously chosen review time, even
+            // after it becomes due; only a newly submitted time must be in the future.
+            if (submitted.has("review_at")) {
                 val raw = a.opt("review_at")
                 SubjectContracts.expect(raw is Number && raw.toDouble().isFinite() &&
                     raw.toDouble() == raw.toLong().toDouble() && raw.toLong() >= now,
