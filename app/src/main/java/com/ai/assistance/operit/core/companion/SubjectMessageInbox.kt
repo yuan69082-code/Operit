@@ -62,7 +62,10 @@ internal class SubjectMessageInbox(private val context: Context) {
         val parent = if (status == "completed") "completed" else if (status == "queued") "queued" else "pending"
         store.activityWrite(role, "message_inbox", id, parent) { requireNotNull(it).put("parent", parent)
             .put("status", status).put("updated_at", System.currentTimeMillis()) }
-        if (status == "completed") SubjectLife(context).inputCompleted(role, id)
+        if (status == "completed") {
+            SubjectInteractionClock(context).record(role, "exchange", System.currentTimeMillis())
+            SubjectLife(context).inputCompleted(role, id)
+        }
     }
     fun attachments(row: JSONObject): List<AttachmentInfo> = row.getJSONArray("attachments").let { array ->
         (0 until array.length()).map { i -> array.getJSONObject(i).let {

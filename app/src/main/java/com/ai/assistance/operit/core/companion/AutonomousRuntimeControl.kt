@@ -51,10 +51,18 @@ class AutonomousRuntimeControl(private val context: Context) {
         store.update(key) { it.put("phase", "running").put("role", role).put("activity", activity).put("started_at", now) }
     }
     fun finish(role: String, success: Boolean, interrupted: Boolean = false, now: Long = System.currentTimeMillis()) {
+        val previous = store.read(key)
         store.update(key) {
             if (it.optString("role") == role && it.optString("phase") == "running") {
                 it.put("phase", if (success || interrupted) "waiting" else "error").put("finished_at", now)
                 if (!success && !interrupted) it.put("error", "本次后台活动未完成，已暂停自主调用。查看活动记录并核对已执行操作后恢复；不自动重放、不切换付费模型。")
+            }
+        }
+        val idle = idleConfig(role)
+        if (success && idle.optBoolean("enabled") && !idle.optBoolean("held") && idle.optLong("choice_at") < previous.optLong("started_at")) {
+            store.update("autonomous-idle:$role") {
+                if (!it.optBoolean("held") && it.optLong("choice_at") < previous.optLong("started_at"))
+                    it.put("next_at", maxOf(it.optLong("next_at"), now + it.getInt("interval_minutes") * 60000L))
             }
         }
     }
