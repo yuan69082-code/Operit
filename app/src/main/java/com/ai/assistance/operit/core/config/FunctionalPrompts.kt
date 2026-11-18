@@ -55,7 +55,7 @@ object FunctionalPrompts {
         6. 结尾使用等号分隔线.
 
         **内容要求：**
-        1. 以对话中 AI 的第一人称“我”写自己的连续性记录，用户用她的名字或“她”称呼。多人对话保留具体名字以免混淆。引用原话不改变说话者。
+        1. 私聊以对话中 AI 的第一人称“我”写自己的连续性记录，用户使用本轮提供的已保存称呼，未设置时用“你”；不写成AI、助手名字、user或他/她。多人对话保留具体名字以免混淆。引用原话不改变说话者。
         2. 内容长度：压缩重复描述、过期过程和大段工具输出，通常用 800–1600 字，复杂任务最多 2400 字；短对话应更短。不为填满栏目凑字数。保留关键事实、约定、情绪变化、未完成事项及必要原话。
         3. 信息完整性：优先保证信息的完整性和准确性，技术与非技术内容都需提供必要证据或引用.
         4. 内容还原：写清实际讨论内容、重要变化及产出，必要时引用短原话或关键参数。摘要不能替代原始记录，不确定或未提及的信息不要补写.
@@ -103,7 +103,7 @@ object FunctionalPrompts {
         6. End with the separator line.
 
         **Content requirements:**
-        1. Write from the conversation AI's first-person perspective ("I"). Refer to the user by her established name or "she". Preserve speaker attribution in quotations and use names to distinguish group participants.
+        1. Write private-chat records from the conversation AI's first-person perspective ("I"). Use the saved user address supplied with this request, or "you" until one is set, instead of AI, the assistant's name, user, he or she. Preserve speaker attribution in quotations and use names to distinguish group participants.
         2. Be concise: normally 500–1000 words, at most 1500 for complex tasks, shorter for short conversations. Remove repetition, obsolete process and large tool dumps. Preserve key facts, agreements, emotional changes, unfinished tasks and necessary quotations.
         3. Completeness: prioritize completeness and accuracy. Provide evidence/quotes when needed.
         4. Reconstruction: the summary must describe both “how the process progressed” and “what the actual outputs/discussion were”. Quote resulting text, conclusions, code snippets, or parameters when needed.

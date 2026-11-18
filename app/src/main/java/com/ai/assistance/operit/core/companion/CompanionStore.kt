@@ -86,6 +86,33 @@ class CompanionStore(context: Context) {
         } else data
     }
 
+    /** Rest/dream reads need the committed category journal, not thousands of unrelated
+     * events, reports and state time curves. Replay the same commit before exposing SQL
+     * rows so a restart between AtomicFile replacement and index update is still safe. */
+    internal fun readPrivateCategories(role: String): JSONObject {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) {
+            val input = file(scope)
+            val data = JSONObject()
+            if (input.baseFile.exists() || File(input.baseFile.path + ".bak").exists()) {
+                com.google.gson.stream.JsonReader(input.openRead().bufferedReader(Charsets.UTF_8)).use { reader ->
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        val field = reader.nextName()
+                        if (field == SubjectStateBoundary.FIELD || field == "category_commit")
+                            data.put(field, JSONObject(com.google.gson.JsonParser.parseReader(reader).toString()))
+                        else reader.skipValue()
+                    }
+                    reader.endObject()
+                }
+            }
+            SubjectStateBoundary.adopt(data, role, "internal-state")
+            data.optJSONObject("category_commit")?.let { journal -> history(scope).use { it.applyCategoryJournal(journal) } }
+            InternalStateDocument(data, historyAccess(scope))
+        }
+    }
+
     /** Small read projection for book activity; skip chapter bodies and old notes while streaming. */
     internal fun readArrayTail(scope: String, array: String, limit: Int): JSONArray = synchronized(lock(scope)) {
         require(scope.startsWith("study-book:") && array in setOf("notes", "events") && limit in 1..8)

@@ -5,7 +5,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.ai.assistance.operit.core.companion.*
 import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
@@ -24,21 +27,39 @@ internal fun SubjectLifePanel(role: String) {
     var error by remember(role) { mutableStateOf("") }
     var notice by remember(role) { mutableStateOf("") }
     var detail by remember(role) { mutableStateOf(false) }
-    LaunchedEffect(role, offset) {
-        while (isActive) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(role, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while (isActive) {
             try {
                 val projection = withContext(Dispatchers.IO) {
-                    val r = SubjectLife(context).rest(role)?.getJSONObject("content")
+                    val r = SubjectLife(context).rest(role)?.getJSONObject("content")?.let { full ->
+                        JSONObject().also { view -> listOf("state", "mode", "until", "meaning", "interruption").forEach {
+                            if (full.has(it)) view.put(it, full.get(it))
+                        } }
+                    }
                     val streaming = ChatRuntimeHolder.activeChatsIfCreated()
                     val chatBusy = streaming.any { ChatHistoryManager.getInstance(context).getChatMetadata(it)?.characterCardId == role }
-                    Triple(r, SubjectRestPolicy.label(r, SubjectLife.busy(role) ?: if (chatBusy) "正在交流" else null, System.currentTimeMillis()),
-                        SubjectMessageInbox(context).page(role, offset))
+                    r to SubjectRestPolicy.label(r, SubjectLife.busy(role) ?: if (chatBusy) "正在交流" else null, System.currentTimeMillis())
                 }
-                rest = projection.first; status = projection.second; inbox = projection.third; error = SubjectLife.failure(role).orEmpty()
+                // JSONObject uses reference equality: replacing an unchanged record every
+                // two seconds needlessly recomposed the entire expanded card.
+                if (rest?.toString() != projection.first?.toString()) rest = projection.first
+                status = projection.second; error = SubjectLife.failure(role).orEmpty()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = "状态读取失败：${failure.javaClass.simpleName}" }
             delay(2_000)
-        }
+        } }
+    }
+    LaunchedEffect(role, offset, detail, lifecycle) {
+        if (!detail) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while (isActive) {
+            try {
+                val page = withContext(Dispatchers.IO) { SubjectMessageInbox(context).page(role, offset) }
+                if (inbox.map { it.toString() } != page.map { it.toString() }) inbox = page
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { error = "待发送消息读取失败：${failure.javaClass.simpleName}" }
+            delay(2_000)
+        } }
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -92,7 +113,7 @@ internal fun SummaryAddressPanel(role: String) {
     var value by remember(role) { mutableStateOf("") }
     var result by remember(role) { mutableStateOf("") }
     LaunchedEffect(role) { value = withContext(Dispatchers.IO) { AssistantRoom(context, role).read().optString("summary_user_address") } }
-    OutlinedTextField(value, { value = it }, label = { Text("对话回顾里怎样称呼你") }, supportingText = { Text("这位助手称为“我”；此处只确定你的称呼，原聊天不改写。") })
+    OutlinedTextField(value, { value = it }, label = { Text("对话回顾里怎样称呼你") }, supportingText = { Text("由你自定义，保存一次后持续沿用。这位助手统一写“我”，你使用这里的称呼；原聊天不改写。") })
     TextButton(onClick = { scope.launch {
         try { withContext(Dispatchers.IO) { AssistantRoom(context, role).summaryAddress(value) }; result = "已保存，以后的压缩沿用。" }
         catch (failure: Exception) { result = "未保存：${failure.message}" }

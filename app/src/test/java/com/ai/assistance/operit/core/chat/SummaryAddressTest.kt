@@ -15,6 +15,26 @@ import org.robolectric.annotation.Config
 @RunWith(OperitStorageTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class SummaryAddressTest {
+    @Test fun recapAndEventSourcesUseSavedAddressWithoutRewritingQuotedPeople() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "沈知屿"))
+        AssistantRoom(context, role).summaryAddress("园园")
+        val address = SummaryAddress.read(context, role)
+        assertEquals("我", SummaryAddress.speaker("ai", address))
+        assertEquals("园园", SummaryAddress.speaker("user", address))
+        val original = "小林说：她叫我明天再来。"
+        val sources = SegmentedSummary.source(listOf(
+            com.ai.assistance.operit.data.model.ChatMessage("user", original, timestamp = 10),
+            com.ai.assistance.operit.data.model.ChatMessage("ai", "我记下了", timestamp = 20, roleName = "沈知屿")
+        ), address)
+        assertTrue(sources.contains("园园：$original"))
+        assertTrue(sources.contains("我：我记下了"))
+        assertFalse(sources.contains("沈知屿："))
+        AssistantRoom(context, role).summaryAddress("Rue")
+        assertEquals("Rue", SummaryAddress.read(context, role))
+        assertEquals("你", SummaryAddress.speaker("user", ""))
+    }
+
     @Test fun addressPersistsPerAssistantWithoutChangingOriginalText() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val cards = CharacterCardManager.getInstance(context)

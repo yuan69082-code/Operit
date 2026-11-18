@@ -732,7 +732,8 @@ object AIMessageManager {
                 ?: fresh.first().timestamp
             val feelings = FeelingLog.since(context, requireNotNull(chatId), from)
             segmentSources = feelings.map { "subject_original_note@${it.at}" to it.text }
-            SegmentedSummary.build(enhancedAiService, chatId, fresh, previous, feelings)
+            SegmentedSummary.build(enhancedAiService, chatId, fresh, previous, feelings,
+                SummaryAddress.read(context, roleCardId))
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
         } catch (failure: Exception) {
             AppLogger.e(TAG, "窗口段落生成失败，只保留原摘要", failure); null
@@ -1095,6 +1096,9 @@ object AIMessageManager {
             return if (combined.isBlank()) "[Empty]" else combined
         }
 
+        // The recap is appended by the host after drafting. It must use the same saved
+        // address as the model instructions, even when the optional AI review is disabled.
+        val summaryUserAddress = if (isGroupChat) "" else SummaryAddress.read(context, roleCardId)
         // 群聊模式：将消息打包成多角色格式
         val conversationToSummarize = if (isGroupChat) {
             // 打包所有消息到一条用户消息
@@ -1150,21 +1154,14 @@ object AIMessageManager {
                 if (cleanedContent.isNotBlank()) {
                     val displayContent =
                         if (role == "assistant") condenseAssistantForReview(cleanedContent) else condenseUserForReview(cleanedContent)
-                    val speakerLabel =
-                        if (message.sender == "user") {
-                            "user"
-                        } else {
-                            val roleName = message.roleName?.takeIf { it.isNotBlank() }
-                            if (roleName != null) roleName else "AI"
-                        }
+                    val speakerLabel = SummaryAddress.speaker(message.sender, summaryUserAddress)
                     conversationReviewEntries.add(speakerLabel to displayContent)
                 }
                 // A summary is data, not a replay of the assistant's tool calls. Sending
                 // historic assistant XML as an assistant turn makes Gemini interpret it as
                 // a new functionCall without the original thought_signature (HTTP 400).
                 // Keep the speaker and ordering in the text, but send it as inert user data.
-                val speaker = if (message.sender == "user") "user"
-                    else message.roleName?.takeIf { it.isNotBlank() } ?: "AI"
+                val speaker = SummaryAddress.speaker(message.sender, summaryUserAddress)
                 Pair("user", "#${index + 1} [$speaker]: $cleanedContent")
             }
         }
@@ -1177,7 +1174,7 @@ object AIMessageManager {
             // Former pinned memory belongs in the library, not every subsequent summary.
             val protectedMemory = ""
             val cacheKey = ReviewedSummaryBatches.fingerprint(listOf(
-                "reviewed-batches-v2-fidelity", chatId,
+                "reviewed-batches-v3-address", chatId, summaryUserAddress,
                 reviewer?.cacheIdentity() ?: SummaryReviewer.draftCacheIdentity(context), summaryConfig.toString(),
                 LocaleUtils.usesChineseContent(context).toString(),
                 com.ai.assistance.operit.core.chat.hooks.SummaryHookRegistry.cacheRevision().toString(),

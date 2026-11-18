@@ -107,23 +107,36 @@ internal class InternalStateArchive(private val file: File, private val scope: S
 
     private fun db(): SQLiteDatabase {
         database?.let { return it }
-        return SQLiteDatabase.openOrCreateDatabase(file, null).also { db ->
+        val db = SQLiteDatabase.openOrCreateDatabase(file, null)
+        try {
+            // Schema creation is independent of the subject scope. Previously every
+            // indexed read reran all DDL and could queue behind another writer.
+            if (db.version < SCHEMA_VERSION) synchronized(schemaLock) {
+                if (db.version < SCHEMA_VERSION) {
+                    db.beginTransaction()
+                    try {
+                        db.execSQL("CREATE TABLE IF NOT EXISTS history (scope TEXT NOT NULL, kind TEXT NOT NULL, hash TEXT NOT NULL, lookup TEXT NOT NULL, payload TEXT NOT NULL, contact_chat TEXT, contact_at INTEGER, PRIMARY KEY(scope,kind,hash))")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS history_lookup ON history(scope,kind,lookup)")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS history_contact ON history(scope,contact_chat,contact_at)")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS history_contact_global ON history(scope,contact_at)")
+                        db.execSQL("CREATE TABLE IF NOT EXISTS category_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, parent TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS category_parent ON category_current(scope,kind,parent,id)")
+                        // Equal owner/kind/parent ranges are then ordered by SQLite's implicit rowid.
+                        // Latest receipt pages must not sort every full historical result.
+                        db.execSQL("CREATE INDEX IF NOT EXISTS category_recent ON category_current(scope,kind,parent)")
+                        db.execSQL("CREATE TABLE IF NOT EXISTS category_commits (scope TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(scope,id))")
+                        db.execSQL("CREATE TABLE IF NOT EXISTS research_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, brief TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tab TEXT NOT NULL, assignee TEXT NOT NULL, category TEXT NOT NULL, priority TEXT NOT NULL, updated INTEGER NOT NULL, due INTEGER NOT NULL, search TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS research_page_order ON research_current(scope,kind,priority,updated DESC,id)")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS research_recent ON research_current(scope,kind,updated DESC,id)")
+                        db.execSQL("CREATE INDEX IF NOT EXISTS research_due ON research_current(scope,kind,state,due)")
+                        db.version = SCHEMA_VERSION
+                        db.setTransactionSuccessful()
+                    } finally { db.endTransaction() }
+                }
+            }
             database = db
-            db.execSQL("CREATE TABLE IF NOT EXISTS history (scope TEXT NOT NULL, kind TEXT NOT NULL, hash TEXT NOT NULL, lookup TEXT NOT NULL, payload TEXT NOT NULL, contact_chat TEXT, contact_at INTEGER, PRIMARY KEY(scope,kind,hash))")
-            db.execSQL("CREATE INDEX IF NOT EXISTS history_lookup ON history(scope,kind,lookup)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS history_contact ON history(scope,contact_chat,contact_at)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS history_contact_global ON history(scope,contact_at)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS category_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, parent TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
-            db.execSQL("CREATE INDEX IF NOT EXISTS category_parent ON category_current(scope,kind,parent,id)")
-            // Equal owner/kind/parent ranges are then ordered by SQLite's implicit rowid.
-            // Latest receipt pages must not sort every full historical result.
-            db.execSQL("CREATE INDEX IF NOT EXISTS category_recent ON category_current(scope,kind,parent)")
-            db.execSQL("CREATE TABLE IF NOT EXISTS category_commits (scope TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(scope,id))")
-            db.execSQL("CREATE TABLE IF NOT EXISTS research_current (scope TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, brief TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tab TEXT NOT NULL, assignee TEXT NOT NULL, category TEXT NOT NULL, priority TEXT NOT NULL, updated INTEGER NOT NULL, due INTEGER NOT NULL, search TEXT NOT NULL, PRIMARY KEY(scope,kind,id))")
-            db.execSQL("CREATE INDEX IF NOT EXISTS research_page_order ON research_current(scope,kind,priority,updated DESC,id)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS research_recent ON research_current(scope,kind,updated DESC,id)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS research_due ON research_current(scope,kind,state,due)")
-        }
+            return db
+        } catch (failure: Throwable) { db.close(); throw failure }
     }
 
     fun put(kind: String, row: JSONObject) {
@@ -590,6 +603,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     }
 
     companion object {
+        // Bump when adding archive tables/indexes; existing payloads are never rewritten.
+        private const val SCHEMA_VERSION = 1
+        private val schemaLock = Any()
         private data class RecallIndex(val revision: Pair<Long, Long>, val entries: List<SubjectRecall.Entry>, val weight: Long)
         private val recallCache = object : LinkedHashMap<Pair<String, String>, LinkedHashMap<String, RecallIndex>>(4, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, String>, LinkedHashMap<String, RecallIndex>>?) = size > 4
