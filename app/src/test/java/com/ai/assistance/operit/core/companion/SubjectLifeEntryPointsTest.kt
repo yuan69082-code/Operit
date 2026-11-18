@@ -348,6 +348,33 @@ class SubjectLifeEntryPointsTest {
         assertNull(life.next(role, chat, System.currentTimeMillis()))
     }
 
+    @Test fun missingConversationPreflightStopsAutomaticRetryWithoutLosingInput() = runBlocking {
+        val inbox = SubjectMessageInbox(context)
+        val original = inbox.accept(role, "deleted-chat", "stale", "不要丢掉这句话", emptyList())
+        assertNull(ChatHistoryManager.getInstance(context).getChatMetadata("deleted-chat"))
+        assertTrue(inbox.rejectQueued(role, "deleted-chat", "stale", "会话不存在"))
+        val reopened = SubjectMessageInbox(context)
+        assertNull(reopened.next(role))
+        val saved = reopened.read(role, "stale")
+        assertEquals("failed", saved.getString("status"))
+        assertEquals("会话不存在", saved.getString("dispatch_error"))
+        assertEquals(original.getString("text"), saved.getString("text"))
+        assertEquals(original.getString("source_chat"), saved.getString("source_chat"))
+        assertEquals(original.getLong("timestamp"), saved.getLong("timestamp"))
+        assertFalse(reopened.rejectQueued(role, "deleted-chat", "stale", "会话不存在"))
+        reopened.accept(role, chat, "valid", "有效会话的新消息", emptyList())
+        assertEquals("valid", SubjectLife(context).next(role, chat, System.currentTimeMillis())!!.input!!.getString("id"))
+    }
+
+    @Test fun latePreflightRejectionCannotResetAClaimedInput() {
+        val inbox = SubjectMessageInbox(context)
+        inbox.accept(role, chat, "claimed", "原文", emptyList())
+        assertTrue(inbox.claim(role, "claimed"))
+        assertFalse(inbox.rejectQueued(role, chat, "claimed", "旧请求的失败"))
+        assertEquals("sending", inbox.read(role, "claimed").getString("status"))
+        assertFalse(inbox.read(role, "claimed").has("dispatch_error"))
+    }
+
     @Test fun earlierFailedInputsDoNotStarveNewInputAndCompletedInputDoesNotWakeTwice() = runBlocking {
         adopt(rest())
         val inbox = SubjectMessageInbox(context)

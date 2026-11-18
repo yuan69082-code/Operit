@@ -67,6 +67,8 @@ internal fun SubjectLifePanel(role: String) {
                         "queued" -> "消息已保存，等待处理"; "sending", "saved" -> "发送中"; "unknown" -> "上次处理结果尚未确认"; else -> "发送失败，原输入保留"
                     })
                     Text(if (expanded) row.getString("text") else row.getString("text").take(240))
+                    if (row.getString("status") == "failed" && row.optString("dispatch_error").isNotBlank())
+                        Text("未发送原因：${row.getString("dispatch_error")}。原文仍保留，请核对原会话。")
                     TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起原文" else "查看原文") }
                     if (row.getString("status") == "failed") TextButton(onClick = { scope.launch {
                         try { withContext(Dispatchers.IO) { SubjectMessageInbox(context).finish(role, row.getString("id"), "queued") } }

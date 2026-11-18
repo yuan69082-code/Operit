@@ -678,8 +678,22 @@ class MessageCoordinationDelegate(
                 roleCardId = roleCardIdOverride,
                 preferActiveRoleCard = preferActiveRoleCard,
             )
-        } } catch (e: Exception) {
+        } } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
             AppLogger.e(TAG, "解析聊天所属助手失败", e)
+            // A durable input has not reached claim() yet. Leaving it queued makes the
+            // life dispatcher submit the same missing conversation every two seconds.
+            if (turnOptions.subjectInboxId != null && roleCardIdOverride != null) {
+                try {
+                    com.ai.assistance.operit.core.companion.SubjectMessageInbox(context).rejectQueued(
+                        roleCardIdOverride, chatId, turnOptions.subjectInboxId,
+                        e.message ?: "无法确定聊天所属助手")
+                } catch (storageFailure: Exception) {
+                    AppLogger.e(TAG, "发送前失败记录未保存", storageFailure)
+                }
+            }
+            turnOptions.onCompanionFailure?.invoke(e)
             uiStateDelegate.showErrorMessage(e.message ?: "无法确定聊天所属助手")
             return
         }
