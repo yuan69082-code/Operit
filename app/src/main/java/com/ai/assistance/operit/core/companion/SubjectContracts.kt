@@ -6,7 +6,7 @@ import org.json.JSONObject
 /** Input limits concern authored input, never host-added provenance. Keep diagnostics value-free. */
 internal object SubjectContracts {
     const val JSON_CHARS = 16384
-    const val HELP = "输入细则可用 companion_internal_state get section=contract id=inner|episodes|unions|action|life|rest|foundation|legacy 查询；整份轮末报告最多16384个UTF-16字符，宿主来源附件不占此额度。工具续轮来源绑定只保留最近24份，早先材料仍存于历史；需重新引用时按需读取，不猜造ID。"
+    const val HELP = "输入细则可用 companion_internal_state get section=contract id=inner|episodes|unions|action|life|concerns|rest|foundation|legacy 查询；整份轮末报告最多16384个UTF-16字符，宿主来源附件不占此额度。工具续轮来源绑定只保留最近24份，早先材料仍存于历史；需重新引用时按需读取，不猜造ID。"
 
     fun expect(ok: Boolean, path: String, rule: String, hint: String) {
         if (!ok) throw InternalStateReportIssue("input", path, rule, hint)
@@ -75,10 +75,11 @@ internal object SubjectContracts {
     }
 
     fun query(topic: String?): JSONObject {
-        val topics = setOf("inner", "episodes", "unions", "action", "life", "rest", "foundation", "legacy")
+        val topics = setOf("inner", "episodes", "unions", "action", "life", "concerns", "rest", "foundation", "legacy")
         if (topic == null) return JSONObject().put("topics", JSONArray(topics.toList())).put("help", HELP)
-        expect(topic in topics, "id", "CONTRACT_TOPIC", "id须为inner|episodes|unions|action|life|rest|foundation|legacy。")
+        expect(topic in topics, "id", "CONTRACT_TOPIC", "id须为inner|episodes|unions|action|life|concerns|rest|foundation|legacy。")
         val contract = when (topic) {
+            "concerns" -> SubjectConcerns.instructions
             "inner" -> InnerStructure.instructions + "\n标识id/replaces/parent_ref最多64字符，kind/aspect最多80，object_ref最多160，relation.label最多100。description/context/exceptions/direction/current_state/understanding/feeling及发展说明没有额外短字数上限，受本次输入预算约束；原文完整保存。evidence/experience_refs/anchors不设额外条数上限，引用字符串最多180字符且不得重复。候选和已采用内容按版本读取；采用不能修改候选原文。"
             "episodes" -> CategoryEvents.instructions + "\nid/category_ref最多64字符；对象、目标及来源标识为非空字符串，每项最多180字符且不得重复。objects/goals省略时保留既有值，新建为[]，显式[]清空关联。对象/目标/来源/关联不设额外条数上限。importance/long_term_impact/understanding/reason须非空，无独立短字数上限。related只能指向已存在且不同于自身的事件。重点capacity仍为3..6，events不得超过所选capacity。"
             "unions" -> InnerInteractions.instructions + "\nid及成员id最多64字符，from/to最多90；interpretation/decision/meaning须非空，无独立短字数上限。至少2个不同权威成员，没有额外成员或作用条数上限；来源须非空并已提供。版本须为非负整数数字。"

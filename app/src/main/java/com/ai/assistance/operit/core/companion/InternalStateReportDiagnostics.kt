@@ -17,10 +17,10 @@ internal class InternalStateReportIssue(
 
 internal object InternalStateReportDiagnostics {
     private val sections = setOf("frame_id", "updates", "create", "revise", "foundation", "inner",
-        "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "life")
+        "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "life", "attention_config")
     private val arrays = setOf("updates", "create", "revise", "foundation", "inner", "episodes", "unions", "decisions",
         "action_feedback", "dream_understanding", "life")
-    private val objects = setOf("rest", "dream")
+    private val objects = setOf("rest", "dream", "attention_config")
 
     /** Validate only the shared structural protocol. Domain-specific rules remain authoritative. */
     fun validate(report: JSONObject) {

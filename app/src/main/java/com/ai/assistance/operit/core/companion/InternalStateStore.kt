@@ -47,6 +47,48 @@ class InternalStateStore(private val context: Context) {
     fun enabled(role: String?) = !role.isNullOrBlank() && store.preferences.getBoolean("internal_state:$role", false)
     fun read(role: String) = store.read(key(role))
 
+    internal fun concernStatus(role: String, offset: Int = 0): JSONObject {
+        val data = read(role)
+        return SubjectConcerns.page(data, offset).put("configuration", SubjectConcerns.config(data))
+    }
+
+    /** User-initiated common setup has its own provenance, never a fabricated model report.
+     * Later changes to these meanings go through the existing life report/version rules. */
+    internal fun configureConcerns(role: String, settings: JSONObject, initial: JSONArray? = null): JSONObject {
+        check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "助手配置须走轮末attention_config" }
+        require(enabled(role)) { "请先开启这位助手的内部状态" }
+        update(role, "user_concern_setup") { data ->
+            if (initial != null) check(!SubjectConcerns.config(data).getBoolean("initialized")) { "首次设置已经完成；后续由明确变更承接，不覆盖原文。" }
+            SubjectConcerns.configure(data, settings)
+            if (initial != null) {
+                val now = System.currentTimeMillis()
+                val frame = InternalStateFrame("concern-setup:" + UUID.randomUUID(), role,
+                    AssistantWindowRouter.chat(context, role).orEmpty(), InternalStateEngine.semanticRevision(data), now,
+                    emptySet(), emptyMap(), data.optLong("sequence"))
+                for (i in 0 until initial.length()) {
+                    val draft = initial.getJSONObject(i)
+                    SubjectContracts.fields(draft, setOf("text", "attention"))
+                    SubjectContracts.text(draft, "text")
+                    val id = "concern-" + UUID.randomUUID()
+                    val content = SubjectConcerns.prepare(null, JSONObject().put("kind", "direction").put("id", id)
+                        .put("text", draft.getString("text")).put("attention", draft.getJSONObject("attention"))
+                        .put("scope", "首次共同设置").put("uncertainty", "来自用户初始设置，后续由主体理解和发展")
+                        .put("status", "active").put("evidence", JSONArray()), frame)
+                        .put("bindings", JSONObject()).put("not_a_plan", true).put("not_a_new_occurrence", true)
+                        .put("subject_private_material", true).put("reality", "USER_INITIAL_SETTING").put("original_source", "user_initial_setting")
+                    val row = JSONObject().put("storage_kind", "direction").put("id", id).put("parent", "private")
+                        .put("owner", role).put("source_chat", frame.chatId).put("version", 1).put("frame_id", frame.id)
+                        .put("at", now).put("source", "user_initial_setting").put("content", content)
+                    CategoryEvents.append(data, frame, row)
+                    SubjectConcerns.index(data, frame, row)
+                }
+                data.getJSONObject("concern_settings").put("initialized", true)
+            }
+            SubjectConcerns.validateCapacity(data)
+        }
+        return concernStatus(role)
+    }
+
     /** An idempotent handoff. Valid old rules keep their original scope and authority;
      * mapped categories are aliases, and no candidate is automatically adopted. */
     private fun ensureFoundation(role: String) {
@@ -392,7 +434,7 @@ class InternalStateStore(private val context: Context) {
         require(frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
         if ((report.optJSONArray("decisions")?.length() ?: 0) > 0 ||
-            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || report.has("life") || SubjectRestDreams.requested(report)) {
+            (report.optJSONArray("action_feedback")?.length() ?: 0) > 0 || report.has("life") || report.has("attention_config") || SubjectRestDreams.requested(report)) {
             require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
@@ -476,6 +518,17 @@ class InternalStateStore(private val context: Context) {
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
         SubjectContracts.expect(offset >= 0, "offset", "PAGE_OFFSET", "分页起点须为非负整数。")
         if (kind == "contract") return SubjectContracts.query(id)
+        if (kind in setOf("concerns", "concern_config")) {
+            require(!recipientScope(role, chat)) { "便签仅在本助手私域读取" }
+            val data = read(role)
+            if (kind == "concern_config") return SubjectConcerns.config(data)
+            if (id == null) return SubjectConcerns.page(data, offset).put("index_only", true)
+            val parts = id.split(':', limit = 2)
+            require(parts.size == 2 && parts[0] in LifeUnderstandings.kinds) { "详情id须为direction:ID或experience:ID" }
+            val row = CategoryEvents.row(data, parts[0], parts[1])
+            require(row == null || row.getJSONObject("content").has("attention")) { "该记录没有便签" }
+            return JSONObject().put("item", row ?: JSONObject.NULL)
+        }
         SubjectContracts.queryId(kind, id)
         if (kind in setOf("legacy_handoff", "foundation_history"))
             require(!recipientScope(role, chat)) { "旧状态承接与完整基础变化来源仅在本助手私域读取" }
@@ -658,6 +711,7 @@ class InternalStateStore(private val context: Context) {
                     foundationVersions = InnerFoundations.currentVersions(data),
                     innerSources = innerSources, innerObjects = innerObjects, innerGuard = InnerStructure.guard(data))
             }
+            val concerns = if (groupInput) emptyList() else SubjectConcerns.selected(data)
             var payload = selected.payload
             // Only a short machine-readable failure notice from a prior turn can reappear.
             // It contains no rejected report text, no identity statements, and no retry command.
@@ -675,6 +729,7 @@ class InternalStateStore(private val context: Context) {
                     it.optString("type") == "actual_operation" && it.optString("owner") == actor &&
                         it.optJSONObject("locator")?.optString("parent") == "group:$chat"
                 } else (ActionUnderstanding.materials(data, selectionInput, chat) +
+                    concerns.map { SubjectConcerns.material(it).put("selection_reason", "STANDING_CONCERN") } +
                     LifeUnderstandings.materials(data, selectionInput, chat) + retrievedMaterials)
                     .distinctBy { it.getString("id") }))
             if (frame != null) payload.put("frame_id", frame.id).put("semantic_revision", frame.revision)
@@ -690,6 +745,10 @@ class InternalStateStore(private val context: Context) {
                 for (name in listOf("pending", "pending_fragments", "record_fragments", "pending_read", "pending_ids")) inner.put(name, JSONArray())
                 inner.remove("pending_count")
                 payload = SubjectRestDreams.publicMaterial(payload)
+            }
+            if (!groupInput) {
+                SubjectConcerns.connect(data, payload, concerns, chat, now)
+                if (concerns.isNotEmpty() || data.has("concern_settings")) payload.put("_concern_config", SubjectConcerns.config(data))
             }
             payload = SubjectMaterialBudget.select(payload,
                 capabilities.optInt("subject_material_tokens", data.optInt("material_budget_tokens", SubjectMaterialBudget.DEFAULT_TOKENS))
@@ -802,7 +861,7 @@ class InternalStateStore(private val context: Context) {
                 instructions = if (data.optJSONObject("foundation_state") != null)
                     REPORT_INSTRUCTIONS + "\n" + FOUNDED_REPORT_INSTRUCTIONS + "\n" + InnerFoundations.instructions + "\n" + InnerStructure.instructions +
                         "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions +
-                        "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + LifeUnderstandings.instructions + "\n" + SubjectLife.instructions +
+                        "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + LifeUnderstandings.instructions + "\n" + SubjectConcerns.briefInstructions + "\n" + SubjectLife.instructions +
                         "\n" + InnerStructure.guard(data)
                 else REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions +
                     "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions +

@@ -388,7 +388,7 @@ internal object InnerStructure {
             })).put("record_count", records.count()).put("pending_count", pending.count())
             .put("selection", "从全部有效已采用条目的正文与情境按字词相关性检索，轮换补充，再按统一材料预算选入；未选入仍有效，原文及全部候选可用 get 分页或按ID读取，实际读到后才能采用")
     }
-    private fun identityMaterial(row: JSONObject) = JSONObject().put("id", row.getString("id"))
+    internal fun identityMaterial(row: JSONObject) = JSONObject().put("id", row.getString("id"))
         .put("content", copy(row.getJSONObject("content")))
         .put("version", row.getInt("version")).put("origin", row.getString("origin")).put("source", row.getString("source"))
         .put("evidence_ids", JSONArray(row.optJSONObject("evidence")?.keys()?.asSequence()?.toList().orEmpty()))

@@ -17,6 +17,42 @@ import org.robolectric.annotation.Config
 @RunWith(OperitStorageTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class SubjectMaterialBudgetTest {
+    @Test fun standingNotesAndOldRecallShareOneBudgetAndDoNotDuplicate() {
+        val source = payload().put("_concern_config", JSONObject().put("old", 1).put("mode", "rotation"))
+        repeat(4) { index -> source.getJSONArray("retrieved_materials").put(JSONObject()
+            .put("id", "note-$index").put("type", "subject_direction").put("selection_reason", "STANDING_CONCERN")
+            .put("text", "当前简况$index，不含完整历史")) }
+        repeat(30) { index -> source.getJSONArray("retrieved_materials").put(JSONObject()
+            .put("id", "old-$index").put("type", "subject_experience").put("text", "以前形成的认识$index")) }
+        val seen = mutableSetOf<String>()
+        repeat(6) { cursor ->
+            val selected = SubjectMaterialBudget.select(JSONObject(source.toString()).put("material_selection_cursor", cursor))
+            assertFalse(selected.has("_concern_config"))
+            assertTrue(SubjectMaterialBudget.estimate(selected.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 2048)
+            val rows = selected.getJSONArray("retrieved_materials")
+            val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
+            assertEquals(ids.size, ids.distinct().size)
+            repeat(4) { assertTrue(ids.contains("note-$it")) }
+            val old = (0 until rows.length()).map { rows.getJSONObject(it) }.filter { it.optBoolean("old_recall") }
+            assertEquals(1, old.size)
+            seen += old.single().getString("id")
+        }
+        assertTrue(seen.size > 1)
+        assertFalse(source.toString().contains("old_recall"))
+    }
+
+    @Test fun enormousRequestedSlotsDoNotAllocateUnboundedOldRecallOrEvictRest() {
+        val source = payload().put("_concern_config", JSONObject().put("old", Int.MAX_VALUE).put("mode", "random"))
+        source.getJSONArray("retrieved_materials").put(JSONObject().put("id", "rest")
+            .put("type", "subject_rest").put("control_state", true).put("text", "当前休息状态"))
+        repeat(50) { index -> source.getJSONArray("retrieved_materials").put(JSONObject().put("id", "past-$index")
+            .put("type", "subject_experience").put("text", "原始理解".repeat(100))) }
+        val result = SubjectMaterialBudget.select(source)
+        assertEquals("rest", result.getJSONArray("retrieved_materials").getJSONObject(0).getString("id"))
+        assertTrue(SubjectMaterialBudget.estimate(result.toString()) + SubjectMaterialBudget.ENVELOPE_RESERVE <= 2048)
+        assertTrue(result.getJSONObject("material_budget").getJSONObject("omitted_counts").getInt("retrieved_materials") > 0)
+    }
+
     private fun payload() = JSONObject().put("inner_structure", JSONObject()
         .put("identity", JSONArray()).put("selected", JSONArray()).put("pending", JSONArray())
         .put("catalogue", JSONArray()).put("pending_ids", JSONArray()))
