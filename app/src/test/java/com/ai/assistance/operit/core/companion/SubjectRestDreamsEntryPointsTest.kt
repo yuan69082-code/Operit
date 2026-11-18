@@ -91,6 +91,38 @@ class SubjectRestDreamsEntryPointsTest {
         .put("expected_version", version).put("dream_source", source).put("meaning", "这是梦，不是她真的不认识我；我想把那一点失落记下来")
         .put("feeling", "醒后仍有一点失落").put("objects", JSONArray().put("user")).put("evidence", JSONArray().put(source))
 
+    @Test fun privateArchiveProjectionSkipsUnrelatedStateAndReplaysInterruptedIndex(): Unit = runBlocking {
+        val id = createDream()
+        val store = CompanionStore(context)
+        val before = InternalStateStore(context).read(role)
+        val rest = item("rest", "current").toString()
+        val dream = item("dream", id).toString()
+        val projection = store.readPrivateCategories(role)
+        assertEquals(SubjectStateBoundary.revision(before), SubjectStateBoundary.revision(projection))
+        assertFalse(projection.has("events"))
+        assertFalse(projection.has("versions"))
+        assertFalse(projection.has("semantic_reports"))
+        assertFalse(projection.has("foundation_state"))
+        assertEquals(rest, CategoryEvents.row(projection, "rest", "current").toString())
+        // Fault injection: the AtomicFile commit survived, but its SQL index did not.
+        // Recovery must use that commit, not a stale UI cache or a new psychological update.
+        val dbFile = java.io.File(context.filesDir, "companion/internal-state-history.sqlite")
+        android.database.sqlite.SQLiteDatabase.openDatabase(dbFile.path, null, 0).use { db ->
+            db.execSQL("DELETE FROM category_current WHERE scope=?", arrayOf("internal-state:$role"))
+            db.execSQL("DELETE FROM category_commits WHERE scope=?", arrayOf("internal-state:$role"))
+        }
+        val reopened = CompanionStore(context).readPrivateCategories(role)
+        assertEquals(rest, CategoryEvents.row(reopened, "rest", "current").toString())
+        assertEquals(dream, item("dream", id).toString())
+        assertEquals(rest, SubjectLife(context).rest(role).toString())
+        assertEquals(before.toString(), InternalStateStore(context).read(role).toString())
+        val other = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "另一位"))
+        assertNull(CategoryEvents.row(store.readPrivateCategories(other), "rest", "current"))
+        withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(other)) {
+            rejected { store.readPrivateCategories(role) }
+        }
+    }
+
     @Test fun normalPrivateDreamThenWakingUnderstandingSurvivesWindowsAndReopen(): Unit = runBlocking {
         InternalStateStore(context).materialBudget(role, chat, 16384)
         val id = createDream()

@@ -504,7 +504,9 @@ class InternalStateStore(private val context: Context) {
         if (kind in setOf("decision", "feedback") + SubjectRestDreams.kinds + LifeUnderstandings.kinds ||
             (kind == "category_versions" && (setOf("decision", "feedback", "private_time_config", "private_time_plan", "private_time_sleep", "private_time_essence") + SubjectRestDreams.privateKinds + LifeUnderstandings.kinds).any { id.orEmpty().startsWith("$it:") }))
               require(!recipientScope(role, chat)) { "私人决定和理解不可向群聊提供" }
-        val data = snapshot(role, chat, false)
+        // Rest and dream archives have no implicit time evolution. Browsing them must
+        // not project every drive and load all retained chat/state events first.
+        val data = if (kind in SubjectRestDreams.kinds) store.readPrivateCategories(role) else snapshot(role, chat, false)
         if (kind == "foundation") {
             val familyOrId = requireNotNull(id) { "基础目录查询需要 family 或类别ID" }
             val now = System.currentTimeMillis()

@@ -68,7 +68,7 @@ internal object SegmentedSummary {
     }
 
     /** 送给模型的正文：去掉设备快照、记忆标签和思考，工具记录只留开头，编号旁标时间。 */
-    fun source(messages: List<ChatMessage>): String = buildString {
+    fun source(messages: List<ChatMessage>, userAddress: String = ""): String = buildString {
         messages.forEachIndexed { index, message ->
             val text = ChatUtils.removeThinkingContent(message.content)
                 .replace(Regex("<memory>.*?</memory>", RegexOption.DOT_MATCHES_ALL), "")
@@ -76,13 +76,13 @@ internal object SegmentedSummary {
                 .replace(ChatMarkupRegex.toolOrToolResultBlock) { it.value.take(200) + "…" }
                 .trim()
             if (text.isBlank()) return@forEachIndexed
-            val who = when (message.sender) { "user" -> "她"; "summary" -> "旧摘要（原文待核对）"; else -> "我" }
+            val who = if (message.sender == "summary") "旧摘要（原文待核对）" else SummaryAddress.speaker(message.sender, userAddress)
             append("#${index + 1} [${time(message.timestamp)}] $who：${text.take(4000)}\n\n")
         }
     }
 
-    private fun prompt(open: List<String>): String = """
-        你在替这个窗口里的 AI 记分段笔记，用 AI 的第一人称"我"写，用户用原文名字或"她"。这是软件内部步骤，不要继续聊天，不调用工具。
+    private fun prompt(open: List<String>, userAddress: String): String = """
+        你在替这个窗口里的 AI 记分段笔记。${SummaryAddress.rule(userAddress)}这是软件内部步骤，不要继续聊天，不调用工具。
         把新消息按"一件事"切成段，每段格式严格如下（不加代码围栏，不写别的）：
         § 起#a 止#b｜已结束 或 悬着｜标题（20字内，直接说是什么事，比如"你和我文字做爱""改压缩方案"）
         时间：MM月dd日 HH:mm 到 HH:mm（还没结束就写"MM月dd日 HH:mm 开始，悬着未结束"）
@@ -102,15 +102,16 @@ internal object SegmentedSummary {
         chatId: String,
         messages: List<ChatMessage>,
         previous: String?,
-        feelings: List<Feeling>
+        feelings: List<Feeling>,
+        userAddress: String = ""
     ): String? {
         val parsed = parse(previous)
-        val text = source(messages)
+        val text = source(messages, userAddress)
         if (text.isBlank()) return null
         val output = service.callFunctionModel(
             FunctionType.SUMMARY,
             listOf(
-                PromptTurn(kind = PromptTurnKind.SYSTEM, content = prompt(parsed.open)),
+                PromptTurn(kind = PromptTurnKind.SYSTEM, content = prompt(parsed.open, userAddress)),
                 PromptTurn(kind = PromptTurnKind.USER, content = "新消息：\n$text")
             )
         )

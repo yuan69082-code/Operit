@@ -22,6 +22,76 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class)
 class CategoryEventsEntryPointsTest {
 
+    @Test fun changedCategoryExplainsRepairAndRelatedFeelingsCanBothPersist(): Unit = runBlocking {
+        val first = frame()
+        submit(first, report(first, listOf(appraisal(first, "concern", category = "foundation:emotion:sadness"))))
+        val original = CategoryEvents.row(states.read(role), "episode", "concern")!!.toString()
+        val change = frame()
+        val failure = try {
+            submit(change, report(change, listOf(appraisal(change, "concern", 1, "foundation:sentiment:attachment"))))
+            fail("changing an existing category must name the failed field")
+            error("unreachable")
+        } catch (issue: InternalStateReportIssue) { issue }
+        assertEquals("EPISODE_CATEGORY_CHANGED", failure.rule)
+        assertEquals("episodes[0].category_ref", failure.path)
+        assertTrue(failure.hint.contains("same_matter"))
+        assertEquals(original, CategoryEvents.row(states.read(role), "episode", "concern")!!.toString())
+        states.noteReportFailure(change, failure)
+
+        // Both the contract and the actionable diagnostic must reach a real next request,
+        // not just exist in developer documentation or a UI toast.
+        val next = InnerStructureContext.prepare(context, role, second, true, input = "理解发生了变化")
+        assertTrue(next.instructions.contains("不能把原ID直接换类"))
+        assertTrue(next.state.contains("ISR_EPISODE_CATEGORY_CHANGED"))
+        assertTrue(next.state.contains("same_matter"))
+        val f = requireNotNull(next.internalStateFrame)
+        submit(f, report(f, listOf(
+            appraisal(f, "concern", 1, "foundation:emotion:sadness").put("intensity", 0.1).put("status", "resolved"),
+            appraisal(f, "affection", category = "foundation:sentiment:attachment")
+                .put("related", JSONArray().put(JSONObject().put("id", "concern").put("relation", "same_matter")))
+        )))
+        assertEquals(2, episode("concern").getInt("version"))
+        assertEquals("foundation:emotion:sadness", episode("concern").getString("parent"))
+        assertEquals("foundation:sentiment:attachment", episode("affection").getString("parent"))
+        assertEquals("concern", episode("affection").getJSONObject("content").getJSONArray("related").getJSONObject(0).getString("id"))
+        val history = states.inspectCategory(role, chat, "category_versions", "episode:concern", 0).getJSONArray("items")
+        assertEquals(2, history.length())
+        assertTrue((0 until history.length()).any { history.getJSONObject(it).toString() == original })
+    }
+
+    @Test fun optionalEpisodeAssociationsDoNotInventGoalsOrEraseExistingOnes(): Unit = runBlocking {
+        val first = frame()
+        val noAssociations = appraisal(first, "untargeted", category = "foundation:emotion:sadness").apply {
+            remove("objects"); remove("goals")
+        }
+        submit(first, report(first, listOf(noAssociations,
+            appraisal(first, "targeted", category = "foundation:emotion:sadness"))))
+        assertEquals(0, episode("untargeted").getJSONObject("content").getJSONArray("goals").length())
+        val prior = episode("targeted").getJSONObject("content")
+        val next = frame()
+        submit(next, report(next, listOf(appraisal(next, "targeted", 1, "foundation:emotion:sadness").apply {
+            remove("objects"); remove("goals")
+        })))
+        val retained = episode("targeted").getJSONObject("content")
+        assertEquals(prior.getJSONArray("goals").toString(), retained.getJSONArray("goals").toString())
+        assertEquals(prior.getJSONArray("objects").toString(), retained.getJSONArray("objects").toString())
+        val clear = frame()
+        submit(clear, report(clear, listOf(appraisal(clear, "targeted", 2, "foundation:emotion:sadness")
+            .put("objects", JSONArray()).put("goals", JSONArray()))))
+        assertEquals(0, episode("targeted").getJSONObject("content").getJSONArray("goals").length())
+        val wrong = frame()
+        val before = CategoryEvents.row(states.read(role), "episode", "targeted")!!.toString()
+        try {
+            submit(wrong, report(wrong, listOf(appraisal(wrong, "targeted", 3, "foundation:emotion:sadness")
+                .put("goals", "不是数组"))))
+            fail("explicit invalid metadata must not overwrite the event")
+        } catch (issue: InternalStateReportIssue) {
+            assertEquals("episodes[0].goals", issue.path)
+            assertEquals("EXPECTED_ARRAY", issue.rule)
+        }
+        assertEquals(before, CategoryEvents.row(states.read(role), "episode", "targeted")!!.toString())
+    }
+
     @Test fun relevantOldEpisodeBeyondRotatingPageReturnsWithoutBecomingANewOccurrence(): Unit = runBlocking {
         val f = frame()
         val reports = (0 until 30).map { n -> appraisal(f, "e%02d".format(n), category = "foundation:emotion:anger")

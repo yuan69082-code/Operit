@@ -12,7 +12,7 @@ internal class SubjectLife(private val context: Context) {
     private val store = CompanionStore(context)
     fun rest(role: String): JSONObject? = if (!InternalStateStore(context).enabled(role) ||
         com.ai.assistance.operit.core.engine.EngineWindow.associated(context, role)) null else
-        CategoryEvents.row(InternalStateStore(context).read(role), "rest", "current")
+        CategoryEvents.row(store.readPrivateCategories(role), "rest", "current")
 
     fun buffer(role: String, chat: String, id: String, source: String, text: String): JSONObject {
         val prior = store.activityRead(role, "life_event", id)

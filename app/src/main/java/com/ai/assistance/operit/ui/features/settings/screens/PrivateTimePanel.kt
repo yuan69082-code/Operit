@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.core.companion.PrivateTime
+import com.ai.assistance.operit.core.companion.CompanionStore
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.time.Instant
@@ -24,6 +25,10 @@ internal fun PrivateTimePanel(role: String) {
     var zone by remember(role) { mutableStateOf(ZoneId.systemDefault().id) }
     var enabled by remember(role) { mutableStateOf(false) }
     var memory by remember(role) { mutableStateOf("") }
+    var memoryPicker by remember(role) { mutableStateOf(false) }
+    var memoryNote by remember(role) { mutableStateOf(false) }
+    var fatiguePicker by remember(role) { mutableStateOf(false) }
+    var fatigueLabel by remember(role) { mutableStateOf("") }
     var sleepTime by remember(role) { mutableStateOf("") }
     var fatigue by remember(role) { mutableStateOf("") }
     var threshold by remember(role) { mutableStateOf("80") }
@@ -39,6 +44,10 @@ internal fun PrivateTimePanel(role: String) {
             enabled = it.getBoolean("enabled"); memory = it.optString("memory_location")
             sleepTime = it.optString("sleep_time"); fatigue = it.optString("fatigue_episode")
             threshold = it.optDouble("fatigue_threshold", 80.0).toString()
+        }
+        fatigueLabel = if (fatigue.isBlank()) "尚未选择" else withContext(Dispatchers.IO) {
+            CompanionStore(context).activityRead(role, "episode", fatigue)?.let(::privateFatigueChoice)?.let { it.title + " · " + it.detail }
+                ?: "原选择记录暂不可用，可重新选择或关闭疲劳提醒"
         }
         essence = withContext(Dispatchers.IO) { PrivateTime(context).essence(role) }
     }
@@ -57,12 +66,28 @@ internal fun PrivateTimePanel(role: String) {
     OutlinedTextField(start, { start = it }, label = { Text("开始 HH:mm") }, enabled = !busy)
     OutlinedTextField(end, { end = it }, label = { Text("结束 HH:mm，可跨午夜") }, enabled = !busy)
     OutlinedTextField(zone, { zone = it }, label = { Text("时区，例如 Asia/Shanghai") }, enabled = !busy)
-    OutlinedTextField(memory, { memory = it }, label = { Text("人工指定 OB / 外置记忆位置") },
-        supportingText = { Text("填写已连接工具名称、vault/文件夹及可处理范围，不填密码。未指定不让助手猜路径。") }, enabled = !busy)
+    Text("记忆来源", style = MaterialTheme.typography.titleMedium)
+    Text(memory.ifBlank { "尚未选择。点击下方按钮，选择你已经连接的 ob 或其他记忆服务。" })
+    Row {
+        TextButton(enabled = !busy, onClick = { memoryPicker = true }) { Text("选择记忆来源") }
+        TextButton(enabled = !busy, onClick = { memoryNote = !memoryNote }) { Text(if (memoryNote) "收起说明" else "补充或修改说明") }
+    }
+    if (memoryNote) OutlinedTextField(memory, { memory = it }, label = { Text("资料范围说明（可选）") },
+        supportingText = { Text("可写“整理沈知屿自己的记忆”。通常不需要文件路径，也不要填写密码。已有说明会保留。") }, enabled = !busy)
     OutlinedTextField(sleepTime, { sleepTime = it }, label = { Text("可选：每日询问睡觉时间 HH:mm") }, enabled = !busy)
-    OutlinedTextField(fatigue, { fatigue = it }, label = { Text("可选：已有疲劳事件 ID") },
-        supportingText = { Text("绑定真实疲劳事件，达到提醒线只询问，不强制睡；没有事件时不从工作量捏造疲劳。") }, enabled = !busy)
-    if (fatigue.isNotBlank()) OutlinedTextField(threshold, { threshold = it }, label = { Text("提醒强度（与所选事件同量纲）") }, enabled = !busy)
+    Text("按疲劳感受询问睡觉（可选）", style = MaterialTheme.typography.titleMedium)
+    Text(fatigueLabel)
+    Row {
+        TextButton(enabled = !busy, onClick = { fatiguePicker = true }) { Text("选择疲劳感受") }
+        if (fatigue.isNotBlank()) TextButton(enabled = !busy, onClick = { fatigue = ""; fatigueLabel = "尚未选择" }) { Text("关闭疲劳提醒") }
+    }
+    Text("选已有记录中代表疲劳的感受，不用填写编号。没有记录可以先不选，定时提醒仍可使用；达到提醒强度也由他决定睡不睡。", style = MaterialTheme.typography.bodySmall)
+    if (fatigue.isNotBlank()) OutlinedTextField(threshold, { threshold = it }, label = { Text("达到多大强度时询问睡觉") }, enabled = !busy)
+    if (memoryPicker) PrivateTimeChoiceDialog("选择记忆来源", "选择这位助手已获准使用的记忆服务或工具包。这里沿用已有连接，不需要另找文件位置。",
+        load = { privateMemoryChoices(context, role) to false }, onChoose = { memory = it.value; memoryPicker = false }, onDismiss = { memoryPicker = false })
+    if (fatiguePicker) PrivateTimeChoiceDialog("选择代表疲劳的感受", "按内容选择他已经记录的疲劳感受。这里只绑定提醒，不会修改这些感受。", paged = true,
+        load = { page -> withContext(Dispatchers.IO) { privateFatigueChoices(context, role, page) } },
+        onChoose = { fatigue = it.value; fatigueLabel = it.title + " · " + it.detail; fatiguePicker = false }, onDismiss = { fatiguePicker = false })
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(enabled = !busy && snapshot != null, onClick = { run {
             val a = JSONObject().put("expected_version", snapshot?.optJSONObject("configuration")?.optInt("version") ?: 0)
