@@ -279,4 +279,3 @@ class SubjectConcernsEntryPointsTest {
         assertEquals(1, InternalStateStore(context).inspectCategory(role, chat, "feedback", "experiment-result", 0).getJSONObject("item").getInt("version"))
     }
 }
-

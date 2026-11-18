@@ -1,6 +1,6 @@
 ---
 repository: https://github.com/yuan69082-code/Operit
-status: in_progress
+status: implemented_pending_validation
 ---
 
 # 持续牵挂与旧事浮现
@@ -14,3 +14,10 @@ status: in_progress
 5. 测试初始设置、常驻稳定、全文保护、跨轮双向反馈、预算/重复、重启/并发/助手隔离；执行现有回归与发布工作流。真实模型与实机表现另列证据。
 
 完整软件检查以现有自动化回归、编译与改动调用链审查为证据，不声称穷尽所有实机问题。
+
+## 实际入口与证据范围
+
+- `SubjectConcerns` 在已有 life 行上维护 attention；`InternalStateStore.prepare` 取简况及当前关联成员，`SubjectMaterialBudget` 在同一总额内选择。`LifeUnderstandings.apply`、`InternalStateReports` 原子采用进度和明确变更。
+- `companion_internal_state get section=contract id=concerns` 给模型完整说明；`section=concerns id=direction:ID` 读取详情并绑定当前版本，`section=concern_config` 查配置。工具续轮复用同一帧，不重复加完整便签。
+- `SubjectConcernsEntryPointsTest` 覆盖跨窗/自主入口、来源、进度与原文、容量、并发和五轮状态—决定—实际工具—反馈—后续读取。`SubjectMaterialBudgetTest` 覆盖共享预算、抽选与去重。
+- 五轮中的决定和心理解释是模拟输入；软件能力构建和算术执行使用真实生产工具。没有真实模型长期成长或实机性能结论。完整执行结果记录在 PR 80 与发布工作流。
