@@ -25,6 +25,8 @@ class AutonomousRuntimeControlTest {
     private lateinit var store: CompanionStore
     @Before fun setup() {
         context = RuntimeEnvironment.getApplication()
+        CharacterCardManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
+        ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         control = AutonomousRuntimeControl(context)
         store = CompanionStore(context)
         store.preferences.edit().remove("autonomous_enabled").remove("autonomous_pause_until").commit()

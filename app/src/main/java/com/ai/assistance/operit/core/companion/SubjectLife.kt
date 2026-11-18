@@ -34,6 +34,8 @@ internal class SubjectLife(private val context: Context) {
     }
 
     fun defer(role: String, chat: String, id: String, source: String, text: String): Boolean {
+        // Pausing automation must not strand newly submitted ordinary messages behind its dispatcher.
+        if (source == "user_message" && !AutonomousRuntimeControl(context).allowed()) return false
         val record = rest(role) ?: return false
         val content = record.getJSONObject("content")
         if (content.getString("state") != "resting") return false

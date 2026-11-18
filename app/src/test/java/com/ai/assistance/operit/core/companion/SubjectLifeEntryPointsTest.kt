@@ -73,6 +73,17 @@ class SubjectLifeEntryPointsTest {
         .put("until", System.currentTimeMillis() + 3_600_000).put("meaning", "暂停一会儿，之后再接上")
         .put("evidence", JSONArray()).apply { if (plan != null) put("dream_plan", plan) })
 
+    @Test fun pausedAutomationDoesNotTrapOrdinaryMessagesOrRewriteRest() = runBlocking {
+        adopt(rest())
+        val life = SubjectLife(context)
+        val preferences = CompanionStore(context).preferences
+        preferences.edit().putBoolean("autonomous_enabled", false).commit()
+        assertFalse(life.defer(role, chat, "input:paused", "user_message", "新消息"))
+        assertEquals("resting", life.rest(role)!!.getJSONObject("content").getString("state"))
+        preferences.edit().putBoolean("autonomous_enabled", true).commit()
+        assertTrue(life.defer(role, chat, "input:enabled", "user_message", "遵循原休息安排"))
+    }
+
     @Test fun sleepBuffersEventsAndOnlyDispatchesTheChosenEndOnce() = runBlocking {
         adopt(rest())
         val life = SubjectLife(context)

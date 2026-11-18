@@ -238,6 +238,7 @@ object CompanionRuntime {
                                     outcome = "interrupted"
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     SubjectLife.recordFailure(work.role, "生活活动未完成", failure)
                                     store.log(work.chat, "生活续接失败", failure.javaClass.simpleName)
                                 } finally {
@@ -279,6 +280,7 @@ object CompanionRuntime {
                                     softwareStore.finish(batch.id, "interrupted")
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     softwareStore.finish(batch.id, "failed")
                                     store.log(batch.chat, "软件感知失败", failure.message.orEmpty().take(300))
                                 } finally {
@@ -315,6 +317,7 @@ object CompanionRuntime {
                                     phoneStore.finish(batch.id, "interrupted", "用户交互、设置变化或服务停止")
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     phoneStore.finish(batch.id, "failed", failure.message.orEmpty())
                                     store.log(batch.chat, "手机感知失败", failure.message.orEmpty().take(300))
                                 } finally {
@@ -344,6 +347,7 @@ object CompanionRuntime {
                                     work.board.dispatchState(work.id, work.event, "interrupted", "执行已中断，请核对实际进展")
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     work.board.dispatchState(work.id, work.event, "failed", failure.message.orEmpty().take(600))
                                 } finally {
                                     releaseTurn(taskEpoch)
@@ -377,6 +381,7 @@ object CompanionRuntime {
                                     outcome = "interrupted"
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     store.log(work.chat, "探索失败", failure.message.orEmpty().take(300))
                                 } finally {
                                     releaseTurn(epoch)
@@ -417,6 +422,7 @@ object CompanionRuntime {
                                     work.store.finish(work.book.getString("id"), work.ids, "unknown", "执行中断，请核对实际已保存回复和工具结果")
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     work.store.finish(work.book.getString("id"), work.ids, "failed", failure.message.orEmpty())
                                 } finally {
                                     releaseTurn(epoch)
@@ -458,6 +464,7 @@ object CompanionRuntime {
                                     outcome = "interrupted"
                                     throw cancelled
                                 } catch (failure: Exception) {
+                                    control.fail("后台活动未完成", failure)
                                     store.log(work.chat, "通知唤醒失败", failure.message.orEmpty().take(300))
                                 } finally {
                                     play.finishWake(work, outcome)
@@ -521,6 +528,7 @@ object CompanionRuntime {
                             store.log(target, "取消", "用户开始对话、关闭功能或服务停止")
                             throw cancelled
                         } catch (error: Exception) {
+                            control.fail("后台活动未完成", error)
                             store.log(target, "失败", "主动活动未完成：" + error.javaClass.simpleName)
                         } finally {
                             releaseTurn(epoch)
