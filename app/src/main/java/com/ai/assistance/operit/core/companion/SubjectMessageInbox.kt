@@ -33,6 +33,18 @@ internal class SubjectMessageInbox(private val context: Context) {
         kotlinx.serialization.json.Json.decodeFromString(com.ai.assistance.operit.data.model.ChatMessage.serializer(), row.getString("reply"))
     fun page(role: String, offset: Int) = store.activityQueuePage(role, "message_inbox", listOf("queued", "pending"), offset)
     fun next(role: String) = store.activityPage(role, "message_inbox", "queued", 0).firstOrNull()
+    /** Preflight failed before a model turn could claim this receipt. Keep the original
+     * destination/content but remove it from automatic dispatch, including after restart. */
+    fun rejectQueued(role: String, chat: String, id: String, reason: String): Boolean = synchronized(lock) {
+        val row = read(role, id)
+        check(row.getString("source_chat") == chat) { "输入来源会话不匹配" }
+        if (row.getString("status") != "queued") return false
+        store.activityWrite(role, "message_inbox", id, "pending") { current ->
+            requireNotNull(current).put("parent", "pending").put("status", "failed")
+                .put("dispatch_error", reason).put("updated_at", System.currentTimeMillis())
+        }
+        true
+    }
     fun claim(role: String, id: String): Boolean = synchronized(lock) {
         if (read(role, id).getString("status") != "queued") return false
         var claimed = false
