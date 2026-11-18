@@ -323,7 +323,7 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
             AppLogger.d(TAG, "Memory query result for '$query':\n$formattedResult")
             ToolResult(toolName = tool.name, success = true, result = formattedResult.copy(memories = formattedResult.memories.map { item ->
                 item.copy(content = com.ai.assistance.operit.data.repository.ChineseRecall.excerpt(item.content,
-                    com.ai.assistance.operit.util.TextSegmenter.segment(query)), isExcerpt = item.content.length > 700)
+                    com.ai.assistance.operit.util.TextSegmenter.segment(query)), isExcerpt = item.isExcerpt || item.content.length > 700)
             }))
         } catch (e: Exception) {
             AppLogger.e(TAG, "Memory query failed", e)
@@ -1361,7 +1361,8 @@ class MemoryQueryToolExecutor(private val context: Context) : ToolExecutor {
                 createdAt = sdf.format(memory.createdAt),
                 chunkInfo = chunkInfo,
                 chunkIndices = chunkIndices,
-                memoryId = memory.id
+                memoryId = memory.id,
+                isExcerpt = automaticRecall && content.length > 218
             )
         }
         MemoryQueryResultData(
