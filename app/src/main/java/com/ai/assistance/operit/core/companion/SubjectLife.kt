@@ -82,6 +82,9 @@ internal class SubjectLife(private val context: Context) {
     }
 
     fun checkpoint(ref: ActivityNotes.Ref, event: String, phase: String, exploration: Boolean = false, toolsUsed: Int? = null) {
+        // Closing the owned turn must not erase a continuation/end explicitly chosen in it.
+        if (phase in setOf("completed", "paused") &&
+            store.activityRead(ref.role, "life_activity", ref.id)?.optString("phase") in setOf("ready", "ended")) return
         store.activityWrite(ref.role, "life_activity", ref.id, if (phase == "paused") "pending" else phase) { old ->
             (old ?: JSONObject().put("id", ref.id).put("owner", ref.role).put("source_chat", ref.chat)
                 .put("event", event).put("exploration", exploration).put("at", System.currentTimeMillis()).put("version", 1))

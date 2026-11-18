@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import './privateState.css';
+import { AutonomousRuntimePanel } from './AutonomousRuntimePanel';
 
 type Value = string | number | boolean | null | Value[] | { [key: string]: Value };
 type Row = { [key: string]: Value };
@@ -131,6 +132,7 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
   const remaining = window?.closes_at === undefined ? 0 : Math.max(0, window.closes_at - now);
   return <div className="private-overlay"><main className="private-page" aria-label="私域内部状态">
     <header><div><small>私域 · {status?.name}</small><h1>内部状态</h1><p>当前、留下的经历，以及后来形成的理解。</p></div><button onClick={close}>返回聊天</button></header>
+    <AutonomousRuntimePanel key={chat} token={token} chat={chat} />
     <nav aria-label="私域分区">{Object.keys(sections).map(name => <button key={name} aria-pressed={tab === name} onClick={() => { setTab(name); navigate(sections[name][0]); }}>{name}</button>)}</nav>
     <div className="private-subnav">{sections[tab].map(s => <button key={s.title} aria-pressed={section.title === s.title} onClick={() => navigate(s)}>{s.title}</button>)}</div>
     {status && !status.enabled ? <p className="private-notice">此助手尚未开启内部状态。已有资料保留；请在手机该助手的内部状态设置中开启。</p> : null}

@@ -15,7 +15,7 @@ internal class SubjectMessageInbox(private val context: Context) {
             check(it.getString("source_chat") == chat && it.getString("text") == text)
             return it
         }
-        return store.activityWrite(role, "message_inbox", id, "queued") { old ->
+        val receipt = store.activityWrite(role, "message_inbox", id, "queued") { old ->
             if (old != null) {
                 check(old.getString("source_chat") == chat && old.getString("text") == text)
                 old
@@ -27,6 +27,8 @@ internal class SubjectMessageInbox(private val context: Context) {
                     .put("fileName", a.fileName).put("mimeType", a.mimeType).put("fileSize", a.fileSize)
                     .put("content", a.content).put("stickerCategory", a.stickerCategory ?: JSONObject.NULL) }))
         }
+        SubjectInteractionClock(context).record(role, "user", receipt.getLong("at"))
+        return receipt
     }
     fun read(role: String, id: String) = requireNotNull(store.activityRead(role, "message_inbox", id))
     fun reply(row: JSONObject) = if (row.isNull("reply")) null else

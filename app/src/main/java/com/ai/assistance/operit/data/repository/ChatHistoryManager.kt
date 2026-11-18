@@ -765,6 +765,16 @@ class ChatHistoryManager private constructor(private val context: Context) {
         messageDao.insertMessage(messageEntity)
 
         chatDao.getChatById(chatId)?.let { chat ->
+            if (chat.characterCardId != null && chat.characterGroupId.isNullOrBlank() &&
+                messageToPersist.displayMode == com.ai.assistance.operit.data.model.ChatMessageDisplayMode.NORMAL) {
+                val clock = com.ai.assistance.operit.core.companion.SubjectInteractionClock(context)
+                if (messageToPersist.sender == "user") clock.record(chat.characterCardId, "user", messageToPersist.timestamp)
+                else if (messageToPersist.sender in setOf("ai", "assistant") && messageToPersist.content.isNotBlank()) {
+                    clock.record(chat.characterCardId, "assistant", messageToPersist.timestamp)
+                    if (chatContentDao.latestVisibleMessageAt(chat.characterCardId, true) != null)
+                        clock.record(chat.characterCardId, "exchange", messageToPersist.timestamp)
+                }
+            }
             chatDao.updateChatMetadata(
                 chatId = chatId,
                 title = chat.title,
@@ -1015,6 +1025,12 @@ class ChatHistoryManager private constructor(private val context: Context) {
         com.ai.assistance.operit.core.companion.SubjectStateBoundary.authorize(role,
             com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         requireNotNull(chatContentDao.assistantActivityDetail(role, id, offset)) { "消息不存在或不属于该助手的私聊" }
+    }
+
+    suspend fun latestVisibleMessageAt(role: String, user: Boolean) = withContext(Dispatchers.IO) {
+        com.ai.assistance.operit.core.companion.SubjectStateBoundary.authorize(role,
+            com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        chatContentDao.latestVisibleMessageAt(role, user)
     }
 
     suspend fun recentAssistantActivity(role: String) = withContext(Dispatchers.IO) {

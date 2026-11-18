@@ -1089,6 +1089,8 @@ class MessageCoordinationDelegate(
         }
     }
 
+    internal fun groupJob(chatId: String): Job? = groupJobs[chatId]
+
     fun isGroupRunning(chatId: String) = groupJobs[chatId]?.isActive == true
 
     fun deliverGroupMessage(chatId: String, item: JSONObject) {

@@ -21,6 +21,21 @@ internal class WebPrivateStateBridge(private val context: Context) {
         val store = InternalStateStore(context)
         store.requireRecipient(role, chat)
         when (body.getString("action")) {
+            "runtime_status" -> AutonomousRuntimeControl(context).status(role)
+            "runtime_control" -> {
+                val control = AutonomousRuntimeControl(context)
+                when (body.getString("operation")) {
+                    "enable" -> control.enable(body.getBoolean("enabled"))
+                    "pause" -> control.pause(if (body.has("minutes")) {
+                        val minutes = body.getInt("minutes"); require(minutes in 1..10080)
+                        System.currentTimeMillis() + minutes * 60000L
+                    } else Long.MAX_VALUE)
+                    "resume" -> control.resume()
+                    "idle" -> control.configureIdle(role, body.getBoolean("enabled"), body.getInt("minutes"), body.getInt("daily"))
+                    else -> error("未知自主运行操作")
+                }
+                control.status(role)
+            }
             "status" -> JSONObject().put("owner", role).put("name", card.name).put("enabled", store.enabled(role))
                 .put("window", store.establishedStatus(role))
             "open_window" -> store.openEstablishedWindow(role)

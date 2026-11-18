@@ -12,6 +12,15 @@ import kotlinx.coroutines.*
 /** Owned by the existing foreground service; due work remains persisted across process death. */
 object GroupWakeRuntime {
     private var running = false
+    private var background: Pair<String, Job>? = null
+    fun stopBackground(context: Context) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val owned = background ?: return@post
+            val coordinator = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN).getMessageCoordinationDelegate()
+            if (coordinator.groupJob(owned.first) === owned.second) coordinator.stopGroup(owned.first)
+            background = null
+        }
+    }
     suspend fun run(context: Context) = withContext(Dispatchers.Main.immediate) {
         if (running) return@withContext
         running = true
@@ -27,6 +36,9 @@ object GroupWakeRuntime {
             while (isActive) {
                 delay(10_000)
                 try {
+                    if (!com.ai.assistance.operit.core.companion.AutonomousRuntimeControl(context).allowed()) {
+                        stopBackground(context); continue
+                    }
                     val holder = ChatRuntimeHolder.getInstance(context)
                     val core = holder.getCore(ChatRuntimeSlot.MAIN)
                     val coordinator = core.getMessageCoordinationDelegate()
@@ -58,10 +70,12 @@ object GroupWakeRuntime {
                         if ((outbound != null || task != null) && GroupGames(context).pending(chatId) != null) continue
                         if (outbound != null) {
                             coordinator.deliverGroupMessage(chatId, outbound)
+                            coordinator.groupJob(chatId)?.let { background = chatId to it }
                             break
                         }
                         if (task != null) {
                             coordinator.processGroupTask(chatId, task)
+                            coordinator.groupJob(chatId)?.let { background = chatId to it }
                             break
                         }
                         val groupId = ChatHistoryManager.getInstance(context).getChatMetadata(chatId)?.characterGroupId
@@ -85,6 +99,7 @@ object GroupWakeRuntime {
                         }
                         coordinator.startGroupDiscussion(chatId, actor,
                             "主动唤醒：$purpose。先看最新群消息，不重复前次内容，可安静。结束前用 group_chat schedule 安排下次或 cancel_schedule 暂停。")
+                        coordinator.groupJob(chatId)?.let { background = chatId to it }
                         break
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }

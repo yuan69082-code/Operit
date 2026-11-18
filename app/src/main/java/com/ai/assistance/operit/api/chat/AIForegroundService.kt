@@ -472,6 +472,7 @@ class AIForegroundService : Service() {
             }.getOrDefault(false)
             if (!keepAliveEnabled && !com.ai.assistance.operit.core.companion.CompanionStore(appContext).proactiveEnabled &&
                 !com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled && !com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(appContext).wakeEnabled && !com.ai.assistance.operit.core.companion.ExplorationStore(appContext).anyEnabled() &&
+                !com.ai.assistance.operit.core.companion.AutonomousRuntimeControl(appContext).needsService() &&
                 !com.ai.assistance.operit.core.companion.StudyStore.hasPending(appContext) &&
                 !com.ai.assistance.operit.core.engine.EngineWindow(appContext).needsBackgroundWork() && !isRunning.get()) {
                 return
@@ -541,6 +542,7 @@ class AIForegroundService : Service() {
                 com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(appContext).enabled ||
                 com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(appContext).wakeEnabled ||
                 com.ai.assistance.operit.core.companion.ExplorationStore(appContext).anyEnabled() ||
+                com.ai.assistance.operit.core.companion.AutonomousRuntimeControl(appContext).needsService() ||
                 com.ai.assistance.operit.core.companion.StudyStore.hasPending(appContext) ||
                 com.ai.assistance.operit.core.engine.EngineWindow(appContext).needsBackgroundWork()
         }
@@ -938,6 +940,7 @@ class AIForegroundService : Service() {
             com.ai.assistance.operit.core.companion.CompanionStore(this).proactiveEnabled ||
             com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(this).enabled || com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(this).wakeEnabled ||
             com.ai.assistance.operit.core.companion.ExplorationStore(this).anyEnabled() ||
+                com.ai.assistance.operit.core.companion.AutonomousRuntimeControl(this).needsService() ||
                 com.ai.assistance.operit.core.companion.StudyStore.hasPending(this) ||
             com.ai.assistance.operit.core.engine.EngineWindow(this).needsBackgroundWork()) {
             return
@@ -1311,6 +1314,7 @@ class AIForegroundService : Service() {
                     !com.ai.assistance.operit.core.awareness.PhoneAwarenessStore(this).enabled &&
                     !com.ai.assistance.operit.core.awareness.SoftwareAwarenessStore(this).wakeEnabled &&
                     !com.ai.assistance.operit.core.companion.ExplorationStore(this).anyEnabled() &&
+                !com.ai.assistance.operit.core.companion.AutonomousRuntimeControl(this).needsService() &&
                 !com.ai.assistance.operit.core.companion.StudyStore.hasPending(this) &&
                     !com.ai.assistance.operit.core.engine.EngineWindow(this).needsBackgroundWork()
                 ) {

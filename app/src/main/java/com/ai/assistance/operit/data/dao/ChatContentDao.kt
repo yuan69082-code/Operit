@@ -91,6 +91,13 @@ abstract class ChatContentDao {
         "ORDER BY messages.timestamp DESC, messages.messageId DESC LIMIT 8")
     abstract suspend fun recentAssistantActivity(role: String): List<AssistantActivityRow>
 
+    @Query("SELECT MAX(messages.timestamp) FROM messages JOIN chats ON chats.id=messages.chatId " +
+        "WHERE chats.characterCardId=:role AND (chats.characterGroupId IS NULL OR chats.characterGroupId='') " +
+        "AND messages.displayMode='NORMAL' AND ((:user=1 AND messages.sender='user') OR " +
+        "(:user=0 AND messages.sender IN ('ai','assistant') AND messages.content<>''))")
+    abstract suspend fun latestVisibleMessageAt(role: String, user: Boolean): Long?
+
+
     @Query("SELECT messages.chatId, messages.messageId, messages.timestamp, messages.sender, " +
         "SUBSTR(CASE WHEN messages.selectedVariantIndex=0 THEN messages.content ELSE selectedVariant.content END,:offset+1,2400) AS content, " +
         "LENGTH(CASE WHEN messages.selectedVariantIndex=0 THEN messages.content ELSE selectedVariant.content END) AS totalChars, " +
