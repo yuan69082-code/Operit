@@ -21,7 +21,7 @@ object CompanionTools {
                 param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
                 param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
-            description = "持续内部状态工具。get按需读取基础目录、独立事件、已采用认识及原文/版本/来源；持续牵挂用get section=concerns，id=direction:ID或experience:ID读取详情；concern_config查名额；get section=contract id=concerns查规则。get section=contract查询输入细则目录，按返回id继续；budget调整共享材料预算。旧数值定义仅作历史，不再create/revise/merge/deactivate或建立第二权威。本轮变化用operit_state_report：基础驱力走foundation，具体感受/事件走episodes，稳定人格与立场走inner候选及跨轮采用。查询不改写或重复计分。",
+            description = "持续状态工具。get按需读目录、事件、认识及原文/版本/来源；section=concerns查便签，id=direction:ID或experience:ID读详情，concern_config查名额。get section=contract查细则，id=concerns查便签用途与规则。budget调整共享材料预算。旧数值定义仅作历史，不另建权威。本轮变化用operit_state_report：驱力走foundation，感受/事件走episodes，人格与立场走inner候选及跨轮采用。查询不改写或重复计分。",
             parametersStructured = listOf(
                 param("action", "get/budget；旧数值定义操作已停用", true),
                 param("id", "定义稳定ID；get 读取记录或 inner_family 的family；历史/长内容用 offset/next_offset 分页"),

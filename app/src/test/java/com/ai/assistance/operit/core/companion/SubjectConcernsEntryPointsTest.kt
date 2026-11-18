@@ -215,7 +215,9 @@ class SubjectConcernsEntryPointsTest {
         InternalStateStore(context).materialBudget(role, chat, 16384)
         val first = requireNotNull(sections().internalStateFrame)
         val fatigue = JSONObject().put("op", "appraise").put("id", "fatigue").put("expected_version", 0)
-            .put("category_ref", "foundation:feeling:fatigue").put("intensity", 0.7).put("importance", "当前影响投入")
+            // Fatigue is this episode's interpretation, using the installed open-feeling
+            // category; the test must not invent a foundation ID that does not exist.
+            .put("category_ref", "foundation:feeling:open").put("intensity", 0.7).put("importance", "当前影响投入")
             .put("long_term_impact", "不否定长期方向").put("attention", "foreground").put("status", "processing")
             .put("understanding", "想研究，但感到疲劳").put("basis", "input").put("reason", "当前体验")
             .put("evidence", JSONArray().put(first.eventIds.first()))
