@@ -574,7 +574,7 @@ internal object InnerFoundations {
         for (i in 0 until actions.length()) {
             try {
             val row = actions.getJSONObject(i)
-            require(row.keys().asSequence().all { it in setOf("id", "expected_version", "value", "evidence", "reason", "objects", "goals") })
+            require(row.keys().asSequence().all { it in setOf("id", "expected_version", "value", "evidence", "reason", "objects", "goals", "time_conditions") })
             val id = row.getString("id")
             require(targets.add(id)) { "同轮不能更新两次相同基础状态" }
             val kind = find(id) ?: throw InternalStateReportIssue("foundation", "foundation[$i].id", "UNKNOWN_CATEGORY")
@@ -587,7 +587,14 @@ internal object InnerFoundations {
             if (row.get("expected_version") !is Number || row.getInt("expected_version") != current.optInt("version") ||
                 frame.foundationVersions[id] != current.optInt("version"))
                 throw InternalStateReportIssue("foundation", "foundation[$i].expected_version", "STATE_VERSION_CHANGED")
-            val raw = row.get("value")
+            if (row.has("time_conditions")) {
+                SubjectContracts.expect(current.has("adapter_id"), "time_conditions", "NO_INHERITED_RULE",
+                    "只有已承接原规则的驱力可以确认原自定义时间条件。")
+                val definition = InternalStateEngine.definitions(data).single { it.getString("id") == current.getString("adapter_id") }
+                InternalStateTimeRules.validateConditions(definition, row.getJSONObject("time_conditions"))
+            }
+            require(row.has("value") || row.has("time_conditions")) { "需要value或原规则的time_conditions" }
+            val raw = if (row.has("value")) row.get("value") else member(data, id, now).getDouble("current_value")
             if (raw !is Number || !raw.toDouble().isFinite() || raw.toDouble() < 0 ||
                 (kind.family == "drive" && raw.toDouble() > 1.0))
                 throw InternalStateReportIssue("foundation", "foundation[$i].value", "VALUE_RANGE")
@@ -618,8 +625,12 @@ internal object InnerFoundations {
                 val definition = InternalStateEngine.definitions(data).single { it.getString("id") == current.getString("adapter_id") }
                 InternalStateEngine.advanceDimension(data, definition, frame.chatId, now)
                 val changes = JSONArray()
-                val experience = JSONObject().put("value", definition.getDouble("min") + raw.toDouble() *
-                    (definition.getDouble("max") - definition.getDouble("min"))).put("reason", reason).put("evidence", evidence)
+                val experience = JSONObject().put("reason", reason).put("evidence", evidence)
+                if (row.has("value")) experience.put("value", definition.getDouble("min") + raw.toDouble() *
+                    (definition.getDouble("max") - definition.getDouble("min")))
+                // Settle the old condition up to now, then persist the new confirmation in
+                // the original instance. A second rule or numeric authority is never created.
+                if (row.has("time_conditions")) experience.put("time_conditions", JSONObject(row.getJSONObject("time_conditions").toString()))
                 InternalStateReports.writeExperience(data, definition, experience, frame, now, changes)
                 InternalStateEngine.record(data, "foundation_report:${frame.id}:$id", "state_report", frame.chatId,
                     "已承接基础状态的同一权威更新", changes, now)
@@ -642,6 +653,7 @@ internal object InnerFoundations {
 
     val instructions = """
         [已安装基础机制与旧数值接替]
+        已承接驱力有inherited_rule时，可在foundation报告附time_conditions:{increase:true/false,decrease:true/false}，仅填写原规则condition=custom的方向；可只更新条件而省略value。原规则的速度、下限和作用域保持不变。always/not_contacted由宿主判断，不能当作自定义条件填写。使用foundation当前expected_version，不再向旧updates重复写同一驱力。
         foundation.available 只是可用概念目录，不等于这些体验已经发生；全目录用 companion_internal_state get section:foundation id:family 分页查看。具体情绪、愿望、感受、关系与人格仍需真实来源和对象。
         七基础驱力的总量在 foundation.drive_values；有原有效规则的继续按原规则，其他按各自连续时间尺度变化，不是到点提醒或必须行动；每一类的不同事情用 episodes.appraise category_ref:"foundation:family:key" 分别记录，旧事变化请使用原事件ID加 expected_version。一个事件被多种心理类别共同理解，仍只有一次现实来源。
         可选 foundation:[{id:"foundation:drive:intimacy",expected_version:0,value:0.5,evidence:["已读本轮事件ID"],reason:"自己的评价"}]，七驱力值在0..1内；也可使用 foundation:need:survival 明确调整求生欲（非负强度、reason可为空、objects和goals可选数组），任何时间、联合、其他关联都不能修改求生欲强度。
