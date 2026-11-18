@@ -11,13 +11,14 @@ internal object LifeUnderstandings {
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
             try {
-            val a = actions.getJSONObject(i)
+            val submitted = actions.getJSONObject(i)
+            val old = CategoryEvents.row(data, submitted.getString("kind"), submitted.getString("id"))
+            val a = SubjectConcerns.prepare(old, submitted, frame)
             SubjectContracts.fields(a, setOf("kind", "id", "expected_version", "text", "scope", "uncertainty",
-                "evidence", "status", "retention", "review_at", "purpose", "goal", "resolve", "ambition", "related"))
+                "evidence", "status", "retention", "review_at", "purpose", "goal", "resolve", "ambition", "related", "attention", "attention_change"))
             val kind = SubjectContracts.choice(a, "kind", kinds)
             val id = SubjectContracts.text(a, "id", 100)
             SubjectContracts.expect(touched.add("$kind:$id"), "id", "DUPLICATE_WRITE", "同一报告不能重复写入同一条记录。")
-            val old = CategoryEvents.row(data, kind, id)
             val version = old?.getInt("version") ?: 0
             SubjectContracts.expect(SubjectContracts.integer(a, "expected_version") == version, "expected_version", "VERSION_CHANGED", "当前版本已改变；先读取现版本，再决定是否修订。")
             if (old != null) SubjectContracts.expect(frame.materialSources.values.any { raw ->
@@ -28,12 +29,14 @@ internal object LifeUnderstandings {
             SubjectContracts.expect(refs.isNotEmpty(), "evidence", "EVIDENCE_REQUIRED", "需要至少一个实际提供的来源ID。")
             val bindings = JSONObject()
             refs.forEach { bindings.put(it, InnerStructure.source(data, frame, it)) }
-            if (a.has("related")) SubjectActions.validateDeclaration(JSONObject()
+            if (submitted.has("related")) SubjectActions.validateDeclaration(JSONObject()
                 .put("intention_refs", a.getJSONArray("related")).put("evidence", JSONArray()), frame, prefix = "related_declaration")
             for (key in listOf("text", "scope", "uncertainty")) SubjectContracts.text(a, key)
             SubjectContracts.choice(a, "status", setOf("considering", "active", "paused", "ended", "abandoned", "uncertain"))
             if (a.has("retention")) SubjectContracts.choice(a, "retention", setOf("short_term", "long_term"))
-            if (a.has("review_at")) {
+            // A progress-only concern patch keeps the previously chosen review time, even
+            // after it becomes due; only a newly submitted time must be in the future.
+            if (submitted.has("review_at")) {
                 val raw = a.opt("review_at")
                 SubjectContracts.expect(raw is Number && raw.toDouble().isFinite() &&
                     raw.toDouble() == raw.toLong().toDouble() && raw.toLong() >= now,
@@ -45,10 +48,14 @@ internal object LifeUnderstandings {
                 .put("bindings", bindings).put("not_a_plan", true).put("not_a_new_occurrence", true)
                 .put("subject_private_material", true)
                 .put("reality", if (SubjectRestDreams.privateProvenance(bindings)) "INTERPRETATION_WITH_PRIVATE_OR_DREAM_SOURCE" else "SOURCE_BOUND_INTERPRETATION")
-            CategoryEvents.append(data, frame, JSONObject().put("storage_kind", kind).put("id", id)
+            if (c.has("attention")) c.put("original_source", if (old != null && old.getJSONObject("content").optString("text") == c.getString("text"))
+                old.getJSONObject("content").optString("original_source", old.getString("source")) else "subject_report")
+            val row = JSONObject().put("storage_kind", kind).put("id", id)
                 .put("parent", "private").put("owner", frame.roleId).put("source_chat", frame.chatId)
                 .put("version", version + 1).put("frame_id", frame.id).put("at", now)
-                .put("source", "subject_report").put("content", c))
+                .put("source", "subject_report").put("content", c)
+            CategoryEvents.append(data, frame, row)
+            SubjectConcerns.index(data, frame, row)
             } catch (failure: Exception) {
                 throw InternalStateReportDiagnostics.issue(failure, "life[$i]")
             }
@@ -58,10 +65,11 @@ internal object LifeUnderstandings {
 
     fun materials(data: JSONObject, input: String = "", chat: String = ""): List<JSONObject> = kinds.flatMap { kind ->
         SubjectRecall.selected(data, kind, input, chat, data.optLong("material_query_cursor") * 8)
-            .map(::material)
+            .filterNot { it.getJSONObject("content").has("attention") }.map { material(it) }
     }
-    fun material(row: JSONObject): JSONObject {
+    fun material(row: JSONObject, detail: Boolean = false): JSONObject {
         val c = row.getJSONObject("content")
+        if (c.has("attention")) return SubjectConcerns.material(row, detail)
         // Original text and source snapshots stay in the journal. Spend the request's
         // allowance on the interpretation, not on nested copies of old evidence.
         val text = listOf("text", "scope", "uncertainty", "status", "retention", "review_at",

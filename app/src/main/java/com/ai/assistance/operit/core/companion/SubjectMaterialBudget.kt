@@ -35,6 +35,8 @@ internal object SubjectMaterialBudget {
     fun select(source: JSONObject, requested: Int = DEFAULT_TOKENS): JSONObject {
         require(requested in 1..MAX_TOKENS)
         val result = JSONObject(source.toString())
+        val concerns = result.optJSONObject("_concern_config")
+        result.remove("_concern_config")
         val lanes = mutableListOf<Lane>()
         fun lane(parent: JSONObject, field: String, path: String) {
             val a = parent.optJSONArray(field) ?: return
@@ -122,6 +124,16 @@ internal object SubjectMaterialBudget {
                 prioritized += materials.path to index
             }
         }
+        // Constantly held concerns enter as compact life projections, once, within the
+        // existing budget. A projection is not a full-detail read and schedules nothing.
+        lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->
+            materials.rows.forEachIndexed { index, row ->
+                if (row is JSONObject && row.optString("selection_reason") == "STANDING_CONCERN") {
+                    include(materials, row)
+                    prioritized += materials.path to index
+                }
+            }
+        }
         // Confirmed essence is a small, explicit choice inside the SAME budget. It is not
         // a second prompt appended after budgeting. Drafts and old versions never enter here.
         lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->
@@ -163,6 +175,40 @@ internal object SubjectMaterialBudget {
             val index = lane.rows.indexOfFirst { row -> row is JSONObject &&
                 row.optString("selection_reason") == "CURRENT_INPUT_RELEVANCE" && (type.isEmpty() || row.optString("type") == type) }
             if (index >= 0 && prioritized.add(path to index)) include(lane, lane.rows[index])
+        }
+        // Current linked state/feedback has a reciprocal route back into consideration.
+        // Each domain gets one bounded opportunity; no numerical propagation occurs here.
+        for (lane in lanes) {
+            val index = lane.rows.indexOfFirst { it is JSONObject && it.optString("selection_reason") == "CONCERN_LINK" }
+            if (index >= 0 && prioritized.add(lane.path to index)) include(lane, lane.rows[index])
+        }
+        if (concerns != null && concerns.optInt("old") > 0) {
+            val eligible = lanes.filter { it.path in setOf("inner_structure.identity", "inner_structure.selected", "thoughts", "candidates", "retrieved_materials") }
+                .flatMap { lane -> lane.rows.mapIndexedNotNull { index, value ->
+                    val row = value as? JSONObject ?: return@mapIndexedNotNull null
+                    val historical = when (lane.path) {
+                        "retrieved_materials" -> row.optString("type") in setOf("subject_experience", "subject_direction", "adopted_decision", "adopted_feedback", "memory_record") &&
+                            row.optString("selection_reason") != "STANDING_CONCERN"
+                        "candidates" -> row.optBoolean("subject_private_material")
+                        else -> true
+                    }
+                    if (historical && (lane.path to index) !in prioritized) Triple(lane, index, row) else null
+                } }
+            val rotation = if (eligible.isEmpty()) emptyList() else {
+                val begin = (cursor % eligible.size).toInt()
+                eligible.drop(begin) + eligible.take(begin)
+            }
+            val relevant = eligible.filter { it.third.optString("selection_reason") == "CURRENT_INPUT_RELEVANCE" }
+            val choices = when (concerns.getString("mode")) {
+                "relevant" -> relevant
+                "random" -> eligible.shuffled(kotlin.random.Random(cursor))
+                "rotation" -> rotation
+                else -> (if (cursor % 2L == 0L) relevant + rotation else rotation + relevant).distinctBy { it.first.path to it.second }
+            }
+            choices.take(concerns.getInt("old").coerceAtMost(eligible.size)).forEach { (lane, index, row) ->
+                include(lane, JSONObject(row.toString()).put("old_recall", true))
+                prioritized += lane.path to index
+            }
         }
         // Remaining space exposes the compact rotating directory before other details. It
         // carries no psychological ranking and continues to advance through existing records.

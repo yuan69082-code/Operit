@@ -330,8 +330,9 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val kind = row.getString("storage_kind")
-                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time", "dream_process") + SubjectRestDreams.kinds + LifeUnderstandings.kinds)
-            put("category_versions", row)
+                require(kind in setOf("episode", "focus", "experience_link", "union", "decision", "feedback", "inner_record", "inner_pending", "inner_index", "inner_family", "foundation_change", "inner_time", "dream_process", SubjectConcerns.INDEX) + SubjectRestDreams.kinds + LifeUnderstandings.kinds)
+            // The attention row is a disposable index. Meaningful history stays on life.
+            if (kind != SubjectConcerns.INDEX) put("category_versions", row)
             db.execSQL("INSERT OR REPLACE INTO category_current(scope,kind,id,parent,payload) VALUES(?,?,?,?,?)",
                 arrayOf(scope, kind, row.getString("id"), row.getString("parent"), row.toString()))
         }

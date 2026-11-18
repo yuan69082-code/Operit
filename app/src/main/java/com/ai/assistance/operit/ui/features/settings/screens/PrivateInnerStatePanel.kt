@@ -30,7 +30,7 @@ internal val innerFamilyNames = linkedMapOf("personality" to "人格", "self_kno
  * marks a candidate as read, changes attention, or adopts a state. */
 @Composable
 internal fun InternalStatePanel(role: String) {
-    val sections = listOf("当前", "人格与自我", "偏好", "关系", "牵挂与事件", "相互影响", "打算与行动", "自由时间", "休息")
+    val sections = listOf("当前", "挂心的事", "人格与自我", "偏好", "关系", "牵挂与事件", "相互影响", "打算与行动", "自由时间", "休息")
     var section by remember(role) { mutableStateOf("当前") }
     var editor by remember(role) { mutableStateOf(false) }
     Text("内部状态", style = MaterialTheme.typography.headlineSmall)
@@ -41,6 +41,7 @@ internal fun InternalStatePanel(role: String) {
     OutlinedButton(onClick = { editor = true }) { Text("已有内容承接 · 候选全文与修订") }
     key(role, section) {
         when (section) {
+            "挂心的事" -> SubjectConcernsPanel(role)
             "当前" -> {
                 Text("基础机制已安装，但不等于每种感受已经发生。已承接的原规则继续使用同一份状态；未确认含义的保留原值和窗口范围。")
                 InnerFamilyPanel(role, listOf("drive", "need", "desire", "emotion", "sentiment", "feeling"))

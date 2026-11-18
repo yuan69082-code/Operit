@@ -106,10 +106,10 @@ internal object SubjectToolMaterials {
                     actionIds.add(source.getString("id"))
                 }
             }
-            if (receipt.section in LifeUnderstandings.kinds) {
+            if (receipt.section in LifeUnderstandings.kinds || (receipt.section == "concerns" && !body.optBoolean("index_only"))) {
                 val rows = body.optJSONObject("item")?.let { JSONArray().put(it) } ?: body.optJSONArray("items")
                 if (rows != null) for (i in 0 until rows.length()) {
-                    val source = LifeUnderstandings.material(rows.getJSONObject(i))
+                    val source = LifeUnderstandings.material(rows.getJSONObject(i), detail = true)
                     sources[source.getString("id")] = source.toString()
                     actionIds.add(source.getString("id"))
                 }
