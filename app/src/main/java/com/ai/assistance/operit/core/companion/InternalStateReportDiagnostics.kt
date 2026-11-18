@@ -58,7 +58,10 @@ internal object InternalStateReportDiagnostics {
                     "foundation" -> {
                         string(entry, "id", "$path.id")
                         integer(entry, "expected_version", "$path.expected_version")
-                        number(entry, "value", "$path.value")
+                        // A mapped drive may confirm an inherited custom condition alone.
+                        // Its eligibility and original rule are checked by InnerFoundations.
+                        if (entry.has("value") || !entry.has("time_conditions")) number(entry, "value", "$path.value")
+                        if (entry.has("time_conditions")) objectField(entry, "time_conditions", "$path.time_conditions")
                         array(entry, "evidence", "$path.evidence")
                         evidence(entry, path)
                         if (entry.has("reason")) stringOrEmpty(entry, "reason", "$path.reason")

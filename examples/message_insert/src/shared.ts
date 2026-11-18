@@ -1220,6 +1220,7 @@ async function buildMemoryContent(
 
   const result = await toolCall("query_memory", {
     query: searchQuery,
+    automatic_recall: true,
     limit: settings.memoryLimit,
     ...(reuseSnapshot ? { snapshot_id: snapshotId } : {}),
     ...(callerCardId ? { caller_card_id: callerCardId } : {}),

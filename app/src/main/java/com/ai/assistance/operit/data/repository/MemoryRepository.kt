@@ -1124,7 +1124,8 @@ class MemoryRepository(private val context: Context, profileId: String) {
         edgeWeight: Float = 0.4f,
         relevanceThreshold: Double = SEARCH_RELEVANCE_THRESHOLD,
         createdAtStartMs: Long? = null,
-        createdAtEndMs: Long? = null
+        createdAtEndMs: Long? = null,
+        automaticRecall: Boolean = false
     ): List<Memory> {
         return runSearchMemoriesWithDebug(
             query = query,
@@ -1136,7 +1137,8 @@ class MemoryRepository(private val context: Context, profileId: String) {
             edgeWeight = edgeWeight,
             relevanceThreshold = relevanceThreshold,
             createdAtStartMs = createdAtStartMs,
-            createdAtEndMs = createdAtEndMs
+            createdAtEndMs = createdAtEndMs,
+            automaticRecall = automaticRecall
         ).memories
     }
 
@@ -1176,7 +1178,8 @@ class MemoryRepository(private val context: Context, profileId: String) {
         edgeWeight: Float = 0.4f,
         relevanceThreshold: Double = SEARCH_RELEVANCE_THRESHOLD,
         createdAtStartMs: Long? = null,
-        createdAtEndMs: Long? = null
+        createdAtEndMs: Long? = null,
+        automaticRecall: Boolean = false
     ): SearchComputationResult = withContext(Dispatchers.IO) {
         val normalizedFolderPath = normalizeFolderPath(folderPath)
 
@@ -1515,7 +1518,11 @@ class MemoryRepository(private val context: Context, profileId: String) {
         }
 
         // 添加相关性阈值过滤，避免返回不相关的记忆
-        val filteredScores = scores.entries.filter { it.value >= effectiveRelevanceThreshold }
+        val filteredScores = scores.entries.filter { entry ->
+            val parts = scorePartsByMemoryId[entry.key]
+            val direct = parts != null && (parts.keywordScore > 0.0 || parts.tagScore > 0.0 || parts.semanticScore > 0.0)
+            entry.value >= effectiveRelevanceThreshold && (!automaticRecall || direct)
+        }
 
         com.ai.assistance.operit.util.AppLogger.d("MemoryRepo", "Final results: ${filteredScores.size}/${scores.size} above threshold")
 

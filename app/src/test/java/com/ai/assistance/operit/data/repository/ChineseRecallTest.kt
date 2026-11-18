@@ -4,6 +4,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChineseRecallTest {
+    @Test fun explicitlyQuotedNegativeAnswerRemainsSearchable() {
+        assertTrue("不行" in ChineseRecall.terms("她说“不行”的那次", listOf("不行")))
+        assertFalse("不行" in ChineseRecall.terms("行不行", listOf("不行")))
+    }
+    @Test fun conversationalFragmentsCannotRecallUnrelatedMemories() {
+        val terms = ChineseRecall.terms("我4点才吃完的晚饭，我又不是猪", listOf("晚饭", "不是"))
+        assertFalse("我又" in terms)
+        assertFalse("又不" in terms)
+        assertFalse("不是" in terms)
+        val rows = listOf(ChineseRecall.Document(1, "抖音", "我又不是故意的"),
+            ChineseRecall.Document(2, "晚饭", "她四点吃完了馄饨"))
+        assertEquals(listOf(2L), ChineseRecall.rank(rows, terms).map { it.id })
+    }
+    @Test fun unseenShortNameSurvivesWithoutFunctionWordFragments() {
+        val terms = ChineseRecall.terms("你让我看祁煜咋了", listOf("看祁煜"))
+        assertTrue("祁煜" in terms)
+        assertFalse("你让" in terms)
+    }
+    @Test fun shortExcerptFindsTheSpecificEventRatherThanAnEarlierGenericWord() {
+        val body = "晚饭" + "旧的日常记录。".repeat(80) + "周二四点吃完馄饨，已经吃饱。" + "其他事情。".repeat(80)
+        val excerpt = ChineseRecall.excerpt(body, listOf("晚饭", "四点", "馄饨"), 218)
+        assertTrue(excerpt.contains("四点吃完馄饨"))
+        assertTrue(excerpt.length <= 220)
+    }
+
     @Test fun shortChineseNameMatchesBodyWithAnUnrelatedTitle() {
         val docs = listOf(ChineseRecall.Document(1, "周二的聊天", "阿屿提议一起看天文摄影"), ChineseRecall.Document(2, "随记", "今天看了一本书"))
         val terms = ChineseRecall.terms("阿屿提议的天文摄影", listOf("提议", "天文摄影"))

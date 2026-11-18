@@ -220,6 +220,13 @@ class SubjectActionEntryPointsTest {
         assertEquals(1, state.inspectCategory(role, chat, "feedback", "understanding", 0).getJSONObject("item").getInt("version"))
         val next = sections(second)
         assertTrue(ActionUnderstanding.materials(state.read(role)).any { it.getString("text").contains("换一种方法") })
+        val feedbackMaterial = ActionUnderstanding.materials(state.read(role)).first { it.getString("type") == "adopted_feedback" }
+        assertTrue(feedbackMaterial.getBoolean("referenced_members_are_historical"))
+        val projected = JSONObject(feedbackMaterial.getString("text"))
+        assertTrue(projected.has("historical_intention_refs"))
+        assertFalse(projected.has("intention_refs"))
+        assertTrue(state.inspectCategory(role, chat, "feedback", "understanding", 0)
+            .getJSONObject("item").getJSONObject("content").has("intention_refs"))
         val queried = execute(requireNotNull(next.internalStateFrame), listOf(invocation("companion_internal_state",
             mapOf("action" to "get", "section" to "feedback", "id" to "understanding")))).results.single()
         assertTrue(queried.error, queried.success)

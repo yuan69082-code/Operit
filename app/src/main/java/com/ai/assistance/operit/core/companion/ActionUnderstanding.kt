@@ -58,11 +58,16 @@ internal object ActionUnderstanding {
 
     fun materials(data: JSONObject, input: String = "", chat: String = ""): List<JSONObject> = listOf("decision", "feedback").flatMap { kind ->
         SubjectRecall.selected(data, kind, input, chat, data.optLong("material_query_cursor")).map { row ->
-            val content = JSONObject(row.getJSONObject("content").toString()).apply { remove("source_bindings") }
+            val content = JSONObject(row.getJSONObject("content").toString()).apply {
+                remove("source_bindings")
+                // Request projection only: copying an old report-shaped field invited stale writes.
+                if (has("intention_refs")) put("historical_intention_refs", remove("intention_refs"))
+            }
             JSONObject().put("id", "material:$kind:${row.getString("id")}:${row.getInt("version")}")
                 .put("type", "adopted_$kind").put("owner", row.getString("owner")).put("author", row.getString("owner"))
                 .put("at", row.getLong("at")).put("status", "retrieved").put("not_new_occurrence", true)
                 .put("selection_reason", row.optString("selection_reason", "ROTATION"))
+                .put("referenced_members_are_historical", true)
                 .put("text", content.toString())
                 .put("locator", JSONObject().put("tool", "companion_internal_state get section=$kind")
                     .put("id", row.getString("id")).put("version", row.getInt("version")))
@@ -71,6 +76,7 @@ internal object ActionUnderstanding {
 
     val instructions = """
         [决定、实际操作和理解]
+        历史决定或反馈内的intention_refs只说明当时的关联，不证明引用成员已在本轮读到；state_catalog也只是目录。需要沿用关联时先get读取该成员当前版本，再填引用。已承接驱力用foundation引用；旧状态仅用于尚未承接的原有规则，不再新建同义数值项。没有实际关联可省略intention_refs，不为填表补造。
         你可结合内在状态表达、继续自己的兴趣、探索、使用能力、调整或暂缓。不要求固定次序，不要求每次行动或每次不行动。普通回复和原有工具无需增加心理表单。
         工具请求可选参数 __operit_action（JSON字符串）记录已形成的 decision、intention_refs:[{kind,id,version}]、evidence:[本轮来源ID]，以及明确再试时 retry_of:原操作ID。宿主在执行前保存原始请求，保留实际权限。引用须来自本轮已读材料，普通工具可省略此参数。它不是完整状态报告，也不证明体验已改变。
         可选 capability:{id:"能力ID",version:"版本字符串",stage:"build|configure|run|adjust",target} 标识明确的软件能力使用；id/target为1..500字符字符串，version可为1..500字符字符串或非负有限数字（均按原值保存）；intention_refs.version须为当前整数版本；无能力关联时省略整个capability，intention_refs/evidence可省略或为[]；只作你给出的关联，不证明安装或达到预期。沿已有写文件/脚本/工具包能力执行，宿主保留实际请求和回执，不提供新权限或任意构建保证。

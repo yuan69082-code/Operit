@@ -86,7 +86,7 @@ internal object SegmentedSummary {
         把新消息按"一件事"切成段，每段格式严格如下（不加代码围栏，不写别的）：
         § 起#a 止#b｜已结束 或 悬着｜标题（20字内，直接说是什么事，比如"你和我文字做爱""改压缩方案"）
         时间：MM月dd日 HH:mm 到 HH:mm（还没结束就写"MM月dd日 HH:mm 开始，悬着未结束"）
-        内容：只写事件精华，发生了什么、结果或未决点，最多80字、一两句。不要复述对话来回、堆原话或写详细分析；细节按索引回原文。
+        内容：只写事件精华，发生了什么、结果或未决点，通常80字以内，近期具体事实可到160字。保留谁在何时做了什么、具体对象、数量、结果及明确纠正；吃过什么、何时吃完等已说清的事实不能只剩“聊吃饭”。不相干的生活事实单独成段，不埋进另一件事的经过。不要复述对话来回或写详细分析；其余细节按索引回原文。
         值不值得回顾：值得/一般/不必，加半句理由，总共不超过25字。
         规则：
         - #a #b 是消息编号，时间照编号旁边标的写。不相干的事不要硬凑一段，一段可以很短。
@@ -206,7 +206,7 @@ internal object SegmentedSummary {
                 val end = lines.firstNotNullOfOrNull { indexLine.find(it)?.groupValues?.get(3)?.toLongOrNull() }
                 if (end != null) "时间：${line.substringAfter("时间：").substringBefore(" 开始")} 至 ${time(end)}" else line
             } else line
-            line.startsWith("内容：") -> "内容：" + excerpt(line.substringAfter("内容："), 100)
+            line.startsWith("内容：") -> "内容：" + excerpt(line.substringAfter("内容："), 160)
             line.startsWith("值不值得回顾：") -> "值不值得回顾：" + excerpt(line.substringAfter("值不值得回顾："), 30)
             line.startsWith("我的感受：") -> "我的感受：" + excerpt(line.substringAfter("我的感受："), 80)
             else -> null
@@ -214,7 +214,7 @@ internal object SegmentedSummary {
     }
 
     /** 只收短实际模型输入，不修改数据库摘要或原聊天。 */
-    fun forPrompt(summary: String, budget: Int = SummaryPromptBudget.MAX_CHARS): String {
+    fun forPrompt(summary: String, budget: Int = SummaryPromptBudget.MAX_CHARS, query: String = ""): String {
         if (!hasBlock(summary)) return SummaryPromptBudget.project(summary, budget)
         val parsed = parse(summary)
         val all = (parsed.closed + parsed.open).sortedBy { block ->
@@ -227,7 +227,13 @@ internal object SegmentedSummary {
             "$HEADER 存档事件共${total}件，本次显示${blocks.size}件；其余用 group_chat events 查询，status=悬着 可查未决事项。未显示不代表已结束。")
         // Recent activity gets detail first (including old events that were just continued).
         // Unresolved events cannot bypass the total budget and grow every request forever.
-        val prioritized = (all.takeLast(4).asReversed() + parsed.open.sortedByDescending { index(it)?.to ?: 0L } +
+        val terms = com.ai.assistance.operit.data.repository.ChineseRecall.terms(query,
+            query.split(Regex("[\\s，。！？、]+")))
+        val relevant = com.ai.assistance.operit.data.repository.ChineseRecall.rank(
+            all.mapIndexed { i, block -> com.ai.assistance.operit.data.repository.ChineseRecall.Document(
+                i.toLong(), block.lineSequence().first(), block.lineSequence().filter { it.startsWith("内容：") }.joinToString("\n")) }, terms
+        ).take(2).map { all[it.id.toInt()] }
+        val prioritized = (relevant + all.takeLast(4).asReversed() + parsed.open.sortedByDescending { index(it)?.to ?: 0L } +
             all.filter { it in recent }.asReversed()).distinct()
         val selected = mutableListOf<String>()
         val abbreviated = mutableListOf<String>()
@@ -246,12 +252,17 @@ internal object SegmentedSummary {
         return if (body.isBlank()) replacement else "$body\n\n$replacement"
     }
 
-    fun promptTurns(turns: List<PromptTurn>): List<PromptTurn> = turns.map { turn ->
+    fun promptTurns(turns: List<PromptTurn>): List<PromptTurn> {
+        val query = turns.lastOrNull { it.kind == PromptTurnKind.USER }?.content.orEmpty()
+            .replace(Regex("<operit_request_context>.*?</operit_request_context>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(ChatMarkupRegex.attachmentTag, "").take(2000)
+        return turns.map { turn ->
         if (turn.kind == PromptTurnKind.SUMMARY) {
             val content = turn.content.removePrefix(SummaryFidelityPrompts.READING_BOUNDARY).trimStart()
             turn.copy(content = SummaryFidelityPrompts.forReading(forPrompt(content,
-                SummaryPromptBudget.MAX_CHARS - SummaryFidelityPrompts.READING_BOUNDARY.length - 1)))
+                SummaryPromptBudget.MAX_CHARS - SummaryFidelityPrompts.READING_BOUNDARY.length - 1, query)))
         } else turn
+        }
     }
 
     private fun brief(block: String) = block.lines().filter { it.startsWith("§") || it.startsWith("时间：") || it.startsWith("索引：") }

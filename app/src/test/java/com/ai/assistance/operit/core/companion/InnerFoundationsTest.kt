@@ -6,6 +6,50 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InnerFoundationsTest {
+    @Test fun inheritedConditionsContinueThroughFoundationWithoutDuplicateNumericState() {
+        fun rule() = JSONObject().put("condition", "custom").put("reason", "原有具体原因")
+            .put("interval_minutes", 60).put("amount", 10)
+        val definition = legacy("intimacy", "drive", 70.0).put("time_rules", JSONObject()
+            .put("increase", rule()).put("decrease", rule()).put("floor", 0))
+        val rules = definition.getJSONObject("time_rules").toString()
+        val data = JSONObject().put("definitions", JSONArray().put(definition))
+            .put("instances", JSONArray().put(JSONObject().put("dimension", "intimacy").put("scope", "global")
+                .put("value", 70.0).put("at", 0L).put("since", 0L)))
+        InnerFoundations.install(data, 0)
+        fun confirm(at: Long, active: Boolean) {
+            val frame = input(data, "condition-$at", at)
+            val action = JSONObject().put("id", "foundation:drive:intimacy")
+                .put("expected_version", frame.foundationVersions.getValue("foundation:drive:intimacy"))
+                .put("reason", "确认原自定义条件").put("evidence", JSONArray().put("condition-$at"))
+                .put("time_conditions", JSONObject().put("increase", active))
+            InternalStateReports.apply(data, frame, report(frame, JSONArray().put(action)), at)
+        }
+        confirm(HOUR, true)
+        InternalStateEngine.advance(data, "chat", 2 * HOUR)
+        assertEquals(80.0, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
+        confirm(2 * HOUR, false)
+        InternalStateEngine.advance(data, "chat", 3 * HOUR)
+        assertEquals(80.0, InternalStateEngine.rows(data, "instances").single().getDouble("value"), 1e-8)
+        assertEquals(rules, InternalStateEngine.definitions(data).single().getJSONObject("time_rules").toString())
+        assertFalse(data.getJSONObject("foundation_state").getJSONObject("drives")
+            .getJSONObject("foundation:drive:intimacy").has("value"))
+    }
+
+    @Test fun builtinDriveRejectsInventedInheritedConditionAtomically() {
+        val data = JSONObject()
+        InnerFoundations.install(data, 0)
+        val frame = input(data, "plain-drive")
+        val action = JSONObject().put("id", "foundation:drive:intimacy")
+            .put("expected_version", frame.foundationVersions.getValue("foundation:drive:intimacy"))
+            .put("reason", "不能虚构规则").put("evidence", JSONArray().put("plain-drive"))
+            .put("time_conditions", JSONObject().put("increase", true))
+        val before = data.toString()
+        val issue = assertThrows(InternalStateReportIssue::class.java) {
+            InternalStateReports.apply(data, frame, report(frame, JSONArray().put(action)), HOUR)
+        }
+        assertEquals("ISR_NO_INHERITED_RULE", issue.code)
+        assertEquals(before, data.toString())
+    }
     private val HOUR = 3_600_000L
 
     private fun legacy(id: String, kind: String, value: Double) =

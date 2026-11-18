@@ -7,7 +7,7 @@ import kotlin.math.ln
 object ChineseRecall {
     data class Document(val id: Long, val title: String, val body: String)
     data class Match(val id: Long, val hits: Int, val score: Double)
-    private val noise = setOf("什么", "那个", "这个", "之前", "上次", "后来", "时候", "一下", "我们", "你们", "可以", "怎么", "事情")
+    private val noise = setOf("什么", "那个", "这个", "之前", "上次", "后来", "时候", "一下", "我们", "你们", "可以", "怎么", "事情", "不是", "是我", "我说", "说的", "给你", "给我", "我又", "又不", "我再", "再看", "不行", "行不行", "好了", "哎呀", "肯定", "现在", "自己", "如果", "那你", "你是", "让我", "你让", "咋了", "删了", "了删")
 
     fun terms(query: String, segmented: List<String>, aliases: Map<String, String> = emptyMap()): List<String> {
         val result = linkedSetOf<String>()
@@ -15,10 +15,19 @@ object ChineseRecall {
             if (query.contains(alias, true) || query.contains(name, true)) { result.add(alias); result.add(name) }
         }
         Regex("[《“\"]([^》”\"]{2,48})[》”\"]").findAll(query).forEach { result.add(it.groupValues[1]) }
+        // An explicitly quoted phrase or confirmed alias remains a deliberate search clue,
+        // including a short negative answer that would otherwise be conversational noise.
+        val explicit = result.map { it.trim().lowercase(Locale.ROOT) }.toSet()
         result.addAll(segmented)
-        // Bigrams supplement Jieba for previously unseen two-character names, without dropping the original terms.
-        Regex("[\\p{IsHan}]{2,}").findAll(query).forEach { run -> result.addAll(run.value.windowed(2)) }
-        return result.map { it.trim().lowercase(Locale.ROOT) }.filter { it.length in 2..48 && it !in noise }.distinct().take(64)
+        // Do not turn every Chinese sentence into overlapping fragments such as 我又/又不.
+        // Preserve short standalone names and common nickname forms missed by segmentation.
+        Regex("[\\p{IsHan}]{2,}").findAll(query).filter { it.value.length == 2 }.forEach { result.add(it.value) }
+        Regex("阿[\\p{IsHan}]").findAll(query).forEach { result.add(it.value) }
+        val functionCharacters = "我你他她它的了是在不又再那这给让才会就也都把过吗呢呀么"
+        Regex("[\\p{IsHan}]{2,}").findAll(query).forEach { run ->
+            result.addAll(run.value.windowed(2).filter { pair -> pair.none { it in functionCharacters } })
+        }
+        return result.map { it.trim().lowercase(Locale.ROOT) }.filter { it.length in 2..48 && (it !in noise || it in explicit) }.distinct().take(64)
     }
 
     fun rank(documents: List<Document>, terms: List<String>): List<Match> {
@@ -40,8 +49,16 @@ object ChineseRecall {
 
     fun excerpt(text: String, terms: List<String>, limit: Int = 700): String {
         if (text.length <= limit) return text
-        val hit = terms.map { text.indexOf(it, ignoreCase = true) }.filter { it >= 0 }.minOrNull() ?: 0
-        val start = (hit - 100).coerceAtLeast(0).coerceAtMost(text.length - limit)
+        val clues = terms.filter { it.isNotBlank() }.distinct()
+        val starts = clues.flatMap { term ->
+            Regex(Regex.escape(term), RegexOption.IGNORE_CASE).findAll(text).take(64).map { match ->
+                (match.range.first - minOf(60, limit / 4)).coerceAtLeast(0).coerceAtMost(text.length - limit)
+            }.toList()
+        }
+        val start = starts.distinct().maxByOrNull { offset ->
+            val window = text.substring(offset, offset + limit)
+            clues.filter { window.contains(it, ignoreCase = true) }.sumOf { it.length }
+        } ?: 0
         return (if (start > 0) "…" else "") + text.substring(start, start + limit) + "…"
     }
 }
