@@ -44,9 +44,10 @@ class InnerFoundationsTest {
             .put("reason", "不能虚构规则").put("evidence", JSONArray().put("plain-drive"))
             .put("time_conditions", JSONObject().put("increase", true))
         val before = data.toString()
-        assertThrows(InternalStateReportIssue::class.java) {
+        val issue = assertThrows(InternalStateReportIssue::class.java) {
             InternalStateReports.apply(data, frame, report(frame, JSONArray().put(action)), HOUR)
         }
+        assertEquals("ISR_NO_INHERITED_RULE", issue.code)
         assertEquals(before, data.toString())
     }
     private val HOUR = 3_600_000L
