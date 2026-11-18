@@ -1805,8 +1805,12 @@ private fun ChatInputBottomBar(
 
     LaunchedEffect(isQueueBlocked, pendingQueueMessages.size, currentChatId) {
         val queueChatId = currentChatId ?: return@LaunchedEffect
-        if (actualViewModel.consumePendingQueueAutoDequeueSignal(queueChatId, isQueueBlocked)) {
+        // Consume the busy-to-idle transition only after the cancellable debounce. A new
+        // queued message restarts this effect; consuming before delay stranded the queue.
+        if (!isQueueBlocked) {
             delay(250)
+        }
+        if (actualViewModel.consumePendingQueueAutoDequeueSignal(queueChatId, latestQueueBlocked.value)) {
             val nextMessage = pendingQueueMessages.firstOrNull()
             if (!latestQueueBlocked.value && nextMessage != null) {
                 actualViewModel.removePendingQueueMessage(queueChatId, nextMessage.id)?.let { item ->

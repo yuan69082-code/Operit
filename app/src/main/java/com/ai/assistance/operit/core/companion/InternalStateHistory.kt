@@ -282,9 +282,35 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         require(journal.getInt("schema") == 1)
         val db = db()
         val id = journal.getString("id")
-        val digest = InnerStructure.hash(journal)
-        db.rawQuery("SELECT digest FROM category_commits WHERE scope=? AND id=?", arrayOf(scope, id)).use {
-            if (it.moveToFirst()) { check(it.getString(0) == digest) { "事件提交标识冲突" }; return }
+        val digest = CategoryJournalFingerprint.digest(journal)
+        val committedDigest = db.rawQuery("SELECT digest FROM category_commits WHERE scope=? AND id=?", arrayOf(scope, id)).use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+        if (committedDigest != null) {
+            if (committedDigest == digest) return
+            // Legacy hashes distinguished 1.0 from 1. JSONObject copies normalize these
+            // numbers, so an unrelated save could make an already-committed journal unreadable.
+            // Upgrade only after verifying the complete ordered history of this frame;
+            // never replay rows or replace current psychological state to repair a checksum.
+            check(!committedDigest.startsWith(CategoryJournalFingerprint.PREFIX)) { "事件提交标识冲突" }
+            val archived = db.rawQuery(
+                "SELECT payload FROM history WHERE scope=? AND kind='category_versions' AND instr(payload,?)>0 ORDER BY rowid",
+                arrayOf(scope, JSONObject.quote(id))
+            ).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        val row = JSONObject(cursor.getString(0))
+                        if (row.optString("frame_id") == id) add(CategoryJournalFingerprint.digest(row))
+                    }
+                }
+            }.distinct()
+            val rows = journal.getJSONArray("rows")
+            val expected = (0 until rows.length()).map { CategoryJournalFingerprint.digest(rows.getJSONObject(it)) }.distinct()
+            check(expected.isNotEmpty() && archived == expected) { "事件提交标识冲突：提交内容与已归档版本不一致" }
+            if (!writing) { db.beginTransaction(); writing = true }
+            db.execSQL("UPDATE category_commits SET digest=? WHERE scope=? AND id=?", arrayOf(digest, scope, id))
+            commit()
+            return
         }
         if (!writing) { db.beginTransaction(); writing = true }
         val rows = journal.getJSONArray("rows")

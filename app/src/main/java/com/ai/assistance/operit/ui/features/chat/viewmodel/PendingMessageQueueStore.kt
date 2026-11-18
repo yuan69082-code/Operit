@@ -26,7 +26,8 @@ internal class PendingMessageQueueStore {
                 state.copy(
                     messages = state.messages + PendingQueueMessageItem(nextMessageId.getAndIncrement(), text),
                     isExpanded = true,
-                    wasBlocked = isQueueBlocked,
+                    // Keep an unconsumed idle transition while the UI debounce restarts.
+                    wasBlocked = state.wasBlocked || isQueueBlocked,
                 )
             }
         }
