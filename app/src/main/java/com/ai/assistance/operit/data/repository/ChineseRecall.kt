@@ -15,6 +15,9 @@ object ChineseRecall {
             if (query.contains(alias, true) || query.contains(name, true)) { result.add(alias); result.add(name) }
         }
         Regex("[《“\"]([^》”\"]{2,48})[》”\"]").findAll(query).forEach { result.add(it.groupValues[1]) }
+        // An explicitly quoted phrase or confirmed alias remains a deliberate search clue,
+        // including a short negative answer that would otherwise be conversational noise.
+        val explicit = result.map { it.trim().lowercase(Locale.ROOT) }.toSet()
         result.addAll(segmented)
         // Do not turn every Chinese sentence into overlapping fragments such as 我又/又不.
         // Preserve short standalone names and common nickname forms missed by segmentation.
@@ -24,7 +27,7 @@ object ChineseRecall {
         Regex("[\\p{IsHan}]{2,}").findAll(query).forEach { run ->
             result.addAll(run.value.windowed(2).filter { pair -> pair.none { it in functionCharacters } })
         }
-        return result.map { it.trim().lowercase(Locale.ROOT) }.filter { it.length in 2..48 && it !in noise }.distinct().take(64)
+        return result.map { it.trim().lowercase(Locale.ROOT) }.filter { it.length in 2..48 && (it !in noise || it in explicit) }.distinct().take(64)
     }
 
     fun rank(documents: List<Document>, terms: List<String>): List<Match> {

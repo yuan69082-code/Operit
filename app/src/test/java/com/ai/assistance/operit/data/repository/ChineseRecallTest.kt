@@ -4,6 +4,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChineseRecallTest {
+    @Test fun explicitlyQuotedNegativeAnswerRemainsSearchable() {
+        assertTrue("不行" in ChineseRecall.terms("她说“不行”的那次", listOf("不行")))
+        assertFalse("不行" in ChineseRecall.terms("行不行", listOf("不行")))
+    }
     @Test fun conversationalFragmentsCannotRecallUnrelatedMemories() {
         val terms = ChineseRecall.terms("我4点才吃完的晚饭，我又不是猪", listOf("晚饭", "不是"))
         assertFalse("我又" in terms)
