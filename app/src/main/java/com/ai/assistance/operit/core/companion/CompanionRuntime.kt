@@ -190,7 +190,7 @@ object CompanionRuntime {
                                 } finally { releaseTurn(epoch) }
                             }
                             decision?.join(); decision = null
-                            nextSource = 0
+                            nextSource = if (source == 8) 0 else (source + 1) % 8
                             continue@dispatch
                         }
                     }
@@ -253,7 +253,7 @@ object CompanionRuntime {
                                 }
                             }
                             decision?.join(); decision = null
-                            nextSource = 0
+                            nextSource = if (source == 8) 0 else (source + 1) % 8
                             continue@dispatch
                         }
                     }
@@ -308,7 +308,7 @@ object CompanionRuntime {
                                     withTimeout(180_000) { evaluate(app, batch.chat, batch.prompt, epoch, phoneRole = batch.role, triggerId = "phone:${batch.id}") }
                                     phoneStore.finish(batch.id, "handled", "助手已完成判断；具体决定见唤醒日志")
                                 } catch (_: SubjectLife.Deferred) {
-                                    phoneStore.finish(batch.id, "deferred", "原事件已进入休息暂存，尚未判断")
+                                    phoneStore.finish(batch.id, "deferred", "原事件已交接或暂存，尚未在本机判断")
                                 } catch (timeout: TimeoutCancellationException) {
                                     currentCoroutineContext().ensureActive()
                                     phoneStore.finish(batch.id, "failed", "判断超过3分钟，已停止；未自动重试工具操作")
@@ -342,7 +342,7 @@ object CompanionRuntime {
                                     withTimeout(300_000) { evaluate(app, work.chat, work.board.prompt(current), taskEpoch, taskEvent = true, triggerId = "todo:${work.id}:${work.event}") }
                                     work.board.dispatchState(work.id, work.event, "handled", "本次处理已结束，事项是否完成以状态和实际进展为准")
                                 } catch (_: SubjectLife.Deferred) {
-                                    work.board.dispatchState(work.id, work.event, "deferred", "原截止与预约未改写；休息后重新判断安排")
+                                    work.board.dispatchState(work.id, work.event, "deferred", "原截止与预约未改写；触发已交接或暂存，后续核对真实进展")
                                 } catch (cancelled: CancellationException) {
                                     work.board.dispatchState(work.id, work.event, "interrupted", "执行已中断，请核对实际进展")
                                     throw cancelled
@@ -430,7 +430,7 @@ object CompanionRuntime {
                                 }
                             }
                             decision?.join(); decision = null
-                            nextSource = 0
+                            nextSource = if (source == 8) 0 else (source + 1) % 8
                             continue@dispatch
                         }
                     }
@@ -474,7 +474,7 @@ object CompanionRuntime {
                             }
                             decision?.join()
                             decision = null
-                            nextSource = 0
+                            nextSource = if (source == 8) 0 else (source + 1) % 8
                             continue@dispatch
                         }
                     }
@@ -622,7 +622,8 @@ object CompanionRuntime {
                     "helper.wake_requested", org.json.JSONObject().put("reason", event)
                         .put("taskEvent", taskEvent).put("exploration", explorationWork != null))
             }
-            error("软件自主判断已停用；主体由引擎管理，获授权的事件保存在引擎窗口记录中")
+            store.log(chatId, "引擎交接", "主体由外部引擎管理，未启动本机模型；交接不算模型失败")
+            throw SubjectLife.Deferred()
         }
         CharacterCardManager.getInstance(context).ensureIndependentSettings(roleId)
         val card = CharacterCardManager.getInstance(context).getCharacterCard(roleId)
