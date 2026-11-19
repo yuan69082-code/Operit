@@ -58,8 +58,8 @@ class SubjectActionEntryPointsTest {
             handler.getToolPermissionSystem().saveToolPermission(name, PermissionLevel.ALLOW)
         }
     }
-    private suspend fun sections(window: String = chat) =
-        InnerStructureContext.prepare(context, role, window, true, input = "继续自己的研究")
+    private suspend fun sections(window: String = chat, wake: Boolean = false) =
+        InnerStructureContext.prepare(context, role, window, true, wake = wake, input = "继续自己的研究")
     private fun invocation(name: String, args: Map<String, String> = emptyMap()) = ToolInvocation(
         AITool(name, args.map { ToolParameter(it.key, it.value) }), "", 0..0)
     private suspend fun execute(f: InternalStateFrame, calls: List<ToolInvocation>, round: Int = 0) =
@@ -119,6 +119,35 @@ class SubjectActionEntryPointsTest {
             "action" to "dream", "id" to "static-dream", "details" to "{\"choice\":\"end\",\"note\":\"结束\"}"))), 2).results.single()
         assertFalse(oldDream.success)
         assertTrue(oldDream.error.orEmpty(), oldDream.error.orEmpty().contains("DREAM_PROCESS_NOT_FOUND"))
+    }
+
+    @Test fun requestsKeepShortFormatsAndToolQueriesReturnFullContracts(): Unit = runBlocking {
+        val chatRequest = sections()
+        val wakeRequest = sections(wake = true)
+        val contractDetails = mapOf(
+            "legacy" to "contact_window_minutes",
+            "inner" to "candidate_hash",
+            "rest" to "theme_count",
+            "foundation" to "可只更新条件而省略value",
+        )
+        for (request in listOf(chatRequest, wakeRequest)) {
+            val prompt = request.instructions
+            assertEquals(1, Regex("<operit_state_report>").findAll(prompt).count())
+            assertTrue(prompt.contains("get section=contract"))
+            assertTrue(prompt.contains("attention:{progress:"))
+            assertTrue(prompt.contains("pending_read"))
+            assertTrue(prompt.contains("companion_life activity"))
+            contractDetails.values.forEach { detail -> assertFalse(prompt.contains(detail)) }
+        }
+        val frame = requireNotNull(wakeRequest.internalStateFrame)
+        val replies = execute(frame, contractDetails.keys.map { topic ->
+            invocation("companion_internal_state", mapOf("action" to "get", "section" to "contract", "id" to topic))
+        }).results
+        assertEquals(contractDetails.size, replies.size)
+        assertTrue(replies.all { it.success })
+        for (detail in contractDetails.values) {
+            assertTrue(detail, replies.any { it.result.toString().contains(detail) })
+        }
     }
 
     @Test fun retrievedFoundationEvidenceCanSaveAnEpisodeThroughNormalReportCommit(): Unit = runBlocking {

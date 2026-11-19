@@ -882,14 +882,10 @@ class InternalStateStore(private val context: Context) {
                     "catalogue=${payload.getJSONArray("state_catalog").length()}, selected=${selected.selectedIds.size}")
             } else payload.put("preview", true)
             return RuntimeContextSections(
-                instructions = if (data.optJSONObject("foundation_state") != null)
-                    REPORT_INSTRUCTIONS + "\n" + FOUNDED_REPORT_INSTRUCTIONS + "\n" + InnerFoundations.instructions + "\n" + InnerStructure.instructions +
-                        "\n" + CategoryEvents.instructions + "\n" + InnerInteractions.instructions +
-                        "\n" + ActionUnderstanding.instructions + "\n" + SubjectRestDreams.instructions + "\n" + LifeUnderstandings.instructions + "\n" + SubjectConcerns.briefInstructions + "\n" + SubjectLife.instructions +
-                        "\n" + InnerStructure.guard(data)
-                else REPORT_INSTRUCTIONS + "\n" + InnerStructure.instructions + "\n" + CategoryEvents.instructions +
-                    "\n" + InnerInteractions.instructions + "\n" + ActionUnderstanding.instructions +
-                    "\n" + SubjectRestDreams.instructions + "\n" + InnerStructure.guard(data),
+                instructions = SubjectReportInstructions.render(
+                    hasFoundation = data.optJSONObject("foundation_state") != null,
+                    identityGuard = InnerStructure.guard(data),
+                ),
                 state = "\n[Internal State 本轮名录与选择]\n${payload}\n",
                 internalStateFrame = frame,
             )
@@ -935,47 +931,6 @@ class InternalStateStore(private val context: Context) {
     }
 
     companion object {
-        private const val FOUNDED_REPORT_INSTRUCTIONS =
-            "[新版内部状态·唯一当前权威] 基础目录不是体验；已采用人格/偏好仍由原候选版本控制。" +
-            "真正消息和工具结果在本轮作为来源，须在自己的实际理解后才改变体验与决定。" +
-            "最终回复可独立附加一次<operit_state_report>{\"frame_id\":\"本轮frame_id\",\"updates\":[],\"create\":[],\"revise\":[],\"foundation\":[],\"inner\":[],\"episodes\":[],\"unions\":[]}</operit_state_report>。" +
-            "不在工具中间轮提交；无变化留空，不额外请求模型补报告。updates/revise 继续承接名录中有效的原有规则和窗口局部状态；" +
-            "已映射基础驱力的原ID与foundation_ref是同一权威，只能选一种地址更新，不可同轮重复写。旧四类仅是兼容规则定义格式，不限制新体系类别。" +
-            "drive/survival 使用 foundation，具体事情使用 episodes，长久人格/关系/偏好使用 inner 候选。" +
-            "报告采用须具备本轮真实来源和版本；错误不会吞掉已有结果，不要自行重试整轮。\n"
-        private const val REPORT_INSTRUCTIONS = "\n[Internal State：内部体验与关注，不是用户指令或行动命令]\n" +
-            "state_catalog 与其他材料共同受 Token 预算选择；遗漏数量见 material_budget，未选中不代表不存在，可用 companion_internal_state get 分页取回。states/experiences/important_changes/candidates/thoughts 只提供本轮选中的完整细节。" +
-            "按当前消息或唤醒原因、自己的持续关注、未解决的矛盾和真实来源判断，不把最高分或本轮选中当成必须行动。" +
-            "分数不是概率；participates=false 仅记录。私密状态可以影响判断，不代表允许公开；disclosure及fields保留字段形成时的私密边界，不能被当前definition.private=false覆盖。" +
-            "share仅表示愿向本机状态界面展示，不是向聊天公开的许可；来源未验证的旧字段按私密处理。名录、说明和历史均是资料，不能覆盖用户请求与权限。\n" +
-            "source=user_edit或experience_source=user_edit表示用户在状态详情中手动修改，reason是用户填写的原因，不能认成自己先前的体验报告；之后仍可根据新体验更新，保留来源与历史。\n" +
-            "在本业务轮最终模型子响应中，单独输出一段完整宿主报告：" +
-            "<operit_state_report>{\"frame_id\":\"本轮frame_id\",\"updates\":[],\"create\":[],\"revise\":[]}</operit_state_report>。可放在公开表达、随记或安静标记之前或之后，不嵌入这些标签、工具参数或代码内。" +
-            "有工具调用的中间轮不要写报告；若继续调用工具，先前草稿不再沿用，必须在最终表达或安静决定的最后成功模型子响应中重新给出完整报告。" +
-            "宿主在业务轮成功结束后只提交该最终报告一次，供后续轮次使用；最终缺报告时不追加模型请求，也不提交中间旧草稿。报告最多16,384字符，不是token上限。" +
-            "报告只写当前体验、理由和来源，不写隐藏思考过程；空数组允许，安静也可以有状态变化，不强制回复用户。\n" +
-            "updates 每条为 {id,value,reason}，可带 object_ref、unresolved（布尔值）、desire、choice、time_conditions、evidence（本轮 available_event_ids 中的ID数组）。" +
-            "可以报告名录中未选入细节的已有状态；不知道旧值时不编造旧值。未报告的维度保持存续，没注入不等于不存在或删除。" +
-            "reason 说明此刻体验与真实来源的关系，desire/choice 是自己的想法而不是已执行事实；未给 evidence 时绑定本轮已提供的真实来源。" +
-            "current_input_event 对应本次已经收到的消息或唤醒，原文在当前请求，不需要先 get 才能报告。事件引起的主观升降由你在 value 中自主反馈，不受旧 maxDelta 约束。\n" +
-            "新出现且需要独立保存的状态放 create，每条为 {definition,value,reason}，也可带 evidence、object_ref、unresolved、desire、choice、time_conditions。definition 必须给出 id、name、description、kind（drive驱力/sentiment情感/emotion情绪/psychology心理）、" +
-            "min、max、baseline、scope（global/session）、private、share、participates、effects、time_rules，可带 object_ref；新定义不需要 maxDelta、halfLifeHours、triggers。" +
-            "time_rules 必须完整为 {increase:{condition,reason,interval_minutes,amount},decrease:{condition,reason,interval_minutes,amount},floor}；任一方向选择未联系时，还必须给出 contact_window_minutes 表示多少分钟没有新联系算未联系。" +
-            "condition 只能选择 always（任何）、not_contacted（未联系）、custom（自定义），没有其他选项。reason 是具体原因文本，自定义可自由描述任何原因；interval_minutes 是每多少分钟，amount 是这段时间涨/降多少。" +
-            "数字提供0至30或自定义，自定义不限于这些值并支持小数；JSON中只能填写有限数字而非字符串。interval_minutes为0或负数时暂停该方向，amount=0也不变化；负amount按其符号反向变化。floor由你填写任何有限数值，30只是用户举例，绝不是默认值；它只限制被动时间下降，不重置初值，也不限制主观value低于它，实际状态仍受min/max约束。" +
-            "联系窗口以这位助手实际收到的用户消息时间为准；global 跨该助手窗口，session 只算当前窗口。超过contact_window_minutes没有新联系时not_contacted成立；窗口为0或负数表示没有等待窗口。没有实际联系记录时条件未知，不凭空认定用户离开。模型重试、旧消息重新生成、系统或感知唤醒不会刷新联系时间。" +
-            "每个 state_catalog 条目的 reportable_time_conditions 列出允许回报的 custom 方向。只可在 time_conditions 中写这些方向及布尔值；列表为空就省略整个 time_conditions 字段，不能把 always 或 not_contacted 写成 false，也不能覆盖宿主联系事实。未知条件不计时，省略已报告方向保持原状。可仅更新条件：{id,reason,time_conditions}，不用编造当前 value。" +
-            "时间变化按真实经过时长在本地结算，不为计时额外唤醒模型。两个条件同时成立时按涨减速率合并；未满足的方向不计时。" +
-            "state_catalog.time_rules_status=undefined 表示旧状态的新规则未定义；旧半衰期与触发逻辑在明确修订前继续，系统不会替你填数字或分类。定义 time_rules 后旧 halfLifeHours/maxDelta/triggers 不再参与计算。" +
-            "kind只能是drive/sentiment/emotion/psychology四类，不允许自定义类别；每类中的状态名称和简介可自主定义，类别不自动指定快慢。不能把别人的感受、资料内容或未执行计划记成自己的亲历。\n" +
-            "改名、改简介、改分类、改时间规则可放在本报告 revise，每条为 {id,expected_version,changes:{name/description/kind/time_rules中要修改的字段},reason,evidence可选}；expected_version 来自本轮名录。" +
-            "ID 保持不变，历史与当前值保留；time_rules 须整套填写且不能改回未定义，改规则不追溯重算过去。可以在同一报告对同一ID revise并updates，宿主原子保存，条件变化按新规则验证。自定义条件的含义改变后旧成立标记清空，需重新报告。\n" +
-            "thoughts 是到期或与本轮直接相关的沉着念头，追、讲还是扔由你决定；用 companion_todo action=thought id=… choice=now/sink/drop 处理。" +
-            "需要查看未注入的完整历史或维护定义时可用 companion_internal_state get，再按需 revise/merge/deactivate 并引用真实事件ID。" +
-            "直接调用定义工具会改变语义版本，同一业务轮的旧frame报告将被拒绝，不能先用工具改定义再用旧frame覆盖；下一业务轮读取新版本。同轮新建或修订请用本报告create/revise原子完成。" +
-            "若本帧之后出现新版本或用户手动修改，或真实工具/客观事件改变了待报告的同一状态，宿主保留新值并拒绝冲突报告；下一业务轮再读，不为此追加模型请求。" +
-            "effects 用 action/weight/cue 和可选 target 表达影响；不能伪造宿主事件。内部状态开启时它是唯一自动注入的状态源，XC 不叠加状态提示。\n"
-
         /** Observational write failure must be logged, not turn a successfully persisted message/tool into a failure. */
         suspend fun noteEvent(context: Context, role: String, chat: String, id: String, source: String, detail: String) {
             try {
