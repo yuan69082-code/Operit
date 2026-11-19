@@ -15,6 +15,10 @@ status: implemented_pending_validation
 
 完整软件检查以现有自动化回归、编译与改动调用链审查为证据，不声称穷尽所有实机问题。
 
+## 更新进度的回报
+
+模型每轮会收到持续牵挂的局部更新示例。使用简况提供的版本和本轮实际来源，仅在 `attention` 内填写有变化的 `progress` 或 `waiting`。完整格式用于新建或确实修改原有理解。进度字段误放在 life 条目顶层时，错误会指向误放的字段和正确位置。修改受保护的本意或常驻仍需读取当前详情并明确说明。整份回报依原有事务校验及采用。
+
 ## 实际入口与证据范围
 
 - `SubjectConcerns` 在已有 life 行上维护 attention；`InternalStateStore.prepare` 取简况及当前关联成员，`SubjectMaterialBudget` 在同一总额内选择。`LifeUnderstandings.apply`、`InternalStateReports` 原子采用进度和明确变更。

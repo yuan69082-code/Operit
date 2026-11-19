@@ -9,6 +9,7 @@ internal object SubjectConcerns {
     val horizons = setOf("long_term", "short_term")
     val modes = setOf("mixed", "relevant", "rotation", "random")
     private val active = setOf("active", "considering", "uncertain")
+    private val progressFields = listOf("progress", "waiting")
     private fun archive(data: JSONObject) = requireNotNull((data as? InternalStateDocument)?.history)
     fun config(data: JSONObject): JSONObject = JSONObject(data.optJSONObject("concern_settings")?.toString()
         ?: """{"version":0,"long_term":2,"short_term":2,"old":1,"mode":"mixed","initialized":false}""")
@@ -33,6 +34,10 @@ internal object SubjectConcerns {
     /** Missing optional fields preserve an existing concern; an ordinary progress report
      * must never accidentally unpin it or erase its original purpose. */
     fun prepare(old: JSONObject?, action: JSONObject, frame: InternalStateFrame): JSONObject {
+        for (key in progressFields) {
+            SubjectContracts.expect(!action.has(key), key, "ATTENTION_FIELD_LOCATION",
+                "请将$key写入attention.$key。只更新进展或等待时，提交kind/id/expected_version/evidence和attention内变化，省略原文及目的字段。")
+        }
         val next = JSONObject(action.toString())
         val prior = old?.getJSONObject("content")
         if (prior?.has("attention") == true) {
@@ -53,7 +58,7 @@ internal object SubjectConcerns {
         for (key in listOf("brief", "importance", "focus")) SubjectContracts.text(a, key, path = "attention.$key")
         for (key in listOf("pinned", "protected")) SubjectContracts.expect(a.opt(key) is Boolean,
             "attention.$key", "EXPECTED_BOOLEAN", "需要true或false，不是字符串。")
-        for (key in listOf("progress", "waiting")) if (a.has(key)) SubjectContracts.text(a, key, empty = true, path = "attention.$key")
+        for (key in progressFields) if (a.has(key)) SubjectContracts.text(a, key, empty = true, path = "attention.$key")
         if (a.has("tags")) SubjectContracts.strings(SubjectContracts.array(a, "tags"), path = "attention.tags")
         val oldAttention = prior?.optJSONObject("attention")
         if (oldAttention != null) {
@@ -66,7 +71,7 @@ internal object SubjectConcerns {
                     .any { prior.optString(it) != next.optString(it) } || oldAttention.getString("brief") != a.getString("brief"))
             if (changedPosition || changedMeaning) {
                 SubjectContracts.expect(next.optString("attention_change").isNotBlank(), "attention_change", "EXPLICIT_CONCERN_CHANGE",
-                    "常驻或本意已保护；先get section=concerns id=kind:ID读详情，明确填写attention_change说明完成、放下、转向或修订。进度可独立更新。")
+                    "只更新进度时用attention.progress，省略原文及目的字段。若确实要改变常驻或本意，先get section=concerns id=kind:ID读详情，再用attention_change说明变更。")
                 val read = frame.materialSources.values.any { raw -> JSONObject(raw).let { source ->
                     source.optBoolean("full_concern_read") && source.optJSONObject("locator")?.let {
                         it.optString("kind") == oldRow.getString("storage_kind") && it.optString("id") == oldRow.getString("id") &&
@@ -221,13 +226,16 @@ internal object SubjectConcerns {
         }
     }
 
-    val briefInstructions = "持续牵挂沿用life记录。使用前可get section=contract id=concerns读取完整字段与规则；get section=concerns按direction:ID/experience:ID看详细原文，concern_config查数量。常驻简况和旧事浮现不等于行动命令；可与内在状态、联合和真实回执双向影响。进度可更新；改变锁定的本意或常驻位置、完成/暂停常驻，须先读当前详情，再用life.attention_change明确说明。遗漏可选关注字段保留原值，旧原文保留历史；稳定人格仍走原候选采用。需要后续活动仍须用原工具真实预约。"
+    const val PROGRESS_REPORT_INSTRUCTIONS = "已有持续牵挂只记进度或等待时，按简况locator取kind、id、version，用当前来源，最小格式：life:[{kind:\"direction\",id:\"便签ID\",expected_version:当前版本,evidence:[\"本轮来源ID\"],attention:{progress:\"新进展\",waiting:\"等待条件\"}}]。两个进度字段只提交有变化的，必须放在attention内。省略text/scope/status/purpose/goal/resolve/ambition和attention内其余字段，保留现存值。简况可以支持此补丁；如需改本意或常驻位置，先读详情再明确说明。"
+
+    val briefInstructions = "持续牵挂沿用life记录。get section=contract id=concerns读取完整规则；get section=concerns按direction:ID/experience:ID看详细原文，concern_config查数量。常驻简况和旧事浮现可与内在状态、联合和真实回执双向影响。改变锁定的本意或常驻位置、完成或暂停常驻，须先读当前详情，再用life.attention_change说明。旧原文保留历史；稳定人格走原候选采用。需要后续活动仍须用原工具真实预约。"
 
     val instructions = """
         [持续牵挂便签]
         便签沿用life的experience/direction原记录，不是另一套待办。需要持续挂心时才在life条目附attention:{horizon:"long_term|short_term",brief:"简况",importance:"长期重要程度",focus:"此刻注意",pinned:true,protected:true,progress?:"实际进展及未核实之处",waiting?:"等待条件",tags?:["野心","目标","决定"]}。不把每个念头自动变成目标。
         常驻简况在正常聊天和自主活动共用的材料预算内提供；详情默认不注入。get section=concerns分页看索引，id="direction:ID"或"experience:ID"读原文、来源、当前进度；category_versions id=kind:ID查变化。简况被省略不等于已处理。不会因便签存在或分数高强制行动、自动唤醒或续约。
-        pinned固定位置，protected保护text/scope/purpose/goal/resolve/ambition与brief；进度、等待、重要程度和当前注意分别更新。已有便签可用life:[{kind,id,expected_version,evidence:[本轮来源],attention:{progress:"新进度"}}]补丁更新；省略核心原文字段、attention内字段和既存可选目的字段会保留，不要求重抄全文。related省略保留历史关联，显式提供须实际读取当前版本。改变本意、取消常驻、改变常驻长短期、结束或暂停常驻前，先读当前详情，并在life条目写attention_change明确说明；版本仍须匹配。旧原文与变更历史保留，不因一轮摘要或新事分数高自动换掉。
+        $PROGRESS_REPORT_INSTRUCTIONS
+        pinned固定位置，protected保护text/scope/purpose/goal/resolve/ambition与brief；进度、等待、重要程度和当前注意分别更新。related省略保留历史关联，显式提供须实际读取当前版本。改变本意、取消常驻、改变常驻长短期、结束或暂停常驻前，先读当前详情，并在life条目写attention_change明确说明；版本仍须匹配。旧原文与变更历史保留，不因一轮摘要或新事分数高自动换掉。
         便签仍用原kind/id/version参与related、unions和__operit_action.intention_refs。情绪/情感/感受/驱力/需要/欲望、人格/自我认识/价值/关系/偏好可以影响牵挂；牵挂与真实进展也能反过来影响这些部分，多个方向可以拉扯。按实际理解通过原life/episodes/foundation/inner/unions/action_feedback采用，不预设成功必满足或失败必坚持。人格等仍走原候选跨轮采用。行动回执与进度自述分开，需预约仍用既有工具，以成功回执为准。
         数量用get section=concern_config查看，初始长期2/短期2/旧事1；是本轮位置而非保存上限。可在轮末attention_config:{expected_version,long_term,short_term,old,mode:"mixed|relevant|rotation|random"}明确调整。所有材料共用总预算；配置很多位置不保证全文全部送达，遗漏见material_budget。旧事只是一次再考虑的机会，可继续、暂缓、放下，也可没有新结论。
     """.trimIndent()
