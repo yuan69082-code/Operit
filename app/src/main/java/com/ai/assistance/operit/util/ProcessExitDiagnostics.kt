@@ -9,8 +9,35 @@ import com.ai.assistance.operit.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-/** Read only on explicit export; JVM handlers cannot record native crashes or system kills. */
+/** Android exit history covers causes that an in-process exception handler cannot observe. */
 internal object ProcessExitDiagnostics {
+    private const val PREFS = "previous_process_exit"
+
+    fun recordLastMainExit(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val manager = context.getSystemService(ActivityManager::class.java)
+        val exit = manager.getHistoricalProcessExitReasons(context.packageName, 0, 10)
+            .firstOrNull { it.processName == context.packageName } ?: return
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (exit.timestamp <= prefs.getLong("at", 0)) return
+        val label = when {
+            exit.reason == ApplicationExitInfo.REASON_PACKAGE_UPDATED &&
+                exit.description.orEmpty().contains("webview", ignoreCase = true) -> "Android 更新 WebView 时结束了应用"
+            exit.reason == ApplicationExitInfo.REASON_PACKAGE_UPDATED -> "系统安装更新时结束了应用"
+            exit.reason == ApplicationExitInfo.REASON_LOW_MEMORY -> "系统因内存压力结束了应用"
+            exit.reason == ApplicationExitInfo.REASON_ANR -> "系统因应用无响应结束了应用"
+            exit.reason == ApplicationExitInfo.REASON_CRASH || exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE -> "应用发生崩溃"
+            else -> "上次进程退出（Android 原因 ${exit.reason}）"
+        }
+        check(prefs.edit().putLong("at", exit.timestamp).putString("label", label).commit())
+        AppLogger.i("ProcessExit", "Previous process exit at=${exit.timestamp} reason=${exit.reason}: $label")
+    }
+
+    fun lastMainExit(context: Context): org.json.JSONObject {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return org.json.JSONObject().put("at", prefs.getLong("at", 0)).put("label", prefs.getString("label", ""))
+    }
+
     fun capture(context: Context): File {
         val file = File(context.cacheDir, "process-exits.txt")
         file.bufferedWriter().use { writer ->

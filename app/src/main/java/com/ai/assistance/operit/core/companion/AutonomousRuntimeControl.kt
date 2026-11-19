@@ -119,6 +119,7 @@ class AutonomousRuntimeControl(private val context: Context) {
             else -> "等待中"
         }
         return JSONObject().put("state", state).put("enabled", enabled).put("now", now)
+            .put("last_process_exit", com.ai.assistance.operit.util.ProcessExitDiagnostics.lastMainExit(context))
             .put("pause_until", if (until == Long.MAX_VALUE) JSONObject.NULL else until)
             .put("reason", run.optString("error")).put("idle", idleConfig(role))
             .put("activity", if (run.optString("role") == role) run.optString("activity") else "")

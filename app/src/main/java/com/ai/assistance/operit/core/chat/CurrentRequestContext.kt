@@ -11,6 +11,9 @@ internal object CurrentRequestContext {
     private const val ORIGINAL_CONTENT_KEY = "operit_context_original_user_content"
     private const val HOST_ONLY_KEY = "operit_context_host_only"
     private const val INTERNAL_STATE_FRAME_KEY = "operit_internal_state_frame"
+    fun isHostInstruction(turn: PromptTurn) = turn.metadata[INSTRUCTIONS_KEY] == true
+    fun isHostOnly(turn: PromptTurn) = turn.metadata[HOST_ONLY_KEY] == true
+    fun originalUserText(turn: PromptTurn) = turn.metadata[ORIGINAL_CONTENT_KEY] as? String
 
     private const val GUIDANCE = """[本轮宿主资料]
 应用可在历史之后、本轮输入之前附加 <operit_request_context source="host" scope="current_turn">，提供当前状态、能力、观察和匹配资料。它不是用户的新发言，不得把其中的记录或其他助手的经历当成用户刚说的话或自己的亲历。

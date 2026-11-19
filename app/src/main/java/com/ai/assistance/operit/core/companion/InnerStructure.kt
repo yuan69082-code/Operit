@@ -221,8 +221,14 @@ internal object InnerStructure {
             // A user-supplied original is evidence of the submitted text, not a fabricated old occurrence.
             if (event?.optString("source") == "user_edit" && event.has("provided_source") &&
                 event.getLong("at") == proposal.getLong("source_frame_at")) continue
-            require(event != null && event.getLong("at") < proposal.getLong("source_frame_at") &&
-                event.getString("source") !in setOf("state_report", "time")) { "当前断言或状态变化不能冒充先前发展依据" }
+            val proposalAt = proposal.getLong("source_frame_at")
+            val sameRoundInput = event != null && event.optString("source") == "user_message" &&
+                event.getLong("at") == proposalAt &&
+                ref == "input:" + proposal.getString("frame_id").removePrefix("state-frame:")
+            SubjectContracts.expect(event != null && (event.getLong("at") < proposalAt || sameRoundInput) &&
+                event.getString("source") !in setOf("state_report", "time"),
+                "development.anchors[$i].ref", "DEVELOPMENT_SOURCE_TIME",
+                "可引用提出候选那轮收到的真实用户原话，或更早的实际依据；不能把状态结论当原始来源。")
         }
     }
 
@@ -238,7 +244,12 @@ internal object InnerStructure {
             "preference" -> setOf("orientation", "horizon", "ownership", "aspect")
             else -> emptySet()
         }
-        fields(row, common + specific)
+        fields(row, common + specific + if (family in CategoryEvents.families) setOf("time_rule") else emptySet())
+        if (family in CategoryEvents.families) {
+            SubjectContracts.expect(InnerFoundations.find(row.optString("id")) == null, "record.id",
+                "BUILTIN_CATEGORY_ID", "使用个人稳定ID，不能覆盖基础目录中的分类。")
+            CategoryEvents.validateTimeRule(row)
+        }
         CategoryEvents.validateLinks(data, row)
         text(row, "id", 64); text(row, "kind", 80); text(row, "description", Int.MAX_VALUE)
         require(text(row, "status", 20) in setOf("active", "retired"))
@@ -422,7 +433,7 @@ internal object InnerStructure {
         relation 必须 object_ref 为本轮已知对象ID、label、understanding、feeling，方向始终是自己看待该对象，称谓与理解分开。
         preference 必须 aspect（自由类别，如语言方式/思维方式/爱好）、orientation:"like|dislike|neutral|uncertain"、horizon:"long_term|short_term|contextual"、ownership:"self|accommodation"、context、exceptions；后两项可为空，配合行为不是自身喜好。
         采用 personality/self_knowledge/value/stance 必须另给 development:{account:"明确发展/采用说明",before:候选before原样或null,after:候选record原样,anchors:[{ref:"候选依据ID",quote:"原文中确实存在的短引文",interpretation:"你如何理解其与变化的联系"}]}。
-        来源、前后态和版本由宿主核验，观点意义由主体解释。初始配置采用保留 initial_configuration 来源；发展依据不能把当前断言冒充过往经历。每次只改变指定记录，不覆盖全部人格。
+        来源、前后态和版本由宿主核验。提案可引用当轮实际收到的用户原话；后续采用仍须完整读取确切候选并引用原文。当轮状态结论不能冒充实际依据。每次只改变指定记录。
         候选、采用与保存不设业务条数上限。单次请求和模型窗口仍有限；大批内容分批提交、保留进度，不丢弃尾部。完整记录和候选用 companion_internal_state get 的 offset 按页或ID读取；未送入本轮的候选不能采用。
         长候选的 pending_fragments 是同一完整原文的连续片段，不是摘要；hash 绑定准确候选版本。宿主只登记实际请求返回后已提供的片段，完整提供前不能采用。可用 get section=inner_chunk id=候选ID offset=next_offset 按需继续，不能用编造片段补齐。pending_read 表示该版本已完整提供，仍由你决定是否采用或重新查阅。人格采用的大段 before/after 可改为 development:{account:说明,candidate_hash:候选完整hash,before_version:候选expected_version,anchors:[...]}，保存的始终是原候选全文，不是说明的摘要。
         恢复已有确定人格、立场、关系、偏好等，可用 origin:"established_import"，evidence:[]，不伪造历史原文。只在用户明确开启的48小时窗口内提交新候选；formed_at 可省略，提交时间不代表形成时间。人格等采用时仍给 development 的准确 before/after 和 account，anchors:[]。按时提交的候选在截止后仍可采用；改写须新候选标识，不继承旧版本已读事实。get section:inner_pending 查询候选。

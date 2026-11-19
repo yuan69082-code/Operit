@@ -24,7 +24,7 @@ class AssistantRoom(private val context: Context, val role: String) {
     fun read() = store.read(scope).put("owner", role)
     fun summaryAddress(value: String): JSONObject {
         require(value.isNotBlank() && value.length <= 80 && '\n' !in value && '\r' !in value)
-        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        check(com.ai.assistance.operit.data.preferences.AssistantScope.callerId() == null) { "摘要称呼由用户设置" }
         return store.update(scope) { it.put("summary_user_address", value.trim()).put("summary_address_at", System.currentTimeMillis()) }
     }
 

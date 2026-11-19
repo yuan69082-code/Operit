@@ -165,6 +165,10 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         }
 
         AppLogger.d(TAG, "【启动计时】应用启动开始")
+        applicationScope.launch {
+            try { com.ai.assistance.operit.util.ProcessExitDiagnostics.recordLastMainExit(this@OperitApplication) }
+            catch (failure: Exception) { AppLogger.e(TAG, "读取上次进程退出记录失败", failure) }
+        }
         AppLogger.d(TAG, "【启动计时】实例初始化完成 - ${System.currentTimeMillis() - startTime}ms")
 
         launchCleanOnExitCleanup()

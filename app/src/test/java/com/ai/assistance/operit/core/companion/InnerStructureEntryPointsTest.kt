@@ -185,9 +185,10 @@ class InnerStructureEntryPointsTest {
         val f = frame()
         val source = f.eventIds.first { it.startsWith("input:") }
         InnerStructureContext.submit(context, f, report(f, propose("now", content("new-self", "personality"), origin = "subject_development", evidence = source)))
-        val later = frame()
-        rejected { InnerStructureContext.submit(context, later, report(later,
-            adoption("now").put("development", development("now", "继续刚才的事", source)))) }
+        val later = nativeInnerRead(context, frame(), "inner_pending", "now")
+        InnerStructureContext.submit(context, later, report(later,
+            adoption("now").put("development", development("now", "继续刚才的事", source))))
+        assertNotNull(InnerStructure.record(states.read(role), "new-self"))
         val initialId = proposeRecord(content("new-value", "value"))
         val bad = frame()
         rejected { InnerStructureContext.submit(context, bad, report(bad,
@@ -195,7 +196,7 @@ class InnerStructureEntryPointsTest {
         val wrongBefore = frame()
         rejected { InnerStructureContext.submit(context, wrongBefore, report(wrongBefore,
             adoption(initialId).put("development", development(initialId).put("before", JSONObject())))) }
-        assertEquals(2, InnerStructure.records(states.read(role)).size)
+        assertEquals(3, InnerStructure.records(states.read(role)).size)
     }
 
     @Test fun relationshipEditorStoresAttributedSuggestionAndAdoptedViewHasSingleAuthority(): Unit = runBlocking {

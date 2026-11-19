@@ -349,14 +349,14 @@ internal class InternalStateArchive(private val file: File, private val scope: S
     /** Activity facts reuse the archive. They are not psychological state changes. */
     fun activityWrite(kind: String, id: String, parent: String, change: (JSONObject?) -> JSONObject): JSONObject {
         require(kind in setOf("activity", "activity_part", "activity_contact", "waking_note", "inner_read", "thought", "thought_meta",
-            "life_event", "life_activity", "life_run", "runtime_run", "runtime_failure", "dream_process", "dream_step", "message_inbox", "private_time_config", "private_time_plan", "private_time_sleep", "private_time_essence"))
+            "life_event", "life_activity", "life_run", "runtime_run", "runtime_failure", "episode_repair", "dream_process", "dream_step", "message_inbox", "private_time_config", "private_time_plan", "private_time_sleep", "private_time_essence"))
         val db = db()
         if (!writing) { db.beginTransaction(); writing = true }
         val old = categoryRow(kind, id)
         val before = old?.toString()
         val oldVersion = old?.getInt("version") ?: 0
         val row = change(old)
-        if (kind.startsWith("private_time_") || kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run", "runtime_run", "runtime_failure")) {
+        if (kind.startsWith("private_time_") || kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "life_run", "runtime_run", "runtime_failure", "episode_repair")) {
             // The archive's version lookup uses kind:id. Bind the host-owned kind here,
             // so technical receipts cannot lose their history identity at any entry point.
             require(!row.has("storage_kind") || row.getString("storage_kind") == kind)
@@ -442,7 +442,7 @@ internal class InternalStateArchive(private val file: File, private val scope: S
         val args = listOf(scope, kind) + listOfNotNull(actualParent) + listOf(limit.toString(), offset.toString())
         // Recent private generated material must not be permanently hidden behind the oldest
         // IDs. The existing scope/kind/parent/rowid index bounds this read before deserialization.
-        val orderedQueue = kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step")
+        val orderedQueue = kind in setOf("life_event", "message_inbox", "life_activity", "dream_process", "dream_step", "episode_repair")
         val order = if (privateRecent) "rowid DESC" else if (orderedQueue) "rowid" else "id"
         val index = if (privateRecent || (orderedQueue && actualParent != null)) " INDEXED BY category_recent" else ""
         return db().rawQuery("SELECT payload FROM category_current$index WHERE scope=? AND kind=?$filter ORDER BY $order LIMIT ? OFFSET ?",

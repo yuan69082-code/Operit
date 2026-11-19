@@ -483,10 +483,15 @@ class EnhancedReportIsolationTest {
             f.output = { n, _ -> if (n == 2) emit("<tool name=\"sleep\"><param name=\"duration_ms\">0</param></tool>")
                 else emit("已拿到工具结果。<operit_state_report>{") }
             val second = f.send()
-            assertTrue(second.second?.stackTraceToString() ?: "No failure; provider calls=${f.calls}",
-                second.second is InternalStateReportStream.ProtocolException)
+            assertNull(second.second)
+            assertTrue(second.first.contains("已拿到工具结果。"))
+            assertFalse(second.first.contains("operit_state_report"))
+            assertTrue(f.warnings.any { it.contains("ISR_TRUNCATED_REPORT") })
             assertEquals(3, f.calls); assertEquals(1, f.executions)
             assertNull(f.savedReport(f.frames.last()))
+            val partialActivity = ActivityNotes.page(f.app, f.role, "activity", null, 0).getJSONArray("items").getJSONObject(0)
+            val partialParts = ActivityNotes.page(f.app, f.role, "activity_part", partialActivity.getString("id"), 0).toString()
+            assertTrue(partialParts.contains("TRUNCATED_REPORT"))
             val actions = SubjectActions.read(f.app, f.role, f.chat, null, 0).getJSONArray("items")
             assertTrue((0 until actions.length()).any { actions.getJSONObject(it).optString("status") == "completed" })
             f.output = { _, frame -> emit("失败后的下一条仍可回复。" + Fixture.report(frame)) }

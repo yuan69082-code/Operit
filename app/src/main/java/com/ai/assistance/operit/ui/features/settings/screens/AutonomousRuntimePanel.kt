@@ -48,6 +48,10 @@ internal fun AutonomousRuntimePanel(role: String) {
     SpaceSectionTitle("自主运行", "总开关控制本机所有助手的后台自主活动；普通聊天仍可使用。空闲接续按当前助手设置。")
     RoomSwitch("允许后台自主运行", snapshot.optBoolean("enabled", true)) { value -> change { control.enable(value) } }
     Text(snapshot.optString("state", "读取中") + " " + snapshot.optString("reason"))
+    snapshot.optJSONObject("last_process_exit")?.takeIf { it.optLong("at") > 0 }?.let { exit ->
+        val time = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(exit.getLong("at")))
+        Text("上次退出 · $time · ${exit.getString("label")}", style = MaterialTheme.typography.bodySmall)
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(enabled = !busy, onClick = { change { control.pause() } }) { Text("暂停") }
         OutlinedButton(enabled = !busy, onClick = { change { control.pause(System.currentTimeMillis() + 3600000) } }) { Text("暂停1小时") }

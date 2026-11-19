@@ -167,7 +167,8 @@ class MessageCoordinationDelegate(
         groupParticipantNamesText: String? = null,
         chatModelConfigIdOverride: String? = null,
         chatModelIndexOverride: Int? = null,
-        memorySpaceIdOverride: String? = null
+        memorySpaceIdOverride: String? = null,
+        onBreakdown: ((com.ai.assistance.operit.core.chat.ContextUsageBreakdown) -> Unit)? = null
     ): Long {
         val currentChat = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == chatId }
         val currentRoleName =
@@ -190,7 +191,8 @@ class MessageCoordinationDelegate(
             chatModelConfigIdOverride = chatModelConfigIdOverride,
             chatModelIndexOverride = chatModelIndexOverride,
             memorySpaceIdOverride = memorySpaceIdOverride,
-            publishEstimate = false
+            publishEstimate = false,
+            onBreakdown = onBreakdown
         )
     }
 
@@ -282,7 +284,8 @@ class MessageCoordinationDelegate(
         groupParticipantNamesText: String? = null,
         chatModelConfigIdOverride: String? = null,
         chatModelIndexOverride: Int? = null,
-        memorySpaceIdOverride: String? = null
+        memorySpaceIdOverride: String? = null,
+        beforeSummary: com.ai.assistance.operit.core.chat.ContextUsageBreakdown? = null
     ): Long? {
         val targetChatId = chatId ?: chatHistoryDelegate.currentChatId.value ?: return null
         val service = resolveWindowEstimateService(targetChatId) ?: return null
@@ -297,6 +300,7 @@ class MessageCoordinationDelegate(
                 ?: currentMemorySpaceIdOverride
                 ?: effectiveRoleCardId?.let { resolveRoleCardMemoryProfileOverride(it) }
 
+        var breakdown: com.ai.assistance.operit.core.chat.ContextUsageBreakdown? = null
         val newWindowSize =
             recalculateStableWindowSize(
                 service = service,
@@ -307,7 +311,8 @@ class MessageCoordinationDelegate(
                 groupParticipantNamesText = groupParticipantNamesText,
                 chatModelConfigIdOverride = effectiveChatModelConfigIdOverride,
                 chatModelIndexOverride = effectiveChatModelIndexOverride,
-                memorySpaceIdOverride = effectiveMemorySpaceIdOverride
+                memorySpaceIdOverride = effectiveMemorySpaceIdOverride,
+                onBreakdown = { breakdown = it }
             )
         coroutineContext.ensureActive()
         val (inputTokens, outputTokens) = tokenStatsDelegate.getCumulativeTokenCounts(targetChatId)
@@ -324,6 +329,11 @@ class MessageCoordinationDelegate(
                 outputTokens,
                 newWindowSize
             )
+        }
+        breakdown?.let {
+            com.ai.assistance.operit.core.chat.ContextUsageDiagnostics.record(targetChatId, it, beforeSummary)
+            if (beforeSummary != null) AppLogger.i(TAG,
+                "Context summary usage before=${beforeSummary.windowTokens} after=${it.windowTokens} beforeParts=${beforeSummary.parts} afterParts=${it.parts}")
         }
         AppLogger.d(
             TAG,
@@ -1898,6 +1908,20 @@ class MessageCoordinationDelegate(
                 ?: return false
             val beforeTimestamp = slice.beforeTimestamp
             val afterTimestamp = slice.afterTimestamp
+            var beforeSummary: com.ai.assistance.operit.core.chat.ContextUsageBreakdown? = null
+            try {
+                resolveWindowEstimateService(currentChatId)?.let { estimateService ->
+                    recalculateStableWindowSize(estimateService, currentChatId, owner,
+                        promptFunctionType = currentPromptFunctionType,
+                        groupOrchestrationMode = isGroupOrchestrationTurn,
+                        groupParticipantNamesText = groupParticipantNamesText,
+                        chatModelConfigIdOverride = effectiveChatModelConfigIdOverride,
+                        chatModelIndexOverride = effectiveChatModelIndexOverride,
+                        memorySpaceIdOverride = effectiveMemorySpaceIdOverride,
+                        onBreakdown = { beforeSummary = it })
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { AppLogger.w(TAG, "压缩前占用统计失败", failure) }
             val summaryConfig = readSummaryConfig(resolveRoleCardId(currentChatId, roleCardIdOverride))
             val summaryMessage =
                 AIMessageManager.summarizeMemory(
@@ -1928,7 +1952,8 @@ class MessageCoordinationDelegate(
                     groupParticipantNamesText = groupParticipantNamesText,
                     chatModelConfigIdOverride = effectiveChatModelConfigIdOverride,
                     chatModelIndexOverride = effectiveChatModelIndexOverride,
-                    memorySpaceIdOverride = effectiveMemorySpaceIdOverride
+                    memorySpaceIdOverride = effectiveMemorySpaceIdOverride,
+                    beforeSummary = beforeSummary
                 )
                 summarySuccess = true
             } else {
