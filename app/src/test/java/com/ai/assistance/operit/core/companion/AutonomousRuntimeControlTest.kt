@@ -64,6 +64,9 @@ class AutonomousRuntimeControlTest {
     }
     @Test fun modelCanPauseIdleWithoutDisablingLearningOrManufacturingState() {
         store.update("autonomous-idle:a") { it.put("enabled", true).put("interval_minutes", 10).put("daily_limit", 8).put("next_at", 1) }
+        // Initial adoption creates the state file; subsequent reads expose its archive cursor.
+        // Establish that existing storage projection before checking the idle operation.
+        store.read("internal-state:a")
         val before = store.read("internal-state:a").toString()
         control.waitChoice("a", null, "暂时没有想继续的")
         assertNull(control.claimIdle("a", System.currentTimeMillis()))

@@ -83,9 +83,8 @@ object CompanionContext {
             if (metadata?.characterCardId == roleId && metadata.characterGroupId.isNullOrBlank()) {
                 if (internalEnabled) {
                     instructions.append(AutonomousRuntimeControl.instructions).append("\n")
-                    hostMaterials.add(JSONObject().put("source", "runtime_clock")
-                        .put("clock", SubjectInteractionClock(context).snapshot(roleId))
-                        .put("runtime", AutonomousRuntimeControl(context).status(roleId).getString("state")))
+                    // Detailed time facts are available through runtime_status. Repeating the
+                    // full clock here displaced existing episodes inside the shared quota.
                 }
                 if (recordSnapshot) {
                     // Only newly delivered, short event receipts enter one real model request.
