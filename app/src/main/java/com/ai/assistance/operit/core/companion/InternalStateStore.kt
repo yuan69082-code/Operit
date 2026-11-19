@@ -18,7 +18,7 @@ class InternalStateStore(private val context: Context) {
     private fun failureKey(role: String) = "isr-failure:$role"
 
     /** Stores only safe failure metadata. Neither report bodies nor personal memories enter logs. */
-    internal fun noteReportFailure(frame: InternalStateFrame, failure: Exception): InternalStateReportIssue {
+    internal fun noteReportFailure(frame: InternalStateFrame, failure: Exception, report: JSONObject? = null): InternalStateReportIssue {
         val issue = InternalStateReportDiagnostics.issue(failure, "report_commit")
         store.update(failureKey(frame.roleId)) { state ->
             state.put("status", "unresolved").put("code", issue.code).put("stage", issue.stage)
@@ -26,6 +26,11 @@ class InternalStateStore(private val context: Context) {
                 .put("hint", issue.hint)
                 .put("frame_id", frame.id).put("frame_revision", frame.revision)
                 .put("state_version", frame.stateVersion).put("at", System.currentTimeMillis())
+        }
+        if (issue.rule == "UNKNOWN_CATEGORY" && report != null && !recipientScope(frame.roleId, frame.chatId)) {
+            val index = issue.stage.substringAfter('[', "").substringBefore(']').toIntOrNull()
+            val draft = index?.let { report.optJSONArray("episodes")?.optJSONObject(it) }
+            if (draft?.optString("op") == "appraise") EpisodeRepair(context).save(frame, draft)
         }
         return issue
     }
@@ -438,6 +443,12 @@ class InternalStateStore(private val context: Context) {
             require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
+        val episodes = report.optJSONArray("episodes") ?: JSONArray()
+        val episodeIds = (0 until episodes.length()).mapNotNull { index ->
+            episodes.optJSONObject(index)?.takeIf { it.optString("op") == "appraise" }?.optString("id")
+        }
+        val repairs = if (episodeIds.isEmpty() || recipientScope(frame.roleId, frame.chatId)) emptyMap()
+            else EpisodeRepair(context).sources(frame.roleId, frame.chatId, episodeIds)
         val saved = update(frame.roleId, "state_report") { data ->
             requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
             store.archivedStateRow(key(frame.roleId), "semantic_reports", frame.id)?.let {
@@ -457,10 +468,13 @@ class InternalStateStore(private val context: Context) {
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
             restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, report.optJSONArray("inner") ?: JSONArray()))
             restoreEvidence(data, frame.roleId, CategoryEvents.evidence(if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray()))
-            receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis())
+            receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis(), repairs)
         }
         // A successful report resolves prior failure metadata without replaying old actions.
-        try { store.update(failureKey(frame.roleId)) { it.put("status", "resolved").put("resolved_at", System.currentTimeMillis()) } }
+        try {
+            EpisodeRepair(context).complete(frame.roleId, frame.chatId, episodeIds)
+            store.update(failureKey(frame.roleId)) { it.put("status", "resolved").put("resolved_at", System.currentTimeMillis()) }
+        }
         catch (failure: Exception) {
             AppLogger.e("InternalState", "报告已提交，但诊断状态未更新", failure)
         }
@@ -518,6 +532,10 @@ class InternalStateStore(private val context: Context) {
     private fun inspectCategoryLocal(role: String, chat: String, kind: String, id: String?, offset: Int): JSONObject {
         SubjectContracts.expect(offset >= 0, "offset", "PAGE_OFFSET", "分页起点须为非负整数。")
         if (kind == "contract") return SubjectContracts.query(id)
+        if (kind == "episode_repair") {
+            require(!recipientScope(role, chat)) { "待修正事件仅供本助手原私聊读取" }
+            return EpisodeRepair(context).page(role, chat, id, offset)
+        }
         if (kind in setOf("concerns", "concern_config")) {
             require(!recipientScope(role, chat)) { "便签仅在本助手私域读取" }
             val data = read(role)
@@ -715,7 +733,11 @@ class InternalStateStore(private val context: Context) {
             var payload = selected.payload
             // Only a short machine-readable failure notice from a prior turn can reappear.
             // It contains no rejected report text, no identity statements, and no retry command.
-            if (!groupInput) failureNotice(actor)?.let { payload.put("last_report_failure", it) }
+            if (!groupInput) {
+                failureNotice(actor)?.let { payload.put("last_report_failure", it) }
+                val repairs = EpisodeRepair(context).page(actor, chat, null, 0).getJSONArray("items")
+                if (repairs.length() > 0) payload.put("pending_episode_repair", repairs.getJSONObject(0).getString("id"))
+            }
             payload.put("material_selection_cursor", innerCursor)
             payload.put("foundation", InnerFoundations.material(data, selectionInput, innerCursor, now))
             payload.put("inner_structure", InnerStructure.material(data, selectionInput, innerCursor))

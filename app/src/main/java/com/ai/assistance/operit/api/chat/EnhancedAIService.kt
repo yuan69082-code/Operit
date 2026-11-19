@@ -452,6 +452,7 @@ class EnhancedAIService private constructor(private val context: Context) {
         var activityRound: Int = 0,
         var pendingStateReport: JSONObject? = null,
         var currentResponseHasStateReport: Boolean = false,
+        var stateReportParsingRejected: Boolean = false,
         var stateReportCommitted: Boolean = false
     )
 
@@ -886,7 +887,8 @@ class EnhancedAIService private constructor(private val context: Context) {
         chatModelIndexOverride: Int? = null,
         memorySpaceIdOverride: String? = null,
         stream: Boolean = true,
-        publishEstimate: Boolean = true
+        publishEstimate: Boolean = true,
+        onBreakdown: ((com.ai.assistance.operit.core.chat.ContextUsageBreakdown) -> Unit)? = null
     ): Long {
         val modelConfig =
             getModelConfigForFunction(
@@ -992,12 +994,14 @@ class EnhancedAIService private constructor(private val context: Context) {
                     previous.toolName == current.toolName
             }.let { CurrentRequestContext.project(it, finalProcessedInput) }
 
-        return estimatePreparedRequestWindow(
+        val window = estimatePreparedRequestWindow(
             serviceForFunction = serviceForFunction,
             preparedHistory = requestHistory,
             availableTools = availableTools,
             publishEstimate = publishEstimate
         )
+        onBreakdown?.invoke(com.ai.assistance.operit.core.chat.ContextUsageDiagnostics.measure(requestHistory, availableTools, window))
+        return window
     }
 
     /** Send a message to the AI service */
@@ -1364,7 +1368,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                         }
                         // Only a normally completed provider response can publish its final
                         // report draft. The revision collector must stop before finish().
-                        val reportTail = stateReportStream?.finish().orEmpty()
+                        val reportTail = finishStateReport(stateReportStream, execContext, onNonFatalError)
                         val tail = (notes?.append(reportTail) ?: reportTail) + notes?.finish().orEmpty()
                         revisionTracker.append(tail)
                         execContext.streamBuffer.append(tail)
@@ -1893,6 +1897,14 @@ class EnhancedAIService private constructor(private val context: Context) {
 
             // Get response content
             val content = context.streamBuffer.toString().trim()
+            if (context.stateReportParsingRejected) {
+                // Keep public text already delivered, but do not start any further tools
+                // from a response whose state envelope did not finish cleanly.
+                finalizeAssistantResponse(context, content, enableMemoryAutoUpdate, onNonFatalError, isSubTask,
+                    chatId, characterName, avatarUri, notifyReplyOverride, memorySpaceIdOverride,
+                    commitStateReport = false)
+                return
+            }
 
             // Only successfully collected streams reach this point. A state-only response can
             // legitimately have no public text and must still commit its state report.
@@ -2173,6 +2185,35 @@ class EnhancedAIService private constructor(private val context: Context) {
     }
 
     /** Finalize an assistant response without relying on status-tag control flow. */
+    private suspend fun finishStateReport(
+        stream: InternalStateReportStream?,
+        execution: MessageExecutionContext,
+        onNonFatalError: suspend (String) -> Unit
+    ): String = try {
+        stream?.finish().orEmpty()
+    } catch (failure: InternalStateReportStream.ProtocolException) {
+        execution.pendingStateReport = null
+        execution.currentResponseHasStateReport = false
+        execution.stateReportParsingRejected = true
+        val issue = com.ai.assistance.operit.core.companion.InternalStateReportIssue(
+            "stream", "operit_state_report", failure.code.name,
+            "回报未完整通过解析。保留现有状态，下一轮从实际状态重新判断。")
+        execution.internalStateFrame?.let { frame ->
+            try {
+                withContext(Dispatchers.IO) {
+                    InternalStateStore(context).noteReportFailure(frame, issue)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (storage: Exception) {
+                AppLogger.e(TAG, "ISR_DIAGNOSTIC_SAVE_FAILED type=${storage.javaClass.simpleName}")
+            }
+        }
+        AppLogger.w(TAG, "STATE_REPORT_PARSE_REJECTED code=${issue.code}; prior state and visible text retained")
+        val reason = InternalStateReportFailure.classify(issue)
+        onNonFatalError(context.getString(R.string.state_report_failure, context.getString(reason.messageRes), issue.code))
+        ""
+    }
+
     private suspend fun finalizeAssistantResponse(
         context: MessageExecutionContext,
         content: String,
@@ -2222,7 +2263,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     // contain complete private state or user-authored text.
                     val issue = try {
                         withContext(Dispatchers.IO) {
-                            InternalStateStore(this@EnhancedAIService.context).noteReportFailure(frame, failure)
+                            InternalStateStore(this@EnhancedAIService.context).noteReportFailure(frame, failure, report)
                         }
                     } catch (metadataError: Exception) {
                         AppLogger.e(TAG, "ISR_DIAGNOSTIC_SAVE_FAILED type=${metadataError.javaClass.simpleName}")
@@ -2668,7 +2709,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     } finally {
                         revisionJob?.cancelAndJoin()
                     }
-                    val reportTail = stateReportStream?.finish().orEmpty()
+                    val reportTail = finishStateReport(stateReportStream, context, onNonFatalError)
                     val tail = (notes?.append(reportTail) ?: reportTail) + notes?.finish().orEmpty()
                     revisionTracker.append(tail)
                     context.streamBuffer.append(tail)

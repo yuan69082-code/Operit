@@ -34,7 +34,8 @@ object InternalStateReports {
     private val experienceFields = setOf("value", "reason", "evidence") + optionalFields
     private val editableDefinitionFields = setOf("name", "description", "kind", "time_rules")
 
-    fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long): JSONObject {
+    fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long,
+              repairSources: Map<String, JSONObject> = emptyMap()): JSONObject {
         InternalStateReportDiagnostics.validate(report)
         require(frame.id.isNotBlank() && frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         require(frame.revision >= 0 && frame.at >= 0 && now >= frame.at) { "状态报告时间早于本轮快照" }
@@ -233,7 +234,7 @@ object InternalStateReports {
             InnerFoundations.syncAdoptedSurvival(next, frame, now)
         } else false
         val episodesChanged = InternalStateReportDiagnostics.stage("episodes") {
-            CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now)
+            CategoryEvents.apply(next, frame, if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray(), now, repairSources)
         }
         val lifeChanged = InternalStateReportDiagnostics.stage("life") {
             LifeUnderstandings.apply(next, frame, report.optJSONArray("life") ?: JSONArray(), now)

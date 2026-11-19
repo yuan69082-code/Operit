@@ -136,6 +136,19 @@ fun ChatScreenHeader(
     val runningCall = VoiceCallRuntime.controller
     val callChatId by actualViewModel.currentChatId.collectAsState()
     val callBusy by actualViewModel.currentChatIsLoading.collectAsState()
+    val histories by actualViewModel.chatHistories.collectAsState()
+    val privateRole = histories.firstOrNull { it.id == callChatId && it.characterGroupId.isNullOrBlank() }?.characterCardId
+    var showSummaryAddress by remember(callChatId) { mutableStateOf(false) }
+    if (showSummaryAddress && privateRole != null) {
+        AlertDialog(
+            onDismissRequest = { showSummaryAddress = false },
+            title = { Text("对话回顾称呼") },
+            text = { Column {
+                com.ai.assistance.operit.ui.features.settings.screens.SummaryAddressPanel(privateRole)
+            } },
+            confirmButton = { TextButton(onClick = { showSummaryAddress = false }) { Text("关闭") } }
+        )
+    }
     val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) voiceCallChatId = actualViewModel.currentChatId.value
         else actualViewModel.showToast(context.getString(R.string.microphone_permission_denied))
@@ -301,6 +314,8 @@ fun ChatScreenHeader(
 
             // 使用一个状态来跟踪是否显示详细信息
             val (showDetailedStats, setShowDetailedStats) = remember { mutableStateOf(false) }
+            var showBreakdown by remember(callChatId) { mutableStateOf(false) }
+            if (showBreakdown) ContextUsageDialog(callChatId, maxWindowSize) { showBreakdown = false }
 
             Box {
                 // 主要显示（圆环进度）
@@ -343,6 +358,14 @@ fun ChatScreenHeader(
                                 Modifier.width(IntrinsicSize.Min)
                                         .background(MaterialTheme.colorScheme.surface)
                 ) {
+                    DropdownMenuItem(text = { Text("窗口占用分项") }, onClick = {
+                        setShowDetailedStats(false)
+                        showBreakdown = true
+                    })
+                    if (privateRole != null) DropdownMenuItem(text = { Text("对话回顾称呼") }, onClick = {
+                        setShowDetailedStats(false)
+                        showSummaryAddress = true
+                    })
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.context_window, currentWindowSize)) },
                         onClick = {},

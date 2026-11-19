@@ -165,6 +165,35 @@ class CategoryEventsEntryPointsTest {
             .put("attention", "foreground").put("status", "unresolved").put("understanding", "这是独立事情$id")
             .put("basis", "input").put("reason", "本次主观解释").put("evidence", JSONArray().put(source))
     private fun episode(id: String) = states.inspectCategory(role, chat, "episode", id, 0).getJSONObject("item")
+    @Test fun unknownCategoryCanBeRepairedThroughPersonalCategoryAndOriginalSource(): Unit = runBlocking {
+        val first = frame()
+        val ref = first.eventIds.first { it.startsWith("input:") }
+        val initial = report(first, listOf(appraisal(first, "finding", category = "missing-category", source = ref)))
+        try {
+            submit(first, initial)
+            fail("unknown category must not be committed")
+        } catch (failure: InternalStateReportIssue) {
+            assertEquals("ISR_UNKNOWN_CATEGORY", states.noteReportFailure(first, failure, initial).code)
+        }
+        val pending = states.inspectCategory(role, chat, "episode_repair", "finding", 0).getJSONObject("item")
+        assertEquals("pending", pending.getString("parent"))
+        assertTrue(states.inspectCategory(role, second, "episode_repair", "finding", 0).isNull("item"))
+        assertTrue(states.inspectCategory(role, chat, "episode", "finding", 0).isNull("item"))
+        adopt(content("seeking", "drive").put("direction", "寻找")
+            .put("time_rule", JSONObject().put("curve", "linear").put("target", 0.2).put("seconds", 60)))
+        val later = frame()
+        val repaired = pending.getJSONObject("draft").put("category_ref", "seeking").put("basis", "recollection")
+        submit(later, report(later, listOf(repaired)))
+        val saved = episode("finding")
+        assertEquals("seeking", saved.getString("parent"))
+        assertTrue(saved.getJSONObject("content").getJSONObject("original_sources").has(ref))
+        val projected = CategoryEvents.timeView(states.read(role), saved, saved.getLong("at") + 30_000)
+        assertEquals(0.4, projected.getJSONObject("time_projection").getDouble("intensity"), 0.001)
+        assertEquals(0.6, saved.getJSONObject("content").getDouble("intensity"), 0.001)
+        assertEquals("resolved", states.inspectCategory(role, chat, "episode_repair", "finding", 0)
+            .getJSONObject("item").getString("parent"))
+    }
+
     private suspend fun rejects(block: suspend () -> Unit) {
         try { block(); fail("expected rejection") } catch (_: IllegalArgumentException) { } catch (_: IllegalStateException) { } catch (_: org.json.JSONException) { }
     }

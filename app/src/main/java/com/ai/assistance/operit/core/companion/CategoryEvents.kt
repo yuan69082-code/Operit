@@ -10,7 +10,7 @@ import kotlin.math.exp
  * lives in the subject snapshot. No time function or action dispatcher writes these values.
  */
 internal object CategoryEvents {
-    private val families = setOf("drive", "need", "desire", "emotion", "sentiment", "feeling")
+    internal val families = setOf("drive", "need", "desire", "emotion", "sentiment", "feeling")
     private fun access(data: JSONObject) = requireNotNull((data as? InternalStateDocument)?.history) { "事件读取必须经过主体存储" }
     fun row(data: JSONObject, kind: String, id: String): JSONObject? {
         val journal = data.optJSONObject("category_commit")?.getJSONArray("rows")
@@ -30,6 +30,25 @@ internal object CategoryEvents {
         return JSONObject().put("items", JSONArray(view))
             .put("next_offset", if (rows.size > 8) offset + 8 else JSONObject.NULL)
     }
+    internal fun validateTimeRule(content: JSONObject) {
+        if (!content.has("time_rule")) return // Records adopted before this rule retain their behavior.
+        val rule = content.optJSONObject("time_rule")
+            ?: throw InternalStateReportIssue("input", "record.time_rule", "EXPECTED_OBJECT")
+        val curve = SubjectContracts.choice(rule, "curve", setOf("inherit", "hold", "linear", "exponential"))
+        fields(rule, if (curve in setOf("inherit", "hold")) setOf("curve") else setOf("curve", "target", "seconds"))
+        if (curve in setOf("linear", "exponential")) {
+            SubjectContracts.expect(content.getString("family") != "sentiment" &&
+                content.optString("semantic_rule") !in setOf("survival", "mortality"),
+                "record.time_rule.curve", "STABLE_CATEGORY", "持续情感、求生欲和终结认识的数值不按自动曲线变化。")
+            val target = rule.opt("target") as? Number
+            val seconds = rule.opt("seconds") as? Number
+            SubjectContracts.expect(target != null && target.toDouble().isFinite() && target.toDouble() >= 0,
+                "record.time_rule.target", "NONNEGATIVE_INTENSITY", "目标须为非负有限数。")
+            SubjectContracts.expect(seconds != null && seconds.toDouble().isFinite() && seconds.toDouble() > 0,
+                "record.time_rule.seconds", "POSITIVE_SECONDS", "变化时长须为正有限秒数。")
+        }
+    }
+
     internal fun timeView(data: JSONObject, source: JSONObject, now: Long): JSONObject {
         val content = source.optJSONObject("content") ?: return source
         val type = InnerFoundations.find(content.optString("category_ref"))
@@ -41,17 +60,28 @@ internal object CategoryEvents {
         val elapsed = ((now - source.optLong("at")).coerceAtLeast(0)).toDouble() / 1000.0
         val original = content.optDouble("intensity")
         if (!original.isFinite()) return source
-        val adopted = InnerTemporalEffects.projection(data, "episode:" + source.getString("id"),
-            source.getInt("version"), now) { anchor, age ->
-            if (type?.family == "emotion") anchor * exp(-age / seconds) else anchor
+        val rule = source.optJSONObject("category_time_rule")
+        val curve = rule?.getString("curve")
+        val inheritsEmotion = source.optString("category_family", type?.family.orEmpty()) == "emotion" &&
+            (curve == "inherit" || rule == null && type != null)
+        fun natural(anchor: Double, age: Double): Double = when {
+            curve == "linear" -> anchor + (requireNotNull(rule).getDouble("target") - anchor) *
+                (age / rule.getDouble("seconds")).coerceIn(0.0, 1.0)
+            curve == "exponential" -> requireNotNull(rule).getDouble("target").let { target ->
+                target + (anchor - target) * exp(-age / rule.getDouble("seconds"))
+            }
+            inheritsEmotion -> anchor * exp(-age / seconds)
+            else -> anchor
         }
+        val adopted = InnerTemporalEffects.projection(data, "episode:" + source.getString("id"),
+            source.getInt("version"), now, ::natural)
         if (adopted != null) return JSONObject(source.toString()).put("time_projection", adopted)
-        if (type?.family != "emotion") return source
-        val value = original * exp(-elapsed / seconds)
+        if (!inheritsEmotion && rule == null) return source
+        val value = natural(original, elapsed)
         return JSONObject(source.toString()).put("time_projection", JSONObject()
             .put("intensity", value).put("at", now)
-            .put("basis", "engine_emotion_natural_v1:baseline_without_relationship_closeness")
-            .put("duration_parameter_seconds", seconds)
+            .put("basis", if (inheritsEmotion) "engine_emotion_natural_v1:baseline_without_relationship_closeness" else "subject_category_time_rule")
+            .put("duration_parameter_seconds", if (inheritsEmotion) seconds else rule?.opt("seconds") ?: JSONObject.NULL)
             .put("not_a_new_episode", true).put("not_resolved_by_time", true))
     }
 
@@ -64,7 +94,8 @@ internal object CategoryEvents {
         // feeling and must not require the model to first invent a candidate about itself.
         val content = InnerStructure.record(data, id)?.getJSONObject("content")
             ?: InnerFoundations.definition(id)
-            ?: throw InternalStateReportIssue("input", "category_ref", "UNKNOWN_CATEGORY", "心理类别不存在；先查询foundation或inner目录。")
+            ?: throw InternalStateReportIssue("input", "category_ref", "UNKNOWN_CATEGORY",
+                "分类ID不存在。查 episode_repair 取回原事件。查 foundation 和 inner_family，选真实已有分类，或新增现有类别下的个人分类，采用后补交原事件。")
         SubjectContracts.expect(content.getString("family") in families && content.getString("status") == "active",
             "category_ref", "INACTIVE_PSYCHOLOGICAL_CATEGORY", "须引用已启用的驱力、需要、欲望、情绪、情感或感受类别；先查询foundation或inner目录。")
         return content
@@ -78,7 +109,8 @@ internal object CategoryEvents {
         val rows = journal.getJSONArray("rows")
         rows.put(row)
     }
-    fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long): Boolean {
+    fun apply(data: JSONObject, frame: InternalStateFrame, actions: JSONArray, now: Long,
+              repairSources: Map<String, JSONObject> = emptyMap()): Boolean {
         val touched = mutableSetOf<String>()
         for (i in 0 until actions.length()) {
             try {
@@ -91,6 +123,8 @@ internal object CategoryEvents {
             val expected = SubjectContracts.integer(a, "expected_version")
             SubjectContracts.expect(expected == (old?.getInt("version") ?: 0), "expected_version", "VERSION_CHANGED", "先读取事件或重点的当前版本；新记录用0。")
             val content = JSONObject(a.toString()).apply { remove("op"); remove("expected_version") }
+            var appliedRule: JSONObject? = null
+            var appliedFamily: String? = null
             val parent: String
             if (op == "appraise") {
                 fields(a, setOf("op", "id", "expected_version", "category_ref", "objects", "goals", "intensity", "importance",
@@ -98,6 +132,8 @@ internal object CategoryEvents {
                     "phase", "supporting", "opposing"))
                 parent = text(a, "category_ref", 64)
                 val category = category(data, parent)
+                appliedRule = category.optJSONObject("time_rule")
+                appliedFamily = category.getString("family")
                 if (a.has("phase")) {
                     SubjectContracts.expect(category.getString("family") == "desire", "phase", "DESIRE_PHASE_ONLY",
                         "phase仅用于desire愿望事件；其他类别用understanding说明变化，不填写phase。")
@@ -137,7 +173,10 @@ internal object CategoryEvents {
                 refs.forEachIndexed { index, ref ->
                     SubjectContracts.expect(!ref.startsWith("config:") && !ref.startsWith("relation:"),
                         "evidence[$index]", "EPISODE_EXPERIENCE_SOURCE", "配置不是现实经历；引用实际消息、操作结果或已读取材料的来源ID。")
-                    val source = InnerStructure.source(data, frame, ref)
+                    val original = repairSources[id]?.optString(ref)?.takeIf { it.isNotEmpty() }
+                    val evidenceFrame = if (original == null || ref in frame.materialSources) frame
+                        else frame.copy(materialSources = mapOf(ref to original))
+                    val source = InnerStructure.source(data, evidenceFrame, ref)
                     SubjectContracts.expect(source.getString("source") !in setOf("state_report", "time"),
                         "evidence[$index]", "EPISODE_EXPERIENCE_SOURCE", "状态报告或时间投影不是新的现实经历；引用原事实，用basis说明回忆或重新理解。")
                     bindings.put(ref, source)
@@ -169,7 +208,11 @@ internal object CategoryEvents {
             append(data, frame, JSONObject().put("storage_kind", kind).put("id", id).put("parent", parent)
                 .put("version", Math.addExact(old?.getInt("version") ?: 0, 1)).put("content", content)
                 .put("owner", frame.roleId).put("frame_id", frame.id).put("at", now).put("source_chat", frame.chatId)
-                .put("previous_version", old?.getInt("version") ?: 0).put("source", "subject_report_adoption"))
+                .put("previous_version", old?.getInt("version") ?: 0).put("source", "subject_report_adoption")
+                .apply {
+                    appliedFamily?.let { put("category_family", it) }
+                    appliedRule?.let { put("category_time_rule", it) }
+                })
             } catch (failure: Exception) {
                 if (failure is InternalStateReportRejected) throw failure
                 throw InternalStateReportDiagnostics.issue(failure, "episodes[$i]")
@@ -235,6 +278,8 @@ internal object CategoryEvents {
     val instructions = """
         [类别内部事件 v1]
         类别使用已采用 inner 记录的 ID，或宿主已安装的 foundation:family:key 目录 ID。不同事情用独立稳定事件 ID；不能按同名对象/关键词合并，也不必每条消息建事件。
+        分类ID不存在时，用 companion_internal_state get section=episode_repair 按事件ID取回待修正记录，也可分页。查 foundation 和 inner_family，优先使用含义合适的真实ID。确需新增时，用 inner propose 在 drive|need|desire|emotion|sentiment|feeling 现有类别下新增个人分类，填稳定ID、名称(kind)、含义、适用情境及 time_rule，按该类别的原字段规格提交。完整读取后跨轮 adopt，采用成功后用原事件ID和原依据补交。已保存版本才算完成，待修正记录不算已采用状态。
+        新分类 time_rule 用 {curve:"inherit"}（情绪自然回落，其余按实际评价变化）、{curve:"hold"}（保持），或 {curve:"linear|exponential",target:非负强度,seconds:正秒数}。规则投影该类有数值的事件；持续情感、求生欲和终结认识保持原规则。实际加强或拉扯沿用 unions，可后来定，建立分类不会自动产生影响。
         同一报告可选 episodes:[...]；没有业务条数上限，按本次模型窗口分批提交，宿主轮末校验采用，无需额外模型调用。
         companion_internal_state action:get section:source id:事实ID 可按ID取得原事件，含已归档来源。section:episode|focus 用 id 精确读取；experience_link 用 id:内在记录ID 查累计经历关联；category_versions 用 id:"episode:事件ID" 或 "focus:类别ID" 查变化过程，offset 分页。
         {op:"appraise",id:"稳定事件ID",expected_version:0或当前版本,category_ref:"类别ID",objects:["对象"],goals:["目标"],intensity:非负强度,importance:"重要性",long_term_impact:"长期意义",attention:"foreground|background|aside",status:"unresolved|processing|resolved",understanding:"当前理解",basis:"input|result|recollection|reinterpretation",evidence:["已读事实ID"],reason:"变化说明",related:[{id:"已有事件ID",relation:"same_matter|split_from|merged_from|corrects"}]}。

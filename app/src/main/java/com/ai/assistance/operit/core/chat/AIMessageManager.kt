@@ -569,7 +569,8 @@ object AIMessageManager {
         chatModelConfigIdOverride: String? = null,
         chatModelIndexOverride: Int? = null,
         memorySpaceIdOverride: String? = null,
-        publishEstimate: Boolean = true
+        publishEstimate: Boolean = true,
+        onBreakdown: ((ContextUsageBreakdown) -> Unit)? = null
     ): Long {
         val memory =
             getMemoryFromMessages(
@@ -599,7 +600,8 @@ object AIMessageManager {
                 chatModelConfigIdOverride = chatModelConfigIdOverride,
                 chatModelIndexOverride = chatModelIndexOverride,
                 memorySpaceIdOverride = memorySpaceIdOverride,
-                publishEstimate = publishEstimate
+                publishEstimate = publishEstimate,
+                onBreakdown = onBreakdown
             )
         return windowSize
     }
