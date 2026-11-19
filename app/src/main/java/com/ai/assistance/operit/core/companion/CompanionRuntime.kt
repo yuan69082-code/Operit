@@ -26,7 +26,7 @@ object CompanionRuntime {
     private val generation = java.util.concurrent.atomic.AtomicLong()
     @Volatile private var decision: Job? = null
     @Volatile private var cancellationBarrier: Job? = null
-    private data class OwnedTurn(val core: ChatServiceCore, val chatId: String, val epoch: Long)
+    private data class OwnedTurn(val core: ChatServiceCore, val chatId: String, val epoch: Long, val role: String, val wakeId: String)
     private val ownershipLock = Any()
     private val owned = AtomicReference<OwnedTurn?>()
     private val toolBudget = CompanionToolBudget()
@@ -97,6 +97,9 @@ object CompanionRuntime {
     }
 
     fun isWake(chatId: String) = owned.get()?.chatId == chatId
+    internal fun wakeId(chatId: String, role: String?) =
+        owned.get()?.takeIf { it.chatId == chatId && it.role == role }?.wakeId
+
     fun hasActiveWork(): Boolean = decision?.isActive == true || owned.get() != null
 
     fun publishEvent(context: Context, source: String, description: String) {
@@ -613,17 +616,18 @@ object CompanionRuntime {
             taskEvent -> "私人事项"
             else -> "主动唤醒"
         }
+        val wakeId = java.util.UUID.randomUUID().toString()
         AutonomousJournal(context).execute(role, chatId, resumeActivity ?: ActivityNotes.scheduledId(role, "wake:$triggerId"),
             source, retryAllowed = resumeActivity == null) {
             evaluateOnce(context, chatId, event, epoch, taskEvent, phoneRole, softwareRole, softwareRevision,
-                explorationWork, studyEvent, triggerId, lifeAdmission, resumeActivity)
+                explorationWork, studyEvent, triggerId, wakeId, lifeAdmission, resumeActivity)
         }
     }
 
     private suspend fun evaluateOnce(context: Context, chatId: String, event: String, epoch: Long, taskEvent: Boolean, phoneRole: String?,
                                  softwareRole: String?, softwareRevision: Long?,
                                  explorationWork: ExplorationStore.Work?, studyEvent: Boolean,
-                                 triggerId: String,
+                                 triggerId: String, wakeId: String,
                                  lifeAdmission: Boolean = false, resumeActivity: String? = null) = coroutineScope {
         val store = CompanionStore(context)
         val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
@@ -692,11 +696,8 @@ object CompanionRuntime {
         }
         val ledgerText = if (!contactWake) "" else buildString {
             val now = System.currentTimeMillis()
-            val userAt = ledger.optLong("last_user_at")
-            append("她上一次真正发消息：")
-            append(if (userAt > 0) "${java.time.Instant.ofEpochMilli(userAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().withNano(0)}（${(now - userAt) / 60000}分钟前）" else "没有记录")
-            append("\n那之后我主动找了她几次她都没回：").append(ledger.optInt("unanswered")).append("次")
-            append("\n她上次发消息之后，专门做主动联系判断却没出声：").append(ledger.optInt("quiet_streak")).append("次")
+            append("从她上次在本窗口发消息起，我主动找了她几次她都没回：").append(ledger.optInt("unanswered")).append("次")
+            append("\n本窗口专门做主动联系判断却没出声：").append(ledger.optInt("quiet_streak")).append("次")
             ledger.optLong("last_contact_at").takeIf { it > 0 }?.let {
                 append("\n我上一次主动开口：${(now - it) / 60000}分钟前，说的是：").append(ledger.optString("last_contact_text").take(200))
             }
@@ -790,10 +791,10 @@ object CompanionRuntime {
 
         val instruction = """
             [软件主动唤醒，不是用户新消息]
-            当前时间：${java.time.ZonedDateTime.now()}。
             此次计划与事件：$event$contactContext$selfContinuity
-            最近一条消息时间：${latest?.timestamp}；发送者：${latest?.sender}。完整可用聊天历史已随本轮提供。$sprout$thoughtPrompt
-            你拥有正常聊天中已授权的工具，可以查时间、当前应用、屏幕或其他内容，但必须实际调用工具后才知道结果。
+            [后台唤醒时钟]是本轮已提供的时间事实，完整时钟仍可用companion_life runtime_status查询。间隔不代表心情或关系变化。
+            可用聊天历史已随本轮提供。$sprout$thoughtPrompt
+            你拥有正常聊天中已授权的工具，可以查询当前应用、屏幕或其他内容，以实际工具结果为准。
             $focusInstruction
             未授权的操作仍需按正常权限执行。通话可使用正常的 request_voice_call 工具，拒接或无人应答后可自行决定是否再次拨打、发文字或不回复，已有来电或通话时须等其结束。
             本轮最多12次工具调用、${if (phoneRole != null || softwareRole != null) 3 else 5}分钟。$scheduleInstruction
@@ -839,7 +840,7 @@ object CompanionRuntime {
             recordedExperience = recordedExperience || recording.isSuccess
         }
         val control = AutonomousRuntimeControl(context)
-        val turn = OwnedTurn(core, chatId, epoch)
+        val turn = OwnedTurn(core, chatId, epoch, roleId, wakeId)
         if (explorationWork != null) check(ExplorationStore(context).valid(explorationWork) && epoch == generation.get()) { "自主探索已撤销" }
         val started = async(start = CoroutineStart.UNDISPATCHED) { core.activeStreamingChatIds.first { chatId in it } }
         var activity: ActivityNotes.Ref? = null
