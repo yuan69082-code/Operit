@@ -100,9 +100,9 @@ class AutonomousJournal(private val context: Context) {
         error("自主重试次数越界")
     }
 
-    internal fun recover(role: String, activity: String) {
+    internal fun recover(role: String, activity: String? = null) {
         val rows = store.activityPage(role, "runtime_run", "private", 0)
-        rows.filter { it.optString("activity") == activity && it.optString("status") in setOf("preparing", "running", "retry_wait") }.forEach { row ->
+        rows.filter { (activity == null || it.optString("activity") == activity) && it.optString("status") in setOf("preparing", "running", "retry_wait") }.forEach { row ->
             update(Run(role, row.getString("source_chat"), row.getString("id"), row.optBoolean("tools_touched")),
                 "interrupted", "应用上次退出；原操作结果待核对，不自动重放。其他活动可继续")
         }

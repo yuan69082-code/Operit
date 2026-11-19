@@ -94,4 +94,25 @@ class AutonomousJournalTest {
         assertTrue(SubjectLife.failure(context, role)!!.contains("测试错误"))
         assertEquals("exact reason", CompanionStore(context).activityRead(role, "runtime_failure", "latest")!!.getString("error"))
     }
+    @Test fun startupAlsoClosesAnAttemptThatNeverReachedTheExecutionClaim() {
+        store.activityWrite(role, "runtime_run", "preparing-run", "private") {
+            JSONObject().put("id", "preparing-run").put("parent", "private").put("source_chat", "chat")
+                .put("activity", "not-started").put("status", "preparing")
+        }
+        AutonomousJournal(context).recover(role)
+        assertEquals("interrupted", AutonomousJournal(context).page(role).getJSONArray("items").getJSONObject(0).getString("status"))
+    }
+    @Test fun timeoutReleasesTheRunAndDoesNotRepeatAnUncertainRequest() = runBlocking {
+        var calls = 0
+        try {
+            AutonomousJournal(context).execute(role, "chat", "timeout", "主动唤醒", pause = { }) {
+                calls++; withTimeout(10) { delay(1000) }
+            }
+            fail()
+        } catch (_: TimeoutCancellationException) { }
+        assertEquals(1, calls)
+        assertTrue(AutonomousRuntimeControl(context).allowed())
+        assertEquals("skipped", AutonomousJournal(context).page(role).getJSONArray("items").getJSONObject(0).getString("status"))
+        AutonomousJournal(context).execute(role, "chat", "after-timeout", "生活安排") { }
+    }
 }

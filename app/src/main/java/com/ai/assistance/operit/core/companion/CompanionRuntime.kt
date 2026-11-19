@@ -142,9 +142,14 @@ object CompanionRuntime {
             com.ai.assistance.operit.core.tasks.TaskEvents.recoverPrivate(app)
             CompanionPlayStore(app).recoverWake()
             ExplorationStore(app).recover()
-            CharacterCardManager.getInstance(app).getAllCharacterCards().filter { InternalStateStore(app).enabled(it.id) }
+            CharacterCardManager.getInstance(app).getAllCharacterCards()
                 .forEach { card ->
-                    try { SubjectLife(app).recover(card.id) }
+                    try {
+                        // A process can exit between saving the attempt and claiming execution.
+                        // Close those preparation receipts too, including non-continuous roles.
+                        AutonomousJournal(app).recover(card.id)
+                        if (InternalStateStore(app).enabled(card.id)) SubjectLife(app).recover(card.id)
+                    }
                     catch (failure: Exception) { SubjectLife.recordFailure(app, card.id, "恢复记录读取失败", failure) }
                 }
             dispatch@ while (isActive) {
