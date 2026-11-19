@@ -36,7 +36,7 @@ internal object SubjectConcerns {
     fun prepare(old: JSONObject?, action: JSONObject, frame: InternalStateFrame): JSONObject {
         for (key in progressFields) {
             SubjectContracts.expect(!action.has(key), key, "ATTENTION_FIELD_LOCATION",
-                "请将$key写入attention.$key。只更新进展或等待时，提交kind/id/expected_version/evidence和attention内变化，省略原文及目的字段。")
+                "请将${key}写入attention.${key}。只更新进展或等待时，提交kind/id/expected_version/evidence和attention内变化，省略原文及目的字段。")
         }
         val next = JSONObject(action.toString())
         val prior = old?.getJSONObject("content")
