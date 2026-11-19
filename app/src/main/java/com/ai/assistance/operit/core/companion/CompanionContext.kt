@@ -12,6 +12,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 object CompanionContext {
+    private const val STATE_START = "\n<operit_state>\n"
+
     fun permissions(context: Context): JSONObject = JSONObject()
         .put("microphone_permission", context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
         .put("camera_permission", context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
@@ -22,7 +24,8 @@ object CompanionContext {
         .put("heart_rate_source", "not_connected")
 
     suspend fun compose(context: Context, chatId: String, roleId: String?, capabilities: JSONObject,
-                        recordSnapshot: Boolean, currentInput: String = "", roleMaterial: String = ""): RuntimeContextSections = withContext(Dispatchers.IO) {
+                        recordSnapshot: Boolean, currentInput: String = "", roleMaterial: String = "",
+                        wakeId: String? = CompanionRuntime.wakeId(chatId, roleId)): RuntimeContextSections = withContext(Dispatchers.IO) {
         val store = CompanionStore(context)
         val scope = store.scope(chatId, roleId)
         if (recordSnapshot) store.migrateMemory(chatId, scope)
@@ -48,7 +51,8 @@ object CompanionContext {
         // Changing snapshots belong at the request tail; host instructions retain SYSTEM priority.
         // Compose each source once so observing the state does not acknowledge events twice.
         val instructions = StringBuilder("\n[软件状态解读规则，仅作为内部上下文，不复述或朗读字段名]\n")
-        val state = StringBuilder("\n<operit_state>\n")
+        val state = StringBuilder(STATE_START)
+        var wakeClockRole: String? = null
         val hostMaterials = mutableListOf<JSONObject>()
         if (roleMaterial.isNotBlank()) hostMaterials.add(JSONObject().put("source", "user_configured_worldbook").put("text", roleMaterial))
         val retrievedMaterials = mutableListOf<JSONObject>()
@@ -81,10 +85,9 @@ object CompanionContext {
             val metadata = history.getChatMetadata(chatId)
             // No private cross-window material enters a group or another assistant's request.
             if (metadata?.characterCardId == roleId && metadata.characterGroupId.isNullOrBlank()) {
+                if (wakeId != null) wakeClockRole = roleId
                 if (internalEnabled) {
                     instructions.append(AutonomousRuntimeControl.instructions).append("\n")
-                    // Detailed time facts are available through runtime_status. Repeating the
-                    // full clock here displaced existing episodes inside the shared quota.
                 }
                 if (recordSnapshot) {
                     // Only newly delivered, short event receipts enter one real model request.
@@ -98,7 +101,7 @@ object CompanionContext {
                             .append(newNotices.toString().take(700)).append("\n")
                     }
                 }
-                if (internalEnabled && !CompanionRuntime.isWake(chatId)) {
+                if (internalEnabled && wakeId == null) {
                     // Keep title discovery, but do not append it to the user's message outside
                     // the shared quota. A title is not evidence of having read the original.
                     relatedItems(context, chatId, roleId, currentInput).forEach { item ->
@@ -192,7 +195,7 @@ object CompanionContext {
         }
         // Internal state owns todo/thought selection when enabled. Do not reinsert the newest
         // fixed-count reminders after selection, and keep this request's live catalogue at the tail.
-        val wake = CompanionRuntime.isWake(chatId)
+        val wake = wakeId != null
         if (!wake && ActivityNotes.current(chatId)?.role == roleId) instructions.append("\n").append(ActivityNotes.instructions)
         // History previews can resume on Main after rollback. State projection reads storage
         // and ranks the complete event history; doing it there freezes editing and scrolling.
@@ -208,8 +211,13 @@ object CompanionContext {
             // Exactly one serialized material block: do not append unbudgeted copies afterwards.
             instructions.append(internalSections.instructions)
             state.setLength(0)
-            state.append("\n<operit_state>\n").append(internalSections.state)
+            state.append(STATE_START).append(internalSections.state)
             internalStateFrame = internalSections.internalStateFrame
+        }
+        // Three short time facts belong at the front of the live attachment. Keep
+        // them outside selection so they cannot displace episodes or activity receipts.
+        if (wakeId != null) wakeClockRole?.let { actor ->
+            state.insert(STATE_START.length, SubjectInteractionClock(context).wakeSummary(actor, wakeId, recordSnapshot))
         }
         state.append("\n</operit_state>\n")
         RuntimeContextSections(instructions.toString(), state.toString(), internalStateFrame)
