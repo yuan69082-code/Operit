@@ -10,7 +10,8 @@ import java.util.concurrent.ConcurrentHashMap
 /** Durable technical receipts, separate from psychological state and private model notes. */
 class AutonomousJournal(private val context: Context) {
     private val store = CompanionStore(context)
-    internal data class Run(val role: String, val chat: String, val id: String, @Volatile var toolsTouched: Boolean = false)
+    internal data class Run(val role: String, val chat: String, val id: String, @Volatile var toolsTouched: Boolean = false,
+        @Volatile var responseCompleted: Boolean = false)
 
     fun page(role: String, offset: Int = 0): JSONObject {
         require(offset >= 0)
@@ -31,7 +32,7 @@ class AutonomousJournal(private val context: Context) {
     private fun update(run: Run, status: String, detail: String, failure: Throwable? = null) {
         store.activityWrite(run.role, "runtime_run", run.id, "private") { old ->
             requireNotNull(old).put("status", status).put("detail", detail).put("updated_at", System.currentTimeMillis())
-                .put("tools_touched", run.toolsTouched).apply {
+                .put("tools_touched", run.toolsTouched).put("response_completed", run.responseCompleted).apply {
                     val steps = optJSONArray("steps") ?: JSONArray()
                     steps.put(JSONObject().put("at", System.currentTimeMillis()).put("status", status).put("detail", detail))
                     put("steps", steps)
@@ -77,9 +78,10 @@ class AutonomousJournal(private val context: Context) {
                     if (interrupted) "用户交互、设置变更或服务停止；保留进展" else "活动超时；保留回执，继续其他活动", cancelled)
                 throw cancelled
             } catch (failure: Exception) {
-                retry = retryAllowed && canRetry(failure, run.toolsTouched, attempt) && control.allowed()
+                retry = retryAllowed && canRetry(failure, run.toolsTouched || run.responseCompleted, attempt) && control.allowed()
                 update(run, if (retry) "retry_wait" else "skipped", when {
                     retry -> "尚未调用工具；5秒后重试一次当前模型请求"
+                    run.responseCompleted -> "模型响应已结束，状态可能已采用；保留进展，不整轮重试，继续其他活动"
                     run.toolsTouched -> "已有工具尝试，不能重放未知副作用；保留回执并继续其他活动，续接前先核对"
                     attempt == 2 -> "重试仍失败；跳过本次，继续其他活动"
                     else -> "此错误不适合自动重试；保留原因并继续其他活动"
@@ -129,14 +131,19 @@ class AutonomousJournal(private val context: Context) {
         private val active = ConcurrentHashMap<String, Run>()
         internal fun canRetry(failure: Exception, toolsTouched: Boolean, attempt: Int): Boolean =
             !toolsTouched && attempt < 2 && (failure is java.io.IOException ||
-                failure is InternalStateReportStream.ProtocolException || failure is AutonomousResponseException)
+                failure is InternalStateReportStream.ProtocolException)
         internal fun progress(context: Context, chat: String?, phase: String, tool: String? = null) {
             val run = active[chat ?: return] ?: return
             if (tool != null) run.toolsTouched = true
             AutonomousJournal(context).update(run, "running", if (tool == null) phase else "$phase：$tool")
         }
+        internal fun responseCompleted(context: Context, chat: String) {
+            val run = active[chat] ?: return
+            run.responseCompleted = true
+            AutonomousJournal(context).update(run, "running", "模型响应已结束，正在核对和保存结果")
+        }
     }
 }
 
-/** A correctable model envelope failure, unlike arbitrary IllegalStateException bugs. */
+/** The report may already be adopted before envelope validation; never replay this round. */
 internal class AutonomousResponseException(message: String) : IllegalStateException(message)

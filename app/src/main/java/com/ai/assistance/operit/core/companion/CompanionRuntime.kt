@@ -879,6 +879,7 @@ object CompanionRuntime {
             // Completion owns every terminal send path. Converting the UI error string into
             // IllegalStateException erased the original cause and raced the real callback.
             val raw = result.await()
+            AutonomousJournal.responseCompleted(context, chatId)
             core.activeStreamingChatIds.first { chatId !in it }
             owned.compareAndSet(turn, null)
             currentCoroutineContext().ensureActive()

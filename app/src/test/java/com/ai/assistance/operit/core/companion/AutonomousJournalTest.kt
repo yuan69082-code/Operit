@@ -69,8 +69,23 @@ class AutonomousJournalTest {
         assertEquals("interrupted", AutonomousJournal(context).page(role).getJSONArray("items").getJSONObject(0).getString("status"))
         AutonomousJournal(context).execute(role, "chat", "next", "生活安排") { }
     }
+    @Test fun storageFailureAfterModelCompletionDoesNotReplayAdoptedState() = runBlocking {
+        var calls = 0
+        try { AutonomousJournal(context).execute(role, "chat", "adopted", "生活安排", pause = { }) {
+            calls++
+            AutonomousJournal.responseCompleted(context, "chat")
+            throw IOException("save failed after model completion")
+        }; fail() } catch (_: IOException) { }
+        assertEquals(1, calls)
+        val row = AutonomousJournal(context).page(role).getJSONArray("items").getJSONObject(0)
+        assertTrue(row.getBoolean("response_completed"))
+        assertEquals("skipped", row.getString("status"))
+    }
     @Test fun programmingErrorsDoNotRetryAndHistoryIsPagedNewestFirst() = runBlocking {
         assertFalse(AutonomousJournal.canRetry(IllegalStateException("bad state"), false, 1))
+        // A valid state report can commit before the public envelope is checked. Retrying
+        // the entire response would make another state decision for that same event.
+        assertFalse(AutonomousJournal.canRetry(AutonomousResponseException("missing quiet marker"), false, 1))
         for (i in 1..10) AutonomousJournal(context).execute(role, "chat", "work-$i", "空闲接续") { }
         val first = AutonomousJournal(context).page(role)
         assertEquals(8, first.getJSONArray("items").length())
