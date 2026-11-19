@@ -124,6 +124,36 @@ class SubjectConcernsEntryPointsTest {
         assertEquals(1, InternalStateStore(context).concernStatus(role).getJSONArray("items").length())
     }
 
+    @Test fun misplacedProgressGetsAnExactCorrectionAndTheMinimalPatchPreservesMeaning(): Unit = runBlocking {
+        val first = requireNotNull(sections().internalStateFrame)
+        submit(first, JSONObject().put("life", JSONArray().put(life(first).put("purpose", "原本的目的"))))
+        val s = sections()
+        val f = requireNotNull(s.internalStateFrame)
+        assertTrue(s.instructions.contains("attention:{progress:"))
+        assertTrue(s.instructions.indexOf("attention:{progress:") < s.instructions.indexOf("新建理解或正式修订原文的完整格式"))
+
+        val before = saved().getJSONObject("content")
+        val bad = patch(f).put("text", "重写受保护的原文").put("progress", "已核对结果")
+        try {
+            submit(f, JSONObject().put("life", JSONArray().put(bad)))
+            fail("misplaced progress")
+        } catch (e: InternalStateReportIssue) {
+            assertEquals("ATTENTION_FIELD_LOCATION", e.rule)
+            assertEquals("life[0].progress", e.path)
+            assertTrue(e.hint.contains("attention.progress"))
+        }
+        assertEquals(1, saved().getInt("version"))
+
+        val correction = patch(f).put("attention", JSONObject().put("progress", "已核对结果").put("waiting", "等下次结果"))
+        submit(f, JSONObject().put("life", JSONArray().put(correction)))
+        val after = saved().getJSONObject("content")
+        for (key in listOf("text", "scope", "purpose", "status")) assertEquals(before.getString(key), after.getString(key))
+        assertTrue(after.getJSONObject("attention").getBoolean("pinned"))
+        assertTrue(after.getJSONObject("attention").getBoolean("protected"))
+        assertEquals("已核对结果", after.getJSONObject("attention").getString("progress"))
+        assertEquals("等下次结果", after.getJSONObject("attention").getString("waiting"))
+    }
+
     @Test fun explicitChangeNeedsRealDetailsAndCompletionReleasesThePosition(): Unit = runBlocking {
         val first = requireNotNull(sections().internalStateFrame)
         submit(first, JSONObject().put("life", JSONArray().put(life(first))))
