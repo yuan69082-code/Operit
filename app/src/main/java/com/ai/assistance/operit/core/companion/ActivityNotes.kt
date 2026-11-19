@@ -116,6 +116,7 @@ internal object ActivityNotes {
     }
 
     suspend fun operation(context: Context, ref: Ref, id: String, tool: String, result: ToolResult?, request: com.ai.assistance.operit.data.model.AITool? = null) {
+        AutonomousJournal.progress(context, ref.chat, if (result == null) "正在调用工具" else if (result.success) "工具已返回成功" else "工具已返回失败", tool)
         val status = result?.executionStatus ?: if (result == null) "started" else if (result.success) "completed" else "failed"
         part(context, ref, "tool:$id:$status", "operation", JSONObject().put("tool", tool)
             .put("actual_tool", request?.name ?: tool)
@@ -176,6 +177,7 @@ internal object ActivityNotes {
     }
 
     suspend fun started(context: Context, ref: Ref) = withContext(Dispatchers.IO) {
+        AutonomousJournal.progress(context, ref.chat, "正在等待或处理模型回复")
         CompanionStore(context).activityWrite(ref.role, "activity", ref.id, "private") { old ->
             requireNotNull(old).put("status", "started")
         }

@@ -41,16 +41,17 @@ class AutonomousRuntimeControlTest {
         store.preferences.edit().putLong("autonomous_pause_until", Long.MAX_VALUE).commit()
         assertFalse(control.allowed(Long.MAX_VALUE))
     }
-    @Test fun failedOrCrashedWorkPersistsPauseButOrdinaryCancellationDoesNot() {
+    @Test fun failedOrCrashedWorkKeepsReceiptsAndDoesNotBlockOtherWork() {
         control.begin("a", "work")
         AutonomousRuntimeControl(context).recover()
-        assertFalse(control.allowed())
-        assertEquals("异常暂停", control.status("a").getString("state"))
+        assertTrue(control.allowed())
+        assertEquals("等待中", control.status("a").getString("state"))
+        assertTrue(control.status("a").getString("reason").contains("中断"))
         store.update("autonomous-runtime") { it.put("phase", "waiting"); it.remove("error") }
         control.begin("a", "work2"); control.finish("a", false, interrupted = true)
         assertTrue(control.allowed())
         control.begin("a", "work3"); control.finish("a", false)
-        assertFalse(AutonomousRuntimeControl(context).allowed())
+        assertTrue(AutonomousRuntimeControl(context).allowed())
     }
     @Test fun idleDoesNotCatchUpAndPreservesDailyLimitAcrossRestart() {
         val now = System.currentTimeMillis()

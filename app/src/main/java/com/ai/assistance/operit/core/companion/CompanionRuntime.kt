@@ -10,7 +10,6 @@ import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
 import com.ai.assistance.operit.data.model.ChatTurnOptions
-import com.ai.assistance.operit.data.model.InputProcessingState
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.services.ChatServiceCore
 import com.ai.assistance.operit.ui.features.chat.voice.VoiceCallIncoming
@@ -113,6 +112,8 @@ object CompanionRuntime {
         var pendingEvent = ""
         var lastSkip = 0L
         var nextSource = 0
+        val sourceBackoff = mutableMapOf<Int, Long>()
+        val lifeReadBackoff = mutableMapOf<String, Long>()
         val recoveredSchedules = mutableSetOf<String>()
         val control = AutonomousRuntimeControl(app)
         val revokePhoneBefore = java.util.concurrent.atomic.AtomicLong()
@@ -144,7 +145,7 @@ object CompanionRuntime {
             CharacterCardManager.getInstance(app).getAllCharacterCards().filter { InternalStateStore(app).enabled(it.id) }
                 .forEach { card ->
                     try { SubjectLife(app).recover(card.id) }
-                    catch (failure: Exception) { SubjectLife.recordFailure(card.id, "恢复记录读取失败", failure) }
+                    catch (failure: Exception) { SubjectLife.recordFailure(app, card.id, "恢复记录读取失败", failure) }
                 }
             dispatch@ while (isActive) {
                 try {
@@ -162,6 +163,8 @@ object CompanionRuntime {
                     gs.ids().any { taskHolder.getCore(ChatRuntimeSlot.MAIN).getMessageCoordinationDelegate().isGroupRunning(it) }
                 }
                 for (source in (0 until 8).map { (nextSource + it) % 8 } + 8) {
+                    if (SystemClock.elapsedRealtime() < (sourceBackoff[source] ?: 0L)) continue
+                    try {
                     if (!control.allowed()) continue@dispatch
                     // Idle opportunities use this same owner, after all existing work sources.
                     if (source == 8 && taskHolder.activeConversationCount.value == 0 && !groupBusy &&
@@ -200,12 +203,13 @@ object CompanionRuntime {
                         val life = SubjectLife(app)
                         val work = CharacterCardManager.getInstance(app).getAllCharacterCards().firstNotNullOfOrNull { card ->
                             try {
-                            if (!InternalStateStore(app).enabled(card.id)) null else AssistantWindowRouter.chat(app, card.id)?.let {
+                            if (SystemClock.elapsedRealtime() < (lifeReadBackoff[card.id] ?: 0L) || !InternalStateStore(app).enabled(card.id)) null else AssistantWindowRouter.chat(app, card.id)?.let {
                                 life.next(card.id, it, System.currentTimeMillis())
                             }
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (failure: Exception) {
-                                if (SubjectLife.failure(card.id) == null) SubjectLife.recordFailure(card.id, "生活安排读取失败", failure)
+                                lifeReadBackoff[card.id] = SystemClock.elapsedRealtime() + 60_000
+                                SubjectLife.recordFailure(app, card.id, "生活安排读取失败，60秒后再检查", failure)
                                 null
                             }
                         }
@@ -223,14 +227,15 @@ object CompanionRuntime {
                                                     subjectInboxId = input.getString("id"), subjectDispatch = true, subjectInputTimestamp = input.getLong("timestamp"),
                                                     acceptedAttachments = SubjectMessageInbox(app).attachments(input), acceptedReplyTo = SubjectMessageInbox(app).reply(input)))
                                         } else if (work.dream) {
-                                            control.begin(work.role, work.id)
-                                            ParticipatoryDreams(app).run(work)
+                                            AutonomousJournal(app).execute(work.role, work.chat, work.id, "梦境", retryAllowed = false) {
+                                                ParticipatoryDreams(app).run(work)
+                                            }
                                         }
                                         else evaluate(app, work.chat, work.text, epoch, taskEvent = true,
                                             triggerId = work.id, lifeAdmission = true, resumeActivity = work.activity)
                                     }
                                     outcome = "completed"
-                                    SubjectLife.clearFailure(work.role)
+                                    SubjectLife.clearFailure(app, work.role)
                                 } catch (timeout: TimeoutCancellationException) {
                                     currentCoroutineContext().ensureActive()
                                     store.log(work.chat, "生活续接超时", "保留已完成片段与回执，没有自动重试")
@@ -239,13 +244,12 @@ object CompanionRuntime {
                                     throw cancelled
                                 } catch (failure: Exception) {
                                     control.fail("后台活动未完成", failure)
-                                    SubjectLife.recordFailure(work.role, "生活活动未完成", failure)
+                                    SubjectLife.recordFailure(app, work.role, "生活活动未完成", failure)
                                     store.log(work.chat, "生活续接失败", failure.javaClass.simpleName)
                                 } finally {
                                     withContext(NonCancellable) {
-                                        if (work.dream) control.finish(work.role, outcome == "completed", outcome == "interrupted")
                                         try { life.finish(work, outcome) }
-                                        catch (failure: Exception) { SubjectLife.recordFailure(work.role, "活动结束事实未保存", failure) }
+                                        catch (failure: Exception) { SubjectLife.recordFailure(app, work.role, "活动结束事实未保存", failure) }
                                     }
                                     SubjectLife.stopped(work.role)
                                     resumedExploration = null
@@ -549,6 +553,13 @@ object CompanionRuntime {
                     decision?.join()
                     decision = null
                     nextSource = 5
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        // Isolate a bad queue/read to this source; never abandon later sources.
+                        sourceBackoff[source] = SystemClock.elapsedRealtime() + 60_000
+                        nextSource = (source + 1) % 8
+                        control.fail("来源${source}读取失败，60秒后再检查", failure)
+                    }
                 }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) {
@@ -584,6 +595,30 @@ object CompanionRuntime {
                                  softwareRole: String? = null, softwareRevision: Long? = null,
                                  explorationWork: ExplorationStore.Work? = null, studyEvent: Boolean = false,
                                  triggerId: String = java.util.UUID.randomUUID().toString(),
+                                 lifeAdmission: Boolean = false, resumeActivity: String? = null) {
+        val role = com.ai.assistance.operit.data.repository.ChatHistoryManager.getInstance(context)
+            .getChatMetadata(chatId)?.characterCardId ?: error("目标会话没有所属助手")
+        val source = when {
+            triggerId.startsWith("idle:") -> "空闲接续"
+            explorationWork != null -> "自主学习"
+            studyEvent -> "书房活动"
+            softwareRole != null -> "软件感知"
+            phoneRole != null -> "手机感知"
+            lifeAdmission -> "生活安排"
+            taskEvent -> "私人事项"
+            else -> "主动唤醒"
+        }
+        AutonomousJournal(context).execute(role, chatId, resumeActivity ?: ActivityNotes.scheduledId(role, "wake:$triggerId"),
+            source, retryAllowed = resumeActivity == null) {
+            evaluateOnce(context, chatId, event, epoch, taskEvent, phoneRole, softwareRole, softwareRevision,
+                explorationWork, studyEvent, triggerId, lifeAdmission, resumeActivity)
+        }
+    }
+
+    private suspend fun evaluateOnce(context: Context, chatId: String, event: String, epoch: Long, taskEvent: Boolean, phoneRole: String?,
+                                 softwareRole: String?, softwareRevision: Long?,
+                                 explorationWork: ExplorationStore.Work?, studyEvent: Boolean,
+                                 triggerId: String,
                                  lifeAdmission: Boolean = false, resumeActivity: String? = null) = coroutineScope {
         val store = CompanionStore(context)
         val core = ChatRuntimeHolder.getInstance(context).getCore(ChatRuntimeSlot.MAIN)
@@ -804,11 +839,7 @@ object CompanionRuntime {
         val started = async(start = CoroutineStart.UNDISPATCHED) { core.activeStreamingChatIds.first { chatId in it } }
         var activity: ActivityNotes.Ref? = null
         var activityOutcome = "not_started"
-        var interrupted = false
-        var admitted = false
         try {
-            control.begin(roleId, wakeEventId)
-            admitted = true
             activity = ActivityNotes.begin(context, roleId, chatId, wakeEventId, event, resumeActivity)
             if (internalEnabled) {
                 SubjectLife(context).checkpoint(requireNotNull(activity), event, "executing", explorationWork != null || resumingExploration)
@@ -840,15 +871,9 @@ object CompanionRuntime {
                 }
             }
             ActivityNotes.started(context, requireNotNull(activity))
-            val failure = async(start = CoroutineStart.UNDISPATCHED) {
-                core.inputProcessingStateByChatId.first { it[chatId] is InputProcessingState.Error }[chatId] as InputProcessingState.Error
-            }
-            val raw = try {
-                kotlinx.coroutines.selects.select<String> {
-                    result.onAwait { it }
-                    failure.onAwait { error(it.message) }
-                }
-            } finally { failure.cancel() }
+            // Completion owns every terminal send path. Converting the UI error string into
+            // IllegalStateException erased the original cause and raced the real callback.
+            val raw = result.await()
             core.activeStreamingChatIds.first { chatId !in it }
             owned.compareAndSet(turn, null)
             currentCoroutineContext().ensureActive()
@@ -879,16 +904,16 @@ object CompanionRuntime {
                 .replace(Regex("<companion_open>[\\s\\S]*?</companion_open>"), "")
             val messages = Regex("<companion_message>([\\s\\S]*?)</companion_message>").findAll(cleaned).toList()
             if (messages.isEmpty()) {
-                check(cleaned.contains("<companion_quiet/>")) { "没有明确的主动消息或安静决定" }
+                if (!cleaned.contains("<companion_quiet/>")) throw AutonomousResponseException("没有明确的主动消息或安静决定")
                 store.log(chatId, "安静", "本次未发送消息；使用工具${toolBudget.used}次")
                 if (proactiveContactWake) store.update("ledger:$chatId") { it.put("quiet_streak", it.optInt("quiet_streak") + 1) }
                 rememberWake(raw, "我决定不吭声")
                 activityOutcome = "quiet"
                 return@coroutineScope
             }
-            check(messages.size == 1) { "主动消息格式不明确" }
+            if (messages.size != 1) throw AutonomousResponseException("主动消息格式不明确")
             val text = messages.single().groupValues[1].trim()
-            require(text.isNotBlank() && text.length <= 4000) { "主动消息为空或过长" }
+            if (text.isBlank() || text.length > 4000) throw AutonomousResponseException("主动消息为空或过长")
             val saved = core.getChatHistoryDelegate().addWakeMessageToChat(ChatMessage(sender = "ai", roleName = card.name, content = text),
                 chatId, roleId, "$wakeEventId:public")
             ActivityNotes.message(context, requireNotNull(activity), saved.message.timestamp, saved.message.content)
@@ -906,11 +931,7 @@ object CompanionRuntime {
             AIForegroundService.notifyReplyCompleted(context, chatId, card.name, text, null,
                 notifyReplyOverride = true, notifyWhileForeground = true)
             store.log(chatId, "主动消息", text.take(240))
-        } catch (cancelled: CancellationException) {
-            interrupted = cancelled !is TimeoutCancellationException
-            throw cancelled
         } finally {
-            if (admitted) control.finish(roleId, activityOutcome in setOf("quiet", "message_saved"), interrupted || epoch != generation.get())
             started.cancel()
             releaseTurn(epoch)
             activity?.let { ref ->
@@ -923,7 +944,7 @@ object CompanionRuntime {
                         try {
                             SubjectLife(context).checkpoint(ref, event,
                                 if (activityOutcome in setOf("quiet", "message_saved")) "completed" else "paused", toolsUsed = toolBudget.used)
-                        } catch (failure: Exception) { SubjectLife.recordFailure(roleId, "活动检查点未保存", failure) }
+                        } catch (failure: Exception) { SubjectLife.recordFailure(context, roleId, "活动检查点未保存", failure) }
                     }
                 }
             }

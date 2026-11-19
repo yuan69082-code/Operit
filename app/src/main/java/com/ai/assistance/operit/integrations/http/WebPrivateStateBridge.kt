@@ -22,6 +22,7 @@ internal class WebPrivateStateBridge(private val context: Context) {
         store.requireRecipient(role, chat)
         when (body.getString("action")) {
             "runtime_status" -> AutonomousRuntimeControl(context).status(role)
+            "runtime_logs" -> AutonomousJournal(context).page(role, body.optInt("offset"))
             "runtime_control" -> {
                 val control = AutonomousRuntimeControl(context)
                 when (body.getString("operation")) {

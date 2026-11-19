@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AutonomousJournalPanel } from './AutonomousJournalPanel';
 
 type RuntimeStatus = {
   state: string; enabled: boolean; reason: string;
@@ -64,5 +65,6 @@ export function AutonomousRuntimePanel({ token, chat }: { token: string; chat: s
       void change({ action: 'runtime_control', operation: 'idle', enabled: idle, minutes: m, daily: d });
     }}>保存空闲设置</button>
     {error ? <p role="alert">{error}</p> : null}
+    <AutonomousJournalPanel key={chat} token={token} chat={chat} />
   </details>;
 }

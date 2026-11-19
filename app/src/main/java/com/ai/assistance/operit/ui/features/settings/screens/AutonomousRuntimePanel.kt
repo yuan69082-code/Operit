@@ -65,4 +65,5 @@ internal fun AutonomousRuntimePanel(role: String) {
         else change { control.configureIdle(role, idle, m, d) }
     }) { Text("保存空闲设置") }
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    AutonomousJournalPanel(role)
 }
