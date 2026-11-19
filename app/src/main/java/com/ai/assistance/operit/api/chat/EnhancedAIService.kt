@@ -1448,17 +1448,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                     throw CancellationException("Message execution was cancelled").apply { initCause(e) }
                 }
                 if (e is InternalStateReportStream.ProtocolException) {
-                    val frame = execContext.internalStateFrame
-                    AppLogger.e(TAG, "STATE_REPORT_PARSE_REJECTED subject=${frame?.roleId} frame=${frame?.id} read=${frame?.stateVersion} code=${e.code}; prior state and execution receipts retained")
-                    execContext.activity?.let { ref ->
-                        try {
-                            ActivityNotes.part(context, ref, "report-failure:${frame?.id}:${execContext.activityRound}", "report_failure",
-                                JSONObject().put("status", "rejected").put("code", e.code.name)
-                                    .put("frame_id", frame?.id ?: JSONObject.NULL).put("read_version", frame?.stateVersion ?: JSONObject.NULL)
-                                    .put("state_adopted", false).put("retry_requested", false))
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (storage: Exception) { AppLogger.e(TAG, "STATE_REPORT_FAILURE_RECEIPT_NOT_SAVED type=${storage.javaClass.simpleName}") }
-                    }
+                    recordStateReportStreamFailure(execContext, e)
                 }
                 AppLogger.e(TAG, "发送消息时发生错误: ${e.message}", e)
                 withContext(Dispatchers.Main) {
@@ -2192,6 +2182,11 @@ class EnhancedAIService private constructor(private val context: Context) {
     ): String = try {
         stream?.finish().orEmpty()
     } catch (failure: InternalStateReportStream.ProtocolException) {
+        val frame = execution.internalStateFrame
+        // Keep the original typed failure for the autonomous owner and its retry policy.
+        if (failure.code != InternalStateReportStream.ErrorCode.TRUNCATED_REPORT || frame?.let {
+                com.ai.assistance.operit.core.companion.CompanionRuntime.isWake(it.chatId)
+            } == true) throw failure
         execution.pendingStateReport = null
         execution.currentResponseHasStateReport = false
         execution.stateReportParsingRejected = true
@@ -2208,10 +2203,29 @@ class EnhancedAIService private constructor(private val context: Context) {
                 AppLogger.e(TAG, "ISR_DIAGNOSTIC_SAVE_FAILED type=${storage.javaClass.simpleName}")
             }
         }
-        AppLogger.w(TAG, "STATE_REPORT_PARSE_REJECTED code=${issue.code}; prior state and visible text retained")
+        recordStateReportStreamFailure(execution, failure)
         val reason = InternalStateReportFailure.classify(issue)
         onNonFatalError(context.getString(R.string.state_report_failure, context.getString(reason.messageRes), issue.code))
         ""
+    }
+
+    private suspend fun recordStateReportStreamFailure(
+        execution: MessageExecutionContext,
+        failure: InternalStateReportStream.ProtocolException
+    ) {
+        val frame = execution.internalStateFrame
+        AppLogger.e(TAG, "STATE_REPORT_PARSE_REJECTED subject=${frame?.roleId} frame=${frame?.id} read=${frame?.stateVersion} code=${failure.code}; prior state and execution receipts retained")
+        execution.activity?.let { ref ->
+            try {
+                ActivityNotes.part(context, ref, "report-failure:${frame?.id}:${execution.activityRound}", "report_failure",
+                    JSONObject().put("status", "rejected").put("code", failure.code.name)
+                        .put("frame_id", frame?.id ?: JSONObject.NULL).put("read_version", frame?.stateVersion ?: JSONObject.NULL)
+                        .put("state_adopted", false).put("retry_requested", false))
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (storage: Exception) {
+                AppLogger.e(TAG, "STATE_REPORT_FAILURE_RECEIPT_NOT_SAVED type=${storage.javaClass.simpleName}")
+            }
+        }
     }
 
     private suspend fun finalizeAssistantResponse(

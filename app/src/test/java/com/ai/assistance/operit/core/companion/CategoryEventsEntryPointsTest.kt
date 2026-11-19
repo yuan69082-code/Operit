@@ -176,7 +176,7 @@ class CategoryEventsEntryPointsTest {
             assertEquals("ISR_UNKNOWN_CATEGORY", states.noteReportFailure(first, failure, initial).code)
         }
         val pending = states.inspectCategory(role, chat, "episode_repair", "finding", 0).getJSONObject("item")
-        assertEquals("pending", pending.getString("parent"))
+        assertEquals("pending", pending.getString("status"))
         assertTrue(states.inspectCategory(role, second, "episode_repair", "finding", 0).isNull("item"))
         assertTrue(states.inspectCategory(role, chat, "episode", "finding", 0).isNull("item"))
         adopt(content("seeking", "drive").put("direction", "寻找")
@@ -191,7 +191,7 @@ class CategoryEventsEntryPointsTest {
         assertEquals(0.4, projected.getJSONObject("time_projection").getDouble("intensity"), 0.001)
         assertEquals(0.6, saved.getJSONObject("content").getDouble("intensity"), 0.001)
         assertEquals("resolved", states.inspectCategory(role, chat, "episode_repair", "finding", 0)
-            .getJSONObject("item").getString("parent"))
+            .getJSONObject("item").getString("status"))
     }
 
     private suspend fun rejects(block: suspend () -> Unit) {

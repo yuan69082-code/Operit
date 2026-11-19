@@ -444,9 +444,11 @@ class InternalStateStore(private val context: Context) {
         }
         lateinit var receipt: JSONObject
         val episodes = report.optJSONArray("episodes") ?: JSONArray()
-        val episodeIds = (0 until episodes.length()).mapNotNull { index ->
-            episodes.optJSONObject(index)?.takeIf { it.optString("op") == "appraise" }?.optString("id")
-        }
+        val episodeVersions = (0 until episodes.length()).mapNotNull { index ->
+            episodes.optJSONObject(index)?.takeIf { it.optString("op") == "appraise" }
+                ?.let { it.optString("id") to it.optInt("expected_version", -1) }
+        }.toMap()
+        val episodeIds = episodeVersions.keys.toList()
         val repairs = if (episodeIds.isEmpty() || recipientScope(frame.roleId, frame.chatId)) emptyMap()
             else EpisodeRepair(context).sources(frame.roleId, frame.chatId, episodeIds)
         val saved = update(frame.roleId, "state_report") { data ->
@@ -472,7 +474,7 @@ class InternalStateStore(private val context: Context) {
         }
         // A successful report resolves prior failure metadata without replaying old actions.
         try {
-            EpisodeRepair(context).complete(frame.roleId, frame.chatId, episodeIds)
+            EpisodeRepair(context).complete(frame.roleId, frame.chatId, episodeVersions)
             store.update(failureKey(frame.roleId)) { it.put("status", "resolved").put("resolved_at", System.currentTimeMillis()) }
         }
         catch (failure: Exception) {

@@ -21,7 +21,7 @@ object CompanionTools {
                 param("source", "算术模板"), param("previous_version", "调整的原版本"), param("version", "返回的产物版本"),
                 param("inputs", "变量数字JSON对象"), param("__operit_action", "可选决定及来源JSON"))),
         ToolPrompt(name = "companion_internal_state",
-            description = "持续状态工具。get按需读目录、事件、认识及原文/版本/来源；section=concerns查便签，id=direction:ID或experience:ID读详情，concern_config查名额。get section=contract查细则，id=concerns查便签用途与规则。budget调整共享材料预算。旧数值定义仅作历史，不另建权威。本轮变化用operit_state_report：驱力走foundation，感受/事件走episodes，人格与立场走inner候选及跨轮采用。未知事件分类先用 get section=episode_repair 读待修正事件，再查 foundation/inner_family，复用已有分类或新增、采用个人分类后补交原事件。查询不改写或重复计分。",
+            description = "持续状态工具。get按需读目录、事件、认识及原文/版本/来源；section=concerns查便签，id=direction:ID或experience:ID读详情，concern_config查名额。get section=contract查细则，id=concerns查便签用途与规则。budget调整共享材料预算。旧数值定义仅作历史，不另建权威。本轮变化用operit_state_report：驱力走foundation，感受/事件走episodes，人格与立场走inner候选及跨轮采用。未知分类用 get section=episode_repair 续接。查询不改写或重复计分。",
             parametersStructured = listOf(
                 param("action", "get/budget；旧数值定义操作已停用", true),
                 param("id", "定义稳定ID；get 读取记录或 inner_family 的family；历史/长内容用 offset/next_offset 分页"),

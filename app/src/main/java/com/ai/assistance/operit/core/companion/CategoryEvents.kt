@@ -174,7 +174,7 @@ internal object CategoryEvents {
                     SubjectContracts.expect(!ref.startsWith("config:") && !ref.startsWith("relation:"),
                         "evidence[$index]", "EPISODE_EXPERIENCE_SOURCE", "配置不是现实经历；引用实际消息、操作结果或已读取材料的来源ID。")
                     val original = repairSources[id]?.optString(ref)?.takeIf { it.isNotEmpty() }
-                    val evidenceFrame = if (original == null || ref in frame.materialSources) frame
+                    val evidenceFrame = if (original == null) frame
                         else frame.copy(materialSources = mapOf(ref to original))
                     val source = InnerStructure.source(data, evidenceFrame, ref)
                     SubjectContracts.expect(source.getString("source") !in setOf("state_report", "time"),
