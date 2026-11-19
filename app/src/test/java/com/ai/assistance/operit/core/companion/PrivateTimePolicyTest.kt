@@ -54,6 +54,19 @@ class PrivateTimePolicyTest {
             assertNull(PrivateTimePolicy.due(p, w.end))
         }
     }
+    @Test fun unfinishedEarlierSlotDoesNotBlockTheNextScheduledSlot() {
+        val boundary = w.start + 3_600_000
+        val p = PrivateTimePolicy.plan(config(), JSONObject().put("date", w.date).put("expected_version", 0)
+            .put("items", JSONArray().put(item("first").put("end", boundary).put("checks", JSONArray()))
+                .put(item("later").put("start", boundary).put("checks", JSONArray()))), null, w.start - 1)
+        assertEquals("first", PrivateTimePolicy.due(p, w.start)!!.slotId)
+        // The first model round failed without submitting progress. Its end reminder is
+        // still a one-shot opportunity; it cannot keep consuming the later slot forever.
+        assertEquals("first", PrivateTimePolicy.due(p, boundary)!!.slotId)
+        val restarted = JSONObject(p.toString())
+        assertEquals("later", PrivateTimePolicy.due(restarted, boundary + 1)!!.slotId)
+        assertEquals("planned", restarted.getJSONArray("items").getJSONObject(0).getString("status"))
+    }
     @Test fun reviewRequiresSelectedAreasAndActualOrganizationOrReasons() {
         expectFailure("targets") { PrivateTimePolicy.plan(config(), JSONObject().put("date", w.date).put("expected_version", 0)
             .put("items", JSONArray().put(item().put("targets", JSONArray()))), null, w.start - 1) }

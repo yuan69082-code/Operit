@@ -81,6 +81,11 @@ object CompanionContext {
             val metadata = history.getChatMetadata(chatId)
             // No private cross-window material enters a group or another assistant's request.
             if (metadata?.characterCardId == roleId && metadata.characterGroupId.isNullOrBlank()) {
+                if (internalEnabled) {
+                    instructions.append(AutonomousRuntimeControl.instructions).append("\n")
+                    // Detailed time facts are available through runtime_status. Repeating the
+                    // full clock here displaced existing episodes inside the shared quota.
+                }
                 if (recordSnapshot) {
                     // Only newly delivered, short event receipts enter one real model request.
                     // The full inbox/keepsake inventory stays on disk and is accessible by tool.

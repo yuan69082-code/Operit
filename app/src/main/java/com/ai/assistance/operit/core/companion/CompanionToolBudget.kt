@@ -12,7 +12,7 @@ internal class CompanionToolBudget(private val limit: Int = 12) {
     fun admit(tool: String, action: String?): Boolean {
         // Exploration must use its own scheduling switch and interval policy.
         // It cannot be forced to use companion_schedule just because its work quota ran out.
-        if (tool == "companion_schedule" || tool == "companion_explore" && action in setOf("schedule", "pause")) return true
+        if (tool == "companion_life" && action == "runtime_wait" || tool == "companion_schedule" || tool == "companion_explore" && action in setOf("schedule", "pause")) return true
         while (true) {
             val current = count.get()
             if (current >= limit) return false

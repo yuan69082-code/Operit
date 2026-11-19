@@ -140,6 +140,7 @@ private fun AssistantSpaceOverview(role: String?, navigate: (AssistantSpacePage)
         counts?.let { "${it[3]} 件进行中的事" }, enabled = role != null, onClick = { navigate(AssistantSpacePage.PLANS) })
     if (role == null) Text("选择助手后，可打开房间、书房与私人打算。", style = MaterialTheme.typography.bodySmall)
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    if (role != null) AutonomousRuntimePanel(role)
     SpaceSectionTitle("自主活动", "联系、探索和唤醒记录各自管理。")
     SpaceLinkCard("主动联系", "消息、来电与通话中的主动接话", Icons.Default.ChatBubbleOutline,
         if (store.proactiveEnabled) "软件主动联系已开启" else "软件主动联系已关闭",

@@ -34,6 +34,8 @@ internal class SubjectLife(private val context: Context) {
     }
 
     fun defer(role: String, chat: String, id: String, source: String, text: String): Boolean {
+        // Pausing automation must not strand newly submitted ordinary messages behind its dispatcher.
+        if (source == "user_message" && !AutonomousRuntimeControl(context).allowed()) return false
         val record = rest(role) ?: return false
         val content = record.getJSONObject("content")
         if (content.getString("state") != "resting") return false
@@ -82,6 +84,14 @@ internal class SubjectLife(private val context: Context) {
     }
 
     fun checkpoint(ref: ActivityNotes.Ref, event: String, phase: String, exploration: Boolean = false, toolsUsed: Int? = null) {
+        // Closing the owned turn must not erase a continuation/end explicitly chosen in it.
+        val chosen = store.activityRead(ref.role, "life_activity", ref.id)
+        if (phase in setOf("completed", "paused") && chosen?.optString("phase") in setOf("ready", "ended")) {
+            if (toolsUsed != null) store.activityWrite(ref.role, "life_activity", ref.id, requireNotNull(chosen).getString("parent")) {
+                requireNotNull(it).put("tools_used", toolsUsed)
+            }
+            return
+        }
         store.activityWrite(ref.role, "life_activity", ref.id, if (phase == "paused") "pending" else phase) { old ->
             (old ?: JSONObject().put("id", ref.id).put("owner", ref.role).put("source_chat", ref.chat)
                 .put("event", event).put("exploration", exploration).put("at", System.currentTimeMillis()).put("version", 1))
@@ -94,6 +104,7 @@ internal class SubjectLife(private val context: Context) {
     fun toolsUsed(role: String, activity: String?) = activity?.let { store.activityRead(role, "life_activity", it)?.optInt("tools_used") } ?: 0
 
     suspend fun recordRequest(ref: ActivityNotes.Ref, frame: InternalStateFrame, round: Int) {
+        AutonomousJournal.progress(context, ref.chat, "模型请求第${round}轮，等待响应")
         if (store.activityRead(ref.role, "life_activity", ref.id) == null) return
         val key = "request:${frame.id}:$round"
         ActivityNotes.part(context, ref, key, "request", JSONObject().put("frame_id", frame.id)
@@ -260,13 +271,23 @@ internal class SubjectLife(private val context: Context) {
     }
 
     companion object {
-        private val failures = ConcurrentHashMap<String, String>()
-        fun failure(role: String): String? = failures[role]
-        fun recordFailure(role: String, stage: String, error: Exception) {
-            failures[role] = "$stage：${error.javaClass.simpleName}；原记录保留，未自动重做。"
+        fun failure(context: Context, role: String): String? = CompanionStore(context)
+            .activityRead(role, "runtime_failure", "latest")?.takeUnless { it.optBoolean("acknowledged") }?.optString("summary")
+        fun recordFailure(context: Context, role: String, stage: String, error: Exception) {
+            AutonomousJournal(context).diagnostic(role, stage, error)
+            CompanionStore(context).activityWrite(role, "runtime_failure", "latest", "private") {
+                JSONObject().put("id", "latest").put("parent", "private").put("owner", role)
+                    .put("at", System.currentTimeMillis()).put("acknowledged", false)
+                    .put("summary", "$stage：${error.javaClass.simpleName}；原记录保留，详情见自主运行日志。")
+                    .put("error", error.message.orEmpty()).put("stack", com.ai.assistance.operit.util.AppLogger.getStackTraceString(error))
+            }
             com.ai.assistance.operit.util.AppLogger.e("SubjectLife", stage, error)
         }
-        fun clearFailure(role: String) { failures.remove(role) }
+        fun clearFailure(context: Context, role: String) {
+            val store = CompanionStore(context)
+            if (store.activityRead(role, "runtime_failure", "latest") != null)
+                store.activityWrite(role, "runtime_failure", "latest", "private") { requireNotNull(it).put("acknowledged", true) }
+        }
         fun material(kind: String, row: JSONObject): JSONObject =
             JSONObject().put("id", "material:$kind:${row.getString("id")}:${row.optInt("version", 1)}")
                 .put("type", kind).put("owner", row.getString("owner")).put("author", row.optString("source", row.getString("owner"))).put("at", row.getLong("at"))

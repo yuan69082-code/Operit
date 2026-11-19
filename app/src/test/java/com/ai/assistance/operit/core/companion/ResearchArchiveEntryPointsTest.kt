@@ -150,11 +150,11 @@ class ResearchArchiveEntryPointsTest {
         store.update("reading:$role") { it.getJSONArray("sources").put(JSONObject().put("title", "缺少身份的损坏旧记录")) }
         enable()
         runBlocking { TaskEvents.recoverPrivate(context) }
-        assertTrue(SubjectLife.failure(role).orEmpty().contains("私人事项历史读取失败"))
+        assertTrue(SubjectLife.failure(context, role).orEmpty().contains("私人事项历史读取失败"))
         try { board.get(id); fail("malformed legacy input must not be silently adopted") } catch (_: org.json.JSONException) { }
         store.update("reading:$role") { it.getJSONArray("sources").remove(1) }
         runBlocking { TaskEvents.recoverPrivate(context) }
-        assertNull(SubjectLife.failure(role))
+        assertNull(SubjectLife.failure(context, role))
         assertEquals(2, notes(id).size)
         assertEquals(2, notes(id).size)
         assertEquals("需要保留的原批注", notes(id).first().getString("text"))

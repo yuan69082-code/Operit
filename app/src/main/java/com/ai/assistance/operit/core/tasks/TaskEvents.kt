@@ -17,9 +17,9 @@ object TaskEvents {
             try {
                 recover(TaskBoard(context, "role:${card.id}", false))
                 pendingRecovery.remove(card.id)
-                clearStorageFailure(card.id)
+                clearStorageFailure(context, card.id)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { pendingRecovery.add(card.id); storageFailure(card.id, failure) }
+            catch (failure: Exception) { pendingRecovery.add(card.id); storageFailure(context, card.id, failure) }
         }
     }
     fun recover(board: TaskBoard) {
@@ -40,12 +40,12 @@ object TaskEvents {
                 if (card.id in pendingRecovery) {
                     recover(board)
                     pendingRecovery.remove(card.id)
-                    clearStorageFailure(card.id)
+                    clearStorageFailure(context, card.id)
                 }
                 board.pending()
             }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { storageFailure(card.id, failure); null } ?: continue
+            catch (failure: Exception) { storageFailure(context, card.id, failure); null } ?: continue
             val chat = com.ai.assistance.operit.core.companion.AssistantWindowRouter.chat(context, card.id)
             if (chat == null) continue
             return Work(board, row, chat, card.id)
@@ -55,11 +55,11 @@ object TaskEvents {
     // A malformed migration input is a visible per-assistant storage failure. It must
     // not escape the foreground service's launch or cancel other assistants' schedules.
     private const val STORAGE_FAILURE = "私人事项历史读取失败"
-    private fun storageFailure(role: String, failure: Exception) {
-        if (SubjectLife.failure(role)?.startsWith(STORAGE_FAILURE) != true)
-            SubjectLife.recordFailure(role, STORAGE_FAILURE, failure)
+    private fun storageFailure(context: Context, role: String, failure: Exception) {
+        if (SubjectLife.failure(context, role)?.startsWith(STORAGE_FAILURE) != true)
+            SubjectLife.recordFailure(context, role, STORAGE_FAILURE, failure)
     }
-    private fun clearStorageFailure(role: String) {
-        if (SubjectLife.failure(role)?.startsWith(STORAGE_FAILURE) == true) SubjectLife.clearFailure(role)
+    private fun clearStorageFailure(context: Context, role: String) {
+        if (SubjectLife.failure(context, role)?.startsWith(STORAGE_FAILURE) == true) SubjectLife.clearFailure(context, role)
     }
 }

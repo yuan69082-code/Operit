@@ -26,11 +26,11 @@ object LogcatExportHelper {
 
     suspend fun exportLogs(context: Context): LogcatExportResult = withContext(Dispatchers.IO) {
         try {
-            val logFiles = listOfNotNull(
-                AppLogger.getLogFile(),
+            val logFiles = (AppLogger.getLogFiles() + listOfNotNull(
+                com.ai.assistance.operit.core.companion.AutonomousJournal(context).exportFile(),
                 File(context.filesDir, "logs/last-crash.txt"),
                 ProcessExitDiagnostics.capture(context)
-            ).filter { it.isFile && it.length() > 0L }
+            )).filter { it.isFile && it.length() > 0L }
             if (logFiles.isEmpty()) {
                 return@withContext LogcatExportResult(
                     message = context.getString(R.string.logcat_no_logs_to_save),

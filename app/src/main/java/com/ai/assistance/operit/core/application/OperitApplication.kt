@@ -155,11 +155,8 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
 
         configureOpenMpEnvironment()
 
-        // 每次应用冷启动时重置上一轮日志，避免日志无限增长
+        // Keep the previous run for diagnosis; AppLogger rotates bounded files by size.
         val isCrashReportRecoveryStartup = CrashRecoveryState.consumePendingCrashReportLaunch(this)
-        if (!isCrashReportRecoveryStartup) {
-            AppLogger.resetLogFile()
-        }
 
         ensureWorkManagerInitialized()
 

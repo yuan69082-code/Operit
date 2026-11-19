@@ -44,7 +44,7 @@ internal fun SubjectLifePanel(role: String) {
                 // JSONObject uses reference equality: replacing an unchanged record every
                 // two seconds needlessly recomposed the entire expanded card.
                 if (rest?.toString() != projection.first?.toString()) rest = projection.first
-                status = projection.second; error = SubjectLife.failure(role).orEmpty()
+                status = projection.second; error = withContext(Dispatchers.IO) { SubjectLife.failure(context, role).orEmpty() }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = "状态读取失败：${failure.javaClass.simpleName}" }
             delay(2_000)

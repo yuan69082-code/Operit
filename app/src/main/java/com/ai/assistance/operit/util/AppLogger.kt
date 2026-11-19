@@ -32,6 +32,9 @@ object AppLogger {
     // Log file configuration
     private const val LOG_DIR_NAME = "logs"
     private const val LOG_FILE_NAME = "operit.log"
+    private const val MAX_LOG_BYTES = 4L * 1024 * 1024
+    private const val LOG_ARCHIVES = 8
+    private val logFileLock = Any()
     private const val PACKAGE_LOG_DIR_NAME = "packageLogs"
     private const val MAX_PACKAGE_LOG_FILES = 20
     private const val TOOLPKG_LOG_TAG = "ToolPkg"
@@ -268,14 +271,35 @@ object AppLogger {
     @JvmStatic
     fun getLogFile(): File? = resolveLogFile()
 
+    /** Includes earlier launches; called off Main when displaying/exporting diagnostics. */
+    fun getLogFiles(): List<File> {
+        fileLogExecutor.submit { }.get() // Include messages queued immediately before export.
+        val current = resolveLogFile() ?: return emptyList()
+        return synchronized(logFileLock) {
+            (LOG_ARCHIVES downTo 1).map { File(current.parentFile, "$LOG_FILE_NAME.$it") }
+                .plus(current).filter { it.isFile }
+        }
+    }
+
+    internal fun rotateLog(file: File) {
+        if (file.length() < MAX_LOG_BYTES) return
+        for (i in LOG_ARCHIVES downTo 1) {
+            val older = File(file.parentFile, "$LOG_FILE_NAME.$i")
+            if (i == LOG_ARCHIVES && older.exists() && !older.delete()) throw IOException("日志归档清理失败")
+            val newer = if (i == 1) file else File(file.parentFile, "$LOG_FILE_NAME.${i - 1}")
+            if (newer.exists() && !newer.renameTo(older)) throw IOException("日志轮转失败")
+        }
+    }
+
     @JvmStatic
     fun resetLogFile() {
         try {
             val appContext: Context = OperitApplication.instance.applicationContext
             val dir = File(appContext.filesDir, LOG_DIR_NAME)
             val file = File(dir, LOG_FILE_NAME)
-            if (file.exists()) {
-                file.delete()
+            synchronized(logFileLock) {
+                if (file.exists()) file.delete()
+                for (i in 1..LOG_ARCHIVES) File(dir, "$LOG_FILE_NAME.$i").delete()
             }
             logFile = null
             packageLogFile = null
@@ -329,8 +353,9 @@ object AppLogger {
         builder.append('\n')
 
         try {
-            FileWriter(file, true).use { writer ->
-                writer.write(builder.toString())
+            synchronized(logFileLock) {
+                rotateLog(file)
+                FileWriter(file, true).use { writer -> writer.write(builder.toString()) }
             }
         } catch (e: IOException) {
             // Avoid recursive logging here; swallow to prevent crashes
