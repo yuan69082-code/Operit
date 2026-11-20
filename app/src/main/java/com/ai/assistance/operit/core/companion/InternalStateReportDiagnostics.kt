@@ -16,6 +16,8 @@ internal class InternalStateReportIssue(
 }
 
 internal object InternalStateReportDiagnostics {
+    const val EPISODES_ARRAY_SHAPE = "\"episodes\":[{\"op\":\"appraise\"}]"
+
     private val sections = setOf("frame_id", "updates", "create", "revise", "foundation", "inner",
         "episodes", "unions", "decisions", "action_feedback", "rest", "dream", "dream_understanding", "life", "attention_config")
     private val arrays = setOf("updates", "create", "revise", "foundation", "inner", "episodes", "unions", "decisions",
@@ -28,89 +30,91 @@ internal object InternalStateReportDiagnostics {
         val unknown = report.keys().asSequence().any { it !in sections }
         if (unknown) throw InternalStateReportIssue("root", "$", "UNKNOWN_FIELD")
         string(report, "frame_id", "frame_id")
-        for (field in arrays) if (field in setOf("updates", "create") || report.has(field)) {
-            array(report, field, field)
-            val rows = report.getJSONArray(field)
-            for (i in 0 until rows.length()) {
-                val path = "$field[$i]"
-                val entry = objectAt(rows, i, path)
-                when (field) {
-                    "updates" -> {
-                        string(entry, "id", "$path.id")
-                        if (entry.has("value")) number(entry, "value", "$path.value")
-                        string(entry, "reason", "$path.reason")
-                        evidence(entry, path)
-                        if (entry.has("unresolved")) boolean(entry, "unresolved", "$path.unresolved")
-                    }
-                    "create" -> {
-                        objectField(entry, "definition", "$path.definition")
-                        string(entry, "reason", "$path.reason")
-                        number(entry, "value", "$path.value")
-                        evidence(entry, path)
-                    }
-                    "revise" -> {
-                        string(entry, "id", "$path.id")
+        for (field in arrays) if (field in setOf("updates", "create") || report.has(field)) validateReportArray(report, field)
+        for (field in objects) if (report.has(field)) objectField(report, field, field)
+    }
+
+    private fun validateReportArray(report: JSONObject, field: String): JSONArray {
+        val rows = array(report, field, field)
+        for (i in 0 until rows.length()) {
+            val path = "$field[$i]"
+            val entry = objectAt(rows, i, path)
+            when (field) {
+                "updates" -> {
+                    string(entry, "id", "$path.id")
+                    if (entry.has("value")) number(entry, "value", "$path.value")
+                    string(entry, "reason", "$path.reason")
+                    evidence(entry, path)
+                    if (entry.has("unresolved")) boolean(entry, "unresolved", "$path.unresolved")
+                }
+                "create" -> {
+                    objectField(entry, "definition", "$path.definition")
+                    string(entry, "reason", "$path.reason")
+                    number(entry, "value", "$path.value")
+                    evidence(entry, path)
+                }
+                "revise" -> {
+                    string(entry, "id", "$path.id")
+                    integer(entry, "expected_version", "$path.expected_version")
+                    objectField(entry, "changes", "$path.changes")
+                    string(entry, "reason", "$path.reason")
+                    evidence(entry, path)
+                }
+                "foundation" -> {
+                    string(entry, "id", "$path.id")
+                    integer(entry, "expected_version", "$path.expected_version")
+                    // A mapped drive may confirm an inherited custom condition alone.
+                    // Its eligibility and original rule are checked by InnerFoundations.
+                    if (entry.has("value") || !entry.has("time_conditions")) number(entry, "value", "$path.value")
+                    if (entry.has("time_conditions")) objectField(entry, "time_conditions", "$path.time_conditions")
+                    array(entry, "evidence", "$path.evidence")
+                    evidence(entry, path)
+                    if (entry.has("reason")) stringOrEmpty(entry, "reason", "$path.reason")
+                    if (entry.has("objects")) stringArray(entry, "objects", "$path.objects")
+                    if (entry.has("goals")) stringArray(entry, "goals", "$path.goals")
+                }
+                "inner" -> {
+                    string(entry, "op", "$path.op")
+                    string(entry, "id", "$path.id")
+                    if (entry.optString("op") == "propose") {
+                        objectField(entry, "record", "$path.record")
                         integer(entry, "expected_version", "$path.expected_version")
-                        objectField(entry, "changes", "$path.changes")
-                        string(entry, "reason", "$path.reason")
-                        evidence(entry, path)
-                    }
-                    "foundation" -> {
-                        string(entry, "id", "$path.id")
-                        integer(entry, "expected_version", "$path.expected_version")
-                        // A mapped drive may confirm an inherited custom condition alone.
-                        // Its eligibility and original rule are checked by InnerFoundations.
-                        if (entry.has("value") || !entry.has("time_conditions")) number(entry, "value", "$path.value")
-                        if (entry.has("time_conditions")) objectField(entry, "time_conditions", "$path.time_conditions")
-                        array(entry, "evidence", "$path.evidence")
-                        evidence(entry, path)
-                        if (entry.has("reason")) stringOrEmpty(entry, "reason", "$path.reason")
-                        if (entry.has("objects")) stringArray(entry, "objects", "$path.objects")
-                        if (entry.has("goals")) stringArray(entry, "goals", "$path.goals")
-                    }
-                    "inner" -> {
-                        string(entry, "op", "$path.op")
-                        string(entry, "id", "$path.id")
-                        if (entry.optString("op") == "propose") {
-                            objectField(entry, "record", "$path.record")
-                            integer(entry, "expected_version", "$path.expected_version")
-                            string(entry, "origin", "$path.origin")
-                            evidence(entry, path, true)
-                        }
-                    }
-                    "episodes" -> {
-                        string(entry, "op", "$path.op")
-                        string(entry, "id", "$path.id")
-                        integer(entry, "expected_version", "$path.expected_version")
-                        if (entry.optString("op") == "appraise") {
-                            string(entry, "category_ref", "$path.category_ref")
-                            // Explicit unknown is valid for open feelings. The category reducer
-                            // checks that null is not used to bypass numeric states in other families.
-                            if (!entry.has("intensity") || !entry.isNull("intensity"))
-                                number(entry, "intensity", "$path.intensity")
-                            stringArray(entry, "evidence", "$path.evidence")
-                        }
-                    }
-                    "unions" -> {
-                        string(entry, "id", "$path.id")
-                        integer(entry, "expected_version", "$path.expected_version")
-                        array(entry, "members", "$path.members")
+                        string(entry, "origin", "$path.origin")
                         evidence(entry, path, true)
                     }
-                    "decisions", "action_feedback" -> {
-                        string(entry, "id", "$path.id")
-                        integer(entry, "expected_version", "$path.expected_version")
-                        string(entry, "meaning", "$path.meaning")
+                }
+                "episodes" -> {
+                    string(entry, "op", "$path.op")
+                    string(entry, "id", "$path.id")
+                    integer(entry, "expected_version", "$path.expected_version")
+                    if (entry.optString("op") == "appraise") {
+                        string(entry, "category_ref", "$path.category_ref")
+                        // Explicit unknown is valid for open feelings. The category reducer
+                        // checks that null is not used to bypass numeric states in other families.
+                        if (!entry.has("intensity") || !entry.isNull("intensity"))
+                            number(entry, "intensity", "$path.intensity")
                         stringArray(entry, "evidence", "$path.evidence")
                     }
-                    "dream_understanding" -> {
-                        string(entry, "id", "$path.id")
-                        integer(entry, "expected_version", "$path.expected_version")
-                    }
+                }
+                "unions" -> {
+                    string(entry, "id", "$path.id")
+                    integer(entry, "expected_version", "$path.expected_version")
+                    array(entry, "members", "$path.members")
+                    evidence(entry, path, true)
+                }
+                "decisions", "action_feedback" -> {
+                    string(entry, "id", "$path.id")
+                    integer(entry, "expected_version", "$path.expected_version")
+                    string(entry, "meaning", "$path.meaning")
+                    stringArray(entry, "evidence", "$path.evidence")
+                }
+                "dream_understanding" -> {
+                    string(entry, "id", "$path.id")
+                    integer(entry, "expected_version", "$path.expected_version")
                 }
             }
         }
-        for (field in objects) if (report.has(field)) objectField(report, field, field)
+        return rows
     }
 
     /** Never surface JSONException.message or a user-provided unknown key as a path. */
@@ -141,8 +145,14 @@ internal object InternalStateReportDiagnostics {
     private fun objectField(parent: JSONObject, key: String, path: String): JSONObject =
         (parent.opt(key) as? JSONObject) ?: throw InternalStateReportIssue("schema", path, "EXPECTED_OBJECT")
 
+    /** Validate sections needed by the host before evidence or repair lookup. */
+    fun optionalReportArray(report: JSONObject, field: String): JSONArray =
+        if (report.has(field)) validateReportArray(report, field) else JSONArray()
+
     private fun array(parent: JSONObject, key: String, path: String): JSONArray =
-        (parent.opt(key) as? JSONArray) ?: throw InternalStateReportIssue("schema", path, "EXPECTED_ARRAY")
+        (parent.opt(key) as? JSONArray) ?: throw InternalStateReportIssue("schema", path, "EXPECTED_ARRAY",
+            if (path == "episodes") "事件回报用数组，格式 $EPISODES_ARRAY_SHAPE。appraise 写在每条记录的 op 里，再填写事件字段。"
+            else "此字段须为 JSON 数组，使用方括号；没有条目时可写空数组。")
 
     private fun string(parent: JSONObject, key: String, path: String) {
         if (parent.opt(key) !is String || parent.getString(key).isBlank())

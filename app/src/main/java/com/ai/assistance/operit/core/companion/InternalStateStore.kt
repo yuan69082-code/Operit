@@ -443,7 +443,8 @@ class InternalStateStore(private val context: Context) {
             require(!recipientScope(frame.roleId, frame.chatId)) { "私人决定和理解仅在本助手私聊采用" }
         }
         lateinit var receipt: JSONObject
-        val episodes = report.optJSONArray("episodes") ?: JSONArray()
+        val episodes = InternalStateReportDiagnostics.optionalReportArray(report, "episodes")
+        val inner = InternalStateReportDiagnostics.optionalReportArray(report, "inner")
         val episodeVersions = (0 until episodes.length()).mapNotNull { index ->
             episodes.optJSONObject(index)?.takeIf { it.optString("op") == "appraise" }
                 ?.let { it.optString("id") to it.optInt("expected_version", -1) }
@@ -462,14 +463,14 @@ class InternalStateStore(private val context: Context) {
             // Old receipts still use the original digest validation. A new report must not
             // bypass conflict checks if intervening objective changes have already been archived.
             val replay = InternalStateEngine.rows(data, "semantic_reports").any { it.getString("frame_id") == frame.id }
-            if (!replay && report.has("inner") && report.getJSONArray("inner").length() > 0) {
+            if (!replay && inner.length() > 0) {
                 requireNotNull(currentInnerSources) { "内在候选须从宿主来源核验入口提交" }
                 require(frame.innerSources == currentInnerSources) { "人格配置或关系来源已改变；本次候选报告不采用" }
             }
             requireStateReport(replay || frame.eventSequence >= data.optLong("archived_event_sequence"), InternalStateReportFailure.CONFLICT)
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
-            restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, report.optJSONArray("inner") ?: JSONArray()))
-            restoreEvidence(data, frame.roleId, CategoryEvents.evidence(if (report.has("episodes")) report.getJSONArray("episodes") else JSONArray()))
+            restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, inner))
+            restoreEvidence(data, frame.roleId, CategoryEvents.evidence(episodes))
             receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis(), repairs)
         }
         // A successful report resolves prior failure metadata without replaying old actions.

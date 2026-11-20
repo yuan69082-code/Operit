@@ -22,6 +22,31 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class)
 class CategoryEventsEntryPointsTest {
 
+    @Test fun groupedAppraisalsGiveArrayInstructionsAndAnArrayCanBeSaved(): Unit = runBlocking {
+        val f = frame()
+        val event = appraisal(f, "new-event", category = "foundation:emotion:sadness")
+        val grouped = JSONObject(event.toString()).apply { remove("op") }
+        val bad = report(f).put("episodes", JSONObject().put("appraise", JSONArray().put(grouped)))
+        val issue = try {
+            submit(f, bad)
+            fail("grouped appraisals must point to the episodes field")
+            error("unreachable")
+        } catch (rejection: InternalStateReportIssue) { rejection }
+        assertEquals("ISR_EXPECTED_ARRAY", issue.code)
+        assertEquals("episodes", issue.path)
+        assertTrue(issue.hint.contains(InternalStateReportDiagnostics.EPISODES_ARRAY_SHAPE))
+        assertNull(CategoryEvents.row(states.read(role), "episode", "new-event"))
+        states.noteReportFailure(f, issue, bad)
+
+        val next = InnerStructureContext.prepare(context, role, chat, true, input = "继续理解")
+        assertTrue(next.instructions.contains(InternalStateReportDiagnostics.EPISODES_ARRAY_SHAPE))
+        assertTrue(next.state.contains("ISR_EXPECTED_ARRAY"))
+        assertTrue(next.state.contains("每条记录的 op"))
+        val retry = requireNotNull(next.internalStateFrame)
+        submit(retry, report(retry, listOf(appraisal(retry, "new-event", category = "foundation:emotion:sadness"))))
+        assertEquals(1, episode("new-event").getInt("version"))
+    }
+
     @Test fun changedCategoryExplainsRepairAndRelatedFeelingsCanBothPersist(): Unit = runBlocking {
         val first = frame()
         submit(first, report(first, listOf(appraisal(first, "concern", category = "foundation:emotion:sadness"))))
