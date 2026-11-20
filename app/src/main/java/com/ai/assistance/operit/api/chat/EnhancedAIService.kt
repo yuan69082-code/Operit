@@ -29,6 +29,9 @@ import com.ai.assistance.operit.core.companion.InternalStateReportStream
 import com.ai.assistance.operit.core.companion.InternalStateReportFailure
 import com.ai.assistance.operit.core.companion.InternalStateReportDiagnostics
 import com.ai.assistance.operit.core.companion.InternalStateStore
+import com.ai.assistance.operit.core.companion.InnerStructureContext
+import com.ai.assistance.operit.core.companion.StateReportRepair
+import com.ai.assistance.operit.core.companion.SubjectContracts
 import com.ai.assistance.operit.core.chat.SegmentedSummary
 import com.ai.assistance.operit.core.chat.hooks.appendUserTurnIfMissing
 import com.ai.assistance.operit.core.chat.hooks.buildActivePromptHookMetadata
@@ -86,6 +89,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -2228,6 +2232,76 @@ class EnhancedAIService private constructor(private val context: Context) {
         }
     }
 
+    private suspend fun commitStateReportInCurrentTurn(
+        execution: MessageExecutionContext,
+        frame: InternalStateFrame,
+        initialReport: JSONObject,
+        onNonFatalError: suspend (String) -> Unit,
+    ) {
+        var report = initialReport
+        val deadline = android.os.SystemClock.elapsedRealtime() + 90_000
+        var attempts = 0
+        while (isExecutionContextActive(execution)) {
+            val failure = try {
+                withContext(Dispatchers.IO) { InnerStructureContext.submit(context, frame, report) }
+                execution.stateReportCommitted = true
+                if (attempts > 0) AppLogger.i(TAG, "STATE_REPORT_REPAIR_ACCEPTED frame=${frame.id} attempts=$attempts")
+                return
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (rejected: Exception) {
+                rejected
+            }
+            val issue = try {
+                withContext(Dispatchers.IO) { InternalStateStore(context).noteReportFailure(frame, failure, report) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (storage: Exception) {
+                AppLogger.e(TAG, "ISR_DIAGNOSTIC_SAVE_FAILED type=${storage.javaClass.simpleName}")
+                InternalStateReportDiagnostics.issue(failure, "report_commit")
+            }
+            AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} code=${issue.code} stage=${issue.stage} path=${issue.path} type=${failure.javaClass.simpleName}")
+            val repair = StateReportRepair.plan(issue, report)
+            val model = execution.modelExecutionSnapshot
+            var corrected: JSONObject? = null
+            while (repair != null && model != null && attempts < 3 && isExecutionContextActive(execution)) {
+                val remaining = deadline - android.os.SystemClock.elapsedRealtime()
+                if (remaining <= 0) break
+                attempts++
+                AppLogger.i(TAG, "STATE_REPORT_REPAIR_STARTED frame=${frame.id} attempt=$attempts path=${issue.path}")
+                corrected = try {
+                    withTimeoutOrNull(remaining) {
+                        val prompt = withContext(Dispatchers.IO) { repair.request(context, frame, report) }
+                        val output = StringBuilder()
+                        model.service.sendMessage(context = context, chatHistory = prompt,
+                            modelParameters = model.modelParameters, enableThinking = false, stream = false,
+                            availableTools = emptyList(), enableRetry = false).collect { chunk ->
+                            output.append(chunk)
+                            require(output.length <= SubjectContracts.JSON_CHARS + 128) { "状态纠错响应超出大小限制" }
+                        }
+                        repair.apply(report, output.toString())
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (repairFailure: Exception) {
+                    AppLogger.w(TAG, "STATE_REPORT_REPAIR_FAILED frame=${frame.id} attempt=$attempts type=${repairFailure.javaClass.simpleName}")
+                    null
+                }
+                if (corrected != null) break
+            }
+            if (corrected != null) {
+                report = corrected
+                continue
+            }
+            if (!isExecutionContextActive(execution)) return
+            val reason = InternalStateReportFailure.classify(failure)
+            onNonFatalError(context.getString(
+                R.string.state_report_failure, context.getString(reason.messageRes),
+                "${issue.code} @ ${issue.path} (${issue.stage})" + if (issue.hint.isEmpty()) "" else "：${issue.hint}"))
+            return
+        }
+    }
+
     private suspend fun finalizeAssistantResponse(
         context: MessageExecutionContext,
         content: String,
@@ -2263,31 +2337,7 @@ class EnhancedAIService private constructor(private val context: Context) {
                 onNonFatalError(this@EnhancedAIService.context.getString(
                         R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes), reason.code))
             } else {
-                try {
-                    withContext(Dispatchers.IO) {
-                        com.ai.assistance.operit.core.companion.InnerStructureContext.submit(this@EnhancedAIService.context, frame, report)
-                    }
-                    context.stateReportCommitted = true
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (failure: Exception) {
-                    // Report text, source text and arbitrary JSON exception messages are private.
-                    val reason = InternalStateReportFailure.classify(failure)
-                    // Never emit raw JSONException/IllegalArgumentException messages: they may
-                    // contain complete private state or user-authored text.
-                    val issue = try {
-                        withContext(Dispatchers.IO) {
-                            InternalStateStore(this@EnhancedAIService.context).noteReportFailure(frame, failure, report)
-                        }
-                    } catch (metadataError: Exception) {
-                        AppLogger.e(TAG, "ISR_DIAGNOSTIC_SAVE_FAILED type=${metadataError.javaClass.simpleName}")
-                        com.ai.assistance.operit.core.companion.InternalStateReportDiagnostics.issue(failure, "report_commit")
-                    }
-                    AppLogger.e(TAG, "STATE_REPORT_COMMIT_REJECTED subject=${frame.roleId} chat=${frame.chatId} frame=${frame.id} read=${frame.stateVersion} code=${issue.code} stage=${issue.stage} path=${issue.path} type=${failure.javaClass.simpleName}")
-                    onNonFatalError(this@EnhancedAIService.context.getString(
-                        R.string.state_report_failure, this@EnhancedAIService.context.getString(reason.messageRes),
-                        "${issue.code} @ ${issue.path} (${issue.stage})" + if (issue.hint.isEmpty()) "" else "：${issue.hint}"))
-                }
+                commitStateReportInCurrentTurn(context, frame, report, onNonFatalError)
             }
         }
         // Mark conversation as complete

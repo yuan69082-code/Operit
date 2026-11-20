@@ -445,6 +445,8 @@ class InternalStateStore(private val context: Context) {
         lateinit var receipt: JSONObject
         val episodes = InternalStateReportDiagnostics.optionalReportArray(report, "episodes")
         val inner = InternalStateReportDiagnostics.optionalReportArray(report, "inner")
+        if ((0 until episodes.length()).any { episodes.getJSONObject(it).has("category_definition") })
+            require(!recipientScope(frame.roleId, frame.chatId)) { "个人事件分类仅在本助手私聊新增" }
         val episodeVersions = (0 until episodes.length()).mapNotNull { index ->
             episodes.optJSONObject(index)?.takeIf { it.optString("op") == "appraise" }
                 ?.let { it.optString("id") to it.optInt("expected_version", -1) }

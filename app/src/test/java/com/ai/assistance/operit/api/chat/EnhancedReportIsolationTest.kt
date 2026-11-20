@@ -70,6 +70,7 @@ class EnhancedReportIsolationTest {
         lateinit var service: EnhancedAIService
         lateinit var handler: AIToolHandler
         var calls = 0
+        var repairCalls = 0
         var executions = 0
         val providerCancellations = AtomicInteger()
         var onProviderCancellation: () -> Unit = {}
@@ -79,6 +80,7 @@ class EnhancedReportIsolationTest {
         val frames = CopyOnWriteArrayList<InternalStateFrame>()
         var output: suspend StreamCollector<String>.(Int, InternalStateFrame) -> Unit = { _, f -> emit("下一条正常回复。" + report(f)) }
         var requestStream: ((List<PromptTurn>, Int) -> Stream<String>)? = null
+        var repairOutput: (List<PromptTurn>, Int) -> String = { _, _ -> "" }
         val uncaught = CopyOnWriteArrayList<Throwable>()
         val warnings = CopyOnWriteArrayList<String>()
         val host = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> uncaught.add(e) })
@@ -108,6 +110,11 @@ class EnhancedReportIsolationTest {
                 "sendMessage" -> {
                     @Suppress("UNCHECKED_CAST")
                     val history = call.arguments[1] as List<PromptTurn>
+                    if (history.firstOrNull()?.content?.startsWith("这是本轮内部状态纠错。") == true) {
+                        assertEquals(emptyList<ToolPrompt>(), call.arguments[5])
+                        val repair = repairOutput(history, ++repairCalls)
+                        return@mock stream<String> { emit(repair) }
+                    }
                     val frame = requireNotNull(CurrentRequestContext.internalStateFrame(history))
                     frames.add(frame)
                     requestInputEstimates.add(inputEstimate)
@@ -394,8 +401,77 @@ class EnhancedReportIsolationTest {
             assertTrue(f.frames.last().materialText.contains("foundation[0].value"))
             assertNotNull(f.savedReport(f.frames.last()))
             assertEquals(2, f.calls)
+            assertEquals(3, f.repairCalls)
             assertEquals(0, f.executions)
             assertTrue(f.uncaught.isEmpty())
+        } finally { f.close() }
+    }
+
+    @Test fun malformedEpisodeAndMissingCategoryAreRepairedBeforeTheOriginalTurnEnds(): Unit = runBlocking {
+        val f = Fixture(RuntimeEnvironment.getApplication()); f.init()
+        try {
+            lateinit var appraisal: JSONObject
+            f.output = { _, frame ->
+                appraisal = JSONObject().put("id", "episode-current-turn").put("expected_version", 0)
+                    .put("category_ref", "personal-curiosity").put("intensity", 0.6)
+                    .put("importance", "值得留意").put("long_term_impact", "影响以后怎么探索")
+                    .put("understanding", "这次实际体验").put("reason", "这次确实开始考虑")
+                    .put("attention", "foreground").put("status", "unresolved").put("basis", "input")
+                    .put("evidence", JSONArray().put(frame.eventIds.first()))
+                val body = JSONObject().put("frame_id", frame.id).put("updates", JSONArray()).put("create", JSONArray())
+                    .put("episodes", JSONObject().put("appraise", JSONArray().put(appraisal)))
+                emit("原本的正文。<operit_state_report>$body</operit_state_report>")
+            }
+            f.repairOutput = { history, attempt ->
+                val instruction = history.last().content
+                val correction = if (attempt == 1) {
+                    assertTrue(instruction.contains("ISR_EXPECTED_ARRAY"))
+                    JSONObject().put("episodes", JSONArray().put(JSONObject(appraisal.toString()).put("op", "appraise")))
+                } else {
+                    assertEquals(2, attempt)
+                    assertTrue(instruction.contains("ISR_UNKNOWN_CATEGORY"))
+                    assertTrue(instruction.contains("foundation:drive:exploration"))
+                    assertTrue(instruction.contains("time_rule"))
+                    JSONObject().put("category_ref", "personal-curiosity").put("category_definition", JSONObject()
+                        .put("id", "personal-curiosity").put("family", "drive").put("kind", "寻找线索")
+                        .put("description", "想在真实经历里寻找线索").put("direction", "寻找线索")
+                        .put("status", "active").put("time_rule", JSONObject().put("curve", "hold")))
+                }
+                "<operit_state_report>$correction</operit_state_report>"
+            }
+            val (body, failure) = f.send()
+            assertNull(failure)
+            assertEquals("原本的正文。", body.trim())
+            assertEquals(1, f.calls)
+            assertEquals(2, f.repairCalls)
+            assertEquals(0, f.executions)
+            assertTrue(f.warnings.isEmpty())
+            assertNotNull(f.savedReport(f.frames.single()))
+            val states = InternalStateStore(f.app)
+            val event = states.inspectCategory(f.role, f.chat, "episode", "episode-current-turn", 0).getJSONObject("item")
+            assertEquals("personal-curiosity", event.getString("parent"))
+            assertEquals("hold", event.getJSONObject("category_time_rule").getString("curve"))
+            assertEquals("drive", InnerStructure.record(states.read(f.role), "personal-curiosity")!!
+                .getJSONObject("content").getString("family"))
+
+            f.output = { _, frame ->
+                val nextEvent = JSONObject(appraisal.toString()).put("op", "appraise")
+                    .put("id", "reused-category-event").put("category_ref", "unavailable")
+                    .put("evidence", JSONArray().put(frame.eventIds.first()))
+                val body = JSONObject().put("frame_id", frame.id).put("updates", JSONArray()).put("create", JSONArray())
+                    .put("episodes", JSONArray().put(nextEvent))
+                emit("第二段正文。<operit_state_report>$body</operit_state_report>")
+            }
+            f.repairOutput = { history, _ ->
+                assertTrue(history.last().content.contains("personal-curiosity"))
+                """<operit_state_report>{"category_ref":"foundation:drive:exploration"}</operit_state_report>"""
+            }
+            val (nextBody, nextFailure) = f.send()
+            assertNull(nextFailure)
+            assertEquals("第二段正文。", nextBody.trim())
+            assertEquals(3, f.repairCalls)
+            assertEquals("foundation:drive:exploration", states.inspectCategory(f.role, f.chat, "episode",
+                "reused-category-event", 0).getJSONObject("item").getString("parent"))
         } finally { f.close() }
     }
 

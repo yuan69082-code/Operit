@@ -11,6 +11,10 @@ import kotlin.math.exp
  */
 internal object CategoryEvents {
     internal val families = setOf("drive", "need", "desire", "emotion", "sentiment", "feeling")
+    val newCategoryGuide = """
+        新事件可在 appraise 条目附 category_definition，与事件一起校验和保存。已有合适分类时只写真实 category_ref。新定义须有未使用的 id，和 category_ref 相同。family 只可选 drive（驱力）、need（需要）、desire（欲望）、emotion（情绪）、sentiment（情感）、feeling（感受）。kind 是该大类内的个人分类名，description 写含义，context 可说明适用情境，status 为 active。
+        drive 另填 direction；need 填 level:broad|specific，specific 要有已启用的 drive/need 作为 parent_ref；desire 填该 parent_ref 和 object_ref；emotion/sentiment/feeling 填 unresolved 布尔值和 current_state。必须给 time_rule:{curve:"inherit|hold"}，或 {curve:"linear|exponential",target:非负数,seconds:正数}。inherit 按该类自然机制，hold 保持，持续情感用 inherit 或 hold。新增后按现有时间、事件、版本和联合机制处理，需相互影响时可之后按真实证据写 unions。此入口只新增分类，稳定人格、特殊需要、旧分类修订走原流程。
+    """.trimIndent()
     private fun access(data: JSONObject) = requireNotNull((data as? InternalStateDocument)?.history) { "事件读取必须经过主体存储" }
     fun row(data: JSONObject, kind: String, id: String): JSONObject? {
         val journal = data.optJSONObject("category_commit")?.getJSONArray("rows")
@@ -95,7 +99,7 @@ internal object CategoryEvents {
         val content = InnerStructure.record(data, id)?.getJSONObject("content")
             ?: InnerFoundations.definition(id)
             ?: throw InternalStateReportIssue("input", "category_ref", "UNKNOWN_CATEGORY",
-                "分类ID不存在。查 episode_repair 取回原事件。查 foundation 和 inner_family，选真实已有分类，或新增现有类别下的个人分类，采用后补交原事件。")
+                "分类ID不存在。查 foundation 和 inner_family 选合适的真实分类；新事件确需新分类可带 category_definition 和 time_rule。待修正原事件可用 episode_repair 取回。")
         SubjectContracts.expect(content.getString("family") in families && content.getString("status") == "active",
             "category_ref", "INACTIVE_PSYCHOLOGICAL_CATEGORY", "须引用已启用的驱力、需要、欲望、情绪、情感或感受类别；先查询foundation或inner目录。")
         return content
@@ -129,11 +133,20 @@ internal object CategoryEvents {
             if (op == "appraise") {
                 fields(a, setOf("op", "id", "expected_version", "category_ref", "objects", "goals", "intensity", "importance",
                     "long_term_impact", "attention", "status", "understanding", "basis", "evidence", "reason", "related",
-                    "phase", "supporting", "opposing"))
+                    "phase", "supporting", "opposing", "category_definition"))
                 parent = text(a, "category_ref", 64)
-                val category = category(data, parent)
+                val definition = if (a.has("category_definition")) a.optJSONObject("category_definition")
+                    ?: throw InternalStateReportIssue("input", "category_definition", "EXPECTED_OBJECT") else null
+                if (definition != null) {
+                    SubjectContracts.expect(old == null, "category_definition", "NEW_EPISODE_REQUIRED",
+                        "只有新事件可随报告新增分类；已有事件保留原分类。")
+                    SubjectContracts.expect(definition.optString("id") == parent, "category_definition.id",
+                        "CATEGORY_ID_MISMATCH", "新分类 id 须与事件的 category_ref 一致。")
+                    content.remove("category_definition")
+                }
+                val category = definition ?: category(data, parent)
                 appliedRule = category.optJSONObject("time_rule")
-                appliedFamily = category.getString("family")
+                appliedFamily = SubjectContracts.choice(category, "family", families, "category_definition.family")
                 if (a.has("phase")) {
                     SubjectContracts.expect(category.getString("family") == "desire", "phase", "DESIRE_PHASE_ONLY",
                         "phase仅用于desire愿望事件；其他类别用understanding说明变化，不填写phase。")
@@ -181,6 +194,8 @@ internal object CategoryEvents {
                         "evidence[$index]", "EPISODE_EXPERIENCE_SOURCE", "状态报告或时间投影不是新的现实经历；引用原事实，用basis说明回忆或重新理解。")
                     bindings.put(ref, source)
                 }
+                if (definition != null) InnerStructure.registerEventCategory(data, frame, definition, id,
+                    bindings, now, a.getString("reason"))
                 content.put("source_bindings", bindings)
                 val related = if (a.has("related")) SubjectContracts.array(a, "related") else JSONArray()
                 for (j in 0 until related.length()) {
@@ -278,7 +293,8 @@ internal object CategoryEvents {
     val instructions = """
         [类别内部事件 v1]
         类别使用已采用 inner 记录的 ID，或宿主已安装的 foundation:family:key 目录 ID。不同事情用独立稳定事件 ID；不能按同名对象/关键词合并，也不必每条消息建事件。
-        分类ID不存在时，用 companion_internal_state get section=episode_repair 按事件ID取回待修正记录，也可分页。查 foundation 和 inner_family，优先使用含义合适的真实ID。确需新增时，用 inner propose 在 drive|need|desire|emotion|sentiment|feeling 现有类别下新增个人分类，填稳定ID、名称(kind)、含义、适用情境及 time_rule，按该类别的原字段规格提交。完整读取后跨轮 adopt，采用成功后用原事件ID和原依据补交。已保存版本才算完成，待修正记录不算已采用状态。
+        分类ID不存在时，查 foundation 和 inner_family 选含义合适的真实ID。可用 get section=episode_repair 取回待修正原事件。下面是随新事件新增分类的规则。
+        $newCategoryGuide
         新分类 time_rule 用 {curve:"inherit"}（情绪自然回落，其余按实际评价变化）、{curve:"hold"}（保持），或 {curve:"linear|exponential",target:非负强度,seconds:正秒数}。规则投影该类有数值的事件；持续情感、求生欲和终结认识保持原规则。实际加强或拉扯沿用 unions，可后来定，建立分类不会自动产生影响。
         同一报告可选 episodes:[...]；没有业务条数上限，按本次模型窗口分批提交，宿主轮末校验采用，无需额外模型调用。
         companion_internal_state action:get section:source id:事实ID 可按ID取得原事件，含已归档来源。section:episode|focus 用 id 精确读取；experience_link 用 id:内在记录ID 查累计经历关联；category_versions 用 id:"episode:事件ID" 或 "focus:类别ID" 查变化过程，offset 分页。

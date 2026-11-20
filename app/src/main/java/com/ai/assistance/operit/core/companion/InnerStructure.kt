@@ -232,6 +232,30 @@ internal object InnerStructure {
         }
     }
 
+    /** A vocabulary addition for an actual new episode, using the same adopted category index. */
+    fun registerEventCategory(data: JSONObject, frame: InternalStateFrame, category: JSONObject,
+                              eventId: String, bindings: JSONObject, now: Long, reason: String) {
+        val records = InnerRows(data, false, frame)
+        val id = SubjectContracts.text(category, "id", 64, path = "category_definition.id")
+        SubjectContracts.expect(!records.used(id) && InnerFoundations.find(id) == null, "category_definition.id",
+            "CATEGORY_ID_USED", "已有分类直接用 category_ref；新增须用未占用的个人稳定 ID。")
+        SubjectContracts.expect(category.getString("family") in CategoryEvents.families &&
+            category.optString("status") == "active" && !category.has("semantic_rule") &&
+            !category.has("legacy_ref") && !category.has("experience_refs"), "category_definition",
+            "EVENT_CATEGORY_ONLY", "只新增现有心理大类下的普通活跃分类。稳定人格、关系、特殊需要和已有分类修订仍走原候选流程。")
+        SubjectContracts.expect(category.has("time_rule"), "category_definition.time_rule", "TIME_RULE_REQUIRED",
+            "新分类须明确 time_rule，用 inherit、hold，或有 target 和 seconds 的 linear、exponential。")
+        validateContent(category, records, data, frame)
+        val source = "episode:$eventId"
+        val record = JSONObject().put("id", id).put("content", JSONObject(category.toString()))
+            .put("version", 1).put("owner", frame.roleId).put("origin", "subject_development")
+            .put("adopted_by", frame.roleId).put("adopted_at", now).put("candidate_id", source)
+            .put("source", "subject_category_registration").put("reason", reason)
+            .put("evidence", JSONObject(bindings.toString()))
+        records.put(id, record)
+        history(data, "category_registered", source, JSONObject.NULL, record, frame, now, reason)
+    }
+
     private fun validateContent(row: JSONObject, records: InnerRows, data: JSONObject, frame: InternalStateFrame) {
         val family = text(row, "family", 30)
         require(family in families)
