@@ -81,8 +81,9 @@ internal fun InternalStatePanel(role: String) {
                 PrivateRows(role, "rest")
                 SubjectLifePanel(role)
                 DreamSettingsPanel(role)
+                DreamArchivePanel(role)
                 Text("梦醒随记", style = MaterialTheme.typography.titleLarge)
-                Text("只呈现明确留给园园看的醒后记录；旧的私密梦境全文不会在这里自动公开。")
+                Text("这里显示主体选择留下的醒后随记。")
                 ActivityNotesPanel(role, wakingOnly = true)
             }
         }

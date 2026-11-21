@@ -34,6 +34,7 @@ class SubjectLifeEntryPointsTest {
         ChatHistoryManager::class.java.getDeclaredField("INSTANCE").apply { isAccessible = true }.set(null, null)
         role = CharacterCardManager.getInstance(context).createCharacterCard(CharacterCard("", "生活测试", characterSetting = "初始参考"))
         InternalStateStore(context).configure(role, true)
+        DreamSettings(context).saveTrigger(role, DreamTrigger.SUBJECT)
         val c = ChatHistory(title = "私聊", messages = emptyList(), characterCardId = role)
         ChatHistoryManager.getInstance(context).saveChatHistory(c)
         chat = c.id

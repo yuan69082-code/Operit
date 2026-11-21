@@ -16,7 +16,7 @@ const sections: Record<string, Section[]> = {
   牵挂与事件: [{ title: '事情与持续影响', kind: 'episode' }, { title: '重点位置', kind: 'focus' }, { title: '念头与关注', kind: 'thought' }],
   相互影响: [{ title: '联合与理解', kind: 'union' }, { title: '经历关联', kind: 'experience_link' }],
   打算与行动: [{ title: '决定', kind: 'decision' }, { title: '实际操作与能力', kind: 'action' }, { title: '结果后的理解', kind: 'feedback' }, { title: '活动随记', kind: 'activity' }],
-  休息: [{ title: '休息与醒来', kind: 'rest' }, { title: '梦醒随记', kind: 'waking_note' }],
+  休息: [{ title: '休息与醒来', kind: 'rest' }, { title: '完整梦境', kind: 'dream_archive' }, { title: '梦醒随记', kind: 'waking_note' }],
   梦醒随记: [{ title: '梦醒随记', kind: 'waking_note' }],
   内容承接: [{ title: '待处理候选', kind: 'inner_pending' }, { title: '已采用内容', kind: 'inner' }]
 };
@@ -113,7 +113,10 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
   async function showDetail(row: Row, kind: string) {
     setError('');
     try {
-      if (kind === 'action') {
+      if (kind === 'dream_archive') {
+        const result = await call<Page>(token, chat, { action: 'dream_archive_detail', kind: text(row.kind), id: text(row.id) });
+        setDetail(result.item ?? null);
+      } else if (kind === 'action') {
         const result = await call<Page>(token, chat, { action: 'page', kind, id: text(row.id) });
         if (!result.item) throw new Error('完整回执未能读取，列表仅为概要');
         setDetail(result.item);
@@ -160,12 +163,20 @@ export function PrivateStateScreen({ token, chat, close }: { token: string; chat
         <button onClick={() => void showDetail(item, section.kind)}>查看全文与来源</button>
         {section.kind === 'activity' ? <button onClick={() => navigate({ title: '这次活动', kind: 'activity_part', id: text(item.id) })}>随记、操作与表达</button> : null}
         {section.kind === 'inner_pending' ? <><button disabled={busy} onClick={() => void edit(item)}>修改全文</button><button disabled={busy} onClick={() => void withdraw(item)}>撤回</button></> : section.kind === 'inner' || section.kind === 'inner_family' ? <button disabled={busy} onClick={() => void edit(item)}>提出修改候选</button> : null}
-        {!['activity', 'activity_part', 'waking_note', 'thought', 'source', 'category_versions', 'action_versions', 'inner_pending'].includes(section.kind) ? <button onClick={() => navigate({ title: '变化历史', kind: section.kind === 'action' ? 'action_versions' : 'category_versions', id: section.kind === 'action' ? text(item.id) : `${['inner_family', 'inner'].includes(section.kind) ? 'inner_record' : section.kind}:${text(item.id)}` })}>变化历史</button> : null}
+        {!['activity', 'activity_part', 'waking_note', 'thought', 'source', 'category_versions', 'action_versions', 'inner_pending', 'dream_archive'].includes(section.kind) ? <button onClick={() => navigate({ title: '变化历史', kind: section.kind === 'action' ? 'action_versions' : 'category_versions', id: section.kind === 'action' ? text(item.id) : `${['inner_family', 'inner'].includes(section.kind) ? 'inner_record' : section.kind}:${text(item.id)}` })}>变化历史</button> : null}
         {section.kind === 'state' ? <button onClick={() => navigate({ title: '这一类别里的事情', kind: 'episode_category', id: text(item.id) })}>分别查看相关事情</button> : null}
       </article>;
     })}</div>
     <footer><button disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - 8))}>上一页</button><span>第 {Math.floor(offset / 8) + 1} 页</span><button disabled={busy || page.next_offset == null} onClick={() => { if (page.next_offset != null) setOffset(page.next_offset); }}>下一页</button><button onClick={() => setRevision(n => n + 1)}>刷新</button></footer>
-    {detail ? <div className="private-dialog"><section className="private-card"><button onClick={() => setDetail(null)}>关闭详情</button><Content value={object(detail.content) ?? object(detail.record) ?? detail} /><Content value={detail} />
+    {detail && Array.isArray(detail.segments) ? <div className="private-dialog"><section className="private-card">
+      <button onClick={() => setDetail(null)}>关闭详情</button>
+      <h2>{text(object(detail.content)?.title)}</h2>
+      {detail.segments.length === 0 ? <p>这次梦没有完成的片段。</p> : detail.segments.map((segment, index) => {
+        const part = object(segment);
+        if (!part) return null;
+        return <section key={index}><h3>{part.actor === 'subject' ? '主体' : part.actor === 'environment' ? '梦中场景' : '梦境'}</h3><p style={{ whiteSpace: 'pre-wrap' }}>{text(part.text)}</p></section>;
+      })}
+    </section></div> : detail ? <div className="private-dialog"><section className="private-card"><button onClick={() => setDetail(null)}>关闭详情</button><Content value={object(detail.content) ?? object(detail.record) ?? detail} /><Content value={detail} />
       {Array.isArray(object(detail.content)?.members) ? <section><p>关联保留当时版本；点开读取成员自己的当前状态，旧联合不会覆盖它。</p>{(object(detail.content)!.members as Value[]).map((value, i) => { const member = object(value); return member ? <button key={i} onClick={() => void showMember(member)}>查看成员 {text(member.id)} · 关联时 v{typeof member.version === 'number' ? member.version : '未记录'}</button> : null; })}</section> : null}
       {object(detail.request)?.parameters ? <details><summary>实际输入参数</summary><pre>{JSON.stringify(object(detail.request)!.parameters, null, 2)}</pre></details> : null}
       {object(detail.receipt)?.data ? <details><summary>完整实际输出</summary><pre>{JSON.stringify(object(detail.receipt)!.data, null, 2)}</pre></details> : null}

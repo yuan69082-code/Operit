@@ -10,6 +10,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.core.companion.DreamSettings
+import com.ai.assistance.operit.core.companion.DreamTrigger
 import com.ai.assistance.operit.data.model.getModelList
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import kotlinx.coroutines.*
@@ -21,12 +22,20 @@ internal fun DreamSettingsPanel(role: String) {
     val manager = remember(context) { ModelConfigManager(context) }
     val configs by manager.configSummariesFlow.collectAsState(initial = emptyList())
     var binding by remember(role) { mutableStateOf<DreamSettings.Binding?>(null) }
+    var trigger by remember(role) { mutableStateOf(DreamTrigger.HALF) }
     var ready by remember(role) { mutableStateOf(false) }
     var picking by remember(role) { mutableStateOf(false) }
     var saving by remember(role) { mutableStateOf(false) }
     var error by remember(role) { mutableStateOf("") }
     LaunchedEffect(role) {
-        try { binding = withContext(Dispatchers.IO) { DreamSettings(context).read(role) }; ready = true }
+        try {
+            val settings = DreamSettings(context)
+            withContext(Dispatchers.IO) { settings.read(role) to settings.trigger(role) }.let {
+                binding = it.first
+                trigger = it.second
+            }
+            ready = true
+        }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { error = failure.message.orEmpty() }
     }
@@ -49,6 +58,28 @@ internal fun DreamSettingsPanel(role: String) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.dream_settings_title), style = MaterialTheme.typography.titleMedium)
+            Text("下次入睡的做梦方式")
+            val modes = DreamTrigger.entries
+            modes.forEach { mode ->
+                Row {
+                    RadioButton(selected = trigger == mode, enabled = ready && !saving, onClick = {
+                        scope.launch {
+                            saving = true
+                            try {
+                                withContext(Dispatchers.IO) { DreamSettings(context).saveTrigger(role, mode) }
+                                trigger = mode
+                                error = ""
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (failure: Exception) { error = failure.message ?: "保存做梦方式失败" }
+                            finally { saving = false }
+                        }
+                    })
+                    Column(Modifier.padding(top = 4.dp)) {
+                        Text(mode.label)
+                        Text(mode.instruction, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             Text(stringResource(R.string.dream_lottery_description))
             Text(stringResource(R.string.dream_model_description))
             Text(label)

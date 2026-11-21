@@ -312,6 +312,12 @@ class CompanionStore(context: Context) {
         return synchronized(lock(scope)) { history(scope).use { it.categoryPage(kind, offset, 9, parent) } }
     }
 
+    internal fun dreamArchivePage(role: String, offset: Int): List<JSONObject> {
+        SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
+        val scope = SubjectStateBoundary.scope(role, "internal-state")
+        return synchronized(lock(scope)) { history(scope).use { it.dreamArchivePage(offset) } }
+    }
+
     internal fun activityRead(role: String, kind: String, id: String): JSONObject? {
         SubjectStateBoundary.authorize(role, com.ai.assistance.operit.data.preferences.AssistantScope.callerId())
         val scope = SubjectStateBoundary.scope(role, "internal-state")
@@ -366,6 +372,9 @@ class CompanionStore(context: Context) {
         }
         override fun categoryPage(kind: String, offset: Int, limit: Int, parent: String?) = synchronized(lock(scope)) {
             history(scope).use { it.categoryPage(kind, offset, limit, parent) }
+        }
+        override fun strongDreamEpisode(start: Long, now: Long) = synchronized(lock(scope)) {
+            history(scope).use { it.strongDreamEpisode(start, now) }
         }
         override fun categoryCount(kind: String, parent: String?) = synchronized(lock(scope)) {
             history(scope).use { it.categoryCount(kind, parent) }

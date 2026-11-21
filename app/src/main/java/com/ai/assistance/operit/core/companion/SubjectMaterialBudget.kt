@@ -124,6 +124,13 @@ internal object SubjectMaterialBudget {
                 prioritized += materials.path to index
             }
         }
+        lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->
+            val index = materials.rows.indexOfFirst { it is JSONObject && it.optBoolean("waking_recall") }
+            if (index >= 0) {
+                include(materials, materials.rows[index])
+                prioritized += materials.path to index
+            }
+        }
         // Constantly held concerns enter as compact life projections, once, within the
         // existing budget. A projection is not a full-detail read and schedules nothing.
         lanes.firstOrNull { it.path == "retrieved_materials" }?.let { materials ->

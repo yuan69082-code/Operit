@@ -8,6 +8,16 @@ import org.json.JSONObject
 
 /** User runtime configuration, independent of personality and never writable by dream text. */
 internal class DreamSettings(private val context: Context) {
+    fun trigger(role: String): DreamTrigger {
+        SubjectStateBoundary.authorize(role, AssistantScope.callerId())
+        return DreamTrigger.read(AssistantRoom(context, role).read().optString("dream_trigger"))
+    }
+
+    fun saveTrigger(role: String, trigger: DreamTrigger) {
+        require(AssistantScope.callerId() == null) { "做梦触发方式由用户设置" }
+        CompanionStore(context).update("room:$role") { it.put("dream_trigger", trigger.name) }
+    }
+
     data class Binding(val configId: String, val index: Int) {
         fun json() = JSONObject().put("config_id", configId).put("model_index", index)
     }
