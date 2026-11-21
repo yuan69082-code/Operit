@@ -543,7 +543,8 @@ class EnhancedAIService private constructor(private val context: Context) {
     private suspend fun recordInnerDelivery(execution: MessageExecutionContext, history: List<PromptTurn>) {
         val frame = execution.internalStateFrame ?: return
         try {
-            CurrentRequestContext.subjectMaterial(history)
+            val provided = CurrentRequestContext.subjectMaterial(history)
+            if (provided != null) com.ai.assistance.operit.core.companion.DreamRecall(context).delivered(frame)
             execution.activity?.let { ref ->
                 com.ai.assistance.operit.core.companion.SubjectLife(context).recordRequest(ref, frame, execution.activityRound)
             }

@@ -32,7 +32,7 @@ internal object DreamShelf {
         val kind = row.getString("storage_kind")
         val review = row.optJSONObject("dream_review")
         val title = review?.optString("title")?.takeIf { it.isNotBlank() }
-            ?: if (kind == "dream") row.getJSONObject("content").getString("title") else row.optString("index_text", "参与式梦")
+            ?: if (kind == "dream") "梦境" else "参与式梦"
         val keywords = review?.optJSONArray("keywords") ?: org.json.JSONArray()
         val card = JSONObject().put("date", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT).format(java.util.Date(row.getLong("at"))))
             .put("title", title.take(120)).put("keywords", org.json.JSONArray((0 until minOf(6, keywords.length())).map { keywords.getString(it) }))

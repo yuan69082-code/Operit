@@ -64,7 +64,7 @@ internal object SubjectRestDreams {
             .put("source", "subject_private_report").put("content", content))
     }
 
-    fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long): Boolean {
+    fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long, dreamTrigger: DreamTrigger): Boolean {
         if (!requested(report)) return false
         var rest = CategoryEvents.row(data, "rest", "current")
         if (report.has("rest")) {
@@ -78,18 +78,35 @@ internal object SubjectRestDreams {
                 .put("meaning", text(change, "meaning", Int.MAX_VALUE))
                 .put("source_bindings", bindings(data, frame, change.getJSONArray("evidence")))
                 .put("device_state_inference", false)
+            val prior = rest?.getJSONObject("content")
+            if (state == "resting") {
+                if (content.optString("mode") == "sleep" && prior?.optString("mode") == "quiet") {
+                    content.put("session_id", frame.id).put("started_at", now)
+                }
+                dreamTrigger.apply(content, prior, data, now)
+            }
+            if (state == "awake" && prior?.optString("state") == "resting") {
+                content.put("previous_rest_version", rest!!.getInt("version"))
+            } else if (state == "awake" && prior?.has("previous_rest_version") == true) {
+                content.put("previous_rest", prior.getString("previous_rest"))
+                    .put("previous_rest_version", prior.getInt("previous_rest_version"))
+                    .put("actual_end", prior.getLong("actual_end"))
+            }
             append(data, frame, "rest", "current", (rest?.getInt("version") ?: 0) + 1, content, now)
             rest = CategoryEvents.row(data, "rest", "current")
         }
         if (report.has("dream")) {
             require(rest?.getJSONObject("content")?.getString("state") == "resting") { "梦须来自主体已采用的休息选择" }
+            val restContent = requireNotNull(rest).getJSONObject("content")
+            if (restContent.has("dream_trigger")) throw InternalStateReportIssue("rest_dream", "dream",
+                "DREAM_MANAGED_BY_SLEEP", "当前睡眠的梦由已选触发方式生成。此轮报告删除dream字段，可保留rest及其他实际状态变化。")
             val dream = report.getJSONObject("dream")
             require(dream.keys().asSequence().all { it in setOf("title", "content", "sources") })
             val id = "dream-" + InnerStructure.hash(frame.id)
             require(CategoryEvents.row(data, "dream", id) == null)
             val content = JSONObject().put("title", text(dream, "title", 160)).put("content", text(dream, "content", Int.MAX_VALUE))
                 .put("reality", "DREAM_NOT_REALITY").put("generated_in_frame", frame.id)
-                .put("rest_version", requireNotNull(rest).getInt("version"))
+                .put("rest_version", rest.getInt("version")).put("rest_session", restContent.optString("session_id"))
                 .put("source_bindings", bindings(data, frame, dream.getJSONArray("sources")))
             // Empty sources are valid: a generated dream has identity, not invented reality evidence.
             append(data, frame, "dream", id, 1, content, now)
@@ -169,10 +186,10 @@ internal object SubjectRestDreams {
         [私域休息、梦与醒后承接]
         休息与设备锁屏、断网、进程停止不同。程序恢复不代表你主动醒来。没有有效触发就安静，不需为了持续存在安排空转；自己的具体预约仍可用原schedule。休息不清除愿望、关系或未确认结果，也不统一拒绝交流。
         本助手私聊或已授权后台轮末报告可选 rest:{expected_version,state:"resting|awake",meaning,evidence:[]}；无旧记录expected_version=0，否则先读当前版本。它是你本轮形成的选择，不冒称后台一直在思考。
-        resting可选mode="quiet"（没有时长的安静休息）或"sleep"（睡眠，须until毫秒时间或wake_sources结束条件）。until到期只执行你已安排的续接，不凭空推断已醒。wake_sources是愿意打断的来源数组：user_message/study/phone/software/task/notification；interruption="buffer|judge|wake"表示暂存/有界判断/按原安排醒来，未选中的普通事件只保存。defer_internal=true允许把自己的内部预约留待醒后重新安排，原截止不改。醒来用state=awake，延长须新报告与新结束条件。可选dream_plan:{steps:1..6,theme_mode:"single|multiple|random",theme_count?}安排一次有参与的梦。安排时先选择单主题、多主题或交给抽签；multiple可给theme_count=2..7，省略时随机2..3。系统独立抽整体短/中/长和每段停留/流动/跳跃节奏，实际组数不超过steps预算；节奏不绑定某个主题。再随机抽取美梦、恐惧、混合、荒诞、日常、冒险、春梦中的类型，独立抽资料为主或状态为主；素材打乱，无来源先后。类型可在经历中变化或维持，不强制按顺序用完。省略theme_mode表示交给抽签。旧theme/tone/form/recall仍保留原记录，新梦不把这些旧字段当指定剧情。每组环境与参与各一次调用，辅助模型只负责环境，主体使用自己的模型参与。consolidation是旧整理范围，保留到醒后再决定；睡眠中不执行整理。清醒回顾整理用companion_life free_status菜单与free_plan安排，可先整理后睡觉。都非必填，不因每次休息自动安排。
-        已选择resting或本轮同时采用resting时，可选 dream:{title,content,sources:[]}，只保存本轮实际生成的梦。sources可空，梦可自由、荒诞、混合或想象，不要求现实情节证据；不要为了休息凑梦。每轮最多一段，重试不重新生成。梦中行为不是任何人的现实行为，不作为现实指控或已证事实。
+        resting可选mode="quiet"（没有时长的安静休息）或"sleep"（睡眠，须until毫秒时间或wake_sources结束条件）。until到期只执行你已安排的续接，不凭空推断已醒。wake_sources是愿意打断的来源数组：user_message/study/phone/software/task/notification；interruption="buffer|judge|wake"表示暂存/有界判断/按原安排醒来，未选中的普通事件只保存。defer_internal=true允许把自己的内部预约留待醒后重新安排，原截止不改。醒来用state=awake，延长须新报告与新结束条件。新入睡按私域设置使用50%随机、主体主动选择或当天强烈刺激三种方式之一。主动选择时，提交dream_plan表示想做梦；另两种方式由系统决定，省略dream_plan会由系统填默认参数，填写只表示偏好的梦境形式。延长沿用本次判定。dream_plan格式为{steps:1..6,theme_mode:"single|multiple|random",theme_count?}。安排时先选择单主题、多主题或交给抽签；multiple可给theme_count=2..7，省略时随机2..3。系统独立抽整体短/中/长和每段停留/流动/跳跃节奏，实际组数不超过steps预算；节奏不绑定某个主题。再随机抽取美梦、恐惧、混合、荒诞、日常、冒险、春梦中的类型，独立抽资料为主或状态为主；素材打乱，无来源先后。类型可在经历中变化或维持，不强制按顺序用完。省略theme_mode表示交给抽签。旧theme/tone/form/recall仍保留原记录，新梦不把这些旧字段当指定剧情。每组环境与参与各一次调用，辅助模型只负责环境，主体使用自己的模型参与。consolidation是旧整理范围，保留到醒后再决定；睡眠中不执行整理。清醒回顾整理用companion_life free_status菜单与free_plan安排，可先整理后睡觉。都非必填，不因每次休息自动安排。
+        由触发方式管理的新睡眠通过现有参与式梦境流程生成，不提交dream字段。旧式休息记录继续支持 dream:{title,content,sources:[]}，只保存本轮实际生成的梦。sources可空，梦可自由、荒诞、混合或想象，不要求现实情节证据；不要为了休息凑梦。每轮最多一段，重试不重新生成。梦中行为不是任何人的现实行为，不作为现实指控或已证事实。
         选择awake后可选 dream_understanding:[{id,expected_version,dream_source,meaning,feeling,objects:[],evidence:[dream_source]}]；引用本轮实际读取的material:dream:...来源。余韵可用正常episodes/foundation/inner/unions承接，参与后续判断和自主选择，不是生成成功就机械加减数值。需要延续到中午或几天，可明确采用联合time_rule的hold/linear/exponential；不统一按两小时归零，保持多久也可以暂不确定。感受可以真实存在，剧情仍是梦；新理解可联系对象，不能编造其现实行为。以后可重新理解同一梦，读到不等于已理解、不自动叠加余波。既有updates/inner/episodes/unions可引用这些实际材料形成变化；人格、关系和稳定认识仍须原采用规则，不因梦直接越过约束。
         dream_understanding可附retention:"active|archive"、retain_until?:未来毫秒或0、review_at?:未来毫秒或0、keywords?:字符串数组。归档或自选保留期到期后只退出普通轮换，关联检索或按ID仍可取回；复查时间不是唤醒预约。先实际查阅梦，再决定整理，不因到期删除原文、已形成感受或认识。
-        用companion_internal_state get section=rest|dream|dream_understanding|dream_process按id或offset查询；普通请求只选少量日期/关键词索引，不自动带全部梦或全文。索引不是已读经历；按ID和dream_step取回实际内容后再解释。dream_step必须id=参与式dream_process的ID，再用offset分页读取步骤，section=category_versions id=种类:ID回看过程。get section=dream的participatory_processes同时提供参与式梦索引，不会因不在旧梦列表就丢失。参与式梦过程的来源为material:dream_process:...，同样只能作为梦的来源。梦与理解属于私域，不默认表达、写外部记忆或进入群聊。材料未选入本轮不代表遗忘。新记录在轮末报告采用后才供后续请求读取；普通报告不新增调用，无周期造梦。只有明确采用dream_plan后才运行已安排的额外有界调用，中断步骤不会自动重试。refused/invalid_response是模型未参与或结果格式不符，不是梦中经历；原始响应保留供核对。只对已生成的环境或主体参与分别形成理解。
+        用companion_internal_state get section=rest|dream|dream_understanding|dream_process按id或offset查询；普通请求只选少量日期/关键词索引，不自动带全部梦或全文。醒来后waking_recall自动浮现一段或完整的梦，能直接作为梦的来源。只解释实际浮现的内容；想起更多时用retrieval按ID与dream_step分页主动回忆。其余索引只供定位。dream_step必须id=参与式dream_process的ID，再用offset分页读取步骤，section=category_versions id=种类:ID回看过程。get section=dream的participatory_processes同时提供参与式梦索引，不会因不在旧梦列表就丢失。参与式梦过程的来源为material:dream_process:...，同样只能作为梦的来源。梦与理解属于私域，不默认表达、写外部记忆或进入群聊。材料未选入本轮不代表遗忘。新记录在轮末报告采用后才供后续请求读取；普通报告不新增调用，无周期造梦。只有该次睡眠已安排梦才运行有界调用，中断步骤不会自动重试。refused/invalid_response是模型未参与或结果格式不符，不是梦中经历；原始响应保留供核对。只对已生成的环境或主体参与分别形成理解。
     """.trimIndent()
 }

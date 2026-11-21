@@ -35,7 +35,7 @@ object InternalStateReports {
     private val editableDefinitionFields = setOf("name", "description", "kind", "time_rules")
 
     fun apply(data: JSONObject, frame: InternalStateFrame, report: JSONObject, now: Long,
-              repairSources: Map<String, JSONObject> = emptyMap()): JSONObject {
+              repairSources: Map<String, JSONObject> = emptyMap(), dreamTrigger: DreamTrigger = DreamTrigger.SUBJECT): JSONObject {
         InternalStateReportDiagnostics.validate(report)
         require(frame.id.isNotBlank() && frame.roleId.isNotBlank() && frame.chatId.isNotBlank())
         require(frame.revision >= 0 && frame.at >= 0 && now >= frame.at) { "状态报告时间早于本轮快照" }
@@ -252,7 +252,7 @@ object InternalStateReports {
             ActionUnderstanding.apply(next, frame, report, now)
         }
         val restDreamChanged = InternalStateReportDiagnostics.stage("rest_dream") {
-            SubjectRestDreams.apply(next, frame, report, now)
+            SubjectRestDreams.apply(next, frame, report, now, dreamTrigger)
         }
         val nextRevision = if (updates.isEmpty() && creates.isEmpty() && revisions.isEmpty() && !foundationChanged && !survivalSynced && !innerChanged && !episodesChanged && !unionsChanged && !actionChanged && !restDreamChanged && !lifeChanged && !attentionChanged) revision else revision + 1
         next.put("semantic_revision", nextRevision)

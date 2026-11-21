@@ -465,6 +465,28 @@ internal class InternalStateArchive(private val file: File, private val scope: S
             arrayOf(scope, kind, parent)).use { c -> if (c.moveToFirst()) JSONObject(c.getString(0)) else null }
     }
 
+    fun dreamArchivePage(offset: Int): List<JSONObject> {
+        require(offset >= 0)
+        if (!file.exists()) return emptyList()
+        return db().rawQuery("SELECT payload FROM category_current WHERE scope=? AND kind IN ('dream','dream_process') ORDER BY rowid DESC LIMIT 9 OFFSET ?",
+            arrayOf(scope, offset.toString())).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(JSONObject(cursor.getString(0))) }
+        }
+    }
+
+    fun strongDreamEpisode(start: Long, now: Long): JSONObject? {
+        if (!file.exists()) return null
+        db().rawQuery("SELECT payload FROM history WHERE scope=? AND kind='category_versions' AND lookup LIKE 'episode:%' ORDER BY rowid DESC",
+            arrayOf(scope)).use { cursor ->
+            while (cursor.moveToNext()) {
+                val row = JSONObject(cursor.getString(0))
+                if (row.optLong("at") < start) break
+                if (qualifiesDreamStimulus(row, start, now)) return row
+            }
+        }
+        return null
+    }
+
     fun categoryVersions(id: String, offset: Int): List<JSONObject> {
         require(offset >= 0)
         if (!file.exists()) return emptyList()

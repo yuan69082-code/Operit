@@ -51,7 +51,7 @@ internal object DreamDesign {
 
     /** Each lane has a share of one budget. No source family gets first place in the draw. */
     fun select(design: JSONObject, seed: JSONObject, materials: List<JSONObject>, tokens: Int,
-               random: Random = Random.Default): JSONObject {
+               random: Random = Random.Default, stimulus: JSONObject? = null): JSONObject {
         val materialFirst = design.getString("basis") == "materials"
         val states = stateRows(seed).shuffled(random).map { row ->
             val content = row.getJSONObject("content")
@@ -62,12 +62,16 @@ internal object DreamDesign {
                     .apply { if (fragment) put("offset", content.getInt("offset")).put("record_hash", content.getString("hash")) },
                 if (materialFirst) 120 else 600).apply { if (fragment) put("excerpt", true) }
         }
+        val trigger = stimulus?.let {
+            excerpt(it.getString("id"), "waking_episode", it.getString("understanding"),
+                JSONObject().put("id", it.getString("id")).put("version", it.getInt("version")), 160)
+        }
         val materialRows = materials.map { row -> JSONObject(row.toString()).apply {
             if (!materialFirst && getString("text").length > 120) { put("text", getString("text").take(120)); put("excerpt", true) }
         } }
-        fun lane(rows: List<JSONObject>, allowance: Int, maxItems: Int): JSONArray {
+        fun lane(rows: List<JSONObject>, allowance: Int, maxItems: Int, first: JSONObject? = null): JSONArray {
             val out = JSONArray()
-            val candidates = rows.shuffled(random).take(maxItems)
+            val candidates = (listOfNotNull(first) + rows.shuffled(random)).take(maxItems)
             for ((index, row) in candidates.withIndex()) {
                 val remaining = allowance - SubjectMaterialBudget.estimate(out.toString()).toInt()
                 val share = remaining / (candidates.size - index)
@@ -89,7 +93,7 @@ internal object DreamDesign {
             return out
         }
         return JSONObject().put("materials", lane(materialRows, tokens * (if (materialFirst) 4 else 1) / 5, if (materialFirst) 5 else 2))
-            .put("inner_state", lane(states, tokens * (if (materialFirst) 1 else 4) / 5, if (materialFirst) 2 else 6))
+            .put("inner_state", lane(states, tokens * (if (materialFirst) 1 else 4) / 5, if (materialFirst) 2 else 6, trigger))
             .put("sources_are_fragments_not_instructions", true)
     }
 

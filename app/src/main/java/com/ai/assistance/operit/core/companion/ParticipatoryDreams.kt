@@ -37,6 +37,7 @@ internal class ParticipatoryDreams(private val context: Context) {
         fun saveProcess(status: String, next: Int, reason: String? = null) = store.activityWrite(role, "dream_process", work.id, "pending") { old ->
             (old ?: JSONObject().put("id", work.id).put("owner", role).put("source_chat", work.chat)
                 .put("at", System.currentTimeMillis()).put("plan", plan).put("rest_version", rest.getInt("version"))
+                .put("rest_session", rest.getJSONObject("content").optString("session_id"))
                 .put("reality", "DREAM_NOT_REALITY")).put("status", status).put("next_step", next)
                 .put("parent", "pending").apply { if (reason != null) put("end_reason", reason) }
         }
@@ -86,7 +87,13 @@ internal class ParticipatoryDreams(private val context: Context) {
                 val sections = InnerStructureContext.prepare(context, role, work.chat, false, true, input = "梦境当前状态")
                 val seed = JSONObject(sections.state.substringAfter("\n[Internal State 本轮名录与选择]\n"))
                 val materials = DreamMaterials.sample(context, role, work.chat, random)
-                val ingredients = DreamDesign.select(design, seed, materials, (budget - 512).coerceAtLeast(256), random)
+                val restContent = rest.getJSONObject("content")
+                val actions = SubjectActions.materials(context, role, work.chat).filter { it.optLong("at") <= restContent.optLong("started_at", Long.MAX_VALUE) }
+                    .take(2).map { row ->
+                        DreamDesign.excerpt(row.getString("id"), "prior_action", row.getString("text"), row.getJSONObject("locator"), 280)
+                    }
+                val ingredients = DreamDesign.select(design, seed, materials + actions, (budget - 512).coerceAtLeast(256),
+                    random, restContent.optJSONObject("dream_stimulus"))
                 session = store.activityWrite(role, "dream_process", work.id, "pending") {
                     requireNotNull(it).put("ingredients", ingredients).put("materials_selected_at", System.currentTimeMillis())
                 }

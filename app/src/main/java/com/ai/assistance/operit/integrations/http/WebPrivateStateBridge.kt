@@ -41,10 +41,12 @@ internal class WebPrivateStateBridge(private val context: Context) {
                 .put("window", store.establishedStatus(role))
             "open_window" -> store.openEstablishedWindow(role)
             "initial_reference" -> JSONObject().put("text", card.characterSetting).put("source", "initial_configuration")
+            "dream_archive_detail" -> JSONObject().put("item", DreamArchive(context).detail(role, body.getString("kind"),
+                body.getString("id")) ?: JSONObject.NULL)
             "page" -> {
                 val kind = body.getString("kind")
-                // Existing private dream text and companion_note retain their old audience.
-                // The web UI exposes only the new explicitly user-visible waking notes.
+                if (kind == "dream_archive") return@withContext DreamArchive(context).page(role, body.optInt("offset"))
+                // Raw private history and companion notes retain their existing access rules.
                 require(kind in setOf("state", "inner", "inner_family", "inner_pending", "episode", "episode_category",
                     "thought", "focus", "experience_link", "union", "category_versions", "source", "action", "action_versions",
                     "decision", "feedback", "rest", "activity", "activity_part", "waking_note")) { "此材料不属于用户可见的私域页面" }

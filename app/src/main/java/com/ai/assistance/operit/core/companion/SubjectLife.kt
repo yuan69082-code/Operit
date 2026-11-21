@@ -153,6 +153,10 @@ internal class SubjectLife(private val context: Context) {
         }
         val input = SubjectMessageInbox(context).next(role)
         if (input != null) return Work(role, input.getString("source_chat"), "input:${input.getString("id")}", input.getString("text"), input = input)
+        DreamRecall(context).pending(role, r)?.let { recall ->
+            claim(role, chat, "wake-dream:${recall.getString("rest_session")}",
+                "你已醒来。本轮若浮现梦的内容，可自然感受它，并自行决定是否影响眼下的选择或更新内在理解。醒来的梦不是新的现实经历。")?.let { return it }
+        }
         PrivateTime(context).next(role, chat, now) { id, text -> claim(role, chat, id, text) }?.let { return it }
         val resume = store.activityPage(role, "life_activity", "ready", 0).firstOrNull()
         if (resume != null) return claim(role, chat, "resume:${resume.getString("id")}:${resume.getInt("version")}",

@@ -454,6 +454,7 @@ class InternalStateStore(private val context: Context) {
         val episodeIds = episodeVersions.keys.toList()
         val repairs = if (episodeIds.isEmpty() || recipientScope(frame.roleId, frame.chatId)) emptyMap()
             else EpisodeRepair(context).sources(frame.roleId, frame.chatId, episodeIds)
+        val dreamTrigger = if (report.has("rest")) DreamSettings(context).trigger(frame.roleId) else DreamTrigger.SUBJECT
         val saved = update(frame.roleId, "state_report") { data ->
             requireStateReport(enabled(frame.roleId), InternalStateReportFailure.DISABLED)
             store.archivedStateRow(key(frame.roleId), "semantic_reports", frame.id)?.let {
@@ -473,7 +474,7 @@ class InternalStateStore(private val context: Context) {
             restoreEvidence(data, frame.roleId, frame.eventIds.toList())
             restoreEvidence(data, frame.roleId, InnerStructure.evidenceToRestore(data, inner))
             restoreEvidence(data, frame.roleId, CategoryEvents.evidence(episodes))
-            receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis(), repairs)
+            receipt = InternalStateReports.apply(data, frame, report, System.currentTimeMillis(), repairs, dreamTrigger)
         }
         // A successful report resolves prior failure metadata without replaying old actions.
         try {

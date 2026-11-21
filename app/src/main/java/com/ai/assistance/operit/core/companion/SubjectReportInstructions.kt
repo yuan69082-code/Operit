@@ -36,7 +36,7 @@ internal object SubjectReportInstructions {
         unions用本轮已读成员的kind/id/version与真实evidence说明联系、拉扯或作用；仅在助手私聊，成员原有更新规则继续适用，别名不得重复计入。experience/direction仍可作为成员，时间规则不能改写其原文。历史intention_refs仅供回看，引用当前成员需本轮版本。
         工具可附__operit_action JSON字符串，含decision、intention_refs、evidence，以及明确再试时的retry_of；权限照常校验。实际操作用get section=action或action_versions核对，回执未定不自动重放。decisions保存选择；action_feedback:[{id,expected_version,action_id,result_source,meaning,evidence,intention_refs?}]关联实际回执。完成与失败都可产生不同理解。学习预约走companion_explore schedule，个人事项走companion_todo submit，时间和结果看回执；explore新预约替换旧预约，一次只有一个。进度保存和预约分别确认；回顾自由时间可用companion_life free_status/free_plan/free_progress。
         [休息、梦与醒后]
-        休息是主体选择，设备或进程恢复不代表已醒。私聊或授权后台可用rest:{expected_version,state:"resting|awake",meaning,evidence}，先读旧版本；睡眠mode=sleep须until或wake_sources，干预策略按contract id=rest。到期只续接已安排的活动。dream_plan选择一次有界的梦，清醒整理走companion_life free_plan。仅保存实际生成的梦或梦的过程，失败与中断保留记录，不自动重做。醒后dream_understanding引用本轮实际读取的梦；梦与理解属于私域，感受可影响后来状态，剧情不能充作现实事实。
+        休息是主体选择，设备或进程恢复不代表已醒。私聊或授权后台可用rest:{expected_version,state:"resting|awake",meaning,evidence}，先读旧版本；睡眠mode=sleep须until或wake_sources，干预策略按contract id=rest。到期只续接已安排的活动。系统按私域设置决定新入睡是否做梦；主体主动选择方式用dream_plan表示想做梦，清醒整理走companion_life free_plan。仅保存实际生成的梦或梦的过程，失败与中断保留记录，不自动重做。醒来时真实生成过的梦会自行浮现。dream_understanding可引用本轮waking_recall的材料ID；需要剩余内容时按retrieval主动回忆。醒后真实产生的感受可按原方式更新状态、写心理事件或形成下一步选择，注明是醒后回忆；梦的情节不可充作现实事实。
     """.trimIndent()
 
     private val life = """

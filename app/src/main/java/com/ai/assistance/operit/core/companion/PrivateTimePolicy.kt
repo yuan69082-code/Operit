@@ -170,7 +170,7 @@ internal object PrivateTimePolicy {
             return Notice("${plan.getString("date")}:${item.getString("id")}:$key", phase +
                 " 活动=${item.getString("activity")}，slot_id=${item.getString("id")}，目标=${item.getString("goal")}；" +
                 "用companion_life action=free_status details={date:${plan.getString("date")}}取得最新计划版本和进度。" +
-                if (item.getString("activity") == "sleep") "睡不睡仍由你决定。若现在睡，正常报告采用rest与dream_plan，再按现有机制抽签；不要先写好梦。" else
+                if (item.getString("activity") == "sleep") "睡不睡仍由你决定。若现在睡，正常报告采用rest mode=sleep，按当前触发方式使用dream_plan；只安排睡眠，无须预写梦。" else
                 "可以改变安排，也可以在过程中给园园留言。开始/阶段进度/完成请free_progress保存；一次模型回复结束不表示整个活动完成。", item.getString("id"))
         }
         return null
@@ -184,7 +184,7 @@ internal object PrivateTimePolicy {
         review 回顾→整理→可能提炼：必须再选targets，可多选。memory本地/外置记忆（先看人工设置的OB位置，未设置先请园园指定，不能猜）；diary日记；reading书房阅读/写作；files资料；context实际上下文；summary摘要；todos待办；personality人格/自我/价值/偏好；relationships关系；directions目的/目标/决心/野心；internal_state驱力/需要/情绪/情感/感受及关联；dreams梦与醒后余韵；essence精华角。
         上下文/摘要只回看本轮实际提供或工具成功取回的部分，未提供不能声称已读；要看原文就按现有入口取回。
         回顾是实际查看选中材料；整理是归类、补索引、建立关联、核对版本、合并确实重复的内容、调整待办或改稿，不要求压缩或删除原文。不能只看过就说整理完。已整理好、无需改动、想保留原样，可以organization=not_needed并写具体理由；否则须有实际整理操作及成功回执。新理解保留来源；过去原话不能被后来理解改写。提炼是说明从中学到什么，没有值得提炼的可refinement=none，不凑精华。人格等仍走原候选/采用流程，不能绕过已有权威状态。
-        diary 写自己的日记；write 在书房写作、续写、改稿、批注；sleep 睡觉做梦，入睡前正常采用rest/dream_plan后才抽签；wander 看看世界或玩：天文、人文、历史、随兴趣逛网站，也可用已连接HY工具去玩，不要求产出学习成果；other 其他自己想做的事，说明目标。
+        diary 写自己的日记；write 在书房写作、续写、改稿、批注；sleep 睡觉，采用rest mode=sleep后按当前触发方式决定梦境；wander 看看世界或玩：天文、人文、历史、随兴趣逛网站，也可用已连接HY工具去玩，不要求产出学习成果；other 其他自己想做的事，说明目标。
         安排与内在状态双向承接：白天新经历、情绪、驱力、需要、关系或新认识可以让你重新考虑计划，保持/修改/暂停/结束都由你决定。用free_status读取真实现版本，free_plan或free_progress落实变化；可用既有__operit_action关联实际已读的决定、经验或状态来源，不只在回复里说改了。执行后核对真实工具回执，用已有action_feedback、life、episodes、inner、unions承接感触、方法、兴趣和状态变化；技术成功不等于满意，也不强制成长。新的理解随后可参与另一次计划与自主活动，未取得的结果不能编造。正常请求会获得一条有界相关计划索引，不带整晚历史；原状态与反馈仍使用同一个材料预算。你不必为了计划硬改情绪，也不必因情绪变化就改计划。
         所有活动都可以给园园留言/发消息，你不是只能埋头做这一项。使用实际可用的工具与权限；工具未连接就如实记录限制，不能编造完成。
         每个时段可自选checks中途续接时间，空数组表示不需要。free_status计划中的activity_ids关联实际活动过程；先用companion_life activities按id核对，再按activity_part/action取真实回执；有索引不代表执行成功。计划与进度可靠保存后才算已预约；按需分页读取材料，不把全部记忆或菜单堆进每轮上下文。

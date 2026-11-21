@@ -17,6 +17,10 @@ class DreamShelfTest {
         assertEquals("dream_index", index.getString("type"))
         assertTrue(index.getString("text").contains("date"))
         assertFalse(index.toString().contains("完整梦境"))
+        assertFalse(index.toString().contains("海上的书房"))
+        val process = JSONObject().put("storage_kind", "dream_process").put("id", "dream:1")
+            .put("owner", "role-a").put("version", 1).put("at", 100L).put("index_text", "后来才会想起的梦")
+        assertFalse(DreamShelf.index(process, 200).toString().contains("后来才会想起"))
         assertTrue(index.getString("retrieval").contains("id=dream-a"))
         assertEquals(before, d.toString())
     }

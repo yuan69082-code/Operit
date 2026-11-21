@@ -41,12 +41,19 @@ internal object InnerStructureContext {
                 CharacterCardManager.getInstance(context).getAllCharacterCards().map { it.id }.toSet() + "user",
                 hostMaterials, retrievedMaterials + SubjectActions.materials(context, role, chat) +
                     (if (group) emptyList() else SubjectMaterials.read(context, role, selectionInput) +
-                        SubjectRestDreams.materials(store.read(role), selectionInput, chat) +
+                        store.read(role).let { data ->
+                            SubjectRestDreams.materials(data, selectionInput, chat) +
+                                (if (persist) listOfNotNull(DreamRecall(context).pending(role, CategoryEvents.row(data, "rest", "current")))
+                                 else emptyList())
+                        } +
                         ActivityNotes.materials(context, role) +
                         SubjectLife(context).materials(role) + PrivateTime(context).materials(role, selectionInput) + ParticipatoryDreams.materials(context, role, selectionInput, chat)),
                 selectionInput)
             prepared.copy(instructions = prepared.instructions +
-                if (!group && prepared.internalStateFrame != null) PrivateTime(context).setupInstruction(role) else "")
+                if (!group && prepared.internalStateFrame != null) {
+                    val trigger = DreamSettings(context).trigger(role)
+                    PrivateTime(context).setupInstruction(role) + "\n下次新入睡的做梦方式为「${trigger.label}」。${trigger.instruction}"
+                } else "")
         }
 
     suspend fun submit(context: Context, frame: InternalStateFrame, report: JSONObject): JSONObject =

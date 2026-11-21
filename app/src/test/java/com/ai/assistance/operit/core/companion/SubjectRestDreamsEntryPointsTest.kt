@@ -123,6 +123,59 @@ class SubjectRestDreamsEntryPointsTest {
         }
     }
 
+    @Test fun firstWakingRequestReceivesActualRecallAndCanAdoptUnderstanding() = runBlocking {
+        val id = createDream()
+        assertFalse(request().internalStateFrame!!.materialSources.values.any { JSONObject(it).optBoolean("waking_recall") })
+        submit(request().internalStateFrame!!, JSONObject().put("rest", rest("awake", 1)))
+        val work = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
+        assertTrue(work.id.startsWith("wake-dream:"))
+        val frame = request(wake = true).internalStateFrame!!
+        val recall = frame.materialSources.entries.single { JSONObject(it.value).optBoolean("waking_recall") }
+        assertEquals(id, JSONObject(recall.value).getJSONObject("locator").getString("id"))
+        val full = DreamArchive(context).detail(role, "dream", id)!!.getJSONArray("segments").getJSONObject(0).getString("text")
+        assertEquals(item("dream", id).getJSONObject("content").getString("content"), full)
+        assertEquals(1, DreamArchive(context).page(role, 0).getJSONArray("items").length())
+        withContext(com.ai.assistance.operit.data.preferences.AssistantScope.executionContext(role)) {
+            rejected { DreamArchive(context).detail(role, "dream", id) }
+        }
+        DreamRecall(context).delivered(frame)
+        submit(frame, JSONObject().put("dream_understanding", JSONArray().put(interpretation(recall.key))))
+        val next = request().internalStateFrame!!
+        assertFalse(next.materialSources.values.any { JSONObject(it).optBoolean("waking_recall") })
+        assertEquals(1, item("dream_understanding", "first-understanding").getInt("version"))
+    }
+
+    @Test fun strongEpisodeFromTodayTriggersSleepWithoutAnExplicitPlan() = runBlocking {
+        val input = InnerStructureContext.prepare(context, role, chat, true, input = "今天找到了一件非常期待的事").internalStateFrame!!
+        val event = JSONObject().put("op", "appraise").put("id", "waking-stimulus")
+            .put("expected_version", 0).put("category_ref", "foundation:emotion:joy")
+            .put("objects", JSONArray()).put("goals", JSONArray()).put("intensity", 0.88)
+            .put("attention", "foreground").put("status", "processing")
+            .put("importance", "今天很在意").put("long_term_impact", "想接着探索")
+            .put("understanding", "今天找到了一件非常期待的事").put("basis", "input")
+            .put("reason", "看到期待的事").put("evidence", JSONArray().put(input.eventIds.last()))
+        submit(input, JSONObject().put("episodes", JSONArray().put(event)))
+        DreamSettings(context).saveTrigger(role, DreamTrigger.STIMULUS)
+        submit(request().internalStateFrame!!, JSONObject().put("rest", rest("resting", 0)
+            .put("mode", "sleep").put("until", System.currentTimeMillis() + 3_600_000)))
+        val saved = item("rest", "current").getJSONObject("content")
+        assertEquals("waking-stimulus", saved.getJSONObject("dream_stimulus").getString("id"))
+        assertTrue(saved.has("dream_plan"))
+        val work = SubjectLife(context).next(role, chat, System.currentTimeMillis())!!
+        assertTrue(work.dream)
+        var sawStimulus = false
+        ParticipatoryDreams(context).run(work, ParticipatoryDreams.Model { _, raw, _ ->
+            val message = JSONObject(raw)
+            if (message.has("subject_material")) sawStimulus = raw.contains("waking-stimulus")
+            JSONObject().put("actor", if (message.has("subject_material")) "subject" else "environment")
+                .put("outcome", if (message.has("subject_material")) "end" else "continue")
+                .put("text", "看到一个熟悉的地方。").toString()
+        })
+        assertTrue(sawStimulus)
+        val archive = DreamArchive(context).detail(role, "dream_process", work.id)!!.getJSONArray("segments")
+        assertEquals(2, archive.length())
+    }
+
     @Test fun normalPrivateDreamThenWakingUnderstandingSurvivesWindowsAndReopen(): Unit = runBlocking {
         InternalStateStore(context).materialBudget(role, chat, 16384)
         val id = createDream()

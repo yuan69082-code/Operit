@@ -10,6 +10,7 @@ internal interface InternalStateHistoryAccess {
     fun contacts(chat: String?, after: Long, until: Long): Sequence<Long>
     fun categoryRow(kind: String, id: String): JSONObject? = null
     fun categoryPage(kind: String, offset: Int, limit: Int, parent: String? = null): List<JSONObject> = emptyList()
+    fun strongDreamEpisode(start: Long, now: Long): JSONObject? = null
     fun categoryCount(kind: String, parent: String? = null): Long = 0L
     fun latestCategoryRow(kind: String, parent: String): JSONObject? = null
     fun relevantInnerRows(input: String, parent: String, limit: Int): List<JSONObject> = emptyList()
